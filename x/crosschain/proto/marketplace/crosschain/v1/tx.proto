@@ -1,0 +1,113 @@
+syntax = "proto3";
+package marketplace.crosschain;
+
+import "gogoproto/gogo.proto";
+import "cosmos/base/v1beta1/coin.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "cosmos/msg/v1/msg.proto";
+
+// BridgeTransfer represents a cross-chain transfer request
+message BridgeTransfer {
+  uint64 id = 1;
+  string sender = 2 [(cosmos.msg.v1.field) = {ordering: "unordered"}];
+  string recipient = 3;
+  cosmos.base.v1beta1.Coin amount = 4;
+  string source_chain = 5;
+  string destination_chain = 6;
+  string asset_denom = 7;
+  string status = 8;
+  uint64 timestamp = 9;
+}
+
+// BridgeState tracks the state of cross-chain operations
+message BridgeState {
+  uint64 next_transfer_id = 1;
+  repeated BridgeTransfer pending_transfers = 2;
+  repeated BridgeTransfer completed_transfers = 3;
+  map<string, uint64> chain_balances = 4;
+}
+
+// Params defines the parameters for the crosschain module
+message Params {
+  string admin_address = 1;
+  repeated string supported_chains = 2;
+  uint64 min_transfer_amount = 3;
+  uint64 max_transfer_amount = 4;
+  uint64 transfer_timeout_blocks = 5;
+}
+
+// GenesisState defines the genesis state for the crosschain module
+message GenesisState {
+  Params params = 1 [(gogoproto.nullable) = false];
+  BridgeState bridge_state = 2 [(gogoproto.nullable) = false];
+}
+
+// MsgInitiateBridgeTransfer initiates a cross-chain transfer
+message MsgInitiateBridgeTransfer {
+  option (cosmos.msg.v1.msg) = {
+    signers: ["sender"]
+  };
+
+  string sender = 1 [(cosmos.msg.v1.field) = {ordering: "unordered"}];
+  string recipient = 2;
+  cosmos.base.v1beta1.Coin amount = 3;
+  string destination_chain = 4;
+}
+
+// MsgCompleteBridgeTransfer completes a cross-chain transfer
+message MsgCompleteBridgeTransfer {
+  option (cosmos.msg.v1.msg) = {
+    signers: ["validator"]
+  };
+
+  string validator = 1 [(cosmos.msg.v1.field) = {ordering: "unordered"}];
+  uint64 transfer_id = 2;
+  string proof = 3;
+}
+
+// MsgUpdateParams updates the module parameters
+message MsgUpdateParams {
+  option (cosmos.msg.v1.msg) = {
+    signers: ["authority"]
+  };
+
+  string authority = 1 [(cosmos.msg.v1.field) = {ordering: "unordered"}];
+  Params params = 2 [(gogoproto.nullable) = false];
+}
+
+// QueryBridgeTransferRequest queries a specific bridge transfer
+message QueryBridgeTransferRequest {
+  uint64 transfer_id = 1;
+}
+
+// QueryBridgeTransferResponse returns a bridge transfer
+message QueryBridgeTransferResponse {
+  BridgeTransfer transfer = 1;
+}
+
+// QueryBridgeTransfersRequest queries all bridge transfers with pagination
+message QueryBridgeTransfersRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryBridgeTransfersResponse returns bridge transfers with pagination
+message QueryBridgeTransfersResponse {
+  repeated BridgeTransfer transfers = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryBridgeStateRequest queries the bridge state
+message QueryBridgeStateRequest {}
+
+// QueryBridgeStateResponse returns the bridge state
+message QueryBridgeStateResponse {
+  BridgeState state = 1;
+}
+
+// QueryParamsRequest queries the module parameters
+message QueryParamsRequest {}
+
+// QueryParamsResponse returns the module parameters
+message QueryParamsResponse {
+  Params params = 1;
+}

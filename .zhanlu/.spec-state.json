@@ -1,0 +1,17 @@
+{
+  "initialized": true,
+  "lastUpdate": 1780046131757,
+  "version": "1.0.0",
+  "scriptCount": 10,
+  "templateCount": 5,
+  "integrity": {
+    "scriptsValid": true,
+    "templatesValid": true,
+    "missingFiles": []
+  },
+  "metadata": {
+    "initializedAt": 1780018117193,
+    "platform": "linux",
+    "extensionVersion": "1.0.0"
+  }
+}

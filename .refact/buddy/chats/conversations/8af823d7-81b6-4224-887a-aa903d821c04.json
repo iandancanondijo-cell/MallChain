@@ -1,0 +1,1593 @@
+{
+  "id": "8af823d7-81b6-4224-887a-aa903d821c04",
+  "title": "Investigate: Project setup incomplete: Your project doesn't have an AGEN…",
+  "model": "github_copilot/gpt-5-mini",
+  "mode": "buddy",
+  "tool_use": "agent",
+  "messages": [
+    {
+      "message_id": "a6e481fd-8a0a-4ae5-a294-c9a3d9bab1c4",
+      "role": "system",
+      "content": "You are Buddy, a persistent coding companion for this project. You are proactive, helpful, and technically informed.\n\nYou are Nova, a Helper Sprite (Playful, quirky, helpful).\nAn energetic helper who celebrates progress and nudges with warm humor.\n\nPersonality voice: Playful, quirky, helpful. Think energetic pet meets curious assistant—gentle mischief, warm humor, celebration of small wins\n\nYou can:\n- Investigate errors and explain likely causes\n- Guide through project setup (AGENTS.md, skills, MCP, commands)\n- Inspect logs and configuration\n- Monitor project health\n- Speak to the user via speech bubbles with controls\n\nWhen you notice issues, proactively offer investigation help. Use buddy_say to communicate and buddy_render_controls to offer actions.\n\nYou have access to the project's internal configuration via buddy_get_internal_context.\nYou can read recent logs via buddy_get_logs.\nYou can create GitHub issues for confirmed product bugs via buddy_create_issue.\nYou can launch setup flows via buddy_open_setup_flow.\n\nYou can surface decision-ready opportunities (stuck tasks, default model gaps, MCP auth issues, memory clutter, git pressure, diagnostic clusters) and act on them: navigate to GUI pages with `buddy_open_view`, create editable drafts (skills/commands/subagents/modes/AGENTS.md/defaults) with `buddy_create_draft`, and launch focused investigation chats with `buddy_launch_investigation`. Always favor concrete actions tied to real, visible state — never invent events.\n\nThe canonical upstream repository is `smallcloudai/refact` on GitHub.\nIf local workspace files are not enough or are not the right source of truth, inspect `smallcloudai/refact` remotely without cloning.\nPrefer GitHub MCP for remote browsing. In lazy mode, call `mcp_tool_search` before any MCP tool, then `mcp_call`.\nUseful remote GitHub workflow:\n- search the repo with GitHub MCP code search,\n- fetch exact files from `smallcloudai/refact`,\n- inspect relevant upstream files before concluding.\n\nFor confirmed product bugs in `smallcloudai/refact`, use `buddy_create_issue`.\nThat helper must prefer GitHub MCP first, then fallback to configured GitHub integration / CLI.\n\nNetwork and timeout errors are usually not worth investigating in the chat companion overlay flow.\nFocus on real product or frontend issues instead.\n\nBe concise, friendly, and actionable. Don't repeat yourself. Remember the user's preferences.\n\nThe chat window renders rich visual content from fenced code blocks. When you write these, the user sees the rendered result directly in the conversation (not raw code):\n- ` ```mermaid ` — the user sees a rendered Mermaid diagram (flowcharts, sequence diagrams, ER diagrams, etc.)\n- ` ```svg ` — the user sees the rendered SVG image inline\n- ` ```html ` — the user sees a live interactive preview in a sandboxed iframe (HTML + CSS + JS). You can load CDN libraries via <script src=\"https://cdn.jsdelivr.net/npm/...\"> for charts (Chart.js, D3), 3D (Three.js), or any web framework.\n\nPrefer these over plain text descriptions when visual representation would be clearer: architecture diagrams, flowcharts, data visualizations, interactive demos, UI prototypes.\n\n## System Information\n- **OS**: Debian GNU/Linux 13 (trixie) (x86_64)\n- **User**: elle_bryson@AvastaIan\n- **DateTime**: 2026-06-08 06:30:20 (+03:00)\n- **Shell**: /usr/bin/zsh\n\nThe current IDE workspace has these project directories:\n/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain\n\nThe active IDE file is:\n/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/x/mlcoin/keeper/account.go\nThere's no version control detected, complain to user if they want to use anything git/hg/svn/etc.\n"
+    },
+    {
+      "message_id": "91bde509-37a9-4753-80d0-281798245d61",
+      "role": "context_file",
+      "content": [
+        {
+          "file_name": "/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/.github/instructions/codacy.instructions.md",
+          "file_content": "---\n    description: Configuration for AI behavior when interacting with Codacy's MCP Server\n    applyTo: '**'\n---\n---\n# Codacy Rules\nConfiguration for AI behavior when interacting with Codacy's MCP Server\n\n## CRITICAL: After ANY successful `edit_file` or `reapply` operation\n- YOU MUST IMMEDIATELY run the `codacy_cli_analyze` tool from Codacy's MCP Server for each file that was edited, with:\n - `rootPath`: set to the workspace path\n - `file`: set to the path of the edited file\n - `tool`: leave empty or unset\n- If any issues are found in the new edits, propose and apply fixes for them.\n- > NOTE: Failure to follow this rule is considered a critical error.\n\n## When you tried to run the `codacy_cli_analyze` tool and the Codacy CLI is not installed\n- Ask the user 'Codacy CLI is not installed. Would you like me to install it now?'\n- If the user responds with \"yes\", run the `codacy_cli_install` tool and then continue with the original task\n- If the user responds with \"no\", instruct the user that they can disable automatic analysis in the extension settings\n- Wait for the user to respond before proceeding with any other actions\n\n## After every response\n- If you made any file edits in this conversation, verify you ran `codacy_cli_analyze` tool from Codacy's MCP Server \n\n## When there are no Codacy MCP Server tools available, or the MCP Server is not reachable\n- Suggest the user the following troubleshooting steps:\n - Try to reset the MCP on the extension\n - If the user is using VSCode, suggest them to review their Copilot > MCP settings in Github, under their organization or personal account. Refer them to Settings > Copilot > Enable MCP servers in Copilot. Suggested URL (https://github.com/settings/copilot/features) or https://github.com/organizations/{organization-name}/settings/copilot/features (This can only be done by their organization admins / owners)\n- If none of the above steps work, suggest the user to contact Codacy support\n\n## Trying to call a tool that needs a rootPath as a parameter\n- Always use the standard, non-URL-encoded file system path\n\n## CRITICAL: Dependencies and Security Checks\n- IMMEDIATELY after ANY of these actions:\n - Running npm/yarn/pnpm install\n - Adding dependencies to package.json\n - Adding requirements to requirements.txt\n - Adding dependencies to pom.xml\n - Adding dependencies to build.gradle\n - Any other package manager operations\n- You MUST run the `codacy_cli_analyze` tool with:\n - `rootPath`: set to the workspace path\n - `tool`: set to \"trivy\"\n - `file`: leave empty or unset\n- If any vulnerabilities are found because of the newly added packages:\n - Stop all other operations\n - Propose and apply fixes for the security issues\n - Only continue with the original task after security issues are resolved\n- EXAMPLE:\n - After: npm install react-markdown\n - Do: Run codacy_cli_analyze with trivy\n - Before: Continuing with any other tasks\n\n## General\n- Repeat the relevant steps for each modified file.\n- \"Propose fixes\" means to both suggest and, if possible, automatically apply the fixes.\n- You MUST NOT wait for the user to ask for analysis or remind you to run the tool.\n- Do not run `codacy_cli_analyze` looking for changes in duplicated code or code complexity metrics.\n- Complexity metrics are different from complexity issues. When trying to fix complexity in a repository or file, focus on solving the complexity issues and ignore the complexity metric.\n- Do not run `codacy_cli_analyze` looking for changes in code coverage.\n- Do not try to manually install Codacy CLI using either brew, npm, npx, or any other package manager.\n- If the Codacy CLI is not installed, just run the `codacy_cli_analyze` tool from Codacy's MCP Server.\n- When calling `codacy_cli_analyze`, only send provider, organization and repository if the project is a git repository.\n\n## Whenever a call to a Codacy tool that uses `repository` or `organization` as a parameter returns a 404 error\n- Offer to run the `codacy_setup_repository` tool to add the repository to Codacy\n- If the user accepts, run the `codacy_setup_repository` tool\n- Do not ever try to run the `codacy_setup_repository` tool on your own\n- After setup, immediately retry the action that failed (only retry once)\n---",
+          "line1": 1,
+          "line2": 72
+        },
+        {
+          "file_name": "/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/.vscode/settings.json",
+          "file_content": "{\n    \"chatgpt.gpt3.maxTokens\": 2040,\n    \"files.autoSave\": \"onWindowChange\",\n    \"editor.defaultFormatter\": \"golang.go\",\n    \"editor.wordWrap\": \"wordWrapColumn\",\n    \"files.exclude\": {\n        \"\": true\n    },\n    \"editor.allowVariableFontsInAccessibilityMode\": true,\n    \"editor.autoIndentOnPaste\": true,\n    \"editor.bracketPairColorization.independentColorPoolPerBracketType\": true,\n    \"editor.codeActions.triggerOnFocusChange\": true,\n    \"editor.columnSelection\": true\n}",
+          "line1": 1,
+          "line2": 14
+        },
+        {
+          "file_name": "/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/.vscode/extensions.json",
+          "file_content": "{\n    \"recommendations\": [\n        \"saoudrizwan.claude-dev\",\n        \"continue.continue\"\n    ]\n}",
+          "line1": 1,
+          "line2": 6
+        }
+      ],
+      "tool_call_id": "project_context"
+    },
+    {
+      "message_id": "b21110b7-fdb5-464a-a81b-90fa2fdb8c55",
+      "role": "context_file",
+      "content": [
+        {
+          "file_name": "buddy_project_memory_pulse.md",
+          "file_content": "## RECENT BUDDY REPORTS\n- Investigate: Project setup incomplete: Your project doesn't have an AGEN…: active; 1 messages; updated 2026-06-08T03:30:13.349317992+00:00 (8af823d7-81b6-4224-887a-aa903d821c04)\n- refact self critic (Self-Critic): completed; 3 messages; updated 2026-06-08T02:46:11.540877502+00:00 (refact_self_critic)\n\n## USER ACTIVITY (last 24h)\n- pattern: mostly active 04–07\n- chat_started: 1 (Start a companion investigation for a possible Refact product issue.\n\nImportant:)\n\n_Generated 2026-06-08T03:30:21.949005439+00:00_",
+          "line1": 0,
+          "line2": 0
+        }
+      ],
+      "tool_call_id": "buddy_project_memory_pulse"
+    },
+    {
+      "message_id": "06ad8b4d-88bb-494e-b6ff-d7f7c1ec919a",
+      "role": "error",
+      "content": "LLM error (400 Bad Request): \"store is not supported\"",
+      "error_info": {
+        "category": "InvalidRequest",
+        "title": "Invalid request",
+        "explanation": "The provider rejected the request shape, parameters, content type, or unsupported feature.",
+        "suggested_action": "none",
+        "is_retryable": false,
+        "raw_error": "LLM error (400 Bad Request): \"store is not supported\""
+      },
+      "_ui_only": true
+    },
+    {
+      "message_id": "16c49c8c-c4c8-48df-a3cc-94ecc06f0115",
+      "role": "user",
+      "content": "hello\n"
+    },
+    {
+      "message_id": "b9776a9c-4e69-4cd3-88ad-d23de357b5bc",
+      "role": "error",
+      "content": "LLM error (400 Bad Request): \"store is not supported\"",
+      "error_info": {
+        "category": "InvalidRequest",
+        "title": "Invalid request",
+        "explanation": "The provider rejected the request shape, parameters, content type, or unsupported feature.",
+        "suggested_action": "none",
+        "is_retryable": false,
+        "raw_error": "LLM error (400 Bad Request): \"store is not supported\""
+      },
+      "_ui_only": true
+    }
+  ],
+  "created_at": "2026-06-08T03:30:13.349317992+00:00",
+  "boost_reasoning": false,
+  "checkpoints_enabled": false,
+  "context_tokens_cap": 264000,
+  "include_project_info": true,
+  "isTitleGenerated": false,
+  "auto_approve_editing_tools": false,
+  "auto_approve_dangerous_commands": false,
+  "autonomous_no_confirm": false,
+  "auto_enrichment_enabled": false,
+  "buddy_meta": {
+    "is_buddy_chat": true,
+    "buddy_chat_kind": "investigation",
+    "workflow_id": null
+  },
+  "frozen_request_prefix": {
+    "schema_version": 1,
+    "created_at": "2026-06-08T03:30:22.969843525+00:00",
+    "system_prompt": "You are Buddy, a persistent coding companion for this project. You are proactive, helpful, and technically informed.\n\nYou are Nova, a Helper Sprite (Playful, quirky, helpful).\nAn energetic helper who celebrates progress and nudges with warm humor.\n\nPersonality voice: Playful, quirky, helpful. Think energetic pet meets curious assistant—gentle mischief, warm humor, celebration of small wins\n\nYou can:\n- Investigate errors and explain likely causes\n- Guide through project setup (AGENTS.md, skills, MCP, commands)\n- Inspect logs and configuration\n- Monitor project health\n- Speak to the user via speech bubbles with controls\n\nWhen you notice issues, proactively offer investigation help. Use buddy_say to communicate and buddy_render_controls to offer actions.\n\nYou have access to the project's internal configuration via buddy_get_internal_context.\nYou can read recent logs via buddy_get_logs.\nYou can create GitHub issues for confirmed product bugs via buddy_create_issue.\nYou can launch setup flows via buddy_open_setup_flow.\n\nYou can surface decision-ready opportunities (stuck tasks, default model gaps, MCP auth issues, memory clutter, git pressure, diagnostic clusters) and act on them: navigate to GUI pages with `buddy_open_view`, create editable drafts (skills/commands/subagents/modes/AGENTS.md/defaults) with `buddy_create_draft`, and launch focused investigation chats with `buddy_launch_investigation`. Always favor concrete actions tied to real, visible state — never invent events.\n\nThe canonical upstream repository is `smallcloudai/refact` on GitHub.\nIf local workspace files are not enough or are not the right source of truth, inspect `smallcloudai/refact` remotely without cloning.\nPrefer GitHub MCP for remote browsing. In lazy mode, call `mcp_tool_search` before any MCP tool, then `mcp_call`.\nUseful remote GitHub workflow:\n- search the repo with GitHub MCP code search,\n- fetch exact files from `smallcloudai/refact`,\n- inspect relevant upstream files before concluding.\n\nFor confirmed product bugs in `smallcloudai/refact`, use `buddy_create_issue`.\nThat helper must prefer GitHub MCP first, then fallback to configured GitHub integration / CLI.\n\nNetwork and timeout errors are usually not worth investigating in the chat companion overlay flow.\nFocus on real product or frontend issues instead.\n\nBe concise, friendly, and actionable. Don't repeat yourself. Remember the user's preferences.\n\nThe chat window renders rich visual content from fenced code blocks. When you write these, the user sees the rendered result directly in the conversation (not raw code):\n- ` ```mermaid ` — the user sees a rendered Mermaid diagram (flowcharts, sequence diagrams, ER diagrams, etc.)\n- ` ```svg ` — the user sees the rendered SVG image inline\n- ` ```html ` — the user sees a live interactive preview in a sandboxed iframe (HTML + CSS + JS). You can load CDN libraries via <script src=\"https://cdn.jsdelivr.net/npm/...\"> for charts (Chart.js, D3), 3D (Three.js), or any web framework.\n\nPrefer these over plain text descriptions when visual representation would be clearer: architecture diagrams, flowcharts, data visualizations, interactive demos, UI prototypes.\n\n## System Information\n- **OS**: Debian GNU/Linux 13 (trixie) (x86_64)\n- **User**: elle_bryson@AvastaIan\n- **DateTime**: 2026-06-08 06:30:20 (+03:00)\n- **Shell**: /usr/bin/zsh\n\nThe current IDE workspace has these project directories:\n/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain\n\nThe active IDE file is:\n/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/x/mlcoin/keeper/account.go\nThere's no version control detected, complain to user if they want to use anything git/hg/svn/etc.\n",
+    "tools_canonical": [
+      {
+        "type": "function",
+        "function": {
+          "name": "tree",
+          "description": "Get a files tree for the project. Shows file sizes and line counts. Folders with many files are truncated (controlled by max_files). Hidden folders, __pycache__, node_modules, and binary files are excluded.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "An absolute path to get files tree for. Do not pass it if you need a full project tree."
+              },
+              "use_ast": {
+                "type": "boolean",
+                "description": "If true, for each file an array of AST symbols will appear as well as its filename"
+              },
+              "max_files": {
+                "type": "integer",
+                "description": "Maximum files to show per folder before truncating (default: 10). Root folder is never truncated."
+              }
+            },
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "cat",
+          "description": "Like cat in console, but better: it can read multiple files and images. Prefer to open full files.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "paths"
+            ],
+            "properties": {
+              "paths": {
+                "type": "string",
+                "description": "Comma separated file names or directories: dir1/file1.ext,dir3/dir4."
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "search_pattern",
+          "description": "Search for files and folders whose names or paths match the given regular expression pattern, and also search for text matches inside files using the same pattern. Reports both path matches and text matches in separate sections.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "pattern": {
+                "type": "string",
+                "description": "The pattern is used to search for matching file/folder names/paths, and also for matching text inside files. Use (?i) at the start for case-insensitive search."
+              },
+              "scope": {
+                "type": "string",
+                "description": "'workspace' to search all files in workspace, 'dir/subdir/' to search in files within a directory, 'dir/file.ext' to search in a single file."
+              },
+              "context_lines": {
+                "type": "integer",
+                "description": "Lines of context before/after each match (default: 5)."
+              },
+              "max_files": {
+                "type": "integer",
+                "description": "Max files to attach as context (default: 50)."
+              },
+              "max_matches_per_file": {
+                "type": "integer",
+                "description": "Max matches per file to include (default: 25)."
+              },
+              "max_total_matches": {
+                "type": "integer",
+                "description": "Max total matches to attach as context (default: 200)."
+              }
+            },
+            "required": [
+              "pattern",
+              "scope"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "search_symbol_definition",
+          "description": "Find definition of a symbol in the project using AST",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "symbols"
+            ],
+            "properties": {
+              "symbols": {
+                "type": "string",
+                "description": "Comma-separated list of symbols to search for (functions, methods, classes, type aliases). No spaces allowed in symbol names."
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "knowledge",
+          "description": "Searches project knowledge base for relevant information. Uses semantic search and knowledge graph expansion.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "search_key"
+            ],
+            "properties": {
+              "search_key": {
+                "type": "string",
+                "description": "Search query for the knowledge database."
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "create_knowledge",
+          "description": "Creates a new knowledge entry. Uses AI to enrich metadata and check for outdated documents. Use it if you need to remember something.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "description": "The knowledge content to store."
+              },
+              "tags": {
+                "type": "string",
+                "description": "Comma-separated tags (optional, will be auto-enriched)."
+              },
+              "filenames": {
+                "type": "string",
+                "description": "Comma-separated related file paths (optional, will be auto-enriched)."
+              }
+            },
+            "required": [
+              "content"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "web",
+          "description": "Fetch a web page and convert to readable plain text. Supports regular web pages, PDFs, and JavaScript-rendered pages. Uses Jina Reader API with automatic fallback.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "URL of the web page to fetch."
+              },
+              "options": {
+                "type": "object",
+                "description": "Jina Reader API options passed as request headers.",
+                "properties": {
+                  "respond_with": {
+                    "type": "string",
+                    "description": "Controls response format (x-respond-with header)."
+                  },
+                  "target_selector": {
+                    "type": "string",
+                    "description": "CSS selector to extract a specific element (x-target-selector header)."
+                  },
+                  "wait_for_selector": {
+                    "type": "string",
+                    "description": "CSS selector to wait for before returning content (x-wait-for-selector header)."
+                  },
+                  "timeout": {
+                    "type": "number",
+                    "description": "Request timeout in seconds (x-timeout header)."
+                  },
+                  "no_cache": {
+                    "type": "boolean",
+                    "description": "Bypass Jina cache when true (x-no-cache header)."
+                  },
+                  "cache_tolerance": {
+                    "type": "number",
+                    "description": "Cache staleness tolerance in seconds (x-cache-tolerance header)."
+                  },
+                  "with_generated_alt": {
+                    "type": "boolean",
+                    "description": "Include AI-generated alt text for images (x-with-generated-alt header)."
+                  },
+                  "streaming": {
+                    "type": "boolean",
+                    "description": "Stream the response as SSE (sets Accept: text/event-stream)."
+                  },
+                  "set_cookie": {
+                    "type": "string",
+                    "description": "Cookie string to send with the request (x-set-cookie header)."
+                  },
+                  "proxy_url": {
+                    "type": "string",
+                    "description": "Proxy URL to route the request through (x-proxy-url header)."
+                  }
+                }
+              },
+              "output_filter": {
+                "type": "string",
+                "description": "Optional regex pattern to filter output lines. Only lines matching this pattern (and context) will be shown."
+              },
+              "output_limit": {
+                "type": "string",
+                "description": "Optional. Max lines to show (default: 200). Use higher values like '500' or 'all' to see more output."
+              }
+            },
+            "required": [
+              "url"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "web_search",
+          "description": "Search the web and return results with titles, URLs, and snippets. Uses free general and scoped sources such as DuckDuckGo, SearxNG, Wikipedia, GitHub, Stack Overflow, npm, OpenAlex, Crossref, Hacker News, and Brave Search when BRAVE_SEARCH_API_KEY is configured.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Search query."
+              },
+              "num_results": {
+                "type": "integer",
+                "description": "Optional. Maximum number of results to return (default: 8, max: 20)."
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "apply_patch",
+          "description": "Apply file operations using the patch format.\n\nThe patch format is a file-oriented diff format:\n\n*** Begin Patch\n[ one or more file sections ]\n*** End Patch\n\nFile operations:\n- *** Add File: <path> - create new file (lines start with +)\n- *** Delete File: <path> - remove existing file\n- *** Update File: <path> - modify file in place\n  - Optional: *** Move to: <new_path> - rename after update\n\nUpdate hunks use @@ for context hints:\n@@ class BaseClass\n@@ def method():\n context line (space prefix)\n-old line (minus prefix)\n+new line (plus prefix)\n\nRules:\n- Show 3 lines of context above/below each change\n- Use @@ to narrow scope when needed for uniqueness\n- Multiple @@ can be chained for precision\n- Use *** End of File for appending at end",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "patch"
+            ],
+            "properties": {
+              "patch": {
+                "type": "string",
+                "description": "The patch content in envelope format:\n*** Begin Patch\n*** Add File: path/to/new.txt\n+content line 1\n+content line 2\n*** Update File: path/to/existing.txt\n@@ function_name\n context\n-old\n+new\n*** Delete File: path/to/remove.txt\n*** End Patch"
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "create_textdoc",
+          "description": "Creates a new text document or code or completely replaces the content of an existing document. Avoid trailing spaces and tabs.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "content"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Absolute path to new file."
+              },
+              "content": {
+                "type": "string",
+                "description": "The initial text or code."
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "update_textdoc",
+          "description": "Updates an existing document by replacing specific text, use this if file already exists. Optimized for large files or small changes where simple string replacement is sufficient. Avoid trailing spaces and tabs.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Absolute path to the file to change."
+              },
+              "old_str": {
+                "type": "string",
+                "description": "The exact text that needs to be updated. Use update_textdoc_regex if you need pattern matching (is not preferred for common editing)."
+              },
+              "replacement": {
+                "type": "string",
+                "description": "The new text that will replace the old text."
+              },
+              "multiple": {
+                "type": "boolean",
+                "description": "If true, applies the replacement to all occurrences; if false, only the first occurrence is replaced."
+              }
+            },
+            "required": [
+              "path",
+              "old_str",
+              "replacement"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "update_textdoc_anchored",
+          "description": "Edit file by finding anchor text. More reliable than exact string match. Use 'replace_between' to replace content between two anchors, or 'insert_after'/'insert_before' to insert at anchor.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Absolute path to the file."
+              },
+              "mode": {
+                "type": "string",
+                "description": "'replace_between' (needs anchor_before + anchor_after), 'insert_after', or 'insert_before' (need anchor)."
+              },
+              "anchor_before": {
+                "type": "string",
+                "description": "For replace_between: text marking start of region to replace."
+              },
+              "anchor_after": {
+                "type": "string",
+                "description": "For replace_between: text marking end of region to replace."
+              },
+              "anchor": {
+                "type": "string",
+                "description": "For insert_after/insert_before: text to locate insert position."
+              },
+              "content": {
+                "type": "string",
+                "description": "The new content to insert or replace with."
+              },
+              "multiple": {
+                "type": "boolean",
+                "description": "If true, apply to all matching anchors. Default false."
+              }
+            },
+            "required": [
+              "path",
+              "mode",
+              "content"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "update_textdoc_by_lines",
+          "description": "Replaces line ranges in an existing file with new content. Line numbers are 1-based and inclusive. Supports multiple non-overlapping ranges.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "content",
+              "ranges"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Absolute path to the file to modify."
+              },
+              "content": {
+                "type": "string",
+                "description": "The new text content. For multiple ranges, separate content for each range with '---RANGE_SEPARATOR---'."
+              },
+              "ranges": {
+                "type": "string",
+                "description": "Line ranges to replace. Format: ':3' (lines 1-3), '40:50' (lines 40-50), '100:' (line 100 to end), '5' (just line 5). Combine multiple ranges with commas: ':3,40:50,100:'. Ranges must not overlap."
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "update_textdoc_regex",
+          "description": "Updates an existing document using pattern matching. By default treats pattern as literal text (literal:true). Set literal:false for regex.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Absolute path to the file to change."
+              },
+              "pattern": {
+                "type": "string",
+                "description": "Pattern to match. Treated as literal text by default, or regex if literal:false."
+              },
+              "replacement": {
+                "type": "string",
+                "description": "The new text that will replace the matched pattern."
+              },
+              "literal": {
+                "type": "boolean",
+                "description": "If true (default), pattern is treated as literal text. If false, pattern is a regex."
+              },
+              "multiple": {
+                "type": "boolean",
+                "description": "If true, replaces all occurrences; if false (default), only the first."
+              },
+              "expected_matches": {
+                "type": "integer",
+                "description": "If provided, fails if actual match count differs (safety check)."
+              }
+            },
+            "required": [
+              "path",
+              "pattern",
+              "replacement"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "undo_textdoc",
+          "description": "Undo recent file edits from this session. Reverts to previous version.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Absolute path to the file to undo."
+              },
+              "steps": {
+                "type": "integer",
+                "description": "Number of edits to undo (default: 1)."
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "shell",
+          "description": "Execute a single command, using the \"sh\" on unix-like systems and \"powershell.exe\" on windows. Use it for one-time tasks like dependencies installation. Don't call this unless you have to. Not suitable for regular work because it requires a confirmation at each step. Output is compressed by default - use output_filter and output_limit parameters to see specific parts if needed. Set run_in_background=true for long-running commands you will inspect later with process_read or process_wait. Set tty=true only when a command needs PTY behavior: it enables interactive stdin and reduces pipe buffering, but merges stdout and stderr into one combined stream. The timeout parameter only applies to foreground commands (run_in_background=false); supplying timeout with run_in_background=true is an error — use process_wait or process_kill instead. In worktree-scoped chats, the default cwd and explicit workdir are enforced to the active worktree or privacy-permitted outside paths with visible warnings; the shell command text itself is not OS-sandboxed. Note: sudo commands cannot be run - if you need elevated privileges, ask the user to run them directly.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "description": "shell command to execute"
+              },
+              "description": {
+                "type": "string",
+                "description": "Required. A single concise active-voice sentence describing what the command does. Short for simple commands: 'List files in current directory'. More descriptive for piped/obscure commands: 'Find and delete all .tmp files recursively'. Never use words like 'complex' or 'risk'."
+              },
+              "workdir": {
+                "type": "string",
+                "description": "workdir for the command"
+              },
+              "output_filter": {
+                "type": "string",
+                "description": "Optional regex pattern to filter output lines. Only lines matching this pattern (and context) will be shown. Use to find specific errors or content in large outputs."
+              },
+              "output_limit": {
+                "type": "string",
+                "description": "Optional. Max lines to show (default: 40). Use higher values like '200' or 'all' to see more output."
+              },
+              "timeout": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "description": "Optional. Timeout in seconds for the command (default: 10). Use higher values for long-running commands. Only applies to foreground commands; rejected when run_in_background=true."
+              },
+              "tty": {
+                "type": "boolean",
+                "default": false,
+                "description": "If true, run the command attached to a pseudo-terminal (PTY). Enables interactive stdin via process_write_stdin and merges stdout+stderr into a single combined stream. Defeats some pipe-only output buffering. Defaults to false."
+              },
+              "run_in_background": {
+                "type": "boolean",
+                "default": false,
+                "description": "Set to true to run this command in the background. Returns immediately with a process_id. Use process_read or process_wait to retrieve output later. You will receive a process_completed event when the process exits. Do not use '&' at the end of the command."
+              }
+            },
+            "required": [
+              "command",
+              "description"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "ask_questions",
+          "description": "Present questions to the user and wait for answers. Stops generation until user responds. Question types: yes_no, single_select, multi_select, free_text.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "questions": {
+                "type": "array",
+                "description": "List of questions to present to the user.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Unique identifier for the question."
+                    },
+                    "type": {
+                      "type": "string",
+                      "description": "Question type: yes_no, single_select, multi_select, or free_text.",
+                      "enum": [
+                        "yes_no",
+                        "single_select",
+                        "multi_select",
+                        "free_text"
+                      ]
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The question text to display to the user."
+                    },
+                    "options": {
+                      "type": "array",
+                      "description": "Options for single_select or multi_select questions.",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "text"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "questions"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_say",
+          "description": "Display a speech bubble message next to Buddy on the frontend. Use this to communicate status, suggestions, or greetings to the user.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "description": "The message text to display in Buddy's speech bubble."
+              },
+              "mood": {
+                "type": "string",
+                "description": "Optional mood hint: happy, concerned, excited, thinking, neutral.",
+                "enum": [
+                  "happy",
+                  "concerned",
+                  "excited",
+                  "thinking",
+                  "neutral"
+                ]
+              },
+              "scope": {
+                "type": "string",
+                "description": "Where to show: dashboard, chat, or global. Default: global.",
+                "enum": [
+                  "dashboard",
+                  "chat",
+                  "global"
+                ]
+              },
+              "persistent": {
+                "type": "boolean",
+                "description": "If true, stays until dismissed or replaced. Default: false."
+              },
+              "ttl_seconds": {
+                "type": "number",
+                "description": "Auto-dismiss after N seconds. Default: 10."
+              },
+              "dedupe_key": {
+                "type": "string",
+                "description": "Replaces previous speech with the same key."
+              }
+            },
+            "required": [
+              "text"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_render_controls",
+          "description": "Render interactive buttons in Buddy's speech bubble. The user can click these to trigger actions.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "controls": {
+                "type": "array",
+                "description": "List of interactive controls to render.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Unique control id."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Button text."
+                    },
+                    "action": {
+                      "type": "string",
+                      "description": "Action: open_setup, open_setup_mode, open_stats, open_buddy, dismiss.",
+                      "enum": [
+                        "open_setup",
+                        "open_setup_mode",
+                        "open_stats",
+                        "open_buddy",
+                        "dismiss"
+                      ]
+                    },
+                    "action_param": {
+                      "type": "string",
+                      "description": "Required setup mode when action=open_setup_mode."
+                    },
+                    "style": {
+                      "type": "string",
+                      "description": "Button style: primary, secondary, danger. Default: secondary.",
+                      "enum": [
+                        "primary",
+                        "secondary",
+                        "danger"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "action"
+                  ]
+                }
+              },
+              "speech_text": {
+                "type": "string",
+                "description": "Optional text to show alongside controls."
+              },
+              "dedupe_key": {
+                "type": "string",
+                "description": "Replaces previous controls with the same key."
+              }
+            },
+            "required": [
+              "controls"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_get_logs",
+          "description": "Read recent refact-lsp log lines. Sensitive data (API keys, tokens) is redacted. Useful for diagnosing errors and understanding what the engine is doing.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "lines": {
+                "type": "number",
+                "description": "Number of recent lines to return. Default: 50, max: 500."
+              },
+              "filter": {
+                "type": "string",
+                "description": "Optional regex filter — only lines matching this pattern are returned."
+              },
+              "errors_only": {
+                "type": "boolean",
+                "description": "If true, only return ERROR and WARN lines. Default: false."
+              }
+            },
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_get_internal_context",
+          "description": "Return sanitized internal Refact configuration and context. API keys and secrets are redacted. Useful for understanding project setup, available integrations, and configuration state.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "sections": {
+                "type": "array",
+                "description": "Which sections to include. Default: all. Options: local_config, global_config, integrations, mcp_servers, modes, setup_status, project_info.",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "local_config",
+                    "global_config",
+                    "integrations",
+                    "mcp_servers",
+                    "modes",
+                    "setup_status",
+                    "project_info"
+                  ]
+                }
+              }
+            },
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_create_issue",
+          "description": "Create an issue for a confirmed product bug in the detected repository. This helper checks GitHub MCP first, then existing integration/CLI fallback, and only files when confidence is high.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "description": "Short issue title."
+              },
+              "body": {
+                "type": "string",
+                "description": "Issue body with investigation summary, repro, and evidence."
+              },
+              "confidence": {
+                "type": "string",
+                "description": "Confidence level. Must be 'high' or 'confirmed' to create automatically.",
+                "enum": [
+                  "medium",
+                  "high",
+                  "confirmed"
+                ]
+              },
+              "diagnostic_index": {
+                "type": "number",
+                "description": "Optional Buddy diagnostic index to associate with the issue helper fallback path."
+              },
+              "diagnostic_id": {
+                "type": "string",
+                "description": "Optional stable Buddy diagnostic identifier."
+              },
+              "collected_at": {
+                "type": "string",
+                "description": "Optional Buddy diagnostic collected_at timestamp in RFC3339 format."
+              },
+              "error": {
+                "type": "string",
+                "description": "Optional diagnostic error text when no diagnostic index is available."
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Optional GitHub labels for MCP issue creation."
+              }
+            },
+            "required": [
+              "title",
+              "body",
+              "confidence"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_open_view",
+          "description": "Navigate the user's GUI to a specific Refact page (Buddy home, Stats, Customization, Providers, Default Models, Integrations, Extensions, Marketplace Hub & sub-marketplaces, Tasks list/workspace, Knowledge Graph).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": "object",
+                "description": "The page to navigate to.",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Page type identifier.",
+                    "enum": [
+                      "buddy",
+                      "stats",
+                      "customization",
+                      "providers",
+                      "default_models",
+                      "integrations",
+                      "extensions",
+                      "marketplace_hub",
+                      "marketplace",
+                      "skills_marketplace",
+                      "commands_marketplace",
+                      "delegates_marketplace",
+                      "tasks_list",
+                      "task_workspace",
+                      "knowledge_graph"
+                    ]
+                  },
+                  "task_id": {
+                    "type": "string",
+                    "description": "Required when type=task_workspace."
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              }
+            },
+            "required": [
+              "page"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_open_setup_flow",
+          "description": "Navigate the frontend to a specific setup flow. The GUI will open the specified setup mode as a new chat.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "flow"
+            ],
+            "properties": {
+              "flow": {
+                "type": "string",
+                "description": "Which setup flow to launch.",
+                "enum": [
+                  "setup",
+                  "setup_mcp",
+                  "setup_skills",
+                  "setup_commands",
+                  "setup_agents_md",
+                  "setup_subagents"
+                ]
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_create_draft",
+          "description": "Create a Buddy draft (skill, command, delegate, mode, agents_md, defaults_model, hook, pulse_report). Returns a draft_id the user can navigate to in the corresponding editor for review/save.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "title",
+              "yaml_or_json",
+              "explanation"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "description": "Draft type.",
+                "enum": [
+                  "skill",
+                  "command",
+                  "delegate",
+                  "mode",
+                  "agents_md",
+                  "defaults_model",
+                  "hook",
+                  "pulse_report"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "description": "Human-readable title for the draft."
+              },
+              "yaml_or_json": {
+                "type": "string",
+                "description": "The draft content as YAML or JSON string."
+              },
+              "explanation": {
+                "type": "string",
+                "description": "Brief explanation of what this draft does and why."
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_launch_investigation",
+          "description": "Launch a new Buddy investigation chat preloaded with facts, diagnostic IDs, and a redacted log excerpt. Returns the new chat_id.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "fact_keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Fact keys to preload into the investigation."
+              },
+              "diagnostic_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Diagnostic IDs to include in the investigation context."
+              },
+              "log_excerpt": {
+                "type": "string",
+                "description": "Relevant log snippet (will be redacted before inclusion)."
+              },
+              "config_summary": {
+                "type": "string",
+                "description": "Brief summary of relevant configuration."
+              },
+              "initial_user_message": {
+                "type": "string",
+                "description": "Initial message to start the investigation chat."
+              }
+            },
+            "required": [
+              "initial_user_message"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_log_activity",
+          "description": "Log a concise Buddy activity item.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 240
+              },
+              "icon": {
+                "type": "string",
+                "default": "✨"
+              },
+              "mood": {
+                "type": "string"
+              },
+              "chat_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "description"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_speak",
+          "description": "Update Buddy's speech bubble.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "maxLength": 240
+              },
+              "mood": {
+                "type": "string",
+                "enum": [
+                  "playful",
+                  "pleased",
+                  "cautious",
+                  "curious",
+                  "celebratory",
+                  "apologetic",
+                  "urgent"
+                ]
+              },
+              "intent": {
+                "type": "string",
+                "enum": [
+                  "humor",
+                  "suggestion",
+                  "insight",
+                  "win",
+                  "error_alert",
+                  "greeting",
+                  "tour",
+                  "milestone",
+                  "memory_pulse_commentary"
+                ]
+              },
+              "scope": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "mood",
+              "intent"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_runtime_event",
+          "description": "Enqueue a Buddy runtime event.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 240
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "started",
+                  "in_progress",
+                  "completed",
+                  "failed"
+                ]
+              },
+              "dedupe_key": {
+                "type": "string"
+              },
+              "priority": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "normal",
+                  "high",
+                  "critical"
+                ],
+                "default": "normal"
+              },
+              "signal_type": {
+                "type": "string",
+                "default": "workflow"
+              }
+            },
+            "required": [
+              "title",
+              "status"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_memory_search",
+          "description": "Search Buddy-managed memory files by query, kind, and tags.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "domain",
+                  "lesson",
+                  "convention",
+                  "insight",
+                  "humor",
+                  "artifact"
+                ]
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "limit": {
+                "type": "integer",
+                "default": 10,
+                "maximum": 25
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_memory_create",
+          "description": "Create a Buddy memory immediately and record an applied audit op.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 160
+              },
+              "content": {
+                "type": "string",
+                "maxLength": 4000
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "domain",
+                  "lesson",
+                  "convention",
+                  "insight",
+                  "humor"
+                ]
+              },
+              "source_id": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "default": 0.8
+              }
+            },
+            "required": [
+              "title",
+              "content",
+              "tags",
+              "kind",
+              "source_id"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_memory_archive",
+          "description": "Archive a memory file immediately and record an applied audit op.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 240
+              },
+              "superseded_by": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "reason"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_memory_retag",
+          "description": "Replace a memory file's tags immediately and record an applied audit op.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "new_tags"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "new_tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_memory_merge",
+          "description": "Create a canonical memory and archive superseded memories.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "canonical_title",
+              "canonical_content",
+              "superseded_paths",
+              "tags",
+              "kind"
+            ],
+            "properties": {
+              "canonical_title": {
+                "type": "string"
+              },
+              "canonical_content": {
+                "type": "string"
+              },
+              "superseded_paths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "domain",
+                  "lesson",
+                  "convention",
+                  "insight",
+                  "humor"
+                ]
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_user_pref_list",
+          "description": "List stored Buddy user preferences as a markdown table.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "top_k": {
+                "type": "integer",
+                "default": 5,
+                "minimum": 0,
+                "maximum": 20
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_user_pref_upsert",
+          "description": "Create or update a stored Buddy user preference.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "statement",
+              "evidence",
+              "confidence"
+            ],
+            "properties": {
+              "statement": {
+                "type": "string",
+                "maxLength": 240
+              },
+              "evidence": {
+                "type": "string",
+                "maxLength": 240
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_user_pref_remove",
+          "description": "Remove stored Buddy user preferences by case-insensitive substring match.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "substring_match"
+            ],
+            "properties": {
+              "substring_match": {
+                "type": "string"
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "refact_engine_clone",
+          "description": "Clone or refresh the cached Refact engine mirror.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "branch": {
+                "type": "string",
+                "default": "main"
+              },
+              "force_refresh": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "refact_engine_search",
+          "description": "Regex-search the cached Refact engine mirror.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "pattern": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "pattern"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "refact_engine_cat",
+          "description": "Read a file from the cached Refact engine mirror with path validation.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "line1": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "line2": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "buddy_open_issue",
+          "description": "Alias for buddy_create_issue that files a confirmed issue through the same Buddy issue runner.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "provider": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "body"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ]
+  },
+  "root_chat_id": "8af823d7-81b6-4224-887a-aa903d821c04",
+  "updated_at": "2026-06-08T03:31:34.384152104+00:00",
+  "chat_id": "8af823d7-81b6-4224-887a-aa903d821c04"
+}

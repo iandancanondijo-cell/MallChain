@@ -1,0 +1,4 @@
+syntax = "proto3";
+package marketplace.badge.module.v1;
+
+option go_package = "marketplace/x/badge/types";

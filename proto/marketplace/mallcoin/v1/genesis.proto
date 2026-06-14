@@ -1,0 +1,17 @@
+syntax = "proto3";
+package marketplace.mallcoin.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+import "marketplace/mallcoin/v1/params.proto";
+
+option go_package = "github.com/tmp/marketplace/x/mallcoin/types";
+
+// GenesisState defines the mallcoin module's genesis state.
+message GenesisState {
+  // params defines all the parameters of the module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}

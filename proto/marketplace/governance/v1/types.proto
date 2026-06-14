@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package marketplace.governance.v1;
+
+import "cosmos/base/v1beta1/coin.proto";
+import "gogoproto/gogo.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "cosmos_proto/cosmos.proto";
+
+option go_package = "github.com/tmp/marketplace/x/governance/types";
+
+// Proposal defines the core field members of a governance proposal.
+message Proposal {
+  uint64 id = 1;
+  repeated google.protobuf.Any messages = 2 [(cosmos_proto.accepts_interface) = "*types.Msg"];
+  ProposalStatus status = 3;
+  TallyResult final_tally_result = 4 [(gogoproto.nullable) = false];
+  google.protobuf.Timestamp submit_time = 5 [(gogoproto.nullable) = false, (gogoproto.stdtime) = true];
+  google.protobuf.Timestamp deposit_end_time = 6 [(gogoproto.nullable) = false, (gogoproto.stdtime) = true];
+  repeated cosmos.base.v1beta1.Coin total_deposit = 7 [(gogoproto.nullable) = false, (gogoproto.castrepeated) = "github.com/cosmos/cosmos-sdk/types.Coins"];
+  google.protobuf.Timestamp voting_start_time = 8 [(gogoproto.nullable) = false, (gogoproto.stdtime) = true];
+  google.protobuf.Timestamp voting_end_time = 9 [(gogoproto.nullable) = false, (gogoproto.stdtime) = true];
+  string metadata = 10;
+  string title = 11 [(gogoproto.moretags) = "yaml:\"title\""];
+  string summary = 12 [(gogoproto.moretags) = "yaml:\"summary\""];
+  string proposer = 13 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bool expedited = 14;
+}
+
+// ProposalStatus enumerates the valid statuses of a proposal.
+enum ProposalStatus {
+  PROPOSAL_STATUS_UNSPECIFIED = 0;
+  PROPOSAL_STATUS_DEPOSIT_PERIOD = 1;
+  PROPOSAL_STATUS_VOTING_PERIOD = 2;
+  PROPOSAL_STATUS_PASSED = 3;
+  PROPOSAL_STATUS_REJECTED = 4;
+  PROPOSAL_STATUS_FAILED = 5;
+}
+
+// TallyResult defines a standard tally for a governance proposal.
+message TallyResult {
+  option (gogoproto.equal) = true;
+  string yes_count = 1 [(cosmos_proto.scalar) = "cosmos.Int", (gogoproto.customtype) = "cosmossdk.io/math.Int", (gogoproto.nullable) = false];
+  string abstain_count = 2 [(cosmos_proto.scalar) = "cosmos.Int", (gogoproto.customtype) = "cosmossdk.io/math.Int", (gogoproto.nullable) = false];
+  string no_count = 3 [(cosmos_proto.scalar) = "cosmos.Int", (gogoproto.customtype) = "cosmossdk.io/math.Int", (gogoproto.nullable) = false];
+  string no_with_veto_count = 4 [(cosmos_proto.scalar) = "cosmos.Int", (gogoproto.customtype) = "cosmossdk.io/math.Int", (gogoproto.nullable) = false];
+}
+
+// Vote defines a vote on a governance proposal.
+message Vote {
+  uint64 proposal_id = 1 [(gogoproto.moretags) = "yaml:\"proposal_id\""];
+  string voter = 2 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  repeated WeightedVoteOption options = 3 [(gogoproto.nullable) = false];
+  string metadata = 4;
+}
+
+// Deposit defines an amount deposited by an account address to an active proposal.
+message Deposit {
+  uint64 proposal_id = 1 [(gogoproto.moretags) = "yaml:\"proposal_id\""];
+  string depositor = 2 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  repeated cosmos.base.v1beta1.Coin amount = 3 [(gogoproto.nullable) = false, (gogoproto.castrepeated) = "github.com/cosmos/cosmos-sdk/types.Coins"];
+}
+
+// WeightedVoteOption defines a unit of vote for vote split.
+message WeightedVoteOption {
+  option (gogoproto.equal) = true;
+  option (gogoproto.goproto_getters) = false;
+  VoteOption option = 1;
+  string weight = 2 [(cosmos_proto.scalar) = "cosmos.Dec", (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec", (gogoproto.nullable) = false];
+}
+
+// VoteOption enumerates the valid vote options for a given governance proposal.
+enum VoteOption {
+  VOTE_OPTION_UNSPECIFIED = 0;
+  VOTE_OPTION_YES = 1;
+  VOTE_OPTION_ABSTAIN = 2;
+  VOTE_OPTION_NO = 3;
+  VOTE_OPTION_NO_WITH_VETO = 4;
+}
+
+// Params defines module parameters for governance.
+message Params {
+  // min_deposit is the minimum deposit required for a proposal to enter the voting period.
+  repeated cosmos.base.v1beta1.Coin min_deposit = 1 [(gogoproto.nullable) = false, (gogoproto.castrepeated) = "github.com/cosmos/cosmos-sdk/types.Coins"];
+
+  // voting_period is the duration of the voting window.
+  google.protobuf.Duration voting_period = 2 [(gogoproto.nullable) = false, (gogoproto.stdduration) = true];
+
+  // threshold is the minimum yes ratio required for a proposal to pass.
+  string threshold = 3 [(cosmos_proto.scalar) = "cosmos.Dec", (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec", (gogoproto.nullable) = false];
+
+  // veto_threshold is the ratio of no_with_veto votes required to veto a proposal.
+  string veto_threshold = 4 [(cosmos_proto.scalar) = "cosmos.Dec", (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec", (gogoproto.nullable) = false];
+
+  // quorum is the minimum participation ratio required for a vote to be valid.
+  string quorum = 5 [(cosmos_proto.scalar) = "cosmos.Dec", (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec", (gogoproto.nullable) = false];
+}

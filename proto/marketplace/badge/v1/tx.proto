@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package marketplace.badge.v1;
+
+import "amino/amino.proto";
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+import "marketplace/badge/v1/params.proto";
+
+option go_package = "github.com/tmp/marketplace/x/badge/types";
+
+// Msg defines the Msg service.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  // UpdateParams defines a (governance) operation for updating the module
+  // parameters. The authority defaults to the x/gov module account.
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+
+  // IssueBadge defines the IssueBadge RPC.
+  rpc IssueBadge(MsgIssueBadge) returns (MsgIssueBadgeResponse);
+}
+
+// MsgUpdateParams is the Msg/UpdateParams request type.
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "marketplace/x/badge/MsgUpdateParams";
+
+  // authority is the address that controls the module (defaults to x/gov unless overwritten).
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // params defines the module parameters to update.
+
+  // NOTE: All parameters must be supplied.
+  Params params = 2 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// MsgUpdateParamsResponse defines the response structure for executing a
+// MsgUpdateParams message.
+message MsgUpdateParamsResponse {}
+
+// MsgIssueBadge defines the MsgIssueBadge message.
+message MsgIssueBadge {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string recipient = 2;
+  string badge_type = 3;
+}
+
+// MsgIssueBadgeResponse defines the MsgIssueBadgeResponse message.
+message MsgIssueBadgeResponse {}

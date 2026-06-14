@@ -1,0 +1,109 @@
+syntax = "proto3";
+package marketplace.crosschain.v1;
+
+import "gogoproto/gogo.proto";
+import "cosmos/base/v1beta1/coin.proto";
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+
+option go_package = "github.com/tmp/marketplace/x/crosschain/types";
+
+// BridgeTransfer represents a cross-chain transfer request
+message BridgeTransfer {
+  uint64 id = 1;
+  string sender = 2;
+  string recipient = 3;
+  cosmos.base.v1beta1.Coin amount = 4;
+  string source_chain = 5;
+  string destination_chain = 6;
+  string asset_denom = 7;
+  string status = 8;
+  uint64 timestamp = 9;
+}
+
+// BridgeState tracks the state of cross-chain operations
+message BridgeState {
+  uint64 next_transfer_id = 1;
+  repeated BridgeTransfer pending_transfers = 2;
+  repeated BridgeTransfer completed_transfers = 3;
+  map<string, uint64> chain_balances = 4;
+}
+
+// Params defines the parameters for the crosschain module
+message Params {
+  string admin_address = 1;
+  repeated string supported_chains = 2;
+  uint64 min_transfer_amount = 3;
+  uint64 max_transfer_amount = 4;
+  uint64 transfer_timeout_blocks = 5;
+}
+
+// Msg defines the crosschain Msg service.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+  // InitiateBridgeTransfer initiates a cross-chain transfer.
+  rpc InitiateBridgeTransfer(MsgInitiateBridgeTransfer) returns (MsgInitiateBridgeTransferResponse) {
+  }
+
+  // CompleteBridgeTransfer completes a cross-chain transfer.
+  rpc CompleteBridgeTransfer(MsgCompleteBridgeTransfer) returns (MsgCompleteBridgeTransferResponse) {
+  }
+
+  // UpdateParams updates the module parameters.
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse) {
+  }
+}
+
+// MsgInitiateBridgeTransfer initiates a cross-chain transfer
+message MsgInitiateBridgeTransfer {
+  option (cosmos.msg.v1.signer) = "sender";
+
+  // sender is the address initiating the transfer.
+  string sender = 1;
+
+  // recipient is the address receiving the transfer.
+  string recipient = 2 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // amount is the amount being transferred.
+  cosmos.base.v1beta1.Coin amount = 3 [(gogoproto.nullable) = false];
+
+  // destination_chain is the destination blockchain identifier.
+  string destination_chain = 4;
+}
+
+// MsgInitiateBridgeTransferResponse is the response type for MsgInitiateBridgeTransfer.
+message MsgInitiateBridgeTransferResponse {
+  // transfer_id is the ID of the initiated transfer.
+  uint64 transfer_id = 1;
+}
+
+// MsgCompleteBridgeTransfer completes a cross-chain transfer
+message MsgCompleteBridgeTransfer {
+  option (cosmos.msg.v1.signer) = "validator";
+
+  // validator is the address of the validator completing the transfer.
+  string validator = 1;
+
+  // transfer_id is the ID of the transfer to complete.
+  uint64 transfer_id = 2;
+
+  // proof is the proof of the transfer completion.
+  string proof = 3;
+}
+
+// MsgCompleteBridgeTransferResponse is the response type for MsgCompleteBridgeTransfer.
+message MsgCompleteBridgeTransferResponse {}
+
+// MsgUpdateParams updates the module parameters
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+
+  // authority is the address authorized to update parameters.
+  string authority = 1;
+
+  // params are the new parameters.
+  Params params = 2 [(gogoproto.nullable) = false];
+}
+
+// MsgUpdateParamsResponse is the response type for MsgUpdateParams.
+message MsgUpdateParamsResponse {}

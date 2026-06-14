@@ -1,0 +1,95 @@
+vue/node_modules
+vue/dist
+release/
+.idea/
+.vscode/
+.DS_Store
+*.dot
+*.log
+*.ign
+build/
+node_modules
+node_modules
+marketplaced
+
+
+#Ignore vscode AI rules
+.github/instructions/codacy.instructions.md
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment files
+.env
+.env.*
+
+# Build outputs
+dist/
+build/
+release/
+coverage/
+
+# Logs
+*.log
+*.out
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Go artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Temporary files
+tmp/
+temp/
+
+# Local test/output files
+search_results.txt
+go_env.txt
+go_env_status.txt
+go_list.out
+go_mod_tidy.out
+go_work_files.out
+test_file.out
+x_gomod_files.out
+x_gomod_files.txt
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment files
+.env
+.env.*
+
+# Build outputs
+dist/
+coverage/
+
+# Logs and outputs
+*.out
+
+# Temporary files
+tmp/
+temp/
+
+# Local generated files
+search_results.txt
+go_env.txt
+go_env_status.txt
+go_list.out
+go_mod_tidy.out
+go_work_files.out
+test_file.out
+x_gomod_files.out
+x_gomod_files.txt

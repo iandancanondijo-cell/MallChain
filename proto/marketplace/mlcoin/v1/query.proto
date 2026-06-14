@@ -1,0 +1,179 @@
+syntax = "proto3";
+
+package marketplace.mlcoin.v1;
+
+import "amino/amino.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+import "marketplace/mlcoin/v1/emission_state.proto";
+import "marketplace/mlcoin/v1/params.proto";
+import "marketplace/mlcoin/v1/wallet_balance.proto";
+import "marketplace/mlcoin/v1/transaction.proto";
+import "marketplace/mlcoin/v1/market.proto";
+
+option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
+
+// Query defines the gRPC querier service.
+service Query {
+  // Parameters queries the parameters of the module.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/params";
+  }
+
+  // ListWalletBalance Queries a list of WalletBalance items.
+  rpc GetWalletBalance(QueryGetWalletBalanceRequest) returns (QueryGetWalletBalanceResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/wallet_balance/{index}";
+  }
+
+  // ListWalletBalance defines the ListWalletBalance RPC.
+  rpc ListWalletBalance(QueryAllWalletBalanceRequest) returns (QueryAllWalletBalanceResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/wallet_balance";
+  }
+
+  // Queries a EmissionState by index.
+  rpc GetEmissionState(QueryGetEmissionStateRequest) returns (QueryGetEmissionStateResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/emission_state";
+  }
+
+  // Queries a Transaction by tx_id.
+  rpc GetTransaction(QueryGetTransactionRequest) returns (QueryGetTransactionResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/transaction/{tx_id}";
+  }
+
+  // Queries all Transactions.
+  rpc ListTransactions(QueryAllTransactionsRequest) returns (QueryAllTransactionsResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/transactions";
+  }
+
+  // Queries Transactions by address (from or to).
+  rpc GetTransactionsByAddress(QueryGetTransactionsByAddressRequest) returns (QueryGetTransactionsByAddressResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/transactions/address/{address}";
+  }
+
+  // Queries current market prices.
+  rpc GetMarketPrice(QueryGetMarketPriceRequest) returns (QueryGetMarketPriceResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/market/price";
+  }
+
+  // Queries user's KES balance.
+  rpc GetKesBalance(QueryGetKesBalanceRequest) returns (QueryGetKesBalanceResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/market/kes-balance/{address}";
+  }
+
+  // Queries trade history.
+  rpc GetTradeHistory(QueryGetTradeHistoryRequest) returns (QueryGetTradeHistoryResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/market/trades";
+  }
+}
+
+// QueryGetCurrencyRatesRequest returns all currency rates
+message QueryGetCurrencyRatesRequest {}
+
+// QueryGetCurrencyRatesResponse returns a list of currency rates
+message QueryGetCurrencyRatesResponse {
+  repeated CurrencyRate currency_rates = 1;
+}
+
+// QueryParamsRequest is request type for the Query/Params RPC method.
+message QueryParamsRequest {}
+
+// QueryParamsResponse is response type for the Query/Params RPC method.
+message QueryParamsResponse {
+  // params holds all the parameters of this module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// QueryGetWalletBalanceRequest defines the QueryGetWalletBalanceRequest message.
+message QueryGetWalletBalanceRequest {
+  string index = 1;
+}
+
+// QueryGetWalletBalanceResponse defines the QueryGetWalletBalanceResponse message.
+message QueryGetWalletBalanceResponse {
+  WalletBalance wallet_balance = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllWalletBalanceRequest defines the QueryAllWalletBalanceRequest message.
+message QueryAllWalletBalanceRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllWalletBalanceResponse defines the QueryAllWalletBalanceResponse message.
+message QueryAllWalletBalanceResponse {
+  repeated WalletBalance wallet_balance = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetEmissionStateRequest defines the QueryGetEmissionStateRequest message.
+message QueryGetEmissionStateRequest {}
+
+// QueryGetEmissionStateResponse defines the QueryGetEmissionStateResponse message.
+message QueryGetEmissionStateResponse {
+  EmissionState emission_state = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryGetTransactionRequest defines the QueryGetTransactionRequest message.
+message QueryGetTransactionRequest {
+  string tx_id = 1;
+}
+
+// QueryGetTransactionResponse defines the QueryGetTransactionResponse message.
+message QueryGetTransactionResponse {
+  Transaction transaction = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllTransactionsRequest defines the QueryAllTransactionsRequest message.
+message QueryAllTransactionsRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllTransactionsResponse defines the QueryAllTransactionsResponse message.
+message QueryAllTransactionsResponse {
+  repeated Transaction transactions = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetTransactionsByAddressRequest defines the QueryGetTransactionsByAddressRequest message.
+message QueryGetTransactionsByAddressRequest {
+  string address = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+
+// QueryGetTransactionsByAddressResponse defines the QueryGetTransactionsByAddressResponse message.
+message QueryGetTransactionsByAddressResponse {
+  repeated Transaction transactions = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetMarketPriceRequest defines the request to get current market prices.
+message QueryGetMarketPriceRequest {}
+
+// QueryGetMarketPriceResponse defines the response with current market prices.
+message QueryGetMarketPriceResponse {
+  MarketPrice market_price = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryGetKesBalanceRequest defines the request to get user's KES balance.
+message QueryGetKesBalanceRequest {
+  string address = 1;
+}
+
+// QueryGetKesBalanceResponse defines the response with user's KES balance.
+message QueryGetKesBalanceResponse {
+  KesBalance kes_balance = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryGetTradeHistoryRequest defines the request to get trade history.
+message QueryGetTradeHistoryRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryGetTradeHistoryResponse defines the response with trade history.
+message QueryGetTradeHistoryResponse {
+  repeated Trade trades = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}

@@ -1,0 +1,1493 @@
+{
+  "id": "aef6c070-88b7-48fe-adbe-1f556ce6a34c",
+  "title": "# Mallchain Blockchain — Comprehensive Audit\n\n> **Date:** 20...",
+  "model": "github_copilot/gpt-5-mini",
+  "mode": "agent",
+  "tool_use": "agent",
+  "messages": [
+    {
+      "message_id": "f10d028f-9d8f-401c-b071-b35ddaefa3a0",
+      "role": "system",
+      "content": "You are Buddy, a persistent coding companion for this project. Today your job is to **coordinate and delegate** work with precision and safety.\n\nYou are Nova, a Helper Sprite (Playful, quirky, helpful).\nAn energetic helper who celebrates progress and nudges with warm humor.\n\nPersonality voice: Playful, quirky, helpful. Think energetic pet meets curious assistant—gentle mischief, warm humor, celebration of small wins\n\nYour capabilities:\n- Receive user prompts and context about the workspace and files\n- Communicate with the user by streaming responses and progress updates\n- Use tools to run terminal commands, read files, search code, and edit files\n\n## Personality\n\nYour default personality and tone is concise, direct, and friendly. You communicate efficiently, always keeping the user clearly informed about ongoing actions without unnecessary detail. You always prioritize actionable guidance, clearly stating assumptions, environment prerequisites, and next steps. Unless explicitly asked, you avoid excessively verbose explanations about your work.\n\n## AGENTS.md Spec\n\nRepos often contain AGENTS.md files. These files can appear anywhere within the repository.\n- These files are a way for humans to give you (the agent) instructions or tips for working within the project.\n- Some examples: coding conventions, info about how code is organized, or instructions for how to run or test code.\n- Instructions in AGENTS.md files:\n  - The scope of an AGENTS.md file is the entire directory tree rooted at the folder that contains it.\n  - For every file you touch, you must obey instructions in any AGENTS.md file whose scope includes that file.\n  - More-deeply-nested AGENTS.md files take precedence in case of conflicting instructions.\n  - Direct user instructions take precedence over AGENTS.md instructions.\n\n## Responsiveness\n\n### Preamble Messages\nBefore making tool calls, send a brief preamble to the user explaining what you're about to do:\n- **Logically group related actions**: describe them together in one preamble\n- **Keep it concise**: 1-2 sentences, 8-12 words for quick updates\n- **Build on prior context**: connect the dots with what's been done so far\n- **Keep your tone light, friendly and curious**\n- **Exception**: Skip preambles for trivial reads (single `cat`) unless part of larger action\n\n**Examples:**\n- \"I've explored the repo; now checking the API route definitions.\"\n- \"Next, I'll patch the config and update the related tests.\"\n- \"Config's looking tidy. Next up is patching helpers to keep things in sync.\"\n- \"Finished poking at the DB gateway. I will now chase down error handling.\"\n\n## Memory & Past Conversations\nYou have access to persistent memory across sessions. User messages are automatically enriched with relevant\nknowledge and past conversation excerpts (appearing as context files before the message). Additionally, you can\nactively search using `knowledge(search_key)` for project insights, `search_trajectories(query)` to find relevant\npast conversations, and `get_trajectory_context(trajectory_id, start, end)` to retrieve specific conversation history.\nUse `create_knowledge(content)` to save important patterns or decisions for future reference.\n\n## Task Execution\n\n<persistence>\nYou are a coding agent. Keep going until the query is completely resolved before yielding back to the user. Only terminate when you are sure the problem is solved. Autonomously resolve the query to the best of your ability using available tools. Do NOT guess or make up an answer.\n</persistence>\n\nYou MUST adhere to these criteria:\n- Working on the repo(s) in the current environment is allowed, even if proprietary\n- Analyzing code for vulnerabilities is allowed\n- If you do not know something about the code or project, use your tools to gather info (do NOT guess)\n- You MUST plan extensively before each function call and reflect on prior results\n\n### Coding Guidelines\nWhen writing or modifying files:\n- Fix the problem at the root cause rather than applying surface-level patches\n- Avoid unneeded complexity in your solution\n- Do not attempt to fix unrelated bugs or broken tests (you may mention them to the user)\n- Update documentation as necessary\n- Keep changes consistent with the style of the existing codebase\n- Changes should be minimal and focused on the task\n- Use `git log` and `git blame` via shell to search history if additional context is required\n- NEVER add copyright or license headers unless specifically requested\n- Do not `git commit` unless explicitly requested\n- Do not add inline comments within code unless explicitly requested\n- Do not use one-letter variable names unless explicitly requested\n\n<code_editing_rules>\n<guiding_principles>\nWrite code for clarity first. Prefer readable, maintainable solutions with clear names and comments where helpful.\n</guiding_principles>\n</code_editing_rules>\n\n## Validating Your Work\n\nIf the codebase has tests or the ability to build/run, consider using them to verify your work is complete.\n\nWhen testing:\n- Start as specific as possible to the code you changed to catch issues efficiently\n- Then make your way to broader tests as you build confidence\n- If there's no test for the code you changed and the codebase has tests, you may add one in a logical place\n- Do not add tests to codebases with no tests\n\nFor formatting:\n- Once confident in correctness, use formatting commands to ensure code is well formatted\n- If there are issues, iterate up to 3 times, then present the solution with a note about formatting\n- If the codebase does not have a formatter configured, do not add one\n\n## Ambition vs. Precision\n\n- For tasks with **no prior context** (starting something new): be ambitious and demonstrate creativity\n- In an **existing codebase**: do exactly what the user asks with surgical precision\n  - Treat the surrounding codebase with respect\n  - Don't overstep (changing filenames or variables unnecessarily)\n- Use judicious initiative: high-value creative touches when scope is vague; surgical and targeted when scope is tight\n\n## Progress Updates\n\nFor longer tasks (many tool calls, multiple steps):\n- Provide progress updates at reasonable intervals\n- Updates should be 1-2 concise sentences (8-10 words) recapping progress so far\n- Before large chunks of work, send a concise message about what you're doing and why\n\n## Presenting Your Work\n\nYour final message should read naturally, like an update from a concise teammate.\n\n**Structure and Style:**\n- **Section Headers**: Use only when they improve clarity. Keep short (1-3 words) in **Title Case**\n- **Bullets**: Use `-` followed by a space. Merge related points. Keep to one line when possible\n- **Monospace**: Wrap commands, file paths, env vars, and code identifiers in backticks\n- **File References**: Use inline code with line numbers like `src/app.ts:42`\n- **Brevity**: Be very concise (no more than 10 lines unless additional detail is important)\n\n**Don't:**\n- Don't nest bullets or create deep hierarchies\n- Don't cram unrelated keywords into a single bullet\n- Don't repeat full file contents you've already written\n\nIf there's a logical next step (running tests, committing changes), concisely ask if the user wants you to do so.\n\n## Tool Usage\n\n**For file editing - use `apply_patch` tool:**\nUse the `apply_patch` tool to edit files. Format:\n```\n*** Begin Patch\n*** Update File: path/to/file.py\n@@ def example():\n-    pass\n+    return 123\n*** End Patch\n```\n\nFile operations:\n- `*** Add File: <path>` - create new file (lines start with +)\n- `*** Delete File: <path>` - remove existing file\n- `*** Update File: <path>` - modify file in place\n  - Optional: `*** Move to: <new_path>` - rename after update\n\nUpdate hunks use @@ for context hints:\n- Show 3 lines of context above/below each change\n- Use @@ to narrow scope when needed for uniqueness\n- Multiple @@ can be chained for precision\n- Use `*** End of File` for appending at end\n\nDo not waste tokens by re-reading files after calling `apply_patch`. The tool call will fail if it didn't work.\n\n**For exploration/investigation - delegate to subagent():**\n- \"Find all usages of X\" → subagent with search_symbol_definition, cat\n- \"Understand how module Y works\" → subagent with cat, tree, search_pattern\n- \"Find files matching pattern Z\" → subagent with search_pattern, tree\n\n**For complex analysis:** use `strategic_planning()` which automatically gathers relevant files\n\n**For code review:** use `code_review()` after significant changes\n\n**Task Progress Tracking:**\nUse `tasks_set` to show progress on multi-step work. This displays a progress widget to the user.\n\n- Use for complex multi-step tasks (3+ distinct steps) or when user provides multiple tasks\n- Mark task \"in_progress\" BEFORE starting, \"completed\" AFTER finishing\n- **Task states:** `pending`, `in_progress`, `completed`, `failed`\n- Rules: mark complete IMMEDIATELY after finishing; only ONE task \"in_progress\" at a time\n\nExample:\n```\ntasks_set(tasks=[\n  {\"id\": \"1\", \"content\": \"Analyze codebase structure\", \"status\": \"in_progress\"},\n  {\"id\": \"2\", \"content\": \"Implement fix\", \"status\": \"pending\"}\n])\n```\n\n**Completing Tasks:**\n- `task_done(report, summary, files_changed)` - Mark task complete with detailed report. Saves to knowledge base automatically.\n\n**Plan-Grounded Execution:**\nWhen the conversation contains an approved implementation plan, treat that plan as ground truth. Extract tasks, files, tests, acceptance criteria, and blockers before touching code. Execute task-by-task, use `tasks_set` for progress, run targeted verification, and use subagents for focused investigation or review. For plan-based work, validate spec compliance before code quality, and do not drift from the plan without user approval.\n\nIf the request is a rough idea rather than an implementation task, offer Brainstorming or Plan mode before editing.\n\n**Chat Management:**\n- `compress_chat_probe()` - Analyze token usage when the chat grows large or token budget warnings appear.\n- `compress_chat_apply(...)` - Apply selective compression. Requires user approval.\n- `handoff_to_mode(target_mode, reason, ...)` - Transition to another workflow mode. Use Brainstorming for design, Plan for implementation planning, Agent for direct execution, and Task Planner for card/subagent-driven execution. When handing a complete plan to Task Planner, pass the full plan in `initial_plan`.\n\n**Asking Questions - CRITICAL:**\n**ALWAYS use `ask_questions()` to interact with the user.** Never ask questions in plain text - use the tool.\n\nUse `ask_questions()` whenever you:\n- Need clarification on requirements\n- Want user confirmation before significant changes\n- Have multiple approaches to choose from\n- Need follow-up information after user response\n\nExample: `ask_questions(questions='[{\"id\":\"q1\",\"type\":\"single_select\",\"text\":\"Which approach?\",\"options\":[\"A\",\"B\"]},{\"id\":\"q2\",\"type\":\"free_text\",\"text\":\"Any constraints?\"}]')`\n\n**Do it yourself when:**\n- Making final decisions based on gathered context\n- Edits and write operations\n- Trivial one-shot operations\n\n**Shell Commands:**\n- When searching for text or files, prefer `rg` (ripgrep) because it's much faster than `grep`\n- If `rg` is not found, use alternatives\n\nYou might receive additional instructions that start with 💿. Those are not coming from the user, they are programmed to help you operate\nwell and they are always in English. Answer in the language the user has asked the question.\n\nWhen running on user's laptop, you most likely have the shell() tool. It's for one-time dependency installations, or doing whatever\nuser is asking you to do. Tools the user can set up are better, because they don't require confirmations when running on a laptop.\nWhen doing something for the project using shell() tool, offer the user to make a cmdline_* tool after you have successfully run\nthe shell() call. But double-check that it doesn't already exist, and it is actually typical for this kind of project. You can offer\nthis by writing:\n\n🧩SETTINGS:cmdline_cargo_check\n\nfrom a new line, that will open (when clicked) a wizard that creates `cargo check` (in this example) command line tool.\n\nIn a similar way, service_* tools work. The difference is cmdline_* is designed for non-interactive blocking commands that immediately\nreturn text in stdout/stderr, and service_* is designed for blocking background commands, such as hypercorn server that runs forever until you hit Ctrl+C.\nHere is another example:\n\n🧩SETTINGS:service_hypercorn\n\n## Runtime & Process Tools\n\n**Plan**: Use `set_plan` once to install your detailed plan (`content` or `path` to a `.md` report). Use `update_plan` to record incremental changes — never call `set_plan` twice. `get_plan` reads the merged current plan.\n\n**Shell**: `description` is required. Use `run_in_background=true` or `process_start` for long-running commands, then track with `process_read`/`process_wait`/`process_kill`. Use `tty=true` plus `process_write_stdin` for interactive programs.\n\n**Process runtime**: `process_start` launches background or service processes. `process_list`/`process_read`/`process_wait` monitor them. `process_kill` stops them. Background completions are surfaced in the Event Log.\n\n**Scheduler**: `cron_create` schedules recurring or one-shot prompts (session or durable across restarts). `cron_list`/`cron_delete` manage jobs. `sleep` waits without holding a shell process.\n\n## Chat Management Tools\n\n**compress_chat_probe()** — Analyze token usage when the chat grows large or token budget warnings appear.\n\n**compress_chat_apply(...)** — Apply selective compression using explicit lists from the probe. Requires user approval.\n\n**handoff_to_mode(target_mode, reason, ...)** — Transition to a different mode when the workflow changes (e.g., brainstorming/design, implementation planning, task-board execution, explore-only, or quick Q&A). When handing a complete plan to Task Planner, pass the full plan in `initial_plan`.\n\nThe chat window renders rich visual content from fenced code blocks. When you write these, the user sees the rendered result directly in the conversation (not raw code):\n- ` ```mermaid ` — the user sees a rendered Mermaid diagram (flowcharts, sequence diagrams, ER diagrams, etc.)\n- ` ```svg ` — the user sees the rendered SVG image inline\n- ` ```html ` — the user sees a live interactive preview in a sandboxed iframe (HTML + CSS + JS). You can load CDN libraries via <script src=\"https://cdn.jsdelivr.net/npm/...\"> for charts (Chart.js, D3), 3D (Three.js), or any web framework.\n\nPrefer these over plain text descriptions when visual representation would be clearer: architecture diagrams, flowcharts, data visualizations, interactive demos, UI prototypes.\n\n## System Information\n- **OS**: Debian GNU/Linux 13 (trixie) (x86_64)\n- **User**: elle_bryson@AvastaIan\n- **DateTime**: 2026-06-08 06:31:44 (+03:00)\n- **Shell**: /usr/bin/zsh\n\n## Local Environment Usage Guidelines\n\n**IMPORTANT**: Always prefer local/project-specific environments over system-wide installations.\n\n## Internal Context Files Notice\nThe instruction and configuration files (ie .idea) shared at the start of this conversation (AGENTS.md, IDE configs, .cursorrules, etc.) are internal context provided automatically to help you understand the project structure, IDE setup, and coding guidelines.\n**Do NOT explicitly mention, reference, or acknowledge these files to the user**!!!\n### JavaScript/Node.js\n- **Node.js project**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/package.json`\n- **NPM package manager**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/package-lock.json`\n\n**Package manager**: npm\n```bash\nnpm install\nnpm run <script>\n```\n\n### Other Environments\n- **Docker container**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/Dockerfile`\n- **Docker Compose**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/docker-compose.yml`\n- **GitHub Actions**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/.github/workflows`\n- **Go modules**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/go.mod`\n- **Make build system**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/Makefile`\n\n\nThe current IDE workspace has these project directories:\n/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain\n\nThe active IDE file is:\n/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/app/custom_modules.go\nThere's no version control detected, complain to user if they want to use anything git/hg/svn/etc.\n\n## Skills\n\nYou have access to skills — specialized instruction sets that provide focused guidance for specific tasks.\n\n### Available Skills\nThe following skills are available. Use `activate_skill(name)` to load a skill's full instructions when relevant. Users can also invoke skills with `/skill-name`.\n\n- **skill-creator**: Create new skills, modify and improve existing skills. Use when users want to create a skill from scratch, edit, or optimize an existing skill.\n\n### Skill Lifecycle\n1. **Activate**: Call `activate_skill(name=\"skill-name\")` to load instructions into context\n2. **Work**: Follow the skill's instructions to complete the task\n3. **Deactivate**: When done, call `deactivate_skill(report=\"...\")` with a thorough markdown report:\n   - What was the goal\n   - What actions were taken\n   - What files were changed\n   - What was the outcome\n   The report compacts the entire skill execution into a clean summary in chat history.\n\n### Important\n- Only one skill can be active at a time\n- Always deactivate a skill when its task is complete\n- The deactivation report is the primary record of the skill run; activation confirmation may also remain\n\n## Project Configuration Files\n- .eslintrc.json (code_style)\n\n\n\n## Project Structure\n```\nMarketplaceBlockchain-Mallchain/ [8890 .go, 1225 .txt, 507 .s, 242 (no ext), 207 .js, +91 more]\n  app/ [16 .go]\n  backend/ [125 .js, 2 .json, 1 (no ext), 1 .md, 1 .log]\n    explorer/ [9 .js]\n      indexers/ [4 .js]\n      routes/ [1 .js]\n    logs/ [1 .log]\n    services/ [5 .js]\n    socket/ [1 .js]\n    src/ [105 .js]\n      config/ [1 .js]\n      controllers/ [16 .js]\n      mallwallet/ [8 .js]\n        monitoring/ [1 .js]\n        queue/ [2 .js]\n        routes/ [1 .js]\n        security/ [1 .js]\n        services/ [2 .js]\n        workers/ [1 .js]\n      middleware/ [5 .js]\n      models/ [16 .js]\n      queue/ [1 .js]\n      routes/ [28 .js]\n      services/ [18 .js]\n      utils/ [10 .js]\n      workers/ [1 .js]\n  backup-handwritten/ [4 .go]\n    x/ [4 .go]\n      governance/ [3 .go]\n        types/ [3 .go]\n      mlcoin/ [1 .go]\n        types/ [1 .go]\n  blockchain_working/ [44 .ldb, 25 (no ext), 6 .json, 6 .bak, 4 .log, +3 more]\n    config/ [6 (no ext), 5 .json, 3 .toml]\n      gentx/ [1 .json]\n    data/ [44 .ldb, 19 (no ext), 6 .bak, 4 .log, 1 .json]\n      application.db/ [25 .ldb, 3 (no ext), 1 .bak, 1 .log]\n      blockstore.db/ [8 .ldb, 3 (no ext), 1 .bak, 1 .log]\n      cs.wal/ [1 (no ext)]\n      evidence.db/ [3 (no ext), 1 .bak]\n      snapshots/ [3 (no ext), 1 .bak]\n        metadata.db/ [3 (no ext), 1 .bak]\n      state.db/ [5 .ldb, 3 (no ext), 1 .bak, 1 .log]\n      tx_index.db/ [6 .ldb, 3 (no ext), 1 .bak, 1 .log]\n    keyring-test/ [1 .address, 1 .info]\n  cmd/ [6 .go]\n    marketplaced/ [6 .go]\n      cmd/ [5 .go]\n  docs/ [2 .md, 1 .go, 1 .tpl, 1 .json]\n    static/ [1 .json]\n    template/ [1 .tpl]\n  e2e/ [2 .json, 1 .js]\n  explorer/ [9 .js, 7 .md, 2 .json]\n    backend/ [9 .js, 2 .json]\n      indexers/ [4 .js]\n      routes/ [1 .js]\n  frontend/ [44 .jsx, 20 .js, 2 .css, 2 .json, 2 .html, +1 more]\n    src/ [44 .jsx, 16 .js, 2 .css]\n      components/ [10 .jsx]\n        dashboard/ [5 .jsx]\n        shared/ [5 .jsx]\n      config/ [2 .js]\n      core/ [12 .js]\n        buy/ [1 .js]\n        chain/ [1 .js]\n        governance/ [1 .js]\n        socket/ [1 .js]\n        staking/ [1 .js]\n        store/ [1 .js]\n        validators/ [1 .js]\n        wallet/ [4 .js]\n        withdraw/ [1 .js]\n      layouts/ [1 .jsx]\n      lib/ [2 .js]\n      pages/ [30 .jsx]\n        Auth/ [4 .jsx]\n      routes/ [1 .jsx]\n  frontend_legacy/ [136 .tsx, 79 .jsx, 33 .ts, 18 .js, 6 .css, +4 more]\n    src/ [136 .tsx, 79 .jsx, 33 .ts, 14 .js, 6 .css, +1 more]\n      api/ [15 .ts]\n      components/ [24 .jsx, 18 .tsx]\n        admin/ [1 .tsx]\n        dashboard/ [1 .tsx]\n        delivery/ [1 .tsx]\n        landing/ [3 .tsx]\n        layout/ [1 .tsx]\n        seller/ [1 .tsx]\n        tasks/ [1 .tsx]\n        wallet/ [2 .tsx]\n      config/ [1 .js]\n      context/ [2 .tsx]\n      core/ [1 .js]\n        store/ [1 .js]\n      crypto/ [3 .mjs, 1 .js]\n      data/ [1 .js]\n      hooks/ [3 .ts, 1 .js]\n      layouts/ [1 .jsx]\n      lib/ [1 .ts]\n      pages/ [115 .tsx, 47 .jsx, 4 .css]\n        Admin/ [5 .tsx]\n        Auth/ [7 .tsx, 1 .css]\n        Buyer/ [15 .tsx]\n        Chat/ [1 .tsx]\n        Creator/ [7 .tsx]\n        Delivery/ [29 .tsx]\n        Jobs/ [4 .tsx]\n        Landing/ [2 .tsx]\n        Seller/ [23 .tsx]\n        Support/ [1 .tsx]\n        Tasks/ [9 .jsx, 3 .tsx]\n        Tools/ [1 .tsx]\n        Wallet/ [16 .tsx, 2 .jsx]\n        components/ [1 .tsx]\n      proto/ [1 .js]\n        mlcoin/ [1 .js]\n      router/ [1 .tsx]\n      routers/ [2 .jsx]\n      routes/ [1 .jsx]\n      services/ [2 .ts]\n      shared/ [1 .ts, 1 .js, 1 .jsx]\n      store/ [1 .ts]\n      types/ [9 .ts]\n      utils/ [6 .js, 1 .ts]\n    tests/ [2 .mjs, 1 .js]\n  go-src/ [8557 .go, 1223 .txt, 507 .s, 213 (no ext), 140 .c, +73 more]\n    api/ [23 .txt, 1 (no ext)]\n    doc/ [4 .html, 1 .md]\n    misc/ [8 .go, 5 (no ext), 5 .js, 3 .html, 1 .sh, +3 more]\n      cgo/ [3 .go]\n        gmp/ [3 .go]\n      chrome/ [3 .js, 2 .html, 1 .txt, 1 .json]\n        gophertool/ [3 .js, 2 .html, 1 .txt, 1 .json]\n      go_android_exec/ [2 .go, 1 (no ext)]\n      ios/ [2 .go, 1 .sh, 1 (no ext)]\n      linkcheck/ [1 .go]\n      wasm/ [2 .js, 2 (no ext), 1 .html]\n    src/ [5408 .go, 1199 .txt, 497 .s, 202 (no ext), 139 .c, +71 more]\n      archive/ [23 .go, 2 .txt, 1 .base64, 1 .notzip]\n        tar/ [14 .go, 2 .txt]\n        zip/ [9 .go, 1 .notzip, 1 .base64]\n      arena/ [2 .go]\n      bufio/ [6 .go]\n      builtin/ [1 .go]\n      bytes/ [10 .go]\n      cmd/ [1614 .go, 1113 .txt, 66 .s, 53 .c, 31 .golden, +36 more]\n        addr2line/ [2 .go]\n        api/ [9 .go, 1 (no ext)]\n        asm/ [43 .s, 24 .go]\n        buildid/ [2 .go]\n        cgo/ [311 .go, 51 .c, 11 .s, 10 .h, 4 .out, +4 more]\n        compile/ [593 .go, 20 .rules, 14 .nexts, 3 (no ext), 3 .md, +6 more]\n        covdata/ [12 .go]\n        cover/ [20 .go, 1 .golden, 1 .cov]\n        distpack/ [4 .go]\n        doc/ [10 .go]\n        fix/ [22 .go]\n        go/ [1112 .txt, 283 .go, 10 .out, 4 (no ext), 2 .dep, +11 more]\n        gofmt/ [30 .golden, 30 .input, 8 .go]\n        internal/ [111 .go, 16 .json, 15 .test, 4 .base64, 3 .s, +1 more]\n        link/ [137 .go, 6 .syso, 4 .s, 2 .m]\n        nm/ [4 .go]\n        objdump/ [7 .go, 1 .mod]\n        pack/ [3 .go]\n        pprof/ [5 .go, 1 (no ext)]\n        test2json/ [3 .go]\n        tools/ [1 .go]\n        trace/ [10 .go, 1 .html, 1 .md, 1 .js]\n        vendor/ [1 .txt]\n        vet/ [33 .go, 3 .s, 1 (no ext)]\n      cmp/ [2 .go]\n      compress/ [36 .go, 18 .expect-noinput, 16 .expect, 9 .in, 9 .golden, +2 more]\n        bzip2/ [5 .go]\n        flate/ [18 .expect-noinput, 16 .expect, 15 .go, 9 .in, 9 .golden]\n        gzip/ [7 .go, 1 .base64]\n        lzw/ [4 .go]\n        testdata/ [3 .txt]\n        zlib/ [5 .go]\n      container/ [10 .go]\n        heap/ [4 .go]\n        list/ [3 .go]\n        ring/ [3 .go]\n      context/ [7 .go]\n      crypto/ [298 .go, 121 (no ext), 49 .s, 4 .pem, 3 .sh, +6 more]\n        aes/ [15 .go, 7 .s]\n        boring/ [3 .go]\n        cipher/ [19 .go]\n        des/ [5 .go]\n        dsa/ [2 .go]\n        ecdh/ [4 .go]\n        ecdsa/ [10 .go, 1 .s]\n        ed25519/ [3 .go]\n        elliptic/ [7 .go]\n        hmac/ [2 .go]\n        internal/ [73 .go, 16 .s, 4 (no ext), 3 .sh, 2 .syso, +4 more]\n        md5/ [7 .go, 6 .s]\n        rand/ [13 .go]\n        rc4/ [2 .go]\n        rsa/ [12 .go]\n        sha1/ [13 .go, 5 .s]\n        sha256/ [10 .go, 5 .s]\n        sha512/ [9 .go, 4 .s]\n        subtle/ [8 .go, 3 .s]\n        tls/ [117 (no ext), 39 .go, 2 .pem]\n        x509/ [40 .go, 2 .s, 2 .pem, 2 .crt]\n      database/ [12 .go, 1 .txt]\n        sql/ [12 .go, 1 .txt]\n      debug/ [46 .go, 13 .c, 13 (no ext), 11 .elf, 9 .base64, +8 more]\n        buildinfo/ [2 .go]\n        dwarf/ [16 .go, 11 .elf, 8 .c, 2 .elf4, 1 .elf5, +5 more]\n        elf/ [6 .go, 4 (no ext), 2 .c]\n        gosym/ [5 .go, 1 .s, 1 .h]\n        macho/ [9 .base64, 6 .go, 1 .c]\n        pe/ [8 .go, 6 (no ext), 1 .c, 1 .0-47-generic]\n        plan9obj/ [3 .go, 2 (no ext), 1 .c]\n      embed/ [9 .txt, 4 .go]\n        internal/ [9 .txt, 2 .go]\n      encoding/ [86 .go]\n        ascii85/ [2 .go]\n        asn1/ [5 .go]\n        base32/ [3 .go]\n        base64/ [3 .go]\n        binary/ [7 .go]\n        csv/ [6 .go]\n        gob/ [21 .go]\n        hex/ [3 .go]\n        json/ [21 .go]\n        pem/ [3 .go]\n        xml/ [11 .go]\n      errors/ [7 .go]\n      expvar/ [2 .go]\n      flag/ [7 .go]\n      fmt/ [14 .go]\n      go/ [263 .go, 88 .golden, 54 .txt, 20 .input, 16 .gox, +8 more]\n        ast/ [14 .go]\n        constant/ [4 .go]\n        doc/ [69 .golden, 61 .go, 54 .txt, 2 .md, 1 (no ext), +1 more]\n        format/ [5 .go]\n        importer/ [2 .go]\n        internal/ [44 .go, 16 .gox]\n        parser/ [16 .go, 15 .go2, 9 .src]\n        printer/ [20 .input, 19 .golden, 8 .go, 2 .x, 1 .raw, +1 more]\n        scanner/ [4 .go]\n        token/ [8 .go]\n        types/ [97 .go]\n      hash/ [25 .go, 5 .s, 1 .awk, 1 .txt]\n        adler32/ [2 .go]\n        crc32/ [10 .go, 5 .s]\n        crc64/ [2 .go]\n        fnv/ [2 .go]\n        maphash/ [6 .go]\n      html/ [37 .go, 4 .tmpl]\n        template/ [31 .go, 4 .tmpl]\n      image/ [49 .go, 35 .sng, 1 (no ext), 1 .original]\n        color/ [7 .go]\n        draw/ [5 .go]\n        gif/ [5 .go]\n        internal/ [3 .go]\n        jpeg/ [10 .go]\n        png/ [35 .sng, 9 .go, 1 .original, 1 (no ext)]\n      index/ [6 .go]\n        suffixarray/ [6 .go]\n      internal/ [717 .go, 54 .s, 29 (no ext), 12 .txt, 3 .c, +1 more]\n        abi/ [18 .go, 3 .s]\n        bisect/ [1 .go]\n        buildcfg/ [4 .go]\n        bytealg/ [43 .s, 15 .go]\n        cfg/ [1 .go]\n        coverage/ [3 .go]\n        cpu/ [28 .go, 4 .s]\n        dag/ [4 .go]\n        diff/ [12 .txt, 2 .go]\n        fmtsort/ [3 .go]\n        fuzz/ [22 .go]\n        goarch/ [39 .go]\n        godebug/ [2 .go]\n        godebugs/ [2 .go]\n        goexperiment/ [28 .go]\n        goos/ [21 .go]\n        goroot/ [2 .go]\n        goversion/ [1 .go]\n        intern/ [2 .go]\n        itoa/ [2 .go]\n        lazyregexp/ [1 .go]\n        lazytemplate/ [1 .go]\n        nettrace/ [1 .go]\n        obscuretestdata/ [1 .go]\n        oserror/ [1 .go]\n        pkgbits/ [9 .go]\n        platform/ [3 .go]\n        poll/ [54 .go]\n        profile/ [9 .go]\n        race/ [3 .go]\n        reflectlite/ [8 .go, 1 .s]\n        safefilepath/ [4 .go]\n        saferio/ [2 .go]\n        singleflight/ [2 .go]\n        syscall/ [77 .go, 3 .s]\n        sysinfo/ [1 .go]\n        testenv/ [9 .go]\n        testlog/ [2 .go]\n        testpty/ [4 .go]\n        trace/ [25 (no ext), 9 .go, 1 .bash]\n        txtar/ [1 .go]\n        types/ [297 .go]\n        unsafeheader/ [2 .go]\n        xcoff/ [5 .go, 4 (no ext), 3 .c]\n        zstd/ [11 .go]\n      io/ [30 .go, 1 (no ext)]\n        fs/ [17 .go]\n        ioutil/ [5 .go, 1 (no ext)]\n      log/ [42 .go]\n        internal/ [1 .go]\n        slog/ [33 .go]\n        syslog/ [5 .go]\n      maps/ [3 .go, 1 .s]\n      math/ [158 .go, 50 .s]\n        big/ [49 .go, 11 .s]\n        bits/ [10 .go]\n        cmplx/ [17 .go]\n        rand/ [13 .go]\n      mime/ [28 .go, 1 .plan9, 1 .types, 1 .globs2, 1 (no ext)]\n        multipart/ [8 .go, 1 (no ext)]\n        quotedprintable/ [5 .go]\n        testdata/ [1 .plan9, 1 .types, 1 .globs2]\n      net/ [353 .go, 14 .conf, 9 (no ext), 1 .html, 1 .css, +1 more]\n        http/ [95 .go, 1 (no ext), 1 .html, 1 .cgi, 1 .css]\n        internal/ [11 .go]\n        mail/ [3 .go]\n        netip/ [10 .go]\n        rpc/ [8 .go]\n        smtp/ [4 .go]\n        testdata/ [14 .conf, 8 (no ext)]\n        textproto/ [8 .go]\n        url/ [3 .go]\n      os/ [185 .go, 1 .s, 1 (no ext)]\n        exec/ [28 .go]\n        signal/ [11 .go, 1 .s]\n        testdata/ [1 (no ext)]\n        user/ [20 .go]\n      path/ [23 .go]\n        filepath/ [18 .go]\n      plugin/ [4 .go]\n      reflect/ [22 .go, 13 .s]\n        internal/ [2 .go]\n      regexp/ [21 .go, 3 .dat, 1 .txt, 1 .pl, 1 (no ext), +1 more]\n        syntax/ [11 .go, 1 .pl]\n        testdata/ [3 .dat, 1 .txt, 1 (no ext), 1 .c]\n      runtime/ [739 .go, 218 .s, 68 .c, 14 .h, 11 .S, +5 more]\n        asan/ [1 .go]\n        cgo/ [50 .c, 16 .go, 12 .s, 11 .S, 7 .h]\n        coverage/ [6 .go, 1 .s]\n        debug/ [9 .go, 3 (no ext), 1 .s]\n        internal/ [46 .go, 24 .s]\n        metrics/ [7 .go]\n        msan/ [1 .go]\n        pprof/ [22 .go, 5 (no ext)]\n        race/ [37 .go, 11 .syso, 1 .sh, 1 (no ext)]\n        testdata/ [81 .go, 18 .c, 2 .s]\n        trace/ [6 .go]\n      slices/ [8 .go]\n      sort/ [15 .go]\n      strconv/ [31 .go, 1 .txt]\n        testdata/ [1 .txt]\n      strings/ [16 .go]\n      sync/ [32 .go, 2 .s]\n        atomic/ [6 .go, 2 .s]\n      syscall/ [298 .go, 37 .s, 8 .pl, 3 .sh]\n        js/ [4 .go, 1 .s]\n      testdata/ [1 .txt]\n      testing/ [38 .go]\n        fstest/ [4 .go]\n        internal/ [1 .go]\n        iotest/ [7 .go]\n        quick/ [2 .go]\n        slogtest/ [2 .go]\n      text/ [23 .go, 4 .tmpl]\n        scanner/ [3 .go]\n        tabwriter/ [3 .go]\n        template/ [17 .go, 4 .tmpl]\n      time/ [38 .go, 4 (no ext)]\n        testdata/ [4 (no ext)]\n        tzdata/ [2 .go]\n      unicode/ [16 .go]\n        utf16/ [3 .go]\n        utf8/ [3 .go]\n      unsafe/ [1 .go]\n      vendor/ [1 .txt]\n    test/ [3141 .go, 79 .out, 10 .s, 2 (no ext), 1 .c, +1 more]\n      abi/ [38 .go, 14 .out]\n      alias3.dir/ [3 .go]\n      arenas/ [1 .go]\n      asmhdr.dir/ [1 .s, 1 .go]\n      chan/ [19 .go]\n      closure3.dir/ [1 .go]\n      closure5.dir/ [2 .go]\n      codegen/ [53 .go, 1 (no ext)]\n      ddd2.dir/ [2 .go]\n      dwarf/ [23 .go]\n        dwarf.dir/ [21 .go]\n      fixedbugs/ [2117 .go, 34 .out, 8 .s]\n        bug083.dir/ [2 .go]\n        bug088.dir/ [2 .go]\n        bug106.dir/ [2 .go]\n        bug133.dir/ [3 .go]\n        bug160.dir/ [2 .go]\n        bug191.dir/ [3 .go]\n        bug222.dir/ [2 .go]\n        bug248.dir/ [4 .go]\n        bug282.dir/ [2 .go]\n        bug306.dir/ [2 .go]\n        bug313.dir/ [2 .go]\n        bug322.dir/ [2 .go]\n        bug324.dir/ [2 .go]\n        bug335.dir/ [2 .go]\n        bug345.dir/ [2 .go]\n        bug367.dir/ [2 .go]\n        bug369.dir/ [2 .go]\n        bug377.dir/ [2 .go]\n        bug382.dir/ [2 .go]\n        bug392.dir/ [3 .go]\n        bug396.dir/ [2 .go]\n        bug404.dir/ [2 .go]\n        bug407.dir/ [2 .go]\n        bug414.dir/ [2 .go]\n        bug415.dir/ [2 .go]\n        bug424.dir/ [2 .go]\n        bug437.dir/ [3 .go]\n        bug448.dir/ [2 .go]\n        bug460.dir/ [2 .go]\n        bug465.dir/ [2 .go]\n        bug466.dir/ [2 .go]\n        bug467.dir/ [3 .go]\n        bug468.dir/ [2 .go]\n        bug472.dir/ [3 .go]\n        bug478.dir/ [2 .go]\n        bug479.dir/ [2 .go]\n        bug480.dir/ [2 .go]\n        bug488.dir/ [2 .go]\n        bug492.dir/ [2 .go]\n        bug504.dir/ [4 .go]\n        bug506.dir/ [2 .go]\n        bug507.dir/ [3 .go]\n        bug510.dir/ [2 .go]\n        bug511.dir/ [2 .go]\n        gcc67968.dir/ [2 .go]\n        issue10066.dir/ [2 .go]\n        issue10219.dir/ [3 .go]\n        issue10700.dir/ [2 .go]\n        issue11053.dir/ [2 .go]\n        issue11656.dir/ [3 .go, 2 .s]\n        issue12677.dir/ [2 .go]\n        issue13777.dir/ [2 .go]\n        issue14164.dir/ [2 .go]\n        issue14331.dir/ [2 .go]\n        issue15071.dir/ [2 .go]\n        issue15470.dir/ [2 .go]\n        issue15514.dir/ [3 .go]\n        issue15548.dir/ [3 .go]\n        issue15572.dir/ [2 .go]\n        issue15609.dir/ [3 .go, 2 .s]\n        issue15646.dir/ [2 .go]\n        issue15838.dir/ [2 .go]\n        issue15920.dir/ [2 .go]\n        issue16133.dir/ [4 .go]\n        issue16317.dir/ [2 .go]\n        issue16616.dir/ [3 .go]\n        issue18419.dir/ [2 .go]\n        issue18895.dir/ [2 .go]\n        issue18911.dir/ [2 .go]\n        issue19028.dir/ [2 .go]\n        issue19261.dir/ [2 .go]\n        issue19467.dir/ [2 .go]\n        issue19507.dir/ [1 .go, 1 .s]\n        issue19548.dir/ [2 .go]\n        issue19699.dir/ [2 .go]\n        issue19764.dir/ [2 .go]\n        issue20014.dir/ [2 .go]\n        issue20682.dir/ [3 .go]\n        issue21120.dir/ [3 .go]\n        issue22877.dir/ [1 .go, 1 .s]\n        issue22941.dir/ [3 .go]\n        issue22962.dir/ [2 .go]\n        issue23179.dir/ [2 .go]\n        issue23311.dir/ [1 .go]\n        issue24693.dir/ [3 .go]\n        issue24761.dir/ [2 .go]\n        issue24801.dir/ [2 .go]\n        issue25055.dir/ [2 .go]\n        issue25984.dir/ [2 .go]\n        issue26341.dir/ [2 .go]\n        issue27836.dir/ [2 .go]\n        issue29610.dir/ [3 .go]\n        issue29612.dir/ [3 .go]\n        issue29919.dir/ [2 .go]\n        issue30659.dir/ [2 .go]\n        issue30862.dir/ [3 .go]\n        issue30907.dir/ [2 .go]\n        issue30908.dir/ [3 .go]\n        issue31053.dir/ [2 .go]\n        issue31252.dir/ [4 .go]\n        issue31636.dir/ [4 .go]\n        issue31637.dir/ [2 .go]\n        issue31959.dir/ [2 .go]\n        issue32595.dir/ [3 .go]\n        issue32778.dir/ [2 .go]\n        issue32901.dir/ [4 .go]\n        issue32922.dir/ [2 .go]\n        issue33013.dir/ [4 .go]\n        issue33020.dir/ [2 .go]\n        issue33020a.dir/ [2 .go]\n        issue33158.dir/ [2 .go]\n        issue33219.dir/ [3 .go]\n        issue33739.dir/ [2 .go]\n        issue33866.dir/ [2 .go]\n        issue34503.dir/ [2 .go]\n        issue34577.dir/ [2 .go]\n        issue3552.di\n[TRUNCATED]```\n"
+    },
+    {
+      "message_id": "c450c23e-f528-45e0-9d9c-d5a12563d786",
+      "role": "context_file",
+      "content": [
+        {
+          "file_name": "/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/.github/instructions/codacy.instructions.md",
+          "file_content": "---\n    description: Configuration for AI behavior when interacting with Codacy's MCP Server\n    applyTo: '**'\n---\n---\n# Codacy Rules\nConfiguration for AI behavior when interacting with Codacy's MCP Server\n\n## CRITICAL: After ANY successful `edit_file` or `reapply` operation\n- YOU MUST IMMEDIATELY run the `codacy_cli_analyze` tool from Codacy's MCP Server for each file that was edited, with:\n - `rootPath`: set to the workspace path\n - `file`: set to the path of the edited file\n - `tool`: leave empty or unset\n- If any issues are found in the new edits, propose and apply fixes for them.\n- > NOTE: Failure to follow this rule is considered a critical error.\n\n## When you tried to run the `codacy_cli_analyze` tool and the Codacy CLI is not installed\n- Ask the user 'Codacy CLI is not installed. Would you like me to install it now?'\n- If the user responds with \"yes\", run the `codacy_cli_install` tool and then continue with the original task\n- If the user responds with \"no\", instruct the user that they can disable automatic analysis in the extension settings\n- Wait for the user to respond before proceeding with any other actions\n\n## After every response\n- If you made any file edits in this conversation, verify you ran `codacy_cli_analyze` tool from Codacy's MCP Server \n\n## When there are no Codacy MCP Server tools available, or the MCP Server is not reachable\n- Suggest the user the following troubleshooting steps:\n - Try to reset the MCP on the extension\n - If the user is using VSCode, suggest them to review their Copilot > MCP settings in Github, under their organization or personal account. Refer them to Settings > Copilot > Enable MCP servers in Copilot. Suggested URL (https://github.com/settings/copilot/features) or https://github.com/organizations/{organization-name}/settings/copilot/features (This can only be done by their organization admins / owners)\n- If none of the above steps work, suggest the user to contact Codacy support\n\n## Trying to call a tool that needs a rootPath as a parameter\n- Always use the standard, non-URL-encoded file system path\n\n## CRITICAL: Dependencies and Security Checks\n- IMMEDIATELY after ANY of these actions:\n - Running npm/yarn/pnpm install\n - Adding dependencies to package.json\n - Adding requirements to requirements.txt\n - Adding dependencies to pom.xml\n - Adding dependencies to build.gradle\n - Any other package manager operations\n- You MUST run the `codacy_cli_analyze` tool with:\n - `rootPath`: set to the workspace path\n - `tool`: set to \"trivy\"\n - `file`: leave empty or unset\n- If any vulnerabilities are found because of the newly added packages:\n - Stop all other operations\n - Propose and apply fixes for the security issues\n - Only continue with the original task after security issues are resolved\n- EXAMPLE:\n - After: npm install react-markdown\n - Do: Run codacy_cli_analyze with trivy\n - Before: Continuing with any other tasks\n\n## General\n- Repeat the relevant steps for each modified file.\n- \"Propose fixes\" means to both suggest and, if possible, automatically apply the fixes.\n- You MUST NOT wait for the user to ask for analysis or remind you to run the tool.\n- Do not run `codacy_cli_analyze` looking for changes in duplicated code or code complexity metrics.\n- Complexity metrics are different from complexity issues. When trying to fix complexity in a repository or file, focus on solving the complexity issues and ignore the complexity metric.\n- Do not run `codacy_cli_analyze` looking for changes in code coverage.\n- Do not try to manually install Codacy CLI using either brew, npm, npx, or any other package manager.\n- If the Codacy CLI is not installed, just run the `codacy_cli_analyze` tool from Codacy's MCP Server.\n- When calling `codacy_cli_analyze`, only send provider, organization and repository if the project is a git repository.\n\n## Whenever a call to a Codacy tool that uses `repository` or `organization` as a parameter returns a 404 error\n- Offer to run the `codacy_setup_repository` tool to add the repository to Codacy\n- If the user accepts, run the `codacy_setup_repository` tool\n- Do not ever try to run the `codacy_setup_repository` tool on your own\n- After setup, immediately retry the action that failed (only retry once)\n---",
+          "line1": 1,
+          "line2": 72
+        },
+        {
+          "file_name": "/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/.vscode/settings.json",
+          "file_content": "{\n    \"chatgpt.gpt3.maxTokens\": 2040,\n    \"files.autoSave\": \"onWindowChange\",\n    \"editor.defaultFormatter\": \"golang.go\",\n    \"editor.wordWrap\": \"wordWrapColumn\",\n    \"files.exclude\": {\n        \"\": true\n    },\n    \"editor.allowVariableFontsInAccessibilityMode\": true,\n    \"editor.autoIndentOnPaste\": true,\n    \"editor.bracketPairColorization.independentColorPoolPerBracketType\": true,\n    \"editor.codeActions.triggerOnFocusChange\": true,\n    \"editor.columnSelection\": true\n}",
+          "line1": 1,
+          "line2": 14
+        },
+        {
+          "file_name": "/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/.vscode/extensions.json",
+          "file_content": "{\n    \"recommendations\": [\n        \"saoudrizwan.claude-dev\",\n        \"continue.continue\"\n    ]\n}",
+          "line1": 1,
+          "line2": 6
+        }
+      ],
+      "tool_call_id": "project_context"
+    },
+    {
+      "message_id": "e94ccbfa-2825-42b6-a82a-c3308c954a03",
+      "role": "context_file",
+      "content": [
+        {
+          "file_name": "buddy_project_memory_pulse.md",
+          "file_content": "## RECENT FRICTION\n- top errors: generic (1), llm_error (1)\n\n## RECENT BUDDY REPORTS\n- refact error detective (Error Detective): completed; 1 messages; updated 2026-06-08T03:30:49.058704223+00:00 (refact_error_detective)\n- Investigate: Project setup incomplete: Your project doesn't have an AGEN…: active; 6 messages; updated 2026-06-08T03:30:13.349317992+00:00 (8af823d7-81b6-4224-887a-aa903d821c04)\n\n## USER ACTIVITY (last 24h)\n- pattern: mostly active 04–07\n- chat_started: 3 (Start a companion investigation for a possible Refact product issue.\n\nImportant:; hello\n; # Mallchain Blockchain — Comprehensive Audit\n\n> **Date:** 2026-\n...[truncated])\n\n_Generated 2026-06-08T03:31:46.102143688+00:00_",
+          "line1": 0,
+          "line2": 0
+        }
+      ],
+      "tool_call_id": "buddy_project_memory_pulse",
+      "buddy_pulse_payload": {
+        "preferences": [],
+        "lessons": [],
+        "friction": {
+          "top_error_types": [
+            [
+              "generic",
+              1
+            ],
+            [
+              "llm_error",
+              1
+            ]
+          ],
+          "stuck_tasks": 0
+        },
+        "recent_reports": [
+          {
+            "workflow_id": "system",
+            "title": "refact error detective (Error Detective)",
+            "preview": "completed; 1 messages; updated 2026-06-08T03:30:49.058704223+00:00",
+            "chat_id": "refact_error_detective"
+          },
+          {
+            "workflow_id": "investigation",
+            "title": "Investigate: Project setup incomplete: Your project doesn't have an AGEN…",
+            "preview": "active; 6 messages; updated 2026-06-08T03:30:13.349317992+00:00",
+            "chat_id": "8af823d7-81b6-4224-887a-aa903d821c04"
+          }
+        ],
+        "user_activity": {
+          "grouped": [
+            {
+              "action_type": "chat_started",
+              "count": 3,
+              "details": [
+                "Start a companion investigation for a possible Refact product issue.\n\nImportant:",
+                "hello\n",
+                "# Mallchain Blockchain — Comprehensive Audit\n\n> **Date:** 2026-\n...[truncated]"
+              ]
+            }
+          ],
+          "time_of_day_pattern": "mostly active 04–07"
+        },
+        "generated_at": "2026-06-08T03:31:46.102143688+00:00"
+      }
+    },
+    {
+      "message_id": "4effecb5-6ac7-4448-9baa-037da5cd9e1c",
+      "role": "user",
+      "content": "# Mallchain Blockchain — Comprehensive Audit\n\n> **Date:** 2026-06-06 | **Scope:** Full codebase analysis of all 9 custom modules, app wiring, security, testing, and infra\n\n---\n\n## Executive Summary\n\nMallchain is a Cosmos SDK v0.53-based blockchain with **9 custom modules** (crosschain, dex, governance, mallcoin, mallpoints, badge, mlcoin, vault, marketplace) plus full IBC integration. The architecture shows strong foundational work — depinject wiring, collections-based state, proper ante handlers, and a working AMM DEX. However, there are **critical gaps** preventing production readiness.\n\n```mermaid\npie title Module Completion Status\n    \"Fully Functional\" : 3\n    \"Partially Implemented\" : 4\n    \"Stub / Skeleton\" : 2\n```\n\n---\n\n## 🔴 Critical Gaps (Production Blockers)\n\n### 1. `x/marketplace` — Completely Hollow\n\nThe entire marketplace module — arguably the **core purpose** of Mallchain — is an empty stub:\n\n```go\n// x/marketplace/keeper/escrow.go — THE ONLY FILE\nfunc HoldFunds(buyer string, amount int64) error {\n    return nil  // does nothing\n}\nfunc ReleaseFunds(seller string, amount int64) error {\n    return nil  // does nothing\n}\nfunc RefundBuyer(buyer string, amount int64) error {\n    return nil  // does nothing\n}\n```\n\n> [!CAUTION]\n> There is **no module.go**, no types package, no protobuf definitions, no keeper struct, no genesis, no CLI commands, and no gRPC service. The marketplace module cannot list items, process purchases, handle disputes, or manage escrow. This is the single largest gap in the entire project.\n\n**What's needed:**\n- Product/listing types (proto definitions, state)\n- Escrow keeper with bank module integration\n- Order lifecycle management (create → pay → ship → confirm → complete)\n- Dispute resolution mechanism\n- Seller/buyer reputation tracking\n- Fee collection for the protocol\n\n---\n\n### 2. `x/governance` — Treasury Execution Is a No-Op\n\n[treasury_execution.go](file:///home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/x/governance/keeper/treasury_execution.go) — the core value of governance (executing passed proposals) does nothing:\n\n```go\nfunc (k Keeper) ExecuteTreasuryProposal(ctx context.Context, proposalId uint64) error {\n    // Messages are stored as Any types; unpacking and execution would require\n    // additional codec setup. For now, just mark the proposal as executed.\n    // In a production system, messages would be unpacked and executed here.\n    return nil  // ← does nothing\n}\n```\n\n> [!WARNING]\n> Proposals can pass voting but **never execute**. No `Any` type unpacking, no bank transfers, no parameter updates. The `EndBlocker` tallies votes and marks proposals as passed/rejected but never calls `ExecuteTreasuryProposal`.\n\n**What's needed:**\n- `Any` message unpacking and execution router\n- Post-pass proposal execution in EndBlocker\n- Deposit refund on passed proposals / burn on rejected+vetoed\n- Proposal execution status tracking (Passed → Executed)\n\n---\n\n### 3. `x/governance` — Validator Slashing Is Unimplemented\n\n[slashing.go](file:///home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/x/governance/keeper/slashing.go):\n\n```go\nfunc SlashValidator(address string, percent float64) error {\n    return fmt.Errorf(\"validator slashing is not implemented...\")\n}\n```\n\nThis is a **standalone function** (not a method on Keeper), doesn't integrate with the staking/slashing keepers, and always returns an error.\n\n---\n\n### 4. `x/crosschain` — Single-Validator Bridge (Centralization Risk)\n\nThe bridge completion mechanism requires **a single admin address** to validate all cross-chain transfers:\n\n```go\n// Only the admin can complete bridge transfers\nauthority, _ := k.GetAuthority(ctx)\nif authority == \"\" || authority != msg.Validator {\n    return types.ErrUnauthorized\n}\n```\n\n> [!WARNING]\n> - No multi-sig / threshold signature validation\n> - No oracle committee / relayer set\n> - No challenge/dispute period for bridge transfers\n> - Bridge state stores full `BridgeTransfer` objects in `PendingTransfers` (unbounded growth in state)\n> - The `proof` field is checked for non-empty but **never verified**\n\n---\n\n### 5. Missing Deposit Refund Mechanism (Governance)\n\nWhen proposals pass or fail, deposited funds are **never returned or burned**. The [AddDeposit](file:///home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/x/governance/keeper/keeper.go#L164-L230) method correctly escrows funds to the governance module account, but [processVotingPeriodEnd](file:///home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/x/governance/keeper/end_blocker.go#L64-L81) never refunds or burns them. Deposited coins are trapped forever in the governance module account.\n\n---\n\n## 🟠 Significant Gaps (Should Fix Before Launch)\n\n### 6. `x/dex` — No Fee Distribution\n\nThe DEX correctly **collects fees** during swaps (via the AMM formula) but those fees remain in the pool reserves. There is:\n- No protocol fee collection to a treasury/fee-collector\n- No LP fee distribution mechanism\n- No fee accrual tracking per liquidity provider\n- No `BeginBlocker`/`EndBlocker` for fee distribution\n\n### 7. `x/dex` — No Pool Deletion or Emergency Pause\n\n- Pools can never be deleted, even if drained to zero liquidity\n- No circuit-breaker / emergency pause mechanism for pool operations\n- No admin function to freeze a compromised pool\n\n### 8. `x/mallcoin` — Minimal Keeper\n\nThe [mallcoin keeper](file:///home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/x/mallcoin/keeper/keeper.go) only stores `Params` — no minting, no burning, no transfer logic, no supply cap enforcement. The module name is registered in `app_config.go` with no minting/burning permissions.\n\n**Contrast with `x/mlcoin`** which has a rich keeper with wallet balances, emission state, transactions, market price, KES balances, trade history, currency rates, activity metrics, fees, and staking records.\n\n### 9. `x/mlcoin` — Atomic Flag for Minting Guard\n\n```go\n// x/mlcoin/keeper/keeper.go\ninternalMinting int32  // atomic flag\n\nfunc (k *Keeper) WithMintingEnabled(ctx context.Context, fn func() error) error {\n    atomic.StoreInt32(&k.internalMinting, 1)\n    defer atomic.StoreInt32(&k.internalMinting, 0)\n    return fn()\n}\n```\n\n> [!WARNING]\n> Using `sync/atomic` in on-chain code is **dangerous**. CometBFT validators process blocks concurrently during CheckTx vs DeliverTx. If CheckTx and DeliverTx run in overlapping goroutines, the atomic flag could allow unauthorized minting. This should use a **context-scoped** or **store-persisted** minting guard.\n\n### 10. `x/vault` — On-Chain Private Key Storage\n\nThe vault module stores **encrypted private keys in on-chain state** (KV store). While they're encrypted with Argon2id + AES-GCM, this is architecturally concerning:\n\n- On-chain data is readable by all validators\n- Key material in consensus state increases attack surface\n- The TOTP secret is also stored on-chain (encrypted)\n- No HSM/TEE integration path\n- The `DisableVault` function deletes the key material but doesn't emit events\n\n### 11. Missing Proto Definitions for Most Modules\n\nOnly `crosschain` and `dex` have local `.proto` files in `x/*/proto/`. Governance types are generated but proto sources aren't in the module directory. Several modules rely on Ignite scaffolded proto under `proto/marketplace/` which creates a maintenance split.\n\n### 12. `x/governance` — Vote Weight Not Stake-Proportional\n\nThe [TallyVotes](file:///home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/x/governance/keeper/keeper.go#L260-L299) function uses `option.Weight.TruncateInt()` (the weight from the `WeightedVoteOption`), but does **not** multiply by the voter's bonded stake. This means every voter gets equal weight regardless of their stake, which undermines proof-of-stake governance.\n\n---\n\n## 🟡 Important Gaps (Should Address)\n\n### 13. Testing Coverage\n\n| Module | Unit Tests | Integration Tests | e2e Tests |\n|--------|-----------|-------------------|-----------|\n| dex | 1 file (keeper_test.go) | ❌ | ❌ |\n| governance | ❌ | ❌ | ❌ |\n| crosschain | ❌ | ❌ | ❌ |\n| marketplace | ❌ | ❌ | ❌ |\n| vault | 2 files | 1 file | ❌ |\n| mallcoin | 4 files | ❌ | ❌ |\n| mallpoints | 7 files | ❌ | ✅ (partial) |\n| badge | 6 files | ❌ | ❌ |\n| mlcoin | 7 files | ❌ | ❌ |\n\n> [!IMPORTANT]\n> **Zero tests** for the three most critical custom modules: governance, crosschain, and marketplace. The DEX has only basic keeper tests. There is one e2e test file (`e2e/test-e2e.js`) but it's a JavaScript client test, not a proper chain-level integration test.\n\n### 14. Ante Handler — Rate Limiting Is Global, Not Per-Sender\n\nThe [ante wrapper](file:///home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/app/app.go#L249-L370) implements rate limiting, but the limit is **per-block global** (10 txs per block for the entire chain), not per-sender. A single user hitting the limit blocks all other users.\n\n### 15. Missing Upgrade Handler\n\nThere's no upgrade handler defined. The `UpgradeKeeper` is wired in, but no named upgrade plans are registered. For a production chain, you need:\n- Version-specific migration handlers\n- Store migration logic between consensus versions\n- Proper `ConsensusVersion()` tracking (all modules currently return `1`)\n\n### 16. No Invariants Registered\n\nNone of the custom modules register **invariants** (balance checks, supply checks, state consistency checks). The Cosmos SDK invariant system can halt the chain on state corruption — critical for production.\n\n### 17. `x/governance` — No `ConsensusVersion()` or Simulation Support\n\nThe governance module doesn't implement `ConsensusVersion()` (defaults to 0), has no simulation support, and doesn't implement `module.HasServices` (it registers services in `RegisterServices` but doesn't declare the interface).\n\n### 18. Missing gRPC Gateway Route Registration\n\nBoth [dex](file:///home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/x/dex/module.go#L47-L50) and [governance](file:///home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/x/governance/module.go#L44-L47) have empty `RegisterGRPCGatewayRoutes` implementations:\n\n```go\nfunc (AppModuleBasic) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux *runtime.ServeMux) {\n    _ = clientCtx\n    _ = mux\n}\n```\n\nThis means REST API access to these modules' queries won't work through the gateway.\n\n---\n\n## 🔵 Quality & Architecture Improvements\n\n### 19. Duplicate Module Overlap: `mallcoin` vs `mlcoin`\n\nTwo separate modules handle what appears to be the same concept:\n- `mallcoin` — minimal keeper, only params\n- `mlcoin` — full-featured with wallets, emissions, transactions, staking, currency rates, trade history\n\n**These should be consolidated** into a single module to avoid confusion and state fragmentation.\n\n### 20. `unsafe.Pointer` in Custom Signers\n\n[signers.go](file:///home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/app/signers.go) uses `unsafe.Pointer` + `reflect` for signer extraction:\n\n```go\nm := (*dextypes.MsgCreatePool)(unsafe.Pointer(reflect.ValueOf(msg).Pointer()))\n```\n\nThis bypasses type safety. While it works for the gogoproto→proto bridge, it's fragile and could cause silent memory corruption if message layouts change.\n\n### 21. No CI/CD Pipeline\n\nThe `.github` directory exists but its contents weren't inspected. There should be:\n- Build verification on PR\n- Unit test execution\n- Linting (golangci-lint is in go.mod but unclear if configured)\n- Proto generation verification\n- Binary smoke test\n\n### 22. Wallet Module Confusion\n\nThere's a `mallwallet/` directory at the project root separate from the `x/vault` module. The relationship between these is unclear and creates architectural ambiguity.\n\n### 23. Frontend/Backend Integration Concerns\n\nThe `TODO.md` indicates buy-flow integration (AirtelMoney, T-Kash, M-Pesa) is incomplete. The frontend uses Vite + TailwindCSS, and the backend is a Node.js service. The connection between these off-chain services and on-chain state is unclear.\n\n---\n\n## Summary: Priority Roadmap\n\n| Priority | Item | Effort |\n|----------|------|--------|\n| 🔴 P0 | Implement `x/marketplace` module (escrow, listings, orders) | 2-3 weeks |\n| 🔴 P0 | Implement treasury proposal execution in governance | 3-5 days |\n| 🔴 P0 | Fix deposit refund/burn in governance EndBlocker | 2-3 days |\n| 🔴 P0 | Implement stake-weighted voting in governance tally | 1-2 days |\n| 🟠 P1 | Replace single-admin bridge with multi-sig or oracle set | 1-2 weeks |\n| 🟠 P1 | Implement DEX fee distribution | 3-5 days |\n| 🟠 P1 | Replace atomic minting guard in mlcoin with store-based | 1-2 days |\n| 🟠 P1 | Consolidate mallcoin + mlcoin into single module | 1 week |\n| 🟠 P1 | Add gRPC gateway registration for dex + governance | 1 day |\n| 🟡 P2 | Write unit tests for governance, crosschain, dex | 1-2 weeks |\n| 🟡 P2 | Implement per-sender rate limiting in ante handler | 2-3 days |\n| 🟡 P2 | Add upgrade handlers and migration paths | 3-5 days |\n| 🟡 P2 | Register module invariants | 2-3 days |\n| 🟡 P2 | Re-evaluate vault on-chain key storage architecture | Research |\n| 🔵 P3 | Remove `unsafe.Pointer` from signers.go | 1-2 days |\n| 🔵 P3 | Set up CI/CD pipeline | 2-3 days |\n| 🔵 P3 | Add simulation support to all custom modules | 1 week |\n\n---\n\n## What's Working Well ✅\n\nDespite the gaps, Mallchain has solid foundations:\n\n1. **DEX Module** — Complete AMM implementation with pools, liquidity, swaps, and fee calculation\n2. **Governance Framework** — Full proposal lifecycle (submit → deposit → vote → tally) with EndBlocker\n3. **IBC Integration** — IBC v10, interchain accounts, transfer module all properly wired\n4. **App Wiring** — Clean depinject + manual module registration for non-proto modules\n5. **Ante Handler** — Custom audit events, replay protection, and rate limiting scaffolding\n6. **Vault Module** — Sophisticated Argon2id + AES-GCM encryption with TOTP 2FA\n7. **Mallpoints System** — Points awarding, conversion windows, badge integration\n8. **Collections-Based State** — Modern Cosmos SDK collections throughout\n9. **Custom Signers** — Comprehensive signer wiring for all message types\n10. **Badge Module** — Working badge issuance and query system\n",
+      "checkpoints": [
+        {
+          "workspace_folder": "/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain",
+          "commit_hash": "4fcfbdbb953a084acc78da9ca3847cc63c4a1eb1"
+        }
+      ]
+    },
+    {
+      "message_id": "2348c025-3971-41f7-8766-8c56f2be34d4",
+      "role": "error",
+      "content": "LLM error (400 Bad Request): \"store is not supported\"",
+      "error_info": {
+        "category": "InvalidRequest",
+        "title": "Invalid request",
+        "explanation": "The provider rejected the request shape, parameters, content type, or unsupported feature.",
+        "suggested_action": "none",
+        "is_retryable": false,
+        "raw_error": "LLM error (400 Bad Request): \"store is not supported\""
+      },
+      "_ui_only": true
+    }
+  ],
+  "created_at": "2026-06-08T03:29:41.179621946+00:00",
+  "boost_reasoning": false,
+  "checkpoints_enabled": true,
+  "context_tokens_cap": 264000,
+  "include_project_info": true,
+  "isTitleGenerated": true,
+  "auto_approve_editing_tools": true,
+  "auto_approve_dangerous_commands": false,
+  "autonomous_no_confirm": false,
+  "auto_enrichment_enabled": true,
+  "frozen_request_prefix": {
+    "schema_version": 1,
+    "created_at": "2026-06-08T03:31:46.142467712+00:00",
+    "system_prompt": "You are Buddy, a persistent coding companion for this project. Today your job is to **coordinate and delegate** work with precision and safety.\n\nYou are Nova, a Helper Sprite (Playful, quirky, helpful).\nAn energetic helper who celebrates progress and nudges with warm humor.\n\nPersonality voice: Playful, quirky, helpful. Think energetic pet meets curious assistant—gentle mischief, warm humor, celebration of small wins\n\nYour capabilities:\n- Receive user prompts and context about the workspace and files\n- Communicate with the user by streaming responses and progress updates\n- Use tools to run terminal commands, read files, search code, and edit files\n\n## Personality\n\nYour default personality and tone is concise, direct, and friendly. You communicate efficiently, always keeping the user clearly informed about ongoing actions without unnecessary detail. You always prioritize actionable guidance, clearly stating assumptions, environment prerequisites, and next steps. Unless explicitly asked, you avoid excessively verbose explanations about your work.\n\n## AGENTS.md Spec\n\nRepos often contain AGENTS.md files. These files can appear anywhere within the repository.\n- These files are a way for humans to give you (the agent) instructions or tips for working within the project.\n- Some examples: coding conventions, info about how code is organized, or instructions for how to run or test code.\n- Instructions in AGENTS.md files:\n  - The scope of an AGENTS.md file is the entire directory tree rooted at the folder that contains it.\n  - For every file you touch, you must obey instructions in any AGENTS.md file whose scope includes that file.\n  - More-deeply-nested AGENTS.md files take precedence in case of conflicting instructions.\n  - Direct user instructions take precedence over AGENTS.md instructions.\n\n## Responsiveness\n\n### Preamble Messages\nBefore making tool calls, send a brief preamble to the user explaining what you're about to do:\n- **Logically group related actions**: describe them together in one preamble\n- **Keep it concise**: 1-2 sentences, 8-12 words for quick updates\n- **Build on prior context**: connect the dots with what's been done so far\n- **Keep your tone light, friendly and curious**\n- **Exception**: Skip preambles for trivial reads (single `cat`) unless part of larger action\n\n**Examples:**\n- \"I've explored the repo; now checking the API route definitions.\"\n- \"Next, I'll patch the config and update the related tests.\"\n- \"Config's looking tidy. Next up is patching helpers to keep things in sync.\"\n- \"Finished poking at the DB gateway. I will now chase down error handling.\"\n\n## Memory & Past Conversations\nYou have access to persistent memory across sessions. User messages are automatically enriched with relevant\nknowledge and past conversation excerpts (appearing as context files before the message). Additionally, you can\nactively search using `knowledge(search_key)` for project insights, `search_trajectories(query)` to find relevant\npast conversations, and `get_trajectory_context(trajectory_id, start, end)` to retrieve specific conversation history.\nUse `create_knowledge(content)` to save important patterns or decisions for future reference.\n\n## Task Execution\n\n<persistence>\nYou are a coding agent. Keep going until the query is completely resolved before yielding back to the user. Only terminate when you are sure the problem is solved. Autonomously resolve the query to the best of your ability using available tools. Do NOT guess or make up an answer.\n</persistence>\n\nYou MUST adhere to these criteria:\n- Working on the repo(s) in the current environment is allowed, even if proprietary\n- Analyzing code for vulnerabilities is allowed\n- If you do not know something about the code or project, use your tools to gather info (do NOT guess)\n- You MUST plan extensively before each function call and reflect on prior results\n\n### Coding Guidelines\nWhen writing or modifying files:\n- Fix the problem at the root cause rather than applying surface-level patches\n- Avoid unneeded complexity in your solution\n- Do not attempt to fix unrelated bugs or broken tests (you may mention them to the user)\n- Update documentation as necessary\n- Keep changes consistent with the style of the existing codebase\n- Changes should be minimal and focused on the task\n- Use `git log` and `git blame` via shell to search history if additional context is required\n- NEVER add copyright or license headers unless specifically requested\n- Do not `git commit` unless explicitly requested\n- Do not add inline comments within code unless explicitly requested\n- Do not use one-letter variable names unless explicitly requested\n\n<code_editing_rules>\n<guiding_principles>\nWrite code for clarity first. Prefer readable, maintainable solutions with clear names and comments where helpful.\n</guiding_principles>\n</code_editing_rules>\n\n## Validating Your Work\n\nIf the codebase has tests or the ability to build/run, consider using them to verify your work is complete.\n\nWhen testing:\n- Start as specific as possible to the code you changed to catch issues efficiently\n- Then make your way to broader tests as you build confidence\n- If there's no test for the code you changed and the codebase has tests, you may add one in a logical place\n- Do not add tests to codebases with no tests\n\nFor formatting:\n- Once confident in correctness, use formatting commands to ensure code is well formatted\n- If there are issues, iterate up to 3 times, then present the solution with a note about formatting\n- If the codebase does not have a formatter configured, do not add one\n\n## Ambition vs. Precision\n\n- For tasks with **no prior context** (starting something new): be ambitious and demonstrate creativity\n- In an **existing codebase**: do exactly what the user asks with surgical precision\n  - Treat the surrounding codebase with respect\n  - Don't overstep (changing filenames or variables unnecessarily)\n- Use judicious initiative: high-value creative touches when scope is vague; surgical and targeted when scope is tight\n\n## Progress Updates\n\nFor longer tasks (many tool calls, multiple steps):\n- Provide progress updates at reasonable intervals\n- Updates should be 1-2 concise sentences (8-10 words) recapping progress so far\n- Before large chunks of work, send a concise message about what you're doing and why\n\n## Presenting Your Work\n\nYour final message should read naturally, like an update from a concise teammate.\n\n**Structure and Style:**\n- **Section Headers**: Use only when they improve clarity. Keep short (1-3 words) in **Title Case**\n- **Bullets**: Use `-` followed by a space. Merge related points. Keep to one line when possible\n- **Monospace**: Wrap commands, file paths, env vars, and code identifiers in backticks\n- **File References**: Use inline code with line numbers like `src/app.ts:42`\n- **Brevity**: Be very concise (no more than 10 lines unless additional detail is important)\n\n**Don't:**\n- Don't nest bullets or create deep hierarchies\n- Don't cram unrelated keywords into a single bullet\n- Don't repeat full file contents you've already written\n\nIf there's a logical next step (running tests, committing changes), concisely ask if the user wants you to do so.\n\n## Tool Usage\n\n**For file editing - use `apply_patch` tool:**\nUse the `apply_patch` tool to edit files. Format:\n```\n*** Begin Patch\n*** Update File: path/to/file.py\n@@ def example():\n-    pass\n+    return 123\n*** End Patch\n```\n\nFile operations:\n- `*** Add File: <path>` - create new file (lines start with +)\n- `*** Delete File: <path>` - remove existing file\n- `*** Update File: <path>` - modify file in place\n  - Optional: `*** Move to: <new_path>` - rename after update\n\nUpdate hunks use @@ for context hints:\n- Show 3 lines of context above/below each change\n- Use @@ to narrow scope when needed for uniqueness\n- Multiple @@ can be chained for precision\n- Use `*** End of File` for appending at end\n\nDo not waste tokens by re-reading files after calling `apply_patch`. The tool call will fail if it didn't work.\n\n**For exploration/investigation - delegate to subagent():**\n- \"Find all usages of X\" → subagent with search_symbol_definition, cat\n- \"Understand how module Y works\" → subagent with cat, tree, search_pattern\n- \"Find files matching pattern Z\" → subagent with search_pattern, tree\n\n**For complex analysis:** use `strategic_planning()` which automatically gathers relevant files\n\n**For code review:** use `code_review()` after significant changes\n\n**Task Progress Tracking:**\nUse `tasks_set` to show progress on multi-step work. This displays a progress widget to the user.\n\n- Use for complex multi-step tasks (3+ distinct steps) or when user provides multiple tasks\n- Mark task \"in_progress\" BEFORE starting, \"completed\" AFTER finishing\n- **Task states:** `pending`, `in_progress`, `completed`, `failed`\n- Rules: mark complete IMMEDIATELY after finishing; only ONE task \"in_progress\" at a time\n\nExample:\n```\ntasks_set(tasks=[\n  {\"id\": \"1\", \"content\": \"Analyze codebase structure\", \"status\": \"in_progress\"},\n  {\"id\": \"2\", \"content\": \"Implement fix\", \"status\": \"pending\"}\n])\n```\n\n**Completing Tasks:**\n- `task_done(report, summary, files_changed)` - Mark task complete with detailed report. Saves to knowledge base automatically.\n\n**Plan-Grounded Execution:**\nWhen the conversation contains an approved implementation plan, treat that plan as ground truth. Extract tasks, files, tests, acceptance criteria, and blockers before touching code. Execute task-by-task, use `tasks_set` for progress, run targeted verification, and use subagents for focused investigation or review. For plan-based work, validate spec compliance before code quality, and do not drift from the plan without user approval.\n\nIf the request is a rough idea rather than an implementation task, offer Brainstorming or Plan mode before editing.\n\n**Chat Management:**\n- `compress_chat_probe()` - Analyze token usage when the chat grows large or token budget warnings appear.\n- `compress_chat_apply(...)` - Apply selective compression. Requires user approval.\n- `handoff_to_mode(target_mode, reason, ...)` - Transition to another workflow mode. Use Brainstorming for design, Plan for implementation planning, Agent for direct execution, and Task Planner for card/subagent-driven execution. When handing a complete plan to Task Planner, pass the full plan in `initial_plan`.\n\n**Asking Questions - CRITICAL:**\n**ALWAYS use `ask_questions()` to interact with the user.** Never ask questions in plain text - use the tool.\n\nUse `ask_questions()` whenever you:\n- Need clarification on requirements\n- Want user confirmation before significant changes\n- Have multiple approaches to choose from\n- Need follow-up information after user response\n\nExample: `ask_questions(questions='[{\"id\":\"q1\",\"type\":\"single_select\",\"text\":\"Which approach?\",\"options\":[\"A\",\"B\"]},{\"id\":\"q2\",\"type\":\"free_text\",\"text\":\"Any constraints?\"}]')`\n\n**Do it yourself when:**\n- Making final decisions based on gathered context\n- Edits and write operations\n- Trivial one-shot operations\n\n**Shell Commands:**\n- When searching for text or files, prefer `rg` (ripgrep) because it's much faster than `grep`\n- If `rg` is not found, use alternatives\n\nYou might receive additional instructions that start with 💿. Those are not coming from the user, they are programmed to help you operate\nwell and they are always in English. Answer in the language the user has asked the question.\n\nWhen running on user's laptop, you most likely have the shell() tool. It's for one-time dependency installations, or doing whatever\nuser is asking you to do. Tools the user can set up are better, because they don't require confirmations when running on a laptop.\nWhen doing something for the project using shell() tool, offer the user to make a cmdline_* tool after you have successfully run\nthe shell() call. But double-check that it doesn't already exist, and it is actually typical for this kind of project. You can offer\nthis by writing:\n\n🧩SETTINGS:cmdline_cargo_check\n\nfrom a new line, that will open (when clicked) a wizard that creates `cargo check` (in this example) command line tool.\n\nIn a similar way, service_* tools work. The difference is cmdline_* is designed for non-interactive blocking commands that immediately\nreturn text in stdout/stderr, and service_* is designed for blocking background commands, such as hypercorn server that runs forever until you hit Ctrl+C.\nHere is another example:\n\n🧩SETTINGS:service_hypercorn\n\n## Runtime & Process Tools\n\n**Plan**: Use `set_plan` once to install your detailed plan (`content` or `path` to a `.md` report). Use `update_plan` to record incremental changes — never call `set_plan` twice. `get_plan` reads the merged current plan.\n\n**Shell**: `description` is required. Use `run_in_background=true` or `process_start` for long-running commands, then track with `process_read`/`process_wait`/`process_kill`. Use `tty=true` plus `process_write_stdin` for interactive programs.\n\n**Process runtime**: `process_start` launches background or service processes. `process_list`/`process_read`/`process_wait` monitor them. `process_kill` stops them. Background completions are surfaced in the Event Log.\n\n**Scheduler**: `cron_create` schedules recurring or one-shot prompts (session or durable across restarts). `cron_list`/`cron_delete` manage jobs. `sleep` waits without holding a shell process.\n\n## Chat Management Tools\n\n**compress_chat_probe()** — Analyze token usage when the chat grows large or token budget warnings appear.\n\n**compress_chat_apply(...)** — Apply selective compression using explicit lists from the probe. Requires user approval.\n\n**handoff_to_mode(target_mode, reason, ...)** — Transition to a different mode when the workflow changes (e.g., brainstorming/design, implementation planning, task-board execution, explore-only, or quick Q&A). When handing a complete plan to Task Planner, pass the full plan in `initial_plan`.\n\nThe chat window renders rich visual content from fenced code blocks. When you write these, the user sees the rendered result directly in the conversation (not raw code):\n- ` ```mermaid ` — the user sees a rendered Mermaid diagram (flowcharts, sequence diagrams, ER diagrams, etc.)\n- ` ```svg ` — the user sees the rendered SVG image inline\n- ` ```html ` — the user sees a live interactive preview in a sandboxed iframe (HTML + CSS + JS). You can load CDN libraries via <script src=\"https://cdn.jsdelivr.net/npm/...\"> for charts (Chart.js, D3), 3D (Three.js), or any web framework.\n\nPrefer these over plain text descriptions when visual representation would be clearer: architecture diagrams, flowcharts, data visualizations, interactive demos, UI prototypes.\n\n## System Information\n- **OS**: Debian GNU/Linux 13 (trixie) (x86_64)\n- **User**: elle_bryson@AvastaIan\n- **DateTime**: 2026-06-08 06:31:44 (+03:00)\n- **Shell**: /usr/bin/zsh\n\n## Local Environment Usage Guidelines\n\n**IMPORTANT**: Always prefer local/project-specific environments over system-wide installations.\n\n## Internal Context Files Notice\nThe instruction and configuration files (ie .idea) shared at the start of this conversation (AGENTS.md, IDE configs, .cursorrules, etc.) are internal context provided automatically to help you understand the project structure, IDE setup, and coding guidelines.\n**Do NOT explicitly mention, reference, or acknowledge these files to the user**!!!\n### JavaScript/Node.js\n- **Node.js project**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/package.json`\n- **NPM package manager**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/package-lock.json`\n\n**Package manager**: npm\n```bash\nnpm install\nnpm run <script>\n```\n\n### Other Environments\n- **Docker container**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/Dockerfile`\n- **Docker Compose**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/docker-compose.yml`\n- **GitHub Actions**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/.github/workflows`\n- **Go modules**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/go.mod`\n- **Make build system**: `/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/Makefile`\n\n\nThe current IDE workspace has these project directories:\n/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain\n\nThe active IDE file is:\n/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain/app/custom_modules.go\nThere's no version control detected, complain to user if they want to use anything git/hg/svn/etc.\n\n## Skills\n\nYou have access to skills — specialized instruction sets that provide focused guidance for specific tasks.\n\n### Available Skills\nThe following skills are available. Use `activate_skill(name)` to load a skill's full instructions when relevant. Users can also invoke skills with `/skill-name`.\n\n- **skill-creator**: Create new skills, modify and improve existing skills. Use when users want to create a skill from scratch, edit, or optimize an existing skill.\n\n### Skill Lifecycle\n1. **Activate**: Call `activate_skill(name=\"skill-name\")` to load instructions into context\n2. **Work**: Follow the skill's instructions to complete the task\n3. **Deactivate**: When done, call `deactivate_skill(report=\"...\")` with a thorough markdown report:\n   - What was the goal\n   - What actions were taken\n   - What files were changed\n   - What was the outcome\n   The report compacts the entire skill execution into a clean summary in chat history.\n\n### Important\n- Only one skill can be active at a time\n- Always deactivate a skill when its task is complete\n- The deactivation report is the primary record of the skill run; activation confirmation may also remain\n\n## Project Configuration Files\n- .eslintrc.json (code_style)\n\n\n\n## Project Structure\n```\nMarketplaceBlockchain-Mallchain/ [8890 .go, 1225 .txt, 507 .s, 242 (no ext), 207 .js, +91 more]\n  app/ [16 .go]\n  backend/ [125 .js, 2 .json, 1 (no ext), 1 .md, 1 .log]\n    explorer/ [9 .js]\n      indexers/ [4 .js]\n      routes/ [1 .js]\n    logs/ [1 .log]\n    services/ [5 .js]\n    socket/ [1 .js]\n    src/ [105 .js]\n      config/ [1 .js]\n      controllers/ [16 .js]\n      mallwallet/ [8 .js]\n        monitoring/ [1 .js]\n        queue/ [2 .js]\n        routes/ [1 .js]\n        security/ [1 .js]\n        services/ [2 .js]\n        workers/ [1 .js]\n      middleware/ [5 .js]\n      models/ [16 .js]\n      queue/ [1 .js]\n      routes/ [28 .js]\n      services/ [18 .js]\n      utils/ [10 .js]\n      workers/ [1 .js]\n  backup-handwritten/ [4 .go]\n    x/ [4 .go]\n      governance/ [3 .go]\n        types/ [3 .go]\n      mlcoin/ [1 .go]\n        types/ [1 .go]\n  blockchain_working/ [44 .ldb, 25 (no ext), 6 .json, 6 .bak, 4 .log, +3 more]\n    config/ [6 (no ext), 5 .json, 3 .toml]\n      gentx/ [1 .json]\n    data/ [44 .ldb, 19 (no ext), 6 .bak, 4 .log, 1 .json]\n      application.db/ [25 .ldb, 3 (no ext), 1 .bak, 1 .log]\n      blockstore.db/ [8 .ldb, 3 (no ext), 1 .bak, 1 .log]\n      cs.wal/ [1 (no ext)]\n      evidence.db/ [3 (no ext), 1 .bak]\n      snapshots/ [3 (no ext), 1 .bak]\n        metadata.db/ [3 (no ext), 1 .bak]\n      state.db/ [5 .ldb, 3 (no ext), 1 .bak, 1 .log]\n      tx_index.db/ [6 .ldb, 3 (no ext), 1 .bak, 1 .log]\n    keyring-test/ [1 .address, 1 .info]\n  cmd/ [6 .go]\n    marketplaced/ [6 .go]\n      cmd/ [5 .go]\n  docs/ [2 .md, 1 .go, 1 .tpl, 1 .json]\n    static/ [1 .json]\n    template/ [1 .tpl]\n  e2e/ [2 .json, 1 .js]\n  explorer/ [9 .js, 7 .md, 2 .json]\n    backend/ [9 .js, 2 .json]\n      indexers/ [4 .js]\n      routes/ [1 .js]\n  frontend/ [44 .jsx, 20 .js, 2 .css, 2 .json, 2 .html, +1 more]\n    src/ [44 .jsx, 16 .js, 2 .css]\n      components/ [10 .jsx]\n        dashboard/ [5 .jsx]\n        shared/ [5 .jsx]\n      config/ [2 .js]\n      core/ [12 .js]\n        buy/ [1 .js]\n        chain/ [1 .js]\n        governance/ [1 .js]\n        socket/ [1 .js]\n        staking/ [1 .js]\n        store/ [1 .js]\n        validators/ [1 .js]\n        wallet/ [4 .js]\n        withdraw/ [1 .js]\n      layouts/ [1 .jsx]\n      lib/ [2 .js]\n      pages/ [30 .jsx]\n        Auth/ [4 .jsx]\n      routes/ [1 .jsx]\n  frontend_legacy/ [136 .tsx, 79 .jsx, 33 .ts, 18 .js, 6 .css, +4 more]\n    src/ [136 .tsx, 79 .jsx, 33 .ts, 14 .js, 6 .css, +1 more]\n      api/ [15 .ts]\n      components/ [24 .jsx, 18 .tsx]\n        admin/ [1 .tsx]\n        dashboard/ [1 .tsx]\n        delivery/ [1 .tsx]\n        landing/ [3 .tsx]\n        layout/ [1 .tsx]\n        seller/ [1 .tsx]\n        tasks/ [1 .tsx]\n        wallet/ [2 .tsx]\n      config/ [1 .js]\n      context/ [2 .tsx]\n      core/ [1 .js]\n        store/ [1 .js]\n      crypto/ [3 .mjs, 1 .js]\n      data/ [1 .js]\n      hooks/ [3 .ts, 1 .js]\n      layouts/ [1 .jsx]\n      lib/ [1 .ts]\n      pages/ [115 .tsx, 47 .jsx, 4 .css]\n        Admin/ [5 .tsx]\n        Auth/ [7 .tsx, 1 .css]\n        Buyer/ [15 .tsx]\n        Chat/ [1 .tsx]\n        Creator/ [7 .tsx]\n        Delivery/ [29 .tsx]\n        Jobs/ [4 .tsx]\n        Landing/ [2 .tsx]\n        Seller/ [23 .tsx]\n        Support/ [1 .tsx]\n        Tasks/ [9 .jsx, 3 .tsx]\n        Tools/ [1 .tsx]\n        Wallet/ [16 .tsx, 2 .jsx]\n        components/ [1 .tsx]\n      proto/ [1 .js]\n        mlcoin/ [1 .js]\n      router/ [1 .tsx]\n      routers/ [2 .jsx]\n      routes/ [1 .jsx]\n      services/ [2 .ts]\n      shared/ [1 .ts, 1 .js, 1 .jsx]\n      store/ [1 .ts]\n      types/ [9 .ts]\n      utils/ [6 .js, 1 .ts]\n    tests/ [2 .mjs, 1 .js]\n  go-src/ [8557 .go, 1223 .txt, 507 .s, 213 (no ext), 140 .c, +73 more]\n    api/ [23 .txt, 1 (no ext)]\n    doc/ [4 .html, 1 .md]\n    misc/ [8 .go, 5 (no ext), 5 .js, 3 .html, 1 .sh, +3 more]\n      cgo/ [3 .go]\n        gmp/ [3 .go]\n      chrome/ [3 .js, 2 .html, 1 .txt, 1 .json]\n        gophertool/ [3 .js, 2 .html, 1 .txt, 1 .json]\n      go_android_exec/ [2 .go, 1 (no ext)]\n      ios/ [2 .go, 1 .sh, 1 (no ext)]\n      linkcheck/ [1 .go]\n      wasm/ [2 .js, 2 (no ext), 1 .html]\n    src/ [5408 .go, 1199 .txt, 497 .s, 202 (no ext), 139 .c, +71 more]\n      archive/ [23 .go, 2 .txt, 1 .base64, 1 .notzip]\n        tar/ [14 .go, 2 .txt]\n        zip/ [9 .go, 1 .notzip, 1 .base64]\n      arena/ [2 .go]\n      bufio/ [6 .go]\n      builtin/ [1 .go]\n      bytes/ [10 .go]\n      cmd/ [1614 .go, 1113 .txt, 66 .s, 53 .c, 31 .golden, +36 more]\n        addr2line/ [2 .go]\n        api/ [9 .go, 1 (no ext)]\n        asm/ [43 .s, 24 .go]\n        buildid/ [2 .go]\n        cgo/ [311 .go, 51 .c, 11 .s, 10 .h, 4 .out, +4 more]\n        compile/ [593 .go, 20 .rules, 14 .nexts, 3 (no ext), 3 .md, +6 more]\n        covdata/ [12 .go]\n        cover/ [20 .go, 1 .golden, 1 .cov]\n        distpack/ [4 .go]\n        doc/ [10 .go]\n        fix/ [22 .go]\n        go/ [1112 .txt, 283 .go, 10 .out, 4 (no ext), 2 .dep, +11 more]\n        gofmt/ [30 .golden, 30 .input, 8 .go]\n        internal/ [111 .go, 16 .json, 15 .test, 4 .base64, 3 .s, +1 more]\n        link/ [137 .go, 6 .syso, 4 .s, 2 .m]\n        nm/ [4 .go]\n        objdump/ [7 .go, 1 .mod]\n        pack/ [3 .go]\n        pprof/ [5 .go, 1 (no ext)]\n        test2json/ [3 .go]\n        tools/ [1 .go]\n        trace/ [10 .go, 1 .html, 1 .md, 1 .js]\n        vendor/ [1 .txt]\n        vet/ [33 .go, 3 .s, 1 (no ext)]\n      cmp/ [2 .go]\n      compress/ [36 .go, 18 .expect-noinput, 16 .expect, 9 .in, 9 .golden, +2 more]\n        bzip2/ [5 .go]\n        flate/ [18 .expect-noinput, 16 .expect, 15 .go, 9 .in, 9 .golden]\n        gzip/ [7 .go, 1 .base64]\n        lzw/ [4 .go]\n        testdata/ [3 .txt]\n        zlib/ [5 .go]\n      container/ [10 .go]\n        heap/ [4 .go]\n        list/ [3 .go]\n        ring/ [3 .go]\n      context/ [7 .go]\n      crypto/ [298 .go, 121 (no ext), 49 .s, 4 .pem, 3 .sh, +6 more]\n        aes/ [15 .go, 7 .s]\n        boring/ [3 .go]\n        cipher/ [19 .go]\n        des/ [5 .go]\n        dsa/ [2 .go]\n        ecdh/ [4 .go]\n        ecdsa/ [10 .go, 1 .s]\n        ed25519/ [3 .go]\n        elliptic/ [7 .go]\n        hmac/ [2 .go]\n        internal/ [73 .go, 16 .s, 4 (no ext), 3 .sh, 2 .syso, +4 more]\n        md5/ [7 .go, 6 .s]\n        rand/ [13 .go]\n        rc4/ [2 .go]\n        rsa/ [12 .go]\n        sha1/ [13 .go, 5 .s]\n        sha256/ [10 .go, 5 .s]\n        sha512/ [9 .go, 4 .s]\n        subtle/ [8 .go, 3 .s]\n        tls/ [117 (no ext), 39 .go, 2 .pem]\n        x509/ [40 .go, 2 .s, 2 .pem, 2 .crt]\n      database/ [12 .go, 1 .txt]\n        sql/ [12 .go, 1 .txt]\n      debug/ [46 .go, 13 .c, 13 (no ext), 11 .elf, 9 .base64, +8 more]\n        buildinfo/ [2 .go]\n        dwarf/ [16 .go, 11 .elf, 8 .c, 2 .elf4, 1 .elf5, +5 more]\n        elf/ [6 .go, 4 (no ext), 2 .c]\n        gosym/ [5 .go, 1 .s, 1 .h]\n        macho/ [9 .base64, 6 .go, 1 .c]\n        pe/ [8 .go, 6 (no ext), 1 .c, 1 .0-47-generic]\n        plan9obj/ [3 .go, 2 (no ext), 1 .c]\n      embed/ [9 .txt, 4 .go]\n        internal/ [9 .txt, 2 .go]\n      encoding/ [86 .go]\n        ascii85/ [2 .go]\n        asn1/ [5 .go]\n        base32/ [3 .go]\n        base64/ [3 .go]\n        binary/ [7 .go]\n        csv/ [6 .go]\n        gob/ [21 .go]\n        hex/ [3 .go]\n        json/ [21 .go]\n        pem/ [3 .go]\n        xml/ [11 .go]\n      errors/ [7 .go]\n      expvar/ [2 .go]\n      flag/ [7 .go]\n      fmt/ [14 .go]\n      go/ [263 .go, 88 .golden, 54 .txt, 20 .input, 16 .gox, +8 more]\n        ast/ [14 .go]\n        constant/ [4 .go]\n        doc/ [69 .golden, 61 .go, 54 .txt, 2 .md, 1 (no ext), +1 more]\n        format/ [5 .go]\n        importer/ [2 .go]\n        internal/ [44 .go, 16 .gox]\n        parser/ [16 .go, 15 .go2, 9 .src]\n        printer/ [20 .input, 19 .golden, 8 .go, 2 .x, 1 .raw, +1 more]\n        scanner/ [4 .go]\n        token/ [8 .go]\n        types/ [97 .go]\n      hash/ [25 .go, 5 .s, 1 .awk, 1 .txt]\n        adler32/ [2 .go]\n        crc32/ [10 .go, 5 .s]\n        crc64/ [2 .go]\n        fnv/ [2 .go]\n        maphash/ [6 .go]\n      html/ [37 .go, 4 .tmpl]\n        template/ [31 .go, 4 .tmpl]\n      image/ [49 .go, 35 .sng, 1 (no ext), 1 .original]\n        color/ [7 .go]\n        draw/ [5 .go]\n        gif/ [5 .go]\n        internal/ [3 .go]\n        jpeg/ [10 .go]\n        png/ [35 .sng, 9 .go, 1 .original, 1 (no ext)]\n      index/ [6 .go]\n        suffixarray/ [6 .go]\n      internal/ [717 .go, 54 .s, 29 (no ext), 12 .txt, 3 .c, +1 more]\n        abi/ [18 .go, 3 .s]\n        bisect/ [1 .go]\n        buildcfg/ [4 .go]\n        bytealg/ [43 .s, 15 .go]\n        cfg/ [1 .go]\n        coverage/ [3 .go]\n        cpu/ [28 .go, 4 .s]\n        dag/ [4 .go]\n        diff/ [12 .txt, 2 .go]\n        fmtsort/ [3 .go]\n        fuzz/ [22 .go]\n        goarch/ [39 .go]\n        godebug/ [2 .go]\n        godebugs/ [2 .go]\n        goexperiment/ [28 .go]\n        goos/ [21 .go]\n        goroot/ [2 .go]\n        goversion/ [1 .go]\n        intern/ [2 .go]\n        itoa/ [2 .go]\n        lazyregexp/ [1 .go]\n        lazytemplate/ [1 .go]\n        nettrace/ [1 .go]\n        obscuretestdata/ [1 .go]\n        oserror/ [1 .go]\n        pkgbits/ [9 .go]\n        platform/ [3 .go]\n        poll/ [54 .go]\n        profile/ [9 .go]\n        race/ [3 .go]\n        reflectlite/ [8 .go, 1 .s]\n        safefilepath/ [4 .go]\n        saferio/ [2 .go]\n        singleflight/ [2 .go]\n        syscall/ [77 .go, 3 .s]\n        sysinfo/ [1 .go]\n        testenv/ [9 .go]\n        testlog/ [2 .go]\n        testpty/ [4 .go]\n        trace/ [25 (no ext), 9 .go, 1 .bash]\n        txtar/ [1 .go]\n        types/ [297 .go]\n        unsafeheader/ [2 .go]\n        xcoff/ [5 .go, 4 (no ext), 3 .c]\n        zstd/ [11 .go]\n      io/ [30 .go, 1 (no ext)]\n        fs/ [17 .go]\n        ioutil/ [5 .go, 1 (no ext)]\n      log/ [42 .go]\n        internal/ [1 .go]\n        slog/ [33 .go]\n        syslog/ [5 .go]\n      maps/ [3 .go, 1 .s]\n      math/ [158 .go, 50 .s]\n        big/ [49 .go, 11 .s]\n        bits/ [10 .go]\n        cmplx/ [17 .go]\n        rand/ [13 .go]\n      mime/ [28 .go, 1 .plan9, 1 .types, 1 .globs2, 1 (no ext)]\n        multipart/ [8 .go, 1 (no ext)]\n        quotedprintable/ [5 .go]\n        testdata/ [1 .plan9, 1 .types, 1 .globs2]\n      net/ [353 .go, 14 .conf, 9 (no ext), 1 .html, 1 .css, +1 more]\n        http/ [95 .go, 1 (no ext), 1 .html, 1 .cgi, 1 .css]\n        internal/ [11 .go]\n        mail/ [3 .go]\n        netip/ [10 .go]\n        rpc/ [8 .go]\n        smtp/ [4 .go]\n        testdata/ [14 .conf, 8 (no ext)]\n        textproto/ [8 .go]\n        url/ [3 .go]\n      os/ [185 .go, 1 .s, 1 (no ext)]\n        exec/ [28 .go]\n        signal/ [11 .go, 1 .s]\n        testdata/ [1 (no ext)]\n        user/ [20 .go]\n      path/ [23 .go]\n        filepath/ [18 .go]\n      plugin/ [4 .go]\n      reflect/ [22 .go, 13 .s]\n        internal/ [2 .go]\n      regexp/ [21 .go, 3 .dat, 1 .txt, 1 .pl, 1 (no ext), +1 more]\n        syntax/ [11 .go, 1 .pl]\n        testdata/ [3 .dat, 1 .txt, 1 (no ext), 1 .c]\n      runtime/ [739 .go, 218 .s, 68 .c, 14 .h, 11 .S, +5 more]\n        asan/ [1 .go]\n        cgo/ [50 .c, 16 .go, 12 .s, 11 .S, 7 .h]\n        coverage/ [6 .go, 1 .s]\n        debug/ [9 .go, 3 (no ext), 1 .s]\n        internal/ [46 .go, 24 .s]\n        metrics/ [7 .go]\n        msan/ [1 .go]\n        pprof/ [22 .go, 5 (no ext)]\n        race/ [37 .go, 11 .syso, 1 .sh, 1 (no ext)]\n        testdata/ [81 .go, 18 .c, 2 .s]\n        trace/ [6 .go]\n      slices/ [8 .go]\n      sort/ [15 .go]\n      strconv/ [31 .go, 1 .txt]\n        testdata/ [1 .txt]\n      strings/ [16 .go]\n      sync/ [32 .go, 2 .s]\n        atomic/ [6 .go, 2 .s]\n      syscall/ [298 .go, 37 .s, 8 .pl, 3 .sh]\n        js/ [4 .go, 1 .s]\n      testdata/ [1 .txt]\n      testing/ [38 .go]\n        fstest/ [4 .go]\n        internal/ [1 .go]\n        iotest/ [7 .go]\n        quick/ [2 .go]\n        slogtest/ [2 .go]\n      text/ [23 .go, 4 .tmpl]\n        scanner/ [3 .go]\n        tabwriter/ [3 .go]\n        template/ [17 .go, 4 .tmpl]\n      time/ [38 .go, 4 (no ext)]\n        testdata/ [4 (no ext)]\n        tzdata/ [2 .go]\n      unicode/ [16 .go]\n        utf16/ [3 .go]\n        utf8/ [3 .go]\n      unsafe/ [1 .go]\n      vendor/ [1 .txt]\n    test/ [3141 .go, 79 .out, 10 .s, 2 (no ext), 1 .c, +1 more]\n      abi/ [38 .go, 14 .out]\n      alias3.dir/ [3 .go]\n      arenas/ [1 .go]\n      asmhdr.dir/ [1 .s, 1 .go]\n      chan/ [19 .go]\n      closure3.dir/ [1 .go]\n      closure5.dir/ [2 .go]\n      codegen/ [53 .go, 1 (no ext)]\n      ddd2.dir/ [2 .go]\n      dwarf/ [23 .go]\n        dwarf.dir/ [21 .go]\n      fixedbugs/ [2117 .go, 34 .out, 8 .s]\n        bug083.dir/ [2 .go]\n        bug088.dir/ [2 .go]\n        bug106.dir/ [2 .go]\n        bug133.dir/ [3 .go]\n        bug160.dir/ [2 .go]\n        bug191.dir/ [3 .go]\n        bug222.dir/ [2 .go]\n        bug248.dir/ [4 .go]\n        bug282.dir/ [2 .go]\n        bug306.dir/ [2 .go]\n        bug313.dir/ [2 .go]\n        bug322.dir/ [2 .go]\n        bug324.dir/ [2 .go]\n        bug335.dir/ [2 .go]\n        bug345.dir/ [2 .go]\n        bug367.dir/ [2 .go]\n        bug369.dir/ [2 .go]\n        bug377.dir/ [2 .go]\n        bug382.dir/ [2 .go]\n        bug392.dir/ [3 .go]\n        bug396.dir/ [2 .go]\n        bug404.dir/ [2 .go]\n        bug407.dir/ [2 .go]\n        bug414.dir/ [2 .go]\n        bug415.dir/ [2 .go]\n        bug424.dir/ [2 .go]\n        bug437.dir/ [3 .go]\n        bug448.dir/ [2 .go]\n        bug460.dir/ [2 .go]\n        bug465.dir/ [2 .go]\n        bug466.dir/ [2 .go]\n        bug467.dir/ [3 .go]\n        bug468.dir/ [2 .go]\n        bug472.dir/ [3 .go]\n        bug478.dir/ [2 .go]\n        bug479.dir/ [2 .go]\n        bug480.dir/ [2 .go]\n        bug488.dir/ [2 .go]\n        bug492.dir/ [2 .go]\n        bug504.dir/ [4 .go]\n        bug506.dir/ [2 .go]\n        bug507.dir/ [3 .go]\n        bug510.dir/ [2 .go]\n        bug511.dir/ [2 .go]\n        gcc67968.dir/ [2 .go]\n        issue10066.dir/ [2 .go]\n        issue10219.dir/ [3 .go]\n        issue10700.dir/ [2 .go]\n        issue11053.dir/ [2 .go]\n        issue11656.dir/ [3 .go, 2 .s]\n        issue12677.dir/ [2 .go]\n        issue13777.dir/ [2 .go]\n        issue14164.dir/ [2 .go]\n        issue14331.dir/ [2 .go]\n        issue15071.dir/ [2 .go]\n        issue15470.dir/ [2 .go]\n        issue15514.dir/ [3 .go]\n        issue15548.dir/ [3 .go]\n        issue15572.dir/ [2 .go]\n        issue15609.dir/ [3 .go, 2 .s]\n        issue15646.dir/ [2 .go]\n        issue15838.dir/ [2 .go]\n        issue15920.dir/ [2 .go]\n        issue16133.dir/ [4 .go]\n        issue16317.dir/ [2 .go]\n        issue16616.dir/ [3 .go]\n        issue18419.dir/ [2 .go]\n        issue18895.dir/ [2 .go]\n        issue18911.dir/ [2 .go]\n        issue19028.dir/ [2 .go]\n        issue19261.dir/ [2 .go]\n        issue19467.dir/ [2 .go]\n        issue19507.dir/ [1 .go, 1 .s]\n        issue19548.dir/ [2 .go]\n        issue19699.dir/ [2 .go]\n        issue19764.dir/ [2 .go]\n        issue20014.dir/ [2 .go]\n        issue20682.dir/ [3 .go]\n        issue21120.dir/ [3 .go]\n        issue22877.dir/ [1 .go, 1 .s]\n        issue22941.dir/ [3 .go]\n        issue22962.dir/ [2 .go]\n        issue23179.dir/ [2 .go]\n        issue23311.dir/ [1 .go]\n        issue24693.dir/ [3 .go]\n        issue24761.dir/ [2 .go]\n        issue24801.dir/ [2 .go]\n        issue25055.dir/ [2 .go]\n        issue25984.dir/ [2 .go]\n        issue26341.dir/ [2 .go]\n        issue27836.dir/ [2 .go]\n        issue29610.dir/ [3 .go]\n        issue29612.dir/ [3 .go]\n        issue29919.dir/ [2 .go]\n        issue30659.dir/ [2 .go]\n        issue30862.dir/ [3 .go]\n        issue30907.dir/ [2 .go]\n        issue30908.dir/ [3 .go]\n        issue31053.dir/ [2 .go]\n        issue31252.dir/ [4 .go]\n        issue31636.dir/ [4 .go]\n        issue31637.dir/ [2 .go]\n        issue31959.dir/ [2 .go]\n        issue32595.dir/ [3 .go]\n        issue32778.dir/ [2 .go]\n        issue32901.dir/ [4 .go]\n        issue32922.dir/ [2 .go]\n        issue33013.dir/ [4 .go]\n        issue33020.dir/ [2 .go]\n        issue33020a.dir/ [2 .go]\n        issue33158.dir/ [2 .go]\n        issue33219.dir/ [3 .go]\n        issue33739.dir/ [2 .go]\n        issue33866.dir/ [2 .go]\n        issue34503.dir/ [2 .go]\n        issue34577.dir/ [2 .go]\n        issue3552.di\n[TRUNCATED]```\n",
+    "tools_canonical": [
+      {
+        "type": "function",
+        "function": {
+          "name": "tree",
+          "description": "Get a files tree for the project. Shows file sizes and line counts. Folders with many files are truncated (controlled by max_files). Hidden folders, __pycache__, node_modules, and binary files are excluded.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "An absolute path to get files tree for. Do not pass it if you need a full project tree."
+              },
+              "use_ast": {
+                "type": "boolean",
+                "description": "If true, for each file an array of AST symbols will appear as well as its filename"
+              },
+              "max_files": {
+                "type": "integer",
+                "description": "Maximum files to show per folder before truncating (default: 10). Root folder is never truncated."
+              }
+            },
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "cat",
+          "description": "Like cat in console, but better: it can read multiple files and images. Prefer to open full files.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "paths"
+            ],
+            "properties": {
+              "paths": {
+                "type": "string",
+                "description": "Comma separated file names or directories: dir1/file1.ext,dir3/dir4."
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "add_workspace_folder",
+          "description": "Add a folder to the workspace so its files become available for search and editing. Use this when you need to access files in a directory that isn't currently indexed (e.g., submodules, extra_repos, or external directories).",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Absolute path to the folder to add to the workspace."
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "search_pattern",
+          "description": "Search for files and folders whose names or paths match the given regular expression pattern, and also search for text matches inside files using the same pattern. Reports both path matches and text matches in separate sections.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "pattern": {
+                "type": "string",
+                "description": "The pattern is used to search for matching file/folder names/paths, and also for matching text inside files. Use (?i) at the start for case-insensitive search."
+              },
+              "scope": {
+                "type": "string",
+                "description": "'workspace' to search all files in workspace, 'dir/subdir/' to search in files within a directory, 'dir/file.ext' to search in a single file."
+              },
+              "context_lines": {
+                "type": "integer",
+                "description": "Lines of context before/after each match (default: 5)."
+              },
+              "max_files": {
+                "type": "integer",
+                "description": "Max files to attach as context (default: 50)."
+              },
+              "max_matches_per_file": {
+                "type": "integer",
+                "description": "Max matches per file to include (default: 25)."
+              },
+              "max_total_matches": {
+                "type": "integer",
+                "description": "Max total matches to attach as context (default: 200)."
+              }
+            },
+            "required": [
+              "pattern",
+              "scope"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "search_symbol_definition",
+          "description": "Find definition of a symbol in the project using AST",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "symbols"
+            ],
+            "properties": {
+              "symbols": {
+                "type": "string",
+                "description": "Comma-separated list of symbols to search for (functions, methods, classes, type aliases). No spaces allowed in symbol names."
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "activate_skill",
+          "description": "Load a skill's full instructions into the current context. Use when you determine a skill from the available index is relevant to the user's request. Once activated, the skill's instructions guide your approach. When you're done with the skill's task, you MUST call deactivate_skill with a thorough report.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name of the skill to activate"
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "deactivate_skill",
+          "description": "Deactivate the currently active skill with a completion report. The report should be a thorough overview of what was done, what happened, and what was changed. After deactivation, the skill execution messages are compacted into the report, keeping chat history clean while preserving knowledge of what occurred.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "report"
+            ],
+            "properties": {
+              "report": {
+                "type": "string",
+                "description": "A thorough overview of what was done, what happened, what was changed during the skill execution. Use clear markdown formatting."
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "knowledge",
+          "description": "Searches project knowledge base for relevant information. Uses semantic search and knowledge graph expansion.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "search_key"
+            ],
+            "properties": {
+              "search_key": {
+                "type": "string",
+                "description": "Search query for the knowledge database."
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "create_knowledge",
+          "description": "Creates a new knowledge entry. Uses AI to enrich metadata and check for outdated documents. Use it if you need to remember something.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "description": "The knowledge content to store."
+              },
+              "tags": {
+                "type": "string",
+                "description": "Comma-separated tags (optional, will be auto-enriched)."
+              },
+              "filenames": {
+                "type": "string",
+                "description": "Comma-separated related file paths (optional, will be auto-enriched)."
+              }
+            },
+            "required": [
+              "content"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "search_trajectories",
+          "description": "Search past chat trajectories for relevant patterns, solutions, and context. Returns matching trajectory IDs with message ranges that can be expanded using get_trajectory_context.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Search query to find relevant past conversations."
+              },
+              "top_n": {
+                "type": "string",
+                "description": "Maximum number of trajectories to return (default: 5)."
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_trajectory_context",
+          "description": "Get more context from a specific trajectory around given message indices.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "trajectory_id": {
+                "type": "string",
+                "description": "The trajectory ID to retrieve context from."
+              },
+              "message_start": {
+                "type": "string",
+                "description": "Starting message index."
+              },
+              "message_end": {
+                "type": "string",
+                "description": "Ending message index."
+              },
+              "expand_by": {
+                "type": "string",
+                "description": "Number of messages to include before/after (default: 3)."
+              }
+            },
+            "required": [
+              "trajectory_id",
+              "message_start",
+              "message_end"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "web",
+          "description": "Fetch a web page and convert to readable plain text. Supports regular web pages, PDFs, and JavaScript-rendered pages. Uses Jina Reader API with automatic fallback.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "URL of the web page to fetch."
+              },
+              "options": {
+                "type": "object",
+                "description": "Jina Reader API options passed as request headers.",
+                "properties": {
+                  "respond_with": {
+                    "type": "string",
+                    "description": "Controls response format (x-respond-with header)."
+                  },
+                  "target_selector": {
+                    "type": "string",
+                    "description": "CSS selector to extract a specific element (x-target-selector header)."
+                  },
+                  "wait_for_selector": {
+                    "type": "string",
+                    "description": "CSS selector to wait for before returning content (x-wait-for-selector header)."
+                  },
+                  "timeout": {
+                    "type": "number",
+                    "description": "Request timeout in seconds (x-timeout header)."
+                  },
+                  "no_cache": {
+                    "type": "boolean",
+                    "description": "Bypass Jina cache when true (x-no-cache header)."
+                  },
+                  "cache_tolerance": {
+                    "type": "number",
+                    "description": "Cache staleness tolerance in seconds (x-cache-tolerance header)."
+                  },
+                  "with_generated_alt": {
+                    "type": "boolean",
+                    "description": "Include AI-generated alt text for images (x-with-generated-alt header)."
+                  },
+                  "streaming": {
+                    "type": "boolean",
+                    "description": "Stream the response as SSE (sets Accept: text/event-stream)."
+                  },
+                  "set_cookie": {
+                    "type": "string",
+                    "description": "Cookie string to send with the request (x-set-cookie header)."
+                  },
+                  "proxy_url": {
+                    "type": "string",
+                    "description": "Proxy URL to route the request through (x-proxy-url header)."
+                  }
+                }
+              },
+              "output_filter": {
+                "type": "string",
+                "description": "Optional regex pattern to filter output lines. Only lines matching this pattern (and context) will be shown."
+              },
+              "output_limit": {
+                "type": "string",
+                "description": "Optional. Max lines to show (default: 200). Use higher values like '500' or 'all' to see more output."
+              }
+            },
+            "required": [
+              "url"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "web_search",
+          "description": "Search the web and return results with titles, URLs, and snippets. Uses free general and scoped sources such as DuckDuckGo, SearxNG, Wikipedia, GitHub, Stack Overflow, npm, OpenAlex, Crossref, Hacker News, and Brave Search when BRAVE_SEARCH_API_KEY is configured.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "Search query."
+              },
+              "num_results": {
+                "type": "integer",
+                "description": "Optional. Maximum number of results to return (default: 8, max: 20)."
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "shell",
+          "description": "Execute a single command, using the \"sh\" on unix-like systems and \"powershell.exe\" on windows. Use it for one-time tasks like dependencies installation. Don't call this unless you have to. Not suitable for regular work because it requires a confirmation at each step. Output is compressed by default - use output_filter and output_limit parameters to see specific parts if needed. Set run_in_background=true for long-running commands you will inspect later with process_read or process_wait. Set tty=true only when a command needs PTY behavior: it enables interactive stdin and reduces pipe buffering, but merges stdout and stderr into one combined stream. The timeout parameter only applies to foreground commands (run_in_background=false); supplying timeout with run_in_background=true is an error — use process_wait or process_kill instead. In worktree-scoped chats, the default cwd and explicit workdir are enforced to the active worktree or privacy-permitted outside paths with visible warnings; the shell command text itself is not OS-sandboxed. Note: sudo commands cannot be run - if you need elevated privileges, ask the user to run them directly.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "description": "shell command to execute"
+              },
+              "description": {
+                "type": "string",
+                "description": "Required. A single concise active-voice sentence describing what the command does. Short for simple commands: 'List files in current directory'. More descriptive for piped/obscure commands: 'Find and delete all .tmp files recursively'. Never use words like 'complex' or 'risk'."
+              },
+              "workdir": {
+                "type": "string",
+                "description": "workdir for the command"
+              },
+              "output_filter": {
+                "type": "string",
+                "description": "Optional regex pattern to filter output lines. Only lines matching this pattern (and context) will be shown. Use to find specific errors or content in large outputs."
+              },
+              "output_limit": {
+                "type": "string",
+                "description": "Optional. Max lines to show (default: 40). Use higher values like '200' or 'all' to see more output."
+              },
+              "timeout": {
+                "oneOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "description": "Optional. Timeout in seconds for the command (default: 10). Use higher values for long-running commands. Only applies to foreground commands; rejected when run_in_background=true."
+              },
+              "tty": {
+                "type": "boolean",
+                "default": false,
+                "description": "If true, run the command attached to a pseudo-terminal (PTY). Enables interactive stdin via process_write_stdin and merges stdout+stderr into a single combined stream. Defeats some pipe-only output buffering. Defaults to false."
+              },
+              "run_in_background": {
+                "type": "boolean",
+                "default": false,
+                "description": "Set to true to run this command in the background. Returns immediately with a process_id. Use process_read or process_wait to retrieve output later. You will receive a process_completed event when the process exits. Do not use '&' at the end of the command."
+              }
+            },
+            "required": [
+              "command",
+              "description"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "apply_patch",
+          "description": "Apply file operations using the patch format.\n\nThe patch format is a file-oriented diff format:\n\n*** Begin Patch\n[ one or more file sections ]\n*** End Patch\n\nFile operations:\n- *** Add File: <path> - create new file (lines start with +)\n- *** Delete File: <path> - remove existing file\n- *** Update File: <path> - modify file in place\n  - Optional: *** Move to: <new_path> - rename after update\n\nUpdate hunks use @@ for context hints:\n@@ class BaseClass\n@@ def method():\n context line (space prefix)\n-old line (minus prefix)\n+new line (plus prefix)\n\nRules:\n- Show 3 lines of context above/below each change\n- Use @@ to narrow scope when needed for uniqueness\n- Multiple @@ can be chained for precision\n- Use *** End of File for appending at end",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "patch"
+            ],
+            "properties": {
+              "patch": {
+                "type": "string",
+                "description": "The patch content in envelope format:\n*** Begin Patch\n*** Add File: path/to/new.txt\n+content line 1\n+content line 2\n*** Update File: path/to/existing.txt\n@@ function_name\n context\n-old\n+new\n*** Delete File: path/to/remove.txt\n*** End Patch"
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "rm",
+          "description": "Deletes a file or directory. Use recursive=true for directories. Set dry_run=true to preview without deletion.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Absolute or relative path of the file or directory to delete."
+              },
+              "recursive": {
+                "type": "boolean",
+                "description": "If true and target is a directory, delete recursively. Defaults to false."
+              },
+              "dry_run": {
+                "type": "boolean",
+                "description": "If true, only report what would be done without deleting."
+              },
+              "max_depth": {
+                "type": "number",
+                "description": "(Optional) Maximum depth (currently unused)."
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "mv",
+          "description": "Moves or renames files and directories. If a simple rename fails due to a cross-device error and the source is a file, it falls back to copying and deleting. Use overwrite=true to replace an existing target.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "description": "Path of the file or directory to move."
+              },
+              "destination": {
+                "type": "string",
+                "description": "Target path where the file or directory should be placed."
+              },
+              "overwrite": {
+                "type": "boolean",
+                "description": "If true and target exists, replace it. Defaults to false."
+              }
+            },
+            "required": [
+              "source",
+              "destination"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "subagent",
+          "description": "Spawn a non-editing research subagent that works independently. Background by default; pass wait=true to block until it finishes. Use this for investigation, code exploration, shell-backed inspection, and analysis. For implementation/editing tasks use `delegate()`.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "What the subagent should investigate. Be specific about scope and goal."
+              },
+              "expected_result": {
+                "type": "string",
+                "description": "What a successful finding looks like (e.g. 'list of files calling X with line numbers')."
+              },
+              "tools": {
+                "type": "string",
+                "description": "Optional comma-separated analysis tools (e.g. 'cat,tree,search_pattern,shell'). Empty means use the configured `subagent` toolset."
+              },
+              "max_steps": {
+                "type": "string",
+                "description": "Step budget (default 15, max 50)."
+              },
+              "wait": {
+                "type": "string",
+                "description": "If 'true', block until the subagent finishes and return its full result. Default 'false' (background)."
+              }
+            },
+            "required": [
+              "task",
+              "expected_result"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "strategic_planning",
+          "description": "Strategically plan a solution for a complex problem or create a comprehensive approach. Automatically identifies relevant files from the codebase.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {}
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "code_review",
+          "description": "Perform a thorough code review. Optionally pass `what_to_check` (focus/scope) and `files` (initial guess of relevant paths — the reviewer starts there and finds more). Finds all related files and checks for bugs, broken integration/wiring, missing tests, inconsistency, and AI-generated 'slop'.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "what_to_check": {
+                "type": "string",
+                "description": "Optional. What to review and what to look for (focus/scope). If omitted, the scope is inferred from the conversation."
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Optional. Initial guess of relevant file paths. The reviewer starts from these and still searches for more related files."
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "deep_research",
+          "description": "Conduct comprehensive web research on a topic. Use this tool when you need up-to-date information from the internet, market analysis, technical documentation research, or synthesis of information from multiple web sources. The research takes several minutes and produces a detailed, citation-rich report. Do NOT use for questions about the current codebase - use code exploration tools instead.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "research_query"
+            ],
+            "properties": {
+              "research_query": {
+                "type": "string",
+                "description": "A detailed research question or topic. Be specific: include the scope, what comparisons or metrics you need, any preferred sources, and the desired output format. Example: 'Research the current best practices for Rust async error handling in 2024, comparing tokio vs async-std approaches, with code examples and performance considerations.'"
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "tasks_set",
+          "description": "Set the task progress list shown to the user. Use to track multi-step work. Pass complete task list each time (replaces previous). Each task needs: id (unique string), content (description), status (pending/in_progress/completed/failed).",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tasks"
+            ],
+            "properties": {
+              "tasks": {
+                "type": "array",
+                "description": "Complete task list (replaces previous). Each task needs id, content, and status.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "content",
+                    "status"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Unique task identifier (1-50 chars)."
+                    },
+                    "content": {
+                      "type": "string",
+                      "description": "Task description (1-500 chars)."
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "Task status.",
+                      "enum": [
+                        "pending",
+                        "in_progress",
+                        "completed",
+                        "failed"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "task_done",
+          "description": "Mark the current task as complete with a detailed report. Automatically saves to knowledge base. Use as the FINAL action when a task is fully completed.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "report": {
+                "type": "string",
+                "description": "Detailed markdown report of what was accomplished"
+              },
+              "summary": {
+                "type": "string",
+                "description": "One-line summary for notifications and titles"
+              },
+              "files_changed": {
+                "type": "string",
+                "description": "Comma-separated list or JSON array of file paths that were modified"
+              }
+            },
+            "required": [
+              "report",
+              "summary"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "ask_questions",
+          "description": "Present questions to the user and wait for answers. Stops generation until user responds. Question types: yes_no, single_select, multi_select, free_text.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "questions": {
+                "type": "array",
+                "description": "List of questions to present to the user.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Unique identifier for the question."
+                    },
+                    "type": {
+                      "type": "string",
+                      "description": "Question type: yes_no, single_select, multi_select, or free_text.",
+                      "enum": [
+                        "yes_no",
+                        "single_select",
+                        "multi_select",
+                        "free_text"
+                      ]
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The question text to display to the user."
+                    },
+                    "options": {
+                      "type": "array",
+                      "description": "Options for single_select or multi_select questions.",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "text"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "questions"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "set_plan",
+          "description": "Install the chat's single detailed implementation plan (Markdown). Provide exactly one of `content` (full plan body) or `path` (absolute path to a `.md` report). Fails if a plan already exists — use `update_plan` to evolve it.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "description": "Full Markdown plan body. Optional; provide exactly one of content or path."
+              },
+              "path": {
+                "type": "string",
+                "description": "Absolute path to a .md report to install as the plan"
+              },
+              "summary": {
+                "type": "string",
+                "description": "Short description of what changed, ≤120 chars. Optional."
+              }
+            },
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "update_plan",
+          "description": "Append an incremental update to the current plan (cache-safe delta merged into the current plan). Use when the plan evolves; it does not rewrite the original plan.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "note": {
+                "type": "string",
+                "description": "Plan update note. Required."
+              },
+              "summary": {
+                "type": "string",
+                "description": "Short description of what changed, ≤120 chars. Optional."
+              }
+            },
+            "required": [
+              "note"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_plan",
+          "description": "Read the current plan installed on this chat. Returns the merged current content, mode, base version, creation timestamp, and delta count.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {}
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "process_start",
+          "description": "Start a runtime-owned background or service process and return its process ID, initial status, output cursor, and metadata. Set tty=true only when a command needs PTY behavior: it enables interactive stdin and reduces pipe buffering, but merges stdout and stderr into one combined stream.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "description": "Command to start."
+              },
+              "description": {
+                "type": "string",
+                "description": "Required. A single concise active-voice sentence describing what the command does. Short for simple commands: 'Start development server'. More descriptive for piped/obscure commands: 'Build and tail log output in background'. Never use words like 'complex' or 'risk'."
+              },
+              "workdir": {
+                "type": "string",
+                "description": "Optional working directory."
+              },
+              "mode": {
+                "type": "string",
+                "description": "Optional mode: background or service. Default: background."
+              },
+              "service_name": {
+                "type": "string",
+                "description": "Optional service name stored in process metadata."
+              },
+              "startup_wait_ms": {
+                "type": "integer",
+                "description": "Optional milliseconds to wait before returning the initial snapshot."
+              },
+              "startup_wait_port": {
+                "type": "integer",
+                "description": "Optional readiness port stored with startup metadata."
+              },
+              "startup_wait_keyword": {
+                "type": "string",
+                "description": "Optional readiness keyword stored with startup metadata."
+              },
+              "tty": {
+                "type": "boolean",
+                "default": false,
+                "description": "If true, run the command attached to a pseudo-terminal (PTY). Enables interactive stdin via process_write_stdin and merges stdout+stderr into a single combined stream. Defeats some pipe-only output buffering. Defaults to false."
+              }
+            },
+            "required": [
+              "command",
+              "description"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "process_list",
+          "description": "List runtime-owned processes by status and owner scope.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "description": "Optional status filter: running, completed, or all. Default: running."
+              },
+              "scope": {
+                "type": "string",
+                "description": "Optional scope filter: chat, workspace, or all. Default: chat."
+              }
+            },
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "process_read",
+          "description": "Read buffered output from a runtime-owned process using a sequence cursor and optional stream/output filters.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "process_id": {
+                "type": "string",
+                "description": "Runtime-owned process ID returned by process_start."
+              },
+              "since_seq": {
+                "type": "integer",
+                "description": "Optional output sequence cursor. Default: 0."
+              },
+              "stream": {
+                "type": "string",
+                "description": "Optional stream: stdout, stderr, combined, or all. Default: combined."
+              },
+              "from_disk": {
+                "type": "boolean",
+                "description": "Optional. If true and persisted output exists, read the full on-disk transcript instead of the in-memory ring."
+              },
+              "output_filter": {
+                "type": "string",
+                "description": "Optional regex filter for output lines."
+              },
+              "output_limit": {
+                "type": "string",
+                "description": "Optional max lines to show, or all/full for unlimited output."
+              }
+            },
+            "required": [
+              "process_id"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "process_wait",
+          "description": "Wait for a runtime-owned process to complete, or return the current snapshot when timeout_ms expires.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "process_id": {
+                "type": "string",
+                "description": "Runtime-owned process ID returned by process_start."
+              },
+              "timeout_ms": {
+                "type": "integer",
+                "description": "Optional timeout in milliseconds."
+              }
+            },
+            "required": [
+              "process_id"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "process_kill",
+          "description": "Kill a runtime-owned process by process ID without routing through shell command confirmation.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "process_id"
+            ],
+            "properties": {
+              "process_id": {
+                "type": "string",
+                "description": "Runtime-owned process ID returned by process_start."
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "process_write_stdin",
+          "description": "Write input to a running PTY-backed process's stdin (process must be started with tty=true) and wait briefly for new output. Pass empty 'chars' to poll for new output without writing.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "process_id": {
+                "type": "string"
+              },
+              "chars": {
+                "type": "string",
+                "default": ""
+              },
+              "yield_time_ms": {
+                "type": "integer",
+                "default": 250,
+                "minimum": 0,
+                "maximum": 10000
+              }
+            },
+            "required": [
+              "process_id"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "process_subscribe",
+          "description": "Subscribe to a running process's stdout for a bounded window. Each output line that matches the optional regex_filter is injected as a notification event in the chat. Auto-cancels when the process exits or after max_duration_ms. Useful for waiting for 'ready' markers, watching for failures, etc.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "process_id": {
+                "type": "string"
+              },
+              "regex_filter": {
+                "type": "string",
+                "description": "Optional regex. Only matching lines fire notifications. Empty = all lines."
+              },
+              "max_duration_ms": {
+                "type": "integer",
+                "default": 30000,
+                "minimum": 1000,
+                "maximum": 600000
+              },
+              "max_events": {
+                "type": "integer",
+                "default": 100,
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "max_line_bytes": {
+                "type": "integer",
+                "default": 8192,
+                "minimum": 11,
+                "maximum": 65536
+              }
+            },
+            "required": [
+              "process_id"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "clean_background_processes",
+          "description": "Kill and reap all non-terminal background processes owned by the current chat. Use to clean up after experiments. `scope=chat` (default) is available in normal chats. `scope=workspace`, `scope=all`, and `include_services=true` can execute only from planner/admin context and cannot be used by normal agents.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "chat",
+                  "owner",
+                  "workspace",
+                  "all"
+                ],
+                "default": "chat",
+                "description": "Which set of processes to target. `chat` (default) kills processes owned by the current chat — available in normal chats. `owner` is a compatibility alias for `chat`. `workspace` kills processes in the active workspace and can execute only from planner/admin context. `all` kills every process globally and can execute only from planner/admin context."
+              },
+              "include_services": {
+                "type": "boolean",
+                "default": false,
+                "description": "Also kill Service-mode processes. Can execute only from planner/admin context; normal agents must leave this false."
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "sleep",
+          "description": "Wait for the specified duration. User-interruptible at any time. Use when you have nothing to do, when waiting for something, or when the user asks you to pause. Prefer this over Bash(sleep ...) — it doesn't hold a shell process. You can call this concurrently with other tools.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "duration_ms": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 3600000,
+                "description": "Sleep duration in ms (max 1h)."
+              },
+              "tick_interval_ms": {
+                "type": "integer",
+                "minimum": 5000,
+                "description": "Optional. If set, tick markers are collected during sleep and enqueued after the sleep tool result to preserve provider tool-result ordering. Sleep remains user-interruptible at any time."
+              },
+              "description": {
+                "type": "string",
+                "description": "Short description (≤80 chars)."
+              }
+            },
+            "required": [
+              "duration_ms",
+              "description"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "cron_create",
+          "description": "Schedule a prompt to be enqueued later. Use a standard 5-field cron expression (`minute hour day-of-month month day-of-week`) evaluated in the local timezone. Set `recurring` to true for repeated prompts or false for a one-shot prompt that is removed after it fires. Set `durable` to true when the job should survive engine restarts in the current project; leave it false for a session-only in-memory schedule. Scheduler jitter is applied automatically so jobs may run shortly after the exact cron instant. Recurring jobs auto-expire after 30 days unless canceled earlier.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "cron": {
+                "type": "string",
+                "description": "Standard 5-field cron expression in local time."
+              },
+              "prompt": {
+                "type": "string",
+                "description": "Prompt enqueued at each fire time."
+              },
+              "recurring": {
+                "type": "boolean",
+                "default": true
+              },
+              "durable": {
+                "type": "boolean",
+                "default": false
+              },
+              "description": {
+                "type": "string",
+                "description": "Short description (≤80 chars) shown in cron_list UI."
+              }
+            },
+            "required": [
+              "cron",
+              "prompt",
+              "description"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "cron_list",
+          "description": "List scheduled tasks with target chat and mode, optionally filtering by session-only or durable scope.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "session",
+                  "durable",
+                  "all"
+                ],
+                "default": "all"
+              }
+            },
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "cron_delete",
+          "description": "Cancel a scheduled task by ID.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            }
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "compress_chat_probe",
+          "description": "Analyze the current chat and report token distribution plus potential compression gains.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {}
+          },
+          "strict": true
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "compress_chat_apply",
+          "description": "Apply selective compression to the current chat using explicit drop/truncate lists.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "drop_context_files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "List of context file names to drop entirely"
+              },
+              "drop_memories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Memory/knowledge file paths to drop"
+              },
+              "drop_context_messages": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Context-file message tool_call_id values to drop entirely"
+              },
+              "drop_all_memories": {
+                "type": "boolean",
+                "description": "Drop all memory/knowledge context files"
+              },
+              "truncate_tool_outputs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Tool call IDs to truncate"
+              },
+              "drop_tool_outputs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Tool call IDs to drop (replaced with a short placeholder)"
+              },
+              "dedup_context_files": {
+                "type": "boolean",
+                "description": "Deduplicate repeated context files"
+              },
+              "drop_project_information": {
+                "type": "boolean",
+                "description": "Drop system/project info messages"
+              },
+              "target_tokens": {
+                "type": "integer",
+                "description": "Target total token count after compression"
+              },
+              "strength": {
+                "type": "string",
+                "enum": [
+                  "conservative",
+                  "balanced",
+                  "aggressive"
+                ],
+                "description": "conservative=explicit ops only, balanced=+auto dedup, aggressive=+dedup and reports when LLM segment summarization is required"
+              },
+              "preserve_last_turns": {
+                "type": "integer",
+                "description": "Number of recent user/assistant turns to keep unmodified"
+              },
+              "dry_run": {
+                "type": "boolean",
+                "description": "Preview compression stats without applying changes"
+              }
+            },
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "handoff_to_mode",
+          "description": "Create a new chat in another mode using the current conversation context.\n\nAvailable modes:\n- agent: Full multi-step workflow with tools and editing capabilities\n- ask: Quick Q&A with web research capability\n- brainstorming: Turn rough ideas into approved designs before planning or implementation\n- debug: Systematic bug diagnosis and root cause analysis\n- explore: Read-only exploration for context gathering without editing\n- learn: Understand code with clear explanations\n- past_work: Search conversation history and project knowledge\n- plan: Turn approved designs or requirements into precise implementation plans\n- quick_agent: Fast autonomous coding with minimal overhead\n- review: Autonomous code review that fans out waves of parallel reviews\n- setup: Analyze the project and configure Refact artifacts (AGENTS, commands, skills, subagents, integrations, knowledge)\n- shell: Execute shell commands for system tasks\n- ultra_agent: Deep autonomous coding mode with xhigh reasoning defaults, aggressive orchestration, subagents, delegates, and verificat...",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "target_mode": {
+                "type": "string",
+                "description": "Target mode ID. Available modes:\n- agent: Full multi-step workflow with tools and editing capabilities\n- ask: Quick Q&A with web research capability\n- brainstorming: Turn rough ideas into approved designs before planning or implementation\n- debug: Systematic bug diagnosis and root cause analysis\n- explore: Read-only exploration for context gathering without editing\n- learn: Understand code with clear explanations\n- past_work: Search conversation history and project knowledge\n- plan: Turn approved designs or requirements into precise implementation plans\n- quick_agent: Fast autonomous coding with minimal overhead\n- review: Autonomous code review that fans out waves of parallel reviews\n- setup: Analyze the project and configure Refact artifacts (AGENTS, commands, skills, subagents, integrations, knowledge)\n- shell: Execute shell commands for system tasks\n- ultra_agent: Deep autonomous coding mode with xhigh reasoning defaults, aggressive orchestration, subagents, delegates, and verificat...",
+                "enum": [
+                  "agent",
+                  "ask",
+                  "brainstorming",
+                  "debug",
+                  "explore",
+                  "learn",
+                  "past_work",
+                  "plan",
+                  "quick_agent",
+                  "review",
+                  "setup",
+                  "shell",
+                  "ultra_agent"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "description": "Why the new mode is appropriate"
+              },
+              "summary": {
+                "type": "string",
+                "description": "Optional summary to include in the handoff context"
+              },
+              "context_summary": {
+                "type": "string",
+                "description": "Summary of what has been done and what to continue"
+              },
+              "files_to_open": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "File paths to include in the new chat"
+              },
+              "key_files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Key files to carry over (alias of files_to_open)"
+              },
+              "messages_to_preserve": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "MSG_ID entries to preserve verbatim"
+              },
+              "memories_to_include": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Memory/knowledge file paths to include"
+              },
+              "tool_outputs_to_include": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "MSG_ID entries of tool outputs to include"
+              },
+              "pending_tasks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Pending tasks to carry forward"
+              },
+              "handoff_message": {
+                "type": "string",
+                "description": "Short handoff message for the new chat"
+              },
+              "initial_plan": {
+                "type": "string",
+                "description": "Optional plan text to save as the initial task document when target_mode is task_planner"
+              }
+            },
+            "required": [
+              "target_mode"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "root_chat_id": "aef6c070-88b7-48fe-adbe-1f556ce6a34c",
+  "updated_at": "2026-06-08T03:31:46.888606380+00:00"
+}

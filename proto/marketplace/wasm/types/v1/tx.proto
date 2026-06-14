@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package marketplace.wasm.types.v1;
+
+option go_package = "github.com/tmp/marketplace/x/wasm/types";
+
+import "gogoproto/gogo.proto";
+import "google/protobuf/any.proto";
+
+// MsgStoreCode stores wasm contract code
+message MsgStoreCode {
+  bytes wasm_code = 1 [(gogoproto.jsontag) = "wasm_code"];
+  string sender = 2 [(gogoproto.jsontag) = "sender"];
+}
+
+// MsgStoreCodeResponse is the response for MsgStoreCode
+message MsgStoreCodeResponse {
+  uint64 code_id = 1 [(gogoproto.jsontag) = "code_id"];
+}
+
+// MsgInstantiateContract instantiates a wasm contract
+message MsgInstantiateContract {
+  string sender = 1 [(gogoproto.jsontag) = "sender"];
+  uint64 code_id = 2 [(gogoproto.jsontag) = "code_id"];
+  string label = 3 [(gogoproto.jsontag) = "label"];
+  bytes init_msg = 4 [(gogoproto.jsontag) = "init_msg"];
+}
+
+// MsgInstantiateContractResponse is the response for MsgInstantiateContract
+message MsgInstantiateContractResponse {
+  string contract_address = 1 [(gogoproto.jsontag) = "contract_address"];
+}

@@ -1,0 +1,11 @@
+syntax = "proto3";
+package marketplace.mallpoints.v1;
+
+option go_package = "github.com/tmp/marketplace/x/mallpoints/types";
+
+// ConversionWindow defines the ConversionWindow message.
+message ConversionWindow {
+  bool is_open = 1;
+  uint64 current_month = 2;
+  uint64 next_opening = 3;
+}

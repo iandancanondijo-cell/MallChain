@@ -1,0 +1,13 @@
+syntax = "proto3";
+package marketplace.badge.v1;
+
+option go_package = "github.com/tmp/marketplace/x/badge/types";
+
+// UserBadge defines the UserBadge message.
+message UserBadge {
+  string index = 1;
+  string address = 2;
+  bool has_badge = 3;
+  uint64 issued_date = 4;
+  string badge_type = 5;
+}

@@ -1,0 +1,13 @@
+syntax = "proto3";
+package marketplace.mallpoints.v1;
+
+option go_package = "github.com/tmp/marketplace/x/mallpoints/types";
+
+// UserPoints defines the UserPoints message.
+message UserPoints {
+  string index = 1;
+  string address = 2;
+  uint64 points = 3;
+  uint64 tasks_completed = 4;
+  uint64 last_earned = 5;
+}

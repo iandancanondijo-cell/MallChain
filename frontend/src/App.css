@@ -1,0 +1,38 @@
+/* Application-level utility styles */
+
+/* Scrollbar styling for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Focus visible for accessibility */
+*:focus-visible {
+  outline: 2px solid #22d3ee;
+  outline-offset: 2px;
+}
+
+/* Smooth page transitions */
+.page-enter {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.page-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+}

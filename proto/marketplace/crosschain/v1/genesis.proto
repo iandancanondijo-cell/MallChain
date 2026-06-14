@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package marketplace.crosschain.v1;
+
+import "gogoproto/gogo.proto";
+import "marketplace/crosschain/v1/tx.proto";
+
+option go_package = "github.com/tmp/marketplace/x/crosschain/types";
+
+// GenesisState defines the crosschain module's genesis state.
+message GenesisState {
+  // params defines the parameters of the module.
+  Params params = 1 [(gogoproto.nullable) = false];
+
+  // bridge_state defines the bridge state at genesis.
+  BridgeState bridge_state = 2 [(gogoproto.nullable) = false];
+}

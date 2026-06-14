@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package marketplace.mlcoin.v1;
+
+option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
+
+// ActivityMetrics tracks community activity for dynamic pricing
+message ActivityMetrics {
+  // total_transactions tracks number of transactions in current period
+  uint64 total_transactions = 1;
+  
+  // total_volume tracks total MLCN volume transacted
+  uint64 total_volume = 2;
+  
+  // active_users tracks number of unique users in current period
+  uint64 active_users = 3;
+  
+  // engagement_score is calculated based on activity (0-1000 scale)
+  uint64 engagement_score = 4;
+  
+  // price_impact_multiplier adjusts market price based on activity (-50 to +50 = -0.5x to +0.5x)
+  int64 price_impact_multiplier = 5;
+  
+  // last_reset_height is the block height of last metrics reset
+  uint64 last_reset_height = 6;
+  
+  // current_period tracks which period these metrics are for (daily/weekly/monthly)
+  string current_period = 7;
+}
+
+// StakingInfo tracks user staking details
+message StakingInfo {
+  string address = 1;
+  uint64 staked_amount = 2;
+  int64 stake_date = 3;
+  uint64 rewards_earned = 4;
+  bool is_active = 5;
+  uint64 unlock_height = 6; // block height when stakes can be withdrawn
+}
+
+// DelegationInfo tracks delegation details
+message DelegationInfo {
+  string delegator = 1;
+  string validator = 2;
+  uint64 amount = 3;
+  int64 delegation_date = 4;
+  uint64 rewards_earned = 5;
+}
+
+// FeesAccumulated tracks accumulated fees for distribution
+message FeesAccumulated {
+  uint64 transaction_fees = 1;
+  uint64 trading_fees = 2;
+  uint64 conversion_fees = 3;
+  int64 last_distribution_time = 4;
+}

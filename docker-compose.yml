@@ -1,0 +1,39 @@
+version: '3.8'
+services:
+  mongo:
+    image: mongo:6.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD must be set}
+      MONGO_INITDB_DATABASE: marketplace
+    volumes:
+      - mongo-data:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    ports:
+      - "127.0.0.1:27017:27017"
+
+  backend:
+    build: ./backend
+    environment:
+      - MONGO_URI=mongodb://mallchain:${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD must be set}@mongo:27017/marketplace?authSource=admin
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set}
+      - SESSION_SECRET=${SESSION_SECRET:?SESSION_SECRET must be set}
+      - FRONTEND_URL=http://localhost:5173
+      - ADMIN_API_KEY=${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
+    ports:
+      - "127.0.0.1:4000:4000"
+    depends_on:
+      - mongo
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE=http://localhost:4000
+    depends_on:
+      - backend
+
+volumes:
+  mongo-data:

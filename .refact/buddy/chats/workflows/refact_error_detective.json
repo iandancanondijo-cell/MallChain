@@ -1,0 +1,1 @@
+{"entries":[{"timestamp":"2026-06-08T03:30:49.058704223+00:00","input_summary":"","output_summary":"LLM error (400 Bad Request): \"store is not supported\"","success":false,"failure_category":"invalid_request","failure_summary":"Invalid provider request. LLM error (400 Bad Request): \"store is not supported\""}]}

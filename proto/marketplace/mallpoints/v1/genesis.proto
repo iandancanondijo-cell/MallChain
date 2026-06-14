@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package marketplace.mallpoints.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+import "marketplace/mallpoints/v1/conversion_window.proto";
+import "marketplace/mallpoints/v1/params.proto";
+import "marketplace/mallpoints/v1/user_points.proto";
+
+option go_package = "github.com/tmp/marketplace/x/mallpoints/types";
+
+// GenesisState defines the mallpoints module's genesis state.
+message GenesisState {
+  // params defines all the parameters of the module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+  repeated UserPoints user_points_map = 2 [(gogoproto.nullable) = false];
+  ConversionWindow conversion_window = 3;
+}

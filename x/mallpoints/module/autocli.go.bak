@@ -1,0 +1,65 @@
+package mallpoints
+
+import (
+	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
+
+	"marketplace/x/mallpoints/types"
+)
+
+// AutoCLIOptions implements the autocli.HasAutoCLIConfig interface.
+func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
+	return &autocliv1.ModuleOptions{
+		Query: &autocliv1.ServiceCommandDescriptor{
+			Service: types.Query_serviceDesc.ServiceName,
+			RpcCommandOptions: []*autocliv1.RpcCommandOptions{
+				{
+					RpcMethod: "Params",
+					Use:       "params",
+					Short:     "Shows the parameters of the module",
+				},
+				{
+					RpcMethod: "ListUserPoints",
+					Use:       "list-user-points",
+					Short:     "List all user-points",
+				},
+				{
+					RpcMethod:      "GetUserPoints",
+					Use:            "get-user-points [id]",
+					Short:          "Gets a user-points",
+					Alias:          []string{"show-user-points"},
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "index"}},
+				},
+				{
+					RpcMethod: "GetConversionWindow",
+					Use:       "get-conversion-window",
+					Short:     "Gets a conversion-window",
+					Alias:     []string{"show-conversion-window"},
+				},
+				// this line is used by ignite scaffolding # autocli/query
+			},
+		},
+		Tx: &autocliv1.ServiceCommandDescriptor{
+			Service:              types.Msg_serviceDesc.ServiceName,
+			EnhanceCustomCommand: true, // only required if you want to use the custom command
+			RpcCommandOptions: []*autocliv1.RpcCommandOptions{
+				{
+					RpcMethod: "UpdateParams",
+					Skip:      true, // skipped because authority gated
+				},
+				{
+					RpcMethod:      "AwardPoints",
+					Use:            "award-points [recipient] [amount] [task-type]",
+					Short:          "Send a award-points tx",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "recipient"}, {ProtoField: "amount"}, {ProtoField: "task_type"}},
+				},
+				{
+					RpcMethod:      "ConvertToMallcoin",
+					Use:            "convert-to-mallcoin [amount]",
+					Short:          "Send a convert-to-mallcoin tx",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "amount"}},
+				},
+				// this line is used by ignite scaffolding # autocli/tx
+			},
+		},
+	}
+}

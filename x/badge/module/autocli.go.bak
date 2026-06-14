@@ -1,0 +1,53 @@
+package badge
+
+import (
+	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
+
+	"marketplace/x/badge/types"
+)
+
+// AutoCLIOptions implements the autocli.HasAutoCLIConfig interface.
+func (am AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
+	return &autocliv1.ModuleOptions{
+		Query: &autocliv1.ServiceCommandDescriptor{
+			Service: types.Query_serviceDesc.ServiceName,
+			RpcCommandOptions: []*autocliv1.RpcCommandOptions{
+				{
+					RpcMethod: "Params",
+					Use:       "params",
+					Short:     "Shows the parameters of the module",
+				},
+				{
+					RpcMethod: "ListUserBadge",
+					Use:       "list-user-badge",
+					Short:     "List all user-badge",
+				},
+				{
+					RpcMethod:      "GetUserBadge",
+					Use:            "get-user-badge [id]",
+					Short:          "Gets a user-badge",
+					Alias:          []string{"show-user-badge"},
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "index"}},
+				},
+				// this line is used by ignite scaffolding # autocli/query
+			},
+		},
+		Tx: &autocliv1.ServiceCommandDescriptor{
+			Service:              types.Msg_serviceDesc.ServiceName,
+			EnhanceCustomCommand: true, // only required if you want to use the custom command
+			RpcCommandOptions: []*autocliv1.RpcCommandOptions{
+				{
+					RpcMethod: "UpdateParams",
+					Skip:      true, // skipped because authority gated
+				},
+				{
+					RpcMethod:      "IssueBadge",
+					Use:            "issue-badge [recipient] [badge-type]",
+					Short:          "Send a issue-badge tx",
+					PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "recipient"}, {ProtoField: "badge_type"}},
+				},
+				// this line is used by ignite scaffolding # autocli/tx
+			},
+		},
+	}
+}

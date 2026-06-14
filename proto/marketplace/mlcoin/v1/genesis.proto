@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package marketplace.mlcoin.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+import "marketplace/mlcoin/v1/emission_state.proto";
+import "marketplace/mlcoin/v1/params.proto";
+import "marketplace/mlcoin/v1/wallet_balance.proto";
+import "marketplace/mlcoin/v1/transaction.proto";
+import "marketplace/mlcoin/v1/market.proto";
+
+option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
+
+// GenesisState defines the mlcoin module's genesis state.
+message GenesisState {
+  // params defines all the parameters of the module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+  repeated WalletBalance wallet_balance_map = 2 [(gogoproto.nullable) = false];
+  EmissionState emission_state = 3;
+  repeated Transaction transaction_map = 4 [(gogoproto.nullable) = false];
+  uint64 transaction_count = 5;
+  MarketPrice market_price = 6;
+  repeated KesBalance kes_balance_map = 7 [(gogoproto.nullable) = false];
+  repeated Trade trade_history = 8 [(gogoproto.nullable) = false];
+}

@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package marketplace.badge.v1;
+
+import "amino/amino.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+import "marketplace/badge/v1/params.proto";
+import "marketplace/badge/v1/user_badge.proto";
+
+option go_package = "github.com/tmp/marketplace/x/badge/types";
+
+// Query defines the gRPC querier service.
+service Query {
+  // Parameters queries the parameters of the module.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/tmp/marketplace/badge/v1/params";
+  }
+
+  // ListUserBadge Queries a list of UserBadge items.
+  rpc GetUserBadge(QueryGetUserBadgeRequest) returns (QueryGetUserBadgeResponse) {
+    option (google.api.http).get = "/tmp/marketplace/badge/v1/user_badge/{index}";
+  }
+
+  // ListUserBadge defines the ListUserBadge RPC.
+  rpc ListUserBadge(QueryAllUserBadgeRequest) returns (QueryAllUserBadgeResponse) {
+    option (google.api.http).get = "/tmp/marketplace/badge/v1/user_badge";
+  }
+}
+
+// QueryParamsRequest is request type for the Query/Params RPC method.
+message QueryParamsRequest {}
+
+// QueryParamsResponse is response type for the Query/Params RPC method.
+message QueryParamsResponse {
+  // params holds all the parameters of this module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// QueryGetUserBadgeRequest defines the QueryGetUserBadgeRequest message.
+message QueryGetUserBadgeRequest {
+  string index = 1;
+}
+
+// QueryGetUserBadgeResponse defines the QueryGetUserBadgeResponse message.
+message QueryGetUserBadgeResponse {
+  UserBadge user_badge = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllUserBadgeRequest defines the QueryAllUserBadgeRequest message.
+message QueryAllUserBadgeRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllUserBadgeResponse defines the QueryAllUserBadgeResponse message.
+message QueryAllUserBadgeResponse {
+  repeated UserBadge user_badge = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}

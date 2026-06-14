@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package marketplace.vault.v1;
+
+import "gogoproto/gogo.proto";
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+
+option go_package = "github.com/tmp/marketplace/x/vault/types";
+
+// Msg service for vault operations. NOTE: some fields are sensitive; ensure
+// operators understand privacy implications before exposing these txs on-chain.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  rpc SetupVault(MsgSetupVault) returns (MsgSetupVaultResponse) {}
+  rpc ConfirmVault(MsgConfirmVault) returns (MsgConfirmVaultResponse) {}
+  rpc UnlockAndSign(MsgUnlockAndSign) returns (MsgUnlockAndSignResponse) {}
+  rpc DisableVault(MsgDisableVault) returns (MsgDisableVaultResponse) {}
+}
+
+message MsgSetupVault {
+  string authority = 1 [(gogoproto.moretags) = "yaml:\"authority\"", (gogoproto.casttype) = "string"];
+  string password = 2; // sensitive
+  string account = 3;
+  string issuer = 4;
+}
+
+message MsgSetupVaultResponse {
+  string provisioning_uri = 1;
+}
+
+message MsgConfirmVault {
+  string authority = 1;
+  string password = 2; // sensitive
+  string totp_code = 3;
+  bytes priv_key = 4; // sensitive (ed25519 private key bytes)
+}
+
+message MsgConfirmVaultResponse {}
+
+message MsgUnlockAndSign {
+  string authority = 1;
+  string password = 2; // sensitive
+  string totp_code = 3;
+  bytes message = 4;
+}
+
+message MsgUnlockAndSignResponse {
+  bytes signature = 1;
+}
+
+message MsgDisableVault {
+  string authority = 1;
+  string password = 2; // sensitive
+  string totp_code = 3;
+}
+
+message MsgDisableVaultResponse {}

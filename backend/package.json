@@ -1,0 +1,48 @@
+{
+  "name": "marketplace-backend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "wallet-service": "node wallet-service.js",
+    "explorer:init-db": "node explorer/init-db.js",
+    "explorer:indexer": "node explorer/indexer.js",
+    "explorer:api": "node explorer/server.js",
+    "explorer:dev": "nodemon explorer/server.js",
+    "explorer:all": "concurrently \"npm run explorer:indexer\" \"npm run explorer:api\""
+  },
+  "dependencies": {
+    "@cosmjs/proto-signing": "^0.28.8",
+    "@cosmjs/stargate": "^0.28.8",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@scure/bip32": "^2.2.0",
+    "axios": "^1.13.4",
+    "bcryptjs": "^3.0.3",
+    "bech32": "^1.1.4",
+    "bip39": "^3.1.0",
+    "bullmq": "^1.81.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "elliptic": "^6.6.1",
+    "ethers": "^6.0.0",
+    "express": "^5.2.1",
+    "express-rate-limit": "^6.7.0",
+    "express-session": "^1.19.0",
+    "helmet": "^8.2.0",
+    "ioredis": "^5.3.2",
+    "joi": "^17.13.3",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.1.5",
+    "morgan": "^1.10.1",
+    "passport": "^0.7.0",
+    "pg": "^8.11.3",
+    "prom-client": "^14.0.0",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.1.11"
+  }
+}

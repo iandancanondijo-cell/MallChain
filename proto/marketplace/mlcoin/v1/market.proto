@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package marketplace.mlcoin.v1;
+
+option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
+
+// MarketPrice tracks current buy/sell prices and trading volume
+message MarketPrice {
+  // buy_price is the current price to buy 1 MLCN in KES (scaled by 100, e.g., 62 = 0.62 KES)
+  uint64 buy_price = 1;
+  
+  // sell_price is the current price to sell 1 MLCN in KES (scaled by 100, e.g., 58 = 0.58 KES)
+  uint64 sell_price = 2;
+  
+  // total_buy_volume tracks total MLCN bought
+  uint64 total_buy_volume = 3;
+  
+  // total_sell_volume tracks total MLCN sold
+  uint64 total_sell_volume = 4;
+  
+  // last_update_height is the block height of last price update
+  uint64 last_update_height = 5;
+}
+
+// KesBalance tracks user's KES balance for marketplace
+message KesBalance {
+  string address = 1;
+  uint64 balance = 2; // KES balance scaled by 100 (e.g., 10000 = 100.00 KES)
+}
+
+// Trade represents a completed buy/sell order
+message Trade {
+  string tx_id = 1;
+  string trader = 2;
+  string trade_type = 3; // "buy" or "sell"
+  uint64 mlcn_amount = 4;
+  uint64 kes_amount = 5;
+  uint64 price = 6; // Price at time of trade
+  int64 timestamp = 7;
+  uint64 block_height = 8;
+}
+
+// CurrencyRate represents exchange rate of a currency to KES (scaled by 100)
+message CurrencyRate {
+  string currency = 1; // ISO code, e.g., "USD"
+  uint64 rate_to_kes = 2; // 1 unit of currency equals rate_to_kes / 100 KES
+  uint64 last_updated = 3; // block height
+}

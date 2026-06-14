@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package marketplace.crosschain.v1;
+
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "cosmos/base/v1beta1/coin.proto";
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+import "marketplace/crosschain/v1/tx.proto";
+
+option go_package = "github.com/tmp/marketplace/x/crosschain/types";
+
+// Query defines the gRPC querier service.
+service Query {
+  // BridgeTransfer queries a specific bridge transfer by ID.
+  rpc BridgeTransfer(QueryBridgeTransferRequest) returns (QueryBridgeTransferResponse);
+
+  // BridgeTransfers queries all bridge transfers with pagination.
+  rpc BridgeTransfers(QueryBridgeTransfersRequest) returns (QueryBridgeTransfersResponse);
+
+  // BridgeState queries the current bridge state.
+  rpc BridgeState(QueryBridgeStateRequest) returns (QueryBridgeStateResponse);
+
+  // Params queries all parameters of the crosschain module.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse);
+}
+
+// QueryBridgeTransferRequest is the request type for the Query/BridgeTransfer RPC method.
+message QueryBridgeTransferRequest {
+  // transfer_id defines the unique id of the bridge transfer.
+  uint64 transfer_id = 1 [(gogoproto.moretags) = "yaml:\"transfer_id\""];
+}
+
+// QueryBridgeTransferResponse is the response type for the Query/BridgeTransfer RPC method.
+message QueryBridgeTransferResponse {
+  // transfer is the requested bridge transfer.
+  BridgeTransfer transfer = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryBridgeTransfersRequest is the request type for the Query/BridgeTransfers RPC method.
+message QueryBridgeTransfersRequest {
+  // pagination defines an optional pagination for the request.
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryBridgeTransfersResponse is the response type for the Query/BridgeTransfers RPC method.
+message QueryBridgeTransfersResponse {
+  // transfers defines all the queried bridge transfers.
+  repeated BridgeTransfer transfers = 1 [(gogoproto.nullable) = false];
+
+  // pagination defines the pagination in the response.
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryBridgeStateRequest is the request type for the Query/BridgeState RPC method.
+message QueryBridgeStateRequest {}
+
+// QueryBridgeStateResponse is the response type for the Query/BridgeState RPC method.
+message QueryBridgeStateResponse {
+  // state defines the current bridge state.
+  BridgeState state = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryParamsRequest is the request type for the Query/Params RPC method.
+message QueryParamsRequest {}
+
+// QueryParamsResponse is the response type for the Query/Params RPC method.
+message QueryParamsResponse {
+  // params defines the parameters of the module.
+  Params params = 1 [(gogoproto.nullable) = false];
+}
+
+
+// Types for crosschain (BridgeTransfer, BridgeState, Params, etc.) are
+// defined in tx.proto to avoid duplicate declarations. This file only
+// contains the Query service and request/response messages.

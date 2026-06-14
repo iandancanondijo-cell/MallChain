@@ -1,0 +1,11 @@
+[package]
+name = "mgp20-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "SDK for Mallchain MGP-20 contract development"
+
+[dependencies]
+cosmwasm-std = "2.0"
+cosmwasm-schema = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde-json = "1.0"

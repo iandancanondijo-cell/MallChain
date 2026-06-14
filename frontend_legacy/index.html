@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Marketplace — Dev UI</title>
+    <meta name="description" content="Marketplace dev UI for interacting with vaults and transactions. Lightweight React app." />
+    <meta property="og:title" content="Marketplace — Dev UI" />
+    <meta property="og:description" content="Interact with Marketplace modules: create vaults, view transactions." />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <div style="padding:24px; font-family:Arial,Helvetica,sans-serif;">
+        <h1>Marketplace</h1>
+        <p>This app requires JavaScript. For a quick view: explore the Vaults and Transactions pages from the CLI or enable JavaScript in your browser.</p>
+      </div>
+    </noscript>
+    <!-- Shim to prevent runtime ReferenceError for libraries expecting `process` in browser -->
+    <script>window.process = window.process || { env: {} };</script>
+    <!-- Minimal Buffer polyfill for browser (supports hex/base64/utf8) -->
+    <script>
+      if (typeof window !== 'undefined' && !window.Buffer) {
+        window.Buffer = {
+          from(input, enc) {
+            if (typeof input === 'string') {
+              const e = (enc || 'utf8').toLowerCase()
+              if (e === 'hex') {
+                const len = input.length / 2
+                const out = new Uint8Array(len)
+                for (let i = 0; i < len; i++) out[i] = parseInt(input.substr(i*2,2), 16)
+                return out
+              }
+              if (e === 'base64') {
+                const bin = atob(input)
+                const out = new Uint8Array(bin.length)
+                for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+                return out
+              }
+              // utf8
+              return new TextEncoder().encode(input)
+            }
+            if (Array.isArray(input)) return new Uint8Array(input)
+            if (input instanceof Uint8Array) return input
+            return new Uint8Array(input)
+          },
+          isBuffer(b) { return b instanceof Uint8Array }
+        }
+      }
+    </script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

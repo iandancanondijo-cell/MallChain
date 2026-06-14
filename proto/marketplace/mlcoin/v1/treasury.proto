@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package marketplace.mlcoin.v1;
+
+option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
+
+service TreasuryQuery {
+  rpc TreasuryMetrics(QueryTreasuryRequest)
+    returns (QueryTreasuryResponse);
+
+  rpc TreasuryHistory(QueryTreasuryHistoryRequest)
+    returns (QueryTreasuryHistoryResponse);
+}
+
+message QueryTreasuryRequest {}
+
+message QueryTreasuryResponse {
+  uint64 total_supply = 1;
+  uint64 circulating_supply = 2;
+  uint64 burned_supply = 3;
+  uint64 total_staked = 4;
+  uint64 treasury_balance = 5;
+}
+
+message QueryTreasuryHistoryRequest {
+  uint64 limit = 1;
+}
+
+message TreasurySnapshot {
+  int64 block_height = 1;
+  uint64 total_supply = 2;
+  uint64 circulating_supply = 3;
+  uint64 burned_supply = 4;
+  uint64 staked_supply = 5;
+  uint64 treasury_balance = 6;
+  int64 timestamp = 7;
+}
+
+message QueryTreasuryHistoryResponse {
+  repeated TreasurySnapshot snapshots = 1;
+}

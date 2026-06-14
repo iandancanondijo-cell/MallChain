@@ -1,0 +1,104 @@
+.wallet-root {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #0b2a3c, #071826);
+  padding: 16px;
+  color: #d7f5ef;
+}
+
+.address-bar {
+  background: #1b3a52;
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.balance-card {
+  background: #213f59;
+  border-radius: 14px;
+  padding: 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.wallet-label {
+  font-size: 18px;
+}
+
+.wallet-sub {
+  opacity: 0.7;
+  font-size: 13px;
+}
+
+.balance {
+  text-align: right;
+}
+
+.balance-title {
+  opacity: 0.7;
+}
+
+.balance-value {
+  font-size: 32px;
+}
+
+.actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.action-card {
+  background: #213f59;
+  border-radius: 14px;
+  padding: 20px;
+  text-align: center;
+}
+
+.icon {
+  font-size: 32px;
+  margin-bottom: 10px;
+  color: #7dd3c7;
+}
+
+.action-title {
+  font-size: 16px;
+}
+
+.action-sub {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 3px solid rgba(255,255,255,0.12);
+  border-top-color: #7dd3c7;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  vertical-align: middle;
+}
+
+.rpc-toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 24px;
+  background: #f97373;
+  color: #071018;
+  padding: 10px 14px;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  font-size: 13px;
+  z-index: 9999;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

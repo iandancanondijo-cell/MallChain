@@ -1,0 +1,9 @@
+body { font-family: Inter, system-ui, Arial, sans-serif; background:#000; color:#fff }
+input { padding: 8px; border: 1px solid #ccc; border-radius: 4px }
+button { padding: 8px 12px }
+
+/* Landing page helpers */
+.mth-header a{color:#cbd5e1}
+.mth-hero{position:relative;text-align:center;padding:4rem 1rem}
+.mth-hero-bg{position:absolute;inset:0;opacity:.18;background-size:cover;background-position:center}
+.mth-coinstack{display:flex;justify-content:center;padding:2.5rem 1rem;background:#050505}

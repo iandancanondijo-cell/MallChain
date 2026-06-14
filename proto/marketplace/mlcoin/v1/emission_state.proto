@@ -1,0 +1,14 @@
+syntax = "proto3";
+package marketplace.mlcoin.v1;
+
+option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
+
+// EmissionState defines the EmissionState message.
+message EmissionState {
+  uint64 total_supply = 1;
+  uint64 circulating = 2;
+  uint64 monthly_cap = 3;
+  uint64 daily_limit = 4;
+  uint64 current_month = 5;
+  uint64 current_day = 6;
+}

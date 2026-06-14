@@ -1,0 +1,15 @@
+syntax = "proto3";
+package marketplace.mlcoin.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
+
+// Params defines the parameters for the module.
+message Params {
+  option (amino.name) = "marketplace/x/mlcoin/Params";
+  option (gogoproto.equal) = true;
+
+  string burn_wallet = 1;
+}

@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package marketplace.mlcoin.v1;
+
+import "amino/amino.proto";
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+import "marketplace/mlcoin/v1/params.proto";
+
+option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
+
+// Msg defines the Msg service.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  // UpdateParams defines a (governance) operation for updating the module
+  // parameters. The authority defaults to the x/gov module account.
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+
+  // TransferMallcoin defines the TransferMallcoin RPC.
+  rpc TransferMallcoin(MsgTransferMallcoin) returns (MsgTransferMallcoinResponse);
+  
+  // BuyMallcoin defines the BuyMallcoin RPC for purchasing MLCN with KES.
+  rpc BuyMallcoin(MsgBuyMallcoin) returns (MsgBuyMallcoinResponse);
+  
+  // SellMallcoin defines the SellMallcoin RPC for selling MLCN for KES.
+  rpc SellMallcoin(MsgSellMallcoin) returns (MsgSellMallcoinResponse);
+
+  // MintMallcoin allows an authority to mint MLCN to a recipient address.
+  rpc MintMallcoin(MsgMintMallcoin) returns (MsgMintMallcoinResponse);
+}
+
+// Admin: set currency rate (rate is scaled by 100, e.g., 13745 = 137.45 KES)
+message MsgSetCurrencyRate {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string currency = 2;
+  uint64 rate_to_kes = 3;
+}
+
+message MsgSetCurrencyRateResponse {}
+
+// MsgUpdateParams is the Msg/UpdateParams request type.
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "marketplace/x/mlcoin/MsgUpdateParams";
+
+  // authority is the address that controls the module (defaults to x/gov unless overwritten).
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // params defines the module parameters to update.
+
+  // NOTE: All parameters must be supplied.
+  Params params = 2 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// MsgUpdateParamsResponse defines the response structure for executing a
+// MsgUpdateParams message.
+message MsgUpdateParamsResponse {}
+
+// MsgTransferMallcoin defines the MsgTransferMallcoin message.
+message MsgTransferMallcoin {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  uint64 amount = 2;
+  string to = 3;
+
+}
+
+// MsgTransferMallcoinResponse defines the MsgTransferMallcoinResponse message.
+message MsgTransferMallcoinResponse {
+  string tx_id = 1; // Unique transaction ID generated for this transfer
+}
+
+// MsgBuyMallcoin defines the message for buying Mallcoins with KES.
+message MsgBuyMallcoin {
+  option (cosmos.msg.v1.signer) = "buyer";
+  string buyer = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  uint64 mlcn_amount = 2; // Amount of MLCN to buy
+}
+
+// MsgBuyMallcoinResponse defines the response for buying Mallcoins.
+message MsgBuyMallcoinResponse {
+  string trade_id = 1; // Unique trade ID
+  uint64 kes_paid = 2; // Total KES paid
+  uint64 price = 3; // Price per MLCN at time of purchase
+}
+
+// MsgSellMallcoin defines the message for selling Mallcoins for KES.
+message MsgSellMallcoin {
+  option (cosmos.msg.v1.signer) = "seller";
+  string seller = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  uint64 mlcn_amount = 2; // Amount of MLCN to sell
+}
+
+// MsgSellMallcoinResponse defines the response for selling Mallcoins.
+message MsgSellMallcoinResponse {
+  string trade_id = 1; // Unique trade ID
+  uint64 kes_received = 2; // Total KES received
+  uint64 price = 3; // Price per MLCN at time of sale
+}
+
+// MintMallcoin allows an authority to mint MLCN to a recipient address.
+message MsgMintMallcoin {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string recipient = 2 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  uint64 amount = 3;
+}
+
+message MsgMintMallcoinResponse {
+  string tx_id = 1; // Tx id for the mint operation
+}

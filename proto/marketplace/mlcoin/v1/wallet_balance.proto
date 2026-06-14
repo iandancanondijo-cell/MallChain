@@ -1,0 +1,12 @@
+syntax = "proto3";
+package marketplace.mlcoin.v1;
+
+option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
+
+// WalletBalance defines the WalletBalance message.
+message WalletBalance {
+  string index = 1;
+  string address = 2;
+  uint64 balance = 3;
+  uint64 locked = 4;
+}

@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package marketplace.mlcoin.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+
+option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
+
+// LiquidityPool represents a single liquidity pool
+message LiquidityPool {
+  uint64 id = 1;
+  string name = 2;
+  string token0 = 3;
+  string token1 = 4;
+  string reserve0 = 5;  // Reserve of token0 (as string for big integers)
+  string reserve1 = 6;  // Reserve of token1 (as string for big integers)
+  string tvl = 7;       // Total Value Locked (as string)
+  string apy = 8;       // Annual Percentage Yield
+  string volume24h = 9; // 24h trading volume (as string)
+  string fee = 10;      // Trading fee percentage
+  string total_liquidity = 11; // Total LP tokens (as string)
+}
+
+// LiquidityPoolState defines the state of liquidity pools
+message LiquidityPoolState {
+  repeated LiquidityPool pools = 1 [(gogoproto.nullable) = false];
+}

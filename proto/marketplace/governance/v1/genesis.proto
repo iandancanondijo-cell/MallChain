@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package marketplace.governance.v1;
+
+import "marketplace/governance/v1/query.proto";
+import "gogoproto/gogo.proto";
+import "marketplace/governance/v1/types.proto";
+
+option go_package = "github.com/tmp/marketplace/x/governance/types";
+
+// GenesisState defines the governance module's genesis state.
+message GenesisState {
+  // starting_proposal_id is the ID of the starting proposal.
+  uint64 starting_proposal_id = 1;
+
+  // deposits defines all the deposits present at genesis.
+  repeated Deposit deposits = 2 [(gogoproto.nullable) = false];
+
+  // votes defines all the votes present at genesis.
+  repeated Vote votes = 3 [(gogoproto.nullable) = false];
+
+  // proposals defines all the proposals present at genesis.
+  repeated Proposal proposals = 4 [(gogoproto.nullable) = false];
+
+  // params defines all the parameters related to deposit.
+  Params params = 5 [(gogoproto.nullable) = false];
+
+  // constitution defines the constitution of the governance module.
+  string constitution = 6;
+}

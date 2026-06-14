@@ -1,0 +1,16 @@
+syntax = "proto3";
+package marketplace.mlcoin.v1;
+
+option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
+
+// Transaction defines a Mallcoin transaction record
+message Transaction {
+  string tx_id = 1;           // Unique transaction ID (format: "TX-{sequence}")
+  string from = 2;            // Sender address
+  string to = 3;              // Recipient address
+  uint64 amount = 4;          // Amount transferred
+  string tx_type = 5;         // Type: "transfer", "mint", "conversion"
+  int64 timestamp = 6;        // Block timestamp
+  uint64 block_height = 7;    // Block height when transaction occurred
+  string memo = 8;            // Optional memo/description
+}

@@ -1,0 +1,6 @@
+syntax = "proto3";
+package marketplace.governance.module.v1;
+
+option go_package = "marketplace/x/governance/types";
+
+// Your remaining original file definitions continue below...

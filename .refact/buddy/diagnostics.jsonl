@@ -1,0 +1,2 @@
+{"error_type":"llm_error","error_message":"LLM error (400 Bad Request): \"store is not supported\"","source_file":"chat/generation.rs","tool_name":null,"chat_id":"8af823d7-81b6-4224-887a-aa903d821c04","collected_at":"2026-06-08T03:30:25.239697616+00:00","severity":"high"}
+{"error_type":"generic","error_message":"LLM error (400 Bad Request): \"store is not supported\"","source_file":null,"tool_name":null,"chat_id":"8af823d7-81b6-4224-887a-aa903d821c04","collected_at":"2026-06-08T03:30:25.860539265+00:00","severity":"high"}

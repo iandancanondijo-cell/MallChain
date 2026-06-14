@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package marketplace.mallpoints.v1;
+
+import "amino/amino.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+import "marketplace/mallpoints/v1/conversion_window.proto";
+import "marketplace/mallpoints/v1/params.proto";
+import "marketplace/mallpoints/v1/user_points.proto";
+
+option go_package = "github.com/tmp/marketplace/x/mallpoints/types";
+
+// Query defines the gRPC querier service.
+service Query {
+  // Parameters queries the parameters of the module.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mallpoints/v1/params";
+  }
+
+  // ListUserPoints Queries a list of UserPoints items.
+  rpc GetUserPoints(QueryGetUserPointsRequest) returns (QueryGetUserPointsResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mallpoints/v1/user_points/{index}";
+  }
+
+  // ListUserPoints defines the ListUserPoints RPC.
+  rpc ListUserPoints(QueryAllUserPointsRequest) returns (QueryAllUserPointsResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mallpoints/v1/user_points";
+  }
+
+  // Queries a ConversionWindow by index.
+  rpc GetConversionWindow(QueryGetConversionWindowRequest) returns (QueryGetConversionWindowResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mallpoints/v1/conversion_window";
+  }
+}
+
+// QueryParamsRequest is request type for the Query/Params RPC method.
+message QueryParamsRequest {}
+
+// QueryParamsResponse is response type for the Query/Params RPC method.
+message QueryParamsResponse {
+  // params holds all the parameters of this module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+// QueryGetUserPointsRequest defines the QueryGetUserPointsRequest message.
+message QueryGetUserPointsRequest {
+  string index = 1;
+}
+
+// QueryGetUserPointsResponse defines the QueryGetUserPointsResponse message.
+message QueryGetUserPointsResponse {
+  UserPoints user_points = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryAllUserPointsRequest defines the QueryAllUserPointsRequest message.
+message QueryAllUserPointsRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryAllUserPointsResponse defines the QueryAllUserPointsResponse message.
+message QueryAllUserPointsResponse {
+  repeated UserPoints user_points = 1 [(gogoproto.nullable) = false];
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetConversionWindowRequest defines the QueryGetConversionWindowRequest message.
+message QueryGetConversionWindowRequest {}
+
+// QueryGetConversionWindowResponse defines the QueryGetConversionWindowResponse message.
+message QueryGetConversionWindowResponse {
+  ConversionWindow conversion_window = 1 [(gogoproto.nullable) = false];
+}
