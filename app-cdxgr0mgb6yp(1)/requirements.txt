@@ -1,0 +1,8 @@
+# Mallchain Mines dependencies
+# For screenshot verification
+Pillow>=10.0.0
+piexif>=1.1.3
+# For OCR in production
+pytesseract>=0.2.0
+# For Redis storage
+redis>=5.0.0
