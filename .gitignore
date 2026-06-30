@@ -1,20 +1,8 @@
-vue/node_modules
-vue/dist
-release/
-.idea/
-.vscode/
-.DS_Store
-*.dot
-*.log
-*.ign
+# Build outputs
+dist/
 build/
-node_modules
-node_modules
-marketplaced
-
-
-#Ignore vscode AI rules
-.github/instructions/codacy.instructions.md
+release/
+coverage/
 
 # Dependencies
 node_modules/
@@ -24,13 +12,7 @@ node_modules/
 .env
 .env.*
 
-# Build outputs
-dist/
-build/
-release/
-coverage/
-
-# Logs
+# Logs and outputs
 *.log
 *.out
 
@@ -53,36 +35,6 @@ Thumbs.db
 tmp/
 temp/
 
-# Local test/output files
-search_results.txt
-go_env.txt
-go_env_status.txt
-go_list.out
-go_mod_tidy.out
-go_work_files.out
-test_file.out
-x_gomod_files.out
-x_gomod_files.txt
-
-# Dependencies
-node_modules/
-**/node_modules/
-
-# Environment files
-.env
-.env.*
-
-# Build outputs
-dist/
-coverage/
-
-# Logs and outputs
-*.out
-
-# Temporary files
-tmp/
-temp/
-
 # Local generated files
 search_results.txt
 go_env.txt
@@ -93,3 +45,28 @@ go_work_files.out
 test_file.out
 x_gomod_files.out
 x_gomod_files.txt
+
+# Validator and node private keys — NEVER commit these
+blockchain_working/config/priv_validator_key.json
+blockchain_working/config/node_key.json
+blockchain_working/keyring-test/
+blockchain_working/data/priv_validator_state.json
+
+# Agent metadata - do not commit
+.kilocode/
+.kiro/
+.mines/
+
+# Blockchain data (large, regeneratable)
+blockchain_working/data/
+
+# Backup files
+backup-handwritten/
+
+# Documentation (moved to separate docs)
+docs/
+*.md
+!README.md
+
+# Wallet data (sensitive)
+wallet_data/

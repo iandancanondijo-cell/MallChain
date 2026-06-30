@@ -51,13 +51,9 @@ import (
 
 	"marketplace/docs"
 	badgemodulekeeper "marketplace/x/badge/keeper"
-	crosschainmodulekeeper "marketplace/x/crosschain/keeper"
-	dexmodulekeeper "marketplace/x/dex/keeper"
-	governancemodulekeeper "marketplace/x/governance/keeper"
 	mallcoinmodulekeeper "marketplace/x/mallcoin/keeper"
 	mallpointsmodulekeeper "marketplace/x/mallpoints/keeper"
 	mlcoinmodulekeeper "marketplace/x/mlcoin/keeper"
-	wasmkeeper "marketplace/x/wasm/keeper"
 )
 
 const (
@@ -116,10 +112,6 @@ type App struct {
 	MlcoinKeeper     *mlcoinmodulekeeper.Keeper
 	MallpointsKeeper mallpointsmodulekeeper.Keeper
 	BadgeKeeper      badgemodulekeeper.Keeper
-	CrosschainKeeper crosschainmodulekeeper.Keeper
-	DexKeeper        dexmodulekeeper.Keeper
-	GovernanceKeeper governancemodulekeeper.Keeper
-	WasmKeeper       wasmkeeper.Keeper
 
 	// Future 2026 feature keepers:
 	// - AgentKeeper for autonomous workflow authorization
@@ -220,7 +212,6 @@ func New(
 		&app.MlcoinKeeper,
 		&app.MallpointsKeeper,
 		&app.BadgeKeeper,
-		&app.WasmKeeper,
 	); err != nil {
 		panic(err)
 	}

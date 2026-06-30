@@ -5,12 +5,6 @@ import (
 
 	_ "marketplace/x/badge/module"
 	badgemoduletypes "marketplace/x/badge/types"
-	_ "marketplace/x/crosschain/module"
-	crosschainmoduletypes "marketplace/x/crosschain/types"
-	_ "marketplace/x/dex"
-	dexmoduletypes "marketplace/x/dex/types"
-	_ "marketplace/x/governance"
-	governancemoduletypes "marketplace/x/governance/types"
 	_ "marketplace/x/mallcoin/module"
 	mallcoinmoduletypes "marketplace/x/mallcoin/types"
 	_ "marketplace/x/mallpoints/module"
@@ -93,9 +87,6 @@ var (
 		{Account: stakingtypes.BondedPoolName, Permissions: []string{authtypes.Burner, stakingtypes.ModuleName}},
 		{Account: stakingtypes.NotBondedPoolName, Permissions: []string{authtypes.Burner, stakingtypes.ModuleName}},
 		{Account: govtypes.ModuleName, Permissions: []string{authtypes.Burner}},
-		{Account: crosschainmoduletypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
-		{Account: dexmoduletypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
-		{Account: governancemoduletypes.ModuleName, Permissions: []string{authtypes.Burner}},
 		{Account: nft.ModuleName},
 		{Account: ibctransfertypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
 		{Account: icatypes.ModuleName},
@@ -133,8 +124,6 @@ var (
 						mlcoinmoduletypes.ModuleName,
 						mallpointsmoduletypes.ModuleName,
 						badgemoduletypes.ModuleName,
-						crosschainmoduletypes.ModuleName,
-						dexmoduletypes.ModuleName,
 					},
 					EndBlockers: []string{
 						govtypes.ModuleName,
@@ -145,9 +134,6 @@ var (
 						mlcoinmoduletypes.ModuleName,
 						mallpointsmoduletypes.ModuleName,
 						badgemoduletypes.ModuleName,
-						crosschainmoduletypes.ModuleName,
-						governancemoduletypes.ModuleName,
-						dexmoduletypes.ModuleName,
 					},
 					OverrideStoreKeys: []*runtimev1alpha1.StoreKeyConfig{
 						{
@@ -181,9 +167,6 @@ var (
 						mlcoinmoduletypes.ModuleName,
 						mallpointsmoduletypes.ModuleName,
 						badgemoduletypes.ModuleName,
-						crosschainmoduletypes.ModuleName,
-						governancemoduletypes.ModuleName,
-						dexmoduletypes.ModuleName,
 					},
 				}),
 			},
