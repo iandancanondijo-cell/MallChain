@@ -12,16 +12,12 @@ import {
   Landmark,
   Vote,
   Droplets,
-  ArrowUpCircle,
-  ArrowDownCircle,
   History,
-  Gift,
   Shield,
   Menu,
   X,
-  Users,
-  Sparkles,
-  LogOut
+  LogOut,
+  BarChart3
 } from 'lucide-react'
 import { appConfig } from '../config/app'
 import { useAuthStore } from '../core/store/authStore'
@@ -35,7 +31,7 @@ export default function AppLayout() {
 
   // Close sidebar on route change (mobile)
   useEffect(() => {
-    setSidebarOpen(false)
+    window.requestAnimationFrame(() => setSidebarOpen(false))
   }, [location.pathname])
 
   useEffect(() => {
@@ -91,6 +87,7 @@ export default function AppLayout() {
     { name: 'Dashboard', path: '/staking', exact: true, icon: <Landmark size={16} /> },
     { name: 'Validators', path: '/staking/validators', icon: <Search size={16} /> },
     { name: 'Validator Center', path: '/validator-center', icon: <Shield size={16} /> },
+    { name: 'My Validator Center', path: '/my-validator-center', icon: <Shield size={16} /> },
   ]
 
   const isSubLinkActive = (path, exact) => {
@@ -112,19 +109,14 @@ export default function AppLayout() {
       icon: <Search size={18} />
     },
     {
-      name: 'Community',
-      path: '/community',
-      icon: <Users size={18} />
-    },
-    {
-      name: 'Mine',
-      path: '/mine',
-      icon: <Sparkles size={18} />
-    },
-    {
       name: 'Liquidity',
       path: '/liquidity',
       icon: <Droplets size={18} />
+    },
+    {
+      name: 'Economics',
+      path: '/economics',
+      icon: <BarChart3 size={18} />
     },
   ]
 

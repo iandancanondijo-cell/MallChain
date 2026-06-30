@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Shield, Sparkles, Search, Award, ArrowRight, Loader } from 'lucide-react'
+import { Shield, Sparkles, Search, Award, ArrowRight, Loader, AlertCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { fetchValidatorLeaderboard, submitValidatorApplication } from '../core/validators/validatorApi'
+import { useAuthStore } from '../core/store/authStore'
+import { fetchValidatorLeaderboard, submitValidatorApplication, getMyValidatorApplication } from '../core/validators/validatorApi'
 
 export default function ValidatorCenter() {
+  const user = useAuthStore((s) => s.user)
   const [loading, setLoading] = useState(true)
   const [validators, setValidators] = useState([])
   const [query, setQuery] = useState('')
   const [form, setForm] = useState({
-    applicantAddress: '',
+    applicantAddress: user?.address || '',
     validatorAddress: '',
     moniker: '',
     website: '',
@@ -53,6 +56,22 @@ export default function ValidatorCenter() {
     return { total, avgUptime, topScore }
   }, [filtered])
 
+  const [myApplication, setMyApplication] = useState(null)
+
+  useEffect(() => {
+    if (!user?.address) return
+    ;(async () => {
+      try {
+        const app = await getMyValidatorApplication(user.address)
+        setMyApplication(app)
+      } catch (e) {
+        // ignore - no application yet
+      }
+    })()
+  }, [user?.address])
+
+  const hasPendingApplication = myApplication?.status === 'pending'
+
   const handleChange = (event) => {
     const { name, value } = event.target
     setForm((prev) => ({ ...prev, [name]: value }))
@@ -68,6 +87,7 @@ export default function ValidatorCenter() {
       setSubmitting(true)
       await submitValidatorApplication(form)
       toast.success('Validator application submitted!')
+      setMyApplication({ ...form, status: 'pending', submittedAt: new Date() })
       setForm({
         applicantAddress: '',
         validatorAddress: '',
@@ -200,76 +220,92 @@ export default function ValidatorCenter() {
             <div className="flex items-center gap-3 mb-4">
               <Award className="w-6 h-6 text-amber-400" />
               <div>
-                <h2 className="text-lg font-semibold text-white">Apply to become a validator</h2>
-                <p className="text-sm text-slate-500">Submit your application and get reviewed by network operators.</p>
+                <h2 className="text-lg font-semibold text-white">
+                  {hasPendingApplication ? 'Application Status' : 'Apply to become a validator'}
+                </h2>
+                <p className="text-sm text-slate-500">
+                  {hasPendingApplication
+                    ? 'Your application is pending review.'
+                    : 'Submit your application and get reviewed by network operators.'}
+                </p>
               </div>
             </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="text-sm text-slate-300">Wallet address</label>
-                <input
-                  name="applicantAddress"
-                  value={form.applicantAddress}
-                  onChange={handleChange}
-                  placeholder="mall1..."
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-500"
-                />
+            {hasPendingApplication ? (
+              <div className="rounded-2xl bg-slate-950/80 p-6 text-center">
+                <AlertCircle className="w-10 h-10 text-amber-400 mx-auto mb-3" />
+                <p className="text-slate-300">
+                  Your validator application has been submitted and is awaiting approval.
+                  You will be notified once it is reviewed.
+                </p>
               </div>
-              <div>
-                <label className="text-sm text-slate-300">Validator name</label>
-                <input
-                  name="moniker"
-                  value={form.moniker}
-                  onChange={handleChange}
-                  placeholder="Mallchain Validator"
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-500"
-                />
-              </div>
-              <div>
-                <label className="text-sm text-slate-300">Details / description</label>
-                <textarea
-                  name="details"
-                  value={form.details}
-                  onChange={handleChange}
-                  placeholder="Why should the network choose you?"
-                  rows="4"
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-500"
-                />
-              </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="text-sm text-slate-300">Validator address (optional)</label>
+                  <label className="text-sm text-slate-300">Wallet address</label>
                   <input
-                    name="validatorAddress"
-                    value={form.validatorAddress}
+                    name="applicantAddress"
+                    value={form.applicantAddress}
                     onChange={handleChange}
-                    placeholder="mallvaloper..."
+                    placeholder="mall1..."
                     className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-500"
                   />
                 </div>
                 <div>
-                  <label className="text-sm text-slate-300">Self-delegation</label>
+                  <label className="text-sm text-slate-300">Validator name</label>
                   <input
-                    name="selfDelegationAmount"
-                    value={form.selfDelegationAmount}
+                    name="moniker"
+                    value={form.moniker}
                     onChange={handleChange}
-                    placeholder="1000000"
+                    placeholder="Mallchain Validator"
                     className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-500"
                   />
                 </div>
-              </div>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:opacity-50"
-              >
-                {submitting ? 'Submitting…' : 'Submit application'}
-                <ArrowRight className="w-4 h-4" />
-              </button>
-              {!localStorage.getItem('token') && (
-                <p className="text-xs text-slate-500">Sign in to submit your validator application.</p>
-              )}
-            </form>
+                <div>
+                  <label className="text-sm text-slate-300">Details / description</label>
+                  <textarea
+                    name="details"
+                    value={form.details}
+                    onChange={handleChange}
+                    placeholder="Why should the network choose you?"
+                    rows="4"
+                    className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="text-sm text-slate-300">Validator address (optional)</label>
+                    <input
+                      name="validatorAddress"
+                      value={form.validatorAddress}
+                      onChange={handleChange}
+                      placeholder="mallvaloper..."
+                      className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm text-slate-300">Self-delegation</label>
+                    <input
+                      name="selfDelegationAmount"
+                      value={form.selfDelegationAmount}
+                      onChange={handleChange}
+                      placeholder="1000000"
+                      className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:opacity-50"
+                >
+                  {submitting ? 'Submitting…' : 'Submit application'}
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+                {!localStorage.getItem('token') && (
+                  <p className="text-xs text-slate-500">Sign in to submit your validator application.</p>
+                )}
+              </form>
+            )}
           </div>
 
           <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6">

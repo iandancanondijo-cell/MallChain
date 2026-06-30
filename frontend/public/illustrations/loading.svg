@@ -1,0 +1,38 @@
+<svg width="400" height="300" viewBox="0 0 400 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="loadGrad1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="loadGrad2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+    <linearGradient id="loadGrad3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <radialGradient id="loadRadial" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1e293b" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <g>
+    <ellipse cx="200" cy="150" rx="100" ry="60" fill="url(#loadRadial)"/>
+    <g stroke="url(#loadGrad1)" stroke-width="6" stroke-linecap="round">
+      <line x1="100" y1="150" x2="300" y2="150"/>
+      <line x1="100" y1="130" x2="300" y2="130"/>
+      <line x1="100" y1="170" x2="300" y2="170"/>
+    </g>
+    <g stroke="url(#loadGrad2)" stroke-width="4">
+      <circle cx="200" cy="150" r="30" fill="none"/>
+      <path d="M200 90 A60 60 0 0 1 260 150" fill="none" stroke-linecap="round"/>
+    </g>
+    <g>
+      <rect x="140" y="100" width="40" height="80" rx="8" fill="url(#loadGrad3)" opacity="0.3"/>
+      <rect x="220" y="100" width="40" height="80" rx="8" fill="url(#loadGrad3)" opacity="0.3"/>
+      <rect x="160" y="120" width="20" height="60" rx="6" fill="url(#loadGrad3)" opacity="0.5"/>
+      <rect x="200" y="120" width="20" height="60" rx="6" fill="url(#loadGrad3)" opacity="0.5"/>
+    </g>
+  </g>
+</svg>

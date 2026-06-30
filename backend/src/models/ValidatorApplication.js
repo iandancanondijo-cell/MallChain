@@ -14,6 +14,8 @@ const ValidatorApplicationSchema = new Schema({
     enum: ['pending', 'approved', 'rejected'],
     default: 'pending',
   },
+  // When approved, set to true to indicate validator is active
+  isActiveValidator: { type: Boolean, default: false },
   submittedAt: { type: Date, default: Date.now },
   reviewedAt: { type: Date },
   reviewer: { type: String, default: '' },

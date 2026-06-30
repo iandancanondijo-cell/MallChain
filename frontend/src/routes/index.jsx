@@ -29,17 +29,18 @@ const GovernanceProposal = lazy(() => import('../pages/GovernanceProposal'))
 const Staking = lazy(() => import('../pages/Staking'))
 const Validators = lazy(() => import('../pages/Validators'))
 const ValidatorCenter = lazy(() => import('../pages/ValidatorCenter'))
+const MyValidatorCenter = lazy(() => import('../pages/MyValidatorCenter'))
 
 const Explorer = lazy(() => import('../pages/Explorer'))
+const Contracts = lazy(() => import('../pages/Contracts'))
 
-const Community = lazy(() => import('../pages/Community'))
-const Mine = lazy(() => import('../pages/Mine'))
-const BuyMlcns = lazy(() => import('../pages/BuyMlcns'))
+
 
 
 
 const Liquidity = lazy(() => import('../pages/Liquidity'))
 const WalletConvert = lazy(() => import('../pages/WalletConvert'))
+const Economics = lazy(() => import('../pages/Economics'))
 
 const NotFound = lazy(() => import('../pages/NotFound'))
 
@@ -79,9 +80,8 @@ export default function AppRouter() {
 
             {/* Explorer */}
             <Route path="/explorer" element={<Explorer />} />
-            <Route path="/community" element={<Community />} />
-            <Route path="/mine" element={<Mine />} />
-            <Route path="/buy/mlcns" element={<BuyMlcns />} />
+            <Route path="/contracts" element={<Contracts />} />
+
 
             {/* Wallet */}
             <Route path="/wallet" element={<Wallet />} />
@@ -152,10 +152,21 @@ export default function AppRouter() {
               element={<ValidatorCenter />}
             />
 
+            <Route
+              path="/my-validator-center"
+              element={<MyValidatorCenter />}
+            />
+
             {/* Liquidity */}
             <Route
               path="/liquidity"
               element={<Liquidity />}
+            />
+
+            {/* Economics */}
+            <Route
+              path="/economics"
+              element={<Economics />}
             />
 
             {/* Home */}

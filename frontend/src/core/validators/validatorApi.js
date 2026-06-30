@@ -24,3 +24,15 @@ export async function submitValidatorApplication(application) {
   if (!res.ok) throw new Error(data.error || 'Failed to submit validator application')
   return data.application || null
 }
+
+export async function getMyValidatorApplication(address) {
+  const token = localStorage.getItem('token')
+  const res = await fetch(`${API}/validators/my-application?address=${encodeURIComponent(address)}`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Failed to get application status')
+  return data.application || null
+}

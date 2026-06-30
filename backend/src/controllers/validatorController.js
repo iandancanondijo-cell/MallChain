@@ -106,7 +106,7 @@ exports.listApplications = async (_req, res) => {
 exports.reviewApplication = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, reviewNotes } = req.body || {};
+    const { status, reviewNotes, createValidatorTx } = req.body || {};
     if (!['approved', 'rejected'].includes(status)) {
       return res.status(400).json({ success: false, error: 'invalid_review_status' });
     }
@@ -120,12 +120,35 @@ exports.reviewApplication = async (req, res) => {
     application.reviewedAt = new Date();
     application.reviewer = req.user?.email || 'admin';
     application.reviewNotes = reviewNotes || '';
+
+    // If approved, set isActiveValidator flag
+    if (status === 'approved') {
+      application.isActiveValidator = true;
+    }
+
     await application.save();
 
     return res.json({ success: true, application });
   } catch (e) {
     console.error('validator application review error:', e.message);
     return res.status(500).json({ success: false, error: 'review_failed', message: e.message });
+  }
+};
+
+exports.getMyApplication = async (req, res) => {
+  try {
+    const address = req.query.address?.trim();
+    if (!address) {
+      return res.status(400).json({ success: false, error: 'address_required' });
+    }
+    const application = await ValidatorApplication.findOne({ applicantAddress: address }).sort({ submittedAt: -1 });
+    if (!application) {
+      return res.json({ success: true, application: null });
+    }
+    return res.json({ success: true, application });
+  } catch (e) {
+    console.error('get my application error:', e.message);
+    return res.status(500).json({ success: false, error: 'lookup_failed', message: e.message });
   }
 };
 
