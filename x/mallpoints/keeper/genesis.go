@@ -21,7 +21,17 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 		}
 	}
 
-	return k.Params.Set(ctx, genState.Params)
+	if err := k.Params.Set(ctx, genState.Params); err != nil {
+		return err
+	}
+	return k.initIntervals(ctx)
+}
+
+func (k Keeper) initIntervals(ctx context.Context) error {
+	if _, err := k.Intervals.Get(ctx); err == nil {
+		return nil
+	}
+	return k.Intervals.Set(ctx, types.DefaultModuleIntervals())
 }
 
 // ExportGenesis returns the module's exported genesis.

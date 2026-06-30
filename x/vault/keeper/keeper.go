@@ -228,11 +228,26 @@ func (k Keeper) DisableVault(ctx context.Context, password, totpCode string) err
 		return errors.New("invalid credentials")
 	}
 	if !crypto.VerifyTOTPCode(string(secretBytes), totpCode) {
-		return errors.New("invalid totp code")
+		return errors.New("invalid credentials")
 	}
 	s, err := k.kvStore(ctx)
 	if err != nil {
 		return err
 	}
 	return s.Delete([]byte(types.VaultKey))
+}
+
+func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) error {
+	if genState.Vault != nil {
+		return k.setVault(ctx, genState.Vault)
+	}
+	return nil
+}
+
+func (k Keeper) ExportGenesis(ctx context.Context) (types.GenesisState, error) {
+	vb, err := k.getVault(ctx)
+	if err != nil {
+		return types.GenesisState{}, err
+	}
+	return types.GenesisState{Vault: vb}, nil
 }

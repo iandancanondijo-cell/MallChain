@@ -6,6 +6,7 @@ import (
 	"marketplace/x/mlcoin/types"
 
 	errorsmod "cosmossdk.io/errors"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 )
 
@@ -25,11 +26,17 @@ func (k msgServer) MintMallcoin(ctx context.Context, msg *types.MsgMintMallcoin)
 	}
 
 	// Mint tokens into the mint module account, then transfer to recipient
-	if err := k.Keeper.MintModuleCoins(ctx, minttypes.ModuleName, msg.Amount); err != nil {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	coins := sdk.NewCoins(sdk.NewInt64Coin("mlc", int64(msg.Amount)))
+	if err := k.Keeper.bankKeeper.MintCoins(sdkCtx, minttypes.ModuleName, coins); err != nil {
 		return nil, err
 	}
 
-	if err := k.Keeper.SendFromModuleToAccount(ctx, minttypes.ModuleName, msg.Recipient, msg.Amount); err != nil {
+	recipientAddr, err := sdk.AccAddressFromBech32(msg.Recipient)
+	if err != nil {
+		return nil, errorsmod.Wrap(types.ErrInvalidRequest, "invalid recipient address")
+	}
+	if err := k.Keeper.bankKeeper.SendCoinsFromModuleToAccount(sdkCtx, minttypes.ModuleName, recipientAddr, coins); err != nil {
 		return nil, err
 	}
 

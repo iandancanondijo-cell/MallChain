@@ -14,12 +14,12 @@ var _ types.QueryServer = queryServer{}
 
 // NewQueryServerImpl returns an implementation of the crosschain QueryServer interface
 // for the provided Keeper.
-func NewQueryServerImpl(k Keeper) types.QueryServer {
+func NewQueryServerImpl(k *Keeper) types.QueryServer {
 	return &queryServer{k}
 }
 
 type queryServer struct {
-	keeper Keeper
+	keeper *Keeper
 }
 
 // BridgeTransfer implements types.QueryServer
@@ -40,7 +40,7 @@ func (q queryServer) BridgeState(ctx context.Context, req *types.QueryBridgeStat
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	state, err := q.keeper.GetBridgeState(sdkCtx)
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		state = types.BridgeState{}
 	}
 
 	return &types.QueryBridgeStateResponse{

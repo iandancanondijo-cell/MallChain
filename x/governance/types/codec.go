@@ -1,9 +1,5 @@
 package types
 
-import (
-	sdk "github.com/cosmos/cosmos-sdk/types"
-)
-
 // RegisterCodec registers the codec for the governance module.
 func RegisterCodec(registry interface{}) {
 	// Stub: proto codec auto-registration
@@ -12,10 +8,7 @@ func RegisterCodec(registry interface{}) {
 // DefaultGenesisState returns the default genesis state for the governance module.
 func DefaultGenesisState() *GenesisState {
 	return &GenesisState{
-		Params: Params{
-			MinDeposit:   sdk.Coins{},
-			VotingPeriod: 0,
-		},
+		Params:    DefaultParams(),
 		Proposals: []Proposal{},
 		Deposits:  []Deposit{},
 		Votes:     []Vote{},

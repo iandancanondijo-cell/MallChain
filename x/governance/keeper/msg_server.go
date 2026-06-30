@@ -26,15 +26,17 @@ var _ types.MsgServer = msgServer{}
 func (k msgServer) SubmitProposal(ctx context.Context, msg *types.MsgSubmitProposal) (*types.MsgSubmitProposalResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
-	// Create proposal with minimal fields
+	// Create proposal with messages
 	proposal := types.Proposal{
 		Title:        msg.Title,
 		Summary:      msg.Summary,
 		Metadata:     msg.Metadata,
 		Proposer:     msg.Proposer,
+		Messages:     msg.Messages,
 		Status:       types.StatusDepositPeriod,
 		TotalDeposit: msg.InitialDeposit,
 		SubmitTime:   sdkCtx.BlockTime(),
+		Expedited:    msg.Expedited,
 	}
 
 	// Submit proposal
@@ -49,6 +51,13 @@ func (k msgServer) SubmitProposal(ctx context.Context, msg *types.MsgSubmitPropo
 			return nil, err
 		}
 	}
+
+	k.emitGovEvent(sdkCtx, types.EventTypeProposalSubmitted,
+		sdk.NewAttribute(types.AttributeKeyProposalID, fmt.Sprintf("%d", proposalID)),
+		sdk.NewAttribute(types.AttributeKeyProposer, msg.Proposer),
+		sdk.NewAttribute(types.AttributeKeyTitle, msg.Title),
+		sdk.NewAttribute(types.AttributeKeyMsgCount, fmt.Sprintf("%d", len(msg.Messages))),
+	)
 
 	return &types.MsgSubmitProposalResponse{
 		ProposalId: proposalID,

@@ -11,12 +11,12 @@ import (
 )
 
 type msgServer struct {
-	Keeper
+	*Keeper
 }
 
 // NewMsgServerImpl returns an implementation of the crosschain MsgServer interface
 // for the provided Keeper.
-func NewMsgServerImpl(keeper Keeper) types.MsgServer {
+func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 	return &msgServer{Keeper: keeper}
 }
 
@@ -64,6 +64,11 @@ func (k msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+
+	sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeParamsUpdated,
+		sdk.NewAttribute(sdk.AttributeKeyModule, types.ModuleName),
+	))
 
 	return &types.MsgUpdateParamsResponse{}, nil
 }

@@ -2,7 +2,6 @@ package types
 
 import "fmt"
 
-// DefaultGenesisState returns the default genesis state
 func DefaultGenesisState() *GenesisState {
 	params := DefaultParams()
 	return &GenesisState{
@@ -12,26 +11,26 @@ func DefaultGenesisState() *GenesisState {
 	}
 }
 
-// DefaultParams returns the default parameters for the dex module
 func DefaultParams() Params {
 	return Params{
-		DefaultFee:          "0.003", // 0.3%
-		MinLiquidity:        1000,
-		MaxFee:              "0.01",  // 1%
-		MinFee:              "0.001", // 0.1%
-		MaxPoolDrainPercent: 30,      // 30% max drain per transaction
+		DefaultFee:         "0.003",
+		MinLiquidity:       1000,
+		MaxFee:             "0.01",
+		MinFee:             "0.001",
+		MaxPoolDrainPercent: 20,
 	}
 }
 
-// Validate validates the genesis state
-func (gs GenesisState) Validate() error {
+func (gs *GenesisState) Validate() error {
+	if gs == nil {
+		return nil
+	}
 	if gs.Params != nil {
 		if err := gs.Params.Validate(); err != nil {
 			return err
 		}
 	}
 
-	// Validate pools
 	poolIds := make(map[uint64]bool)
 	for _, pool := range gs.Pools {
 		if pool == nil {
@@ -66,8 +65,10 @@ func (gs GenesisState) Validate() error {
 	return nil
 }
 
-// Validate validates the parameters
-func (p Params) Validate() error {
+func (p *Params) Validate() error {
+	if p == nil {
+		return nil
+	}
 	if p.DefaultFee == "" {
 		return fmt.Errorf("default fee cannot be empty")
 	}
@@ -83,8 +84,8 @@ func (p Params) Validate() error {
 	if p.MaxPoolDrainPercent == 0 {
 		return fmt.Errorf("max pool drain percent cannot be zero")
 	}
-	if p.MaxPoolDrainPercent > 50 {
-		return fmt.Errorf("max pool drain percent cannot exceed 50%")
+	if p.MaxPoolDrainPercent > 30 {
+		return fmt.Errorf("max pool drain percent cannot exceed 30 percent for security")
 	}
 	return nil
 }

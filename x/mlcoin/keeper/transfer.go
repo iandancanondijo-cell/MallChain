@@ -7,6 +7,8 @@ import (
 	"marketplace/x/mlcoin/types"
 
 	errorsmod "cosmossdk.io/errors"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 // safeSub subtracts b from a, returning an error on underflow.
@@ -52,6 +54,18 @@ func (k Keeper) Transfer(ctx context.Context, sender, recipient string, amount u
 	if err != nil {
 		return errorsmod.Wrap(types.ErrWalletNotFound, "sender wallet not found")
 	}
+
+	// Check vesting unlock for founder wallet (5-year period)
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	if wallet.Locked > 0 && wallet.UnlockTime > 0 && sdkCtx.BlockTime().Unix() >= wallet.UnlockTime {
+		wallet.Balance += wallet.Locked
+		wallet.Locked = 0
+		wallet.UnlockTime = 0
+		if err := k.WalletBalance.Set(ctx, sender, wallet); err != nil {
+			return errorsmod.Wrap(err, "failed to release vested tokens")
+		}
+	}
+
 	if wallet.Balance < amount {
 		return errorsmod.Wrap(types.ErrInsufficientBalance, "sender has insufficient balance")
 	}
@@ -79,8 +93,6 @@ func (k Keeper) Transfer(ctx context.Context, sender, recipient string, amount u
 	}
 
 	if _, err := k.RecordTransaction(ctx, sender, recipient, amount, "transfer", "WASM bridge transfer"); err != nil {
-		// Log the error but don't fail the transfer — the transfer is already committed.
-		// The error is surfacing here for observability instead of being silently dropped.
 		ctx, ok := ctx.(interface {
 			Logger() interface{ Info(string, ...interface{}) }
 		})

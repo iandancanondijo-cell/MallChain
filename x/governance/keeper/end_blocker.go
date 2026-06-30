@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -60,7 +61,7 @@ func (k Keeper) processDepositPeriodEnd(ctx context.Context, proposal types.Prop
 		proposal.Status = types.StatusFailed
 		if err := k.refundDeposits(ctx, proposal.Id); err != nil {
 			sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
-				"deposit_refund_failed",
+				types.EventTypeDepositRefundFail,
 				sdk.NewAttribute("proposal_id", fmt.Sprintf("%d", proposal.Id)),
 				sdk.NewAttribute("error", err.Error()),
 			))
@@ -86,12 +87,30 @@ func (k Keeper) processVotingPeriodEnd(ctx context.Context, proposal types.Propo
 	proposal.Status = outcome
 	proposal.FinalTallyResult = tally
 
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	if outcome == types.StatusPassed {
+		k.emitGovEvent(sdkCtx, types.EventTypeProposalPassed,
+			sdk.NewAttribute(types.AttributeKeyProposalID, strconv.FormatUint(proposal.Id, 10)),
+			sdk.NewAttribute(types.AttributeKeyStatus, "passed"),
+		)
+		if err := k.ExecuteProposal(ctx, proposal); err != nil {
+			sdkCtx.Logger().Error("proposal execution failed", "proposal_id", proposal.Id, "error", err)
+		} else if err := k.ExecuteTreasuryTransfer(ctx, proposal); err != nil {
+			sdkCtx.Logger().Error("treasury execution failed", "proposal_id", proposal.Id, "error", err)
+		}
+	} else if outcome == types.StatusRejected {
+		k.emitGovEvent(sdkCtx, types.EventTypeProposalRejected,
+			sdk.NewAttribute(types.AttributeKeyProposalID, strconv.FormatUint(proposal.Id, 10)),
+			sdk.NewAttribute(types.AttributeKeyStatus, "rejected"),
+		)
+	}
+
 	// Refund deposits if proposal was rejected
 	if outcome == types.StatusRejected {
-		sdkCtx := sdk.UnwrapSDKContext(ctx)
 		if err := k.refundDeposits(ctx, proposal.Id); err != nil {
 			sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
-				"deposit_refund_failed",
+				types.EventTypeDepositRefundFail,
 				sdk.NewAttribute("proposal_id", fmt.Sprintf("%d", proposal.Id)),
 				sdk.NewAttribute("error", err.Error()),
 			))
@@ -132,7 +151,7 @@ func (k Keeper) hasQuorum(ctx context.Context, tally types.TallyResult, params t
 	}
 
 	if k.stakingKeeper == nil {
-		return true
+		return false
 	}
 
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -195,7 +214,7 @@ func (k Keeper) refundDeposits(ctx context.Context, proposalID uint64) error {
 		}
 
 		sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
-			"deposit_refunded",
+			types.EventTypeDepositRefunded,
 			sdk.NewAttribute("proposal_id", fmt.Sprintf("%d", proposalID)),
 			sdk.NewAttribute("depositor", deposit.Depositor),
 			sdk.NewAttribute("amount", deposit.Amount.String()),

@@ -94,3 +94,83 @@ func TestBuyMallcoinTotalSupplyCap(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), types.ErrSupplyExhausted.Error())
 }
+
+func TestTransferWithVestingLocked(t *testing.T) {
+	f := initFixture(t)
+	sender := testAddr(0x10)
+	recipient := testAddr(0x20)
+
+	// Set up sender wallet with vested tokens (locked) - 160M MLCN in micro-units
+	require.NoError(t, f.keeper.WalletBalance.Set(f.ctx, sender, types.WalletBalance{
+		Address: sender,
+		Balance: 0,
+		Locked:  160_000_000_000_000,
+	}))
+
+	// Transfer should fail - no spendable balance
+	err := f.keeper.Transfer(f.ctx, sender, recipient, 100_000_000)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), types.ErrInsufficientBalance.Error())
+}
+
+func TestTransferSuccess(t *testing.T) {
+	f := initFixture(t)
+	sender := testAddr(0x11)
+	recipient := testAddr(0x21)
+
+	// Set up sender wallet with spendable balance - 500 MLCN
+	require.NoError(t, f.keeper.WalletBalance.Set(f.ctx, sender, types.WalletBalance{
+		Address: sender,
+		Balance: 500_000_000_000,
+	}))
+
+	// Transfer should succeed
+	err := f.keeper.Transfer(f.ctx, sender, recipient, 200_000_000_000)
+	require.NoError(t, err)
+
+	senderWallet, err := f.keeper.WalletBalance.Get(f.ctx, sender)
+	require.NoError(t, err)
+	require.Equal(t, uint64(300_000_000_000), senderWallet.Balance)
+
+	recipientWallet, err := f.keeper.WalletBalance.Get(f.ctx, recipient)
+	require.NoError(t, err)
+	require.Equal(t, uint64(200_000_000_000), recipientWallet.Balance)
+}
+
+func TestVestingUnlockAfterTime(t *testing.T) {
+	f := initFixture(t)
+	founder := testAddr(0x12)
+
+	// Genesis time is 2026-01-24, unlock time is 2031-01-24 (in the future)
+	futureUnlockTime := int64(1926979200) // 2031-01-24
+	pastUnlockTime := int64(1768880000)  // 2026-01-24 (past)
+
+	// Test wallet with future unlock time (still locked)
+	require.NoError(t, f.keeper.WalletBalance.Set(f.ctx, founder, types.WalletBalance{
+		Address:    founder,
+		Balance:    0,
+		Locked:     100_000_000_000, // 100 MLCN in micro
+		UnlockTime: futureUnlockTime,
+	}))
+
+	err := f.keeper.Transfer(f.ctx, founder, testAddr(0x22), 50_000_000_000)
+	require.Error(t, err) // Should fail - still locked
+
+	// Test wallet with past unlock time (should auto-release)
+	pastWallet := testAddr(0x13)
+	require.NoError(t, f.keeper.WalletBalance.Set(f.ctx, pastWallet, types.WalletBalance{
+		Address:    pastWallet,
+		Balance:    0,
+		Locked:     200_000_000_000, // 200 MLCN in micro
+		UnlockTime: pastUnlockTime,
+	}))
+
+	// Wallet should have been auto-released when we accessed it via Transfer
+	err = f.keeper.Transfer(f.ctx, pastWallet, pastWallet, 0)
+	require.NoError(t, err)
+
+	w, err := f.keeper.WalletBalance.Get(f.ctx, pastWallet)
+	require.NoError(t, err)
+	require.Equal(t, uint64(200_000_000_000), w.Balance)
+	require.Equal(t, uint64(0), w.Locked)
+}

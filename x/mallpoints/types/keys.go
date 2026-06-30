@@ -16,7 +16,7 @@ const (
 )
 
 // ParamsKey is the prefix to retrieve all Params
-var ParamsKey = collections.NewPrefix("p_mallpoints")
+var ParamsKey = collections.NewPrefix("p_mallpoints_params")
 var MonthlyPointsIssuedKey = collections.NewPrefix("monthlyPointsIssued/value/")
 
 var (

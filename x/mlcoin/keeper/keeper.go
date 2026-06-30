@@ -27,6 +27,7 @@ type Keeper struct {
 
 	Schema        collections.Schema
 	Params        collections.Item[types.Params]
+	Intervals     collections.Item[types.ModuleIntervals]
 	WalletBalance collections.Map[string, types.WalletBalance]
 	// Accounts collection removed; use the standard AuthKeeper for account/state
 	EmissionState    collections.Item[types.EmissionState]
@@ -71,6 +72,7 @@ func NewKeeper(
 		bankKeeper:   bankKeeper,
 
 		Params:        collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[types.Params](cdc)),
+		Intervals:     collections.NewItem(sb, collections.NewPrefix("p_mlcoin_intervals"), "intervals", collections.NewJSONValueCodec[types.ModuleIntervals]()),
 		WalletBalance: collections.NewMap(sb, types.WalletBalanceKey, "walletBalance", collections.StringKey, codec.CollValue[types.WalletBalance](cdc)),
 		Allowances:    collections.NewMap(sb, types.AllowanceKey, "allowances", collections.StringKey, collections.Uint64Value),
 		// Accounts collection removed; account management is handled by AuthKeeper

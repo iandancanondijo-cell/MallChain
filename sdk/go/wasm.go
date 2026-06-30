@@ -1,15 +1,13 @@
-// Package mallchain provides Go SDK for Mallchain smart contract interactions
-//
-// Usage:
-//   client, _ := mallchain.NewWasmClient("https://rpc.mallchain.com")
-//   codeId, _ := client.StoreCode(wasmBytecode, senderAddr)
-//   contractAddr, _ := client.Instantiate(codeId, initMsg, senderAddr, "my-contract")
-//   result, _ := client.Execute(contractAddr, execMsg, senderAddr)
 package mallchain
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 )
 
 // WasmClient provides smart contract interaction methods
@@ -38,11 +36,11 @@ func (m *MsgStoreCode) MsgName() string { return "wasm/MsgStoreCode" }
 
 // MsgInstantiateContract instantiates a WASM contract
 type MsgInstantiateContract struct {
-	Sender          string          `json:"sender"`
-	CodeID          uint64          `json:"code_id"`
-	Label           string          `json:"label,omitempty"`
-	InitMsg         json.RawMessage `json:"init_msg"`
-	GasLimit        uint64          `json:"gas_limit,omitempty"`
+	Sender   string          `json:"sender"`
+	CodeID   uint64          `json:"code_id"`
+	Label    string          `json:"label,omitempty"`
+	InitMsg  json.RawMessage `json:"init_msg"`
+	GasLimit uint64          `json:"gas_limit,omitempty"`
 }
 
 func (m *MsgInstantiateContract) MsgName() string { return "wasm/MsgInstantiateContract" }
@@ -112,7 +110,6 @@ func (c *WasmClient) StoreCode(ctx context.Context, wasmCode []byte, sender stri
 		return 0, err
 	}
 
-	// Parse response for code_id
 	var result struct {
 		CodeID uint64 `json:"code_id"`
 	}
@@ -156,5 +153,139 @@ func (c *WasmClient) Execute(ctx context.Context, contractAddr string, msg json.
 	}
 
 	resp, err := c.Signer.SignAndBroadcast(ctx, []MsgWasm{m}, Fee{Gas: gasLimit})
-	return resp, err
+	return &resp, err
+}
+
+// Query queries a WASM contract via REST
+func (c *WasmClient) Query(ctx context.Context, contractAddr string, query json.RawMessage) (json.RawMessage, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		fmt.Sprintf("%s/wasm/contract/%s", c.RpcUrl, url.PathEscape(contractAddr)),
+		bytes.NewReader(query))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return io.ReadAll(resp.Body)
+}
+
+// MlcoinClient provides Mallcoin token interaction methods.
+type MlcoinClient struct {
+	RpcUrl string
+	Signer Signer
+}
+
+// NewMlcoinClient creates a new Mallcoin client.
+func NewMlcoinClient(rpcUrl string, signer Signer) *MlcoinClient {
+	return &MlcoinClient{
+		RpcUrl: rpcUrl,
+		Signer: signer,
+	}
+}
+
+// Transfer transfers mallcoin from sender to recipient.
+func (c *MlcoinClient) Transfer(ctx context.Context, from, to string, amount uint64, denom string) (*TxResponse, error) {
+	resp, err := c.Signer.SignAndBroadcast(ctx, []MsgWasm{}, Fee{Gas: 100000})
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// Balance queries a wallet balance.
+func (c *MlcoinClient) Balance(ctx context.Context, address string) (uint64, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		fmt.Sprintf("%s/mlcoin/balance/%s", c.RpcUrl, url.PathEscape(address)), nil)
+	if err != nil {
+		return 0, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	var result struct {
+		Balance uint64 `json:"balance"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, err
+	}
+	return result.Balance, nil
+}
+
+// MarketplaceClient provides marketplace escrow interaction methods.
+type MarketplaceClient struct {
+	RpcUrl string
+	Signer Signer
+}
+
+// NewMarketplaceClient creates a new Marketplace client.
+func NewMarketplaceClient(rpcUrl string, signer Signer) *MarketplaceClient {
+	return &MarketplaceClient{
+		RpcUrl: rpcUrl,
+		Signer: signer,
+	}
+}
+
+// CreateEscrow creates a new escrow order.
+func (c *MarketplaceClient) CreateEscrow(ctx context.Context, buyer, seller, amount, denom, description string, disputeWindow uint64) (string, error) {
+	resp, err := c.Signer.SignAndBroadcast(ctx, []MsgWasm{}, Fee{Gas: 150000})
+	if err != nil {
+		return "", err
+	}
+	var result struct {
+		EscrowID string `json:"escrow_id"`
+	}
+	if err := json.Unmarshal(resp.Data, &result); err != nil {
+		return "", err
+	}
+	return result.EscrowID, nil
+}
+
+// GetEscrow queries escrow details by ID.
+func (c *MarketplaceClient) GetEscrow(ctx context.Context, escrowID string) (json.RawMessage, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		fmt.Sprintf("%s/marketplace/escrow/%s", c.RpcUrl, url.PathEscape(escrowID)), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+// Client is the main entry point for Mallchain SDK interactions.
+type Client struct {
+	Wasm        *WasmClient
+	Mlcoin      *MlcoinClient
+	Marketplace *MarketplaceClient
+}
+
+// ClientOptions configures the SDK client.
+type ClientOptions struct {
+	RpcUrl string
+}
+
+// NewClient creates a new Mallchain SDK client.
+func NewClient(opts ClientOptions, signer Signer) *Client {
+	return &Client{
+		Wasm:        NewWasmClient(opts.RpcUrl, signer),
+		Mlcoin:      NewMlcoinClient(opts.RpcUrl, signer),
+		Marketplace: NewMarketplaceClient(opts.RpcUrl, signer),
+	}
 }

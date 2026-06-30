@@ -143,9 +143,11 @@ type Params struct {
 	// max_fee is the maximum allowed swap fee.
 	MaxFee string `protobuf:"bytes,3,opt,name=max_fee,json=maxFee,proto3" json:"max_fee,omitempty"`
 	// min_fee is the minimum allowed swap fee.
-	MinFee        string `protobuf:"bytes,4,opt,name=min_fee,json=minFee,proto3" json:"min_fee,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	MinFee string `protobuf:"bytes,4,opt,name=min_fee,json=minFee,proto3" json:"min_fee,omitempty"`
+	// max_pool_drain_percent is the maximum percentage of a pool's reserves that can be drained in a single transaction.
+	MaxPoolDrainPercent uint32 `protobuf:"varint,5,opt,name=max_pool_drain_percent,json=maxPoolDrainPercent,proto3" json:"max_pool_drain_percent,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *Params) Reset() {
@@ -204,6 +206,13 @@ func (x *Params) GetMinFee() string {
 		return x.MinFee
 	}
 	return ""
+}
+
+func (x *Params) GetMaxPoolDrainPercent() uint32 {
+	if x != nil {
+		return x.MaxPoolDrainPercent
+	}
+	return 0
 }
 
 // GenesisState defines the dex module's genesis state.
@@ -283,13 +292,14 @@ const file_marketplace_dex_v1_genesis_proto_rawDesc = "" +
 	"\x0ftoken_b_reserve\x18\x05 \x01(\v2\x19.cosmos.base.v1beta1.CoinB\x04\xc8\xde\x1f\x00R\rtokenBReserve\x12H\n" +
 	"\x0ftotal_liquidity\x18\x06 \x01(\v2\x19.cosmos.base.v1beta1.CoinB\x04\xc8\xde\x1f\x00R\x0etotalLiquidity\x12\x10\n" +
 	"\x03fee\x18\a \x01(\tR\x03fee\x122\n" +
-	"\acreator\x18\b \x01(\tB\x18Ҵ-\x14cosmos.AddressStringR\acreator\"\x80\x01\n" +
+	"\acreator\x18\b \x01(\tB\x18Ҵ-\x14cosmos.AddressStringR\acreator\"\xb5\x01\n" +
 	"\x06Params\x12\x1f\n" +
 	"\vdefault_fee\x18\x01 \x01(\tR\n" +
 	"defaultFee\x12#\n" +
 	"\rmin_liquidity\x18\x02 \x01(\x04R\fminLiquidity\x12\x17\n" +
 	"\amax_fee\x18\x03 \x01(\tR\x06maxFee\x12\x17\n" +
-	"\amin_fee\x18\x04 \x01(\tR\x06minFee\"\xa0\x01\n" +
+	"\amin_fee\x18\x04 \x01(\tR\x06minFee\x123\n" +
+	"\x16max_pool_drain_percent\x18\x05 \x01(\rR\x13maxPoolDrainPercent\"\xa0\x01\n" +
 	"\fGenesisState\x128\n" +
 	"\x06params\x18\x01 \x01(\v2\x1a.marketplace.dex.v1.ParamsB\x04\xc8\xde\x1f\x00R\x06params\x124\n" +
 	"\x05pools\x18\x02 \x03(\v2\x18.marketplace.dex.v1.PoolB\x04\xc8\xde\x1f\x00R\x05pools\x12 \n" +

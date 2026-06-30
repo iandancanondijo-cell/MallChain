@@ -16,22 +16,22 @@ option go_package = "github.com/tmp/marketplace/x/mallpoints/types";
 service Query {
   // Parameters queries the parameters of the module.
   rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
-    option (google.api.http).get = "/tmp/marketplace/mallpoints/v1/params";
+    option (google.api.http).get = "/marketplace/mallpoints/v1/params";
   }
 
   // ListUserPoints Queries a list of UserPoints items.
   rpc GetUserPoints(QueryGetUserPointsRequest) returns (QueryGetUserPointsResponse) {
-    option (google.api.http).get = "/tmp/marketplace/mallpoints/v1/user_points/{index}";
+    option (google.api.http).get = "/marketplace/mallpoints/v1/user_points/{index}";
   }
 
   // ListUserPoints defines the ListUserPoints RPC.
   rpc ListUserPoints(QueryAllUserPointsRequest) returns (QueryAllUserPointsResponse) {
-    option (google.api.http).get = "/tmp/marketplace/mallpoints/v1/user_points";
+    option (google.api.http).get = "/marketplace/mallpoints/v1/user_points";
   }
 
   // Queries a ConversionWindow by index.
   rpc GetConversionWindow(QueryGetConversionWindowRequest) returns (QueryGetConversionWindowResponse) {
-    option (google.api.http).get = "/tmp/marketplace/mallpoints/v1/conversion_window";
+    option (google.api.http).get = "/marketplace/mallpoints/v1/conversion_window";
   }
 }
 

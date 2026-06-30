@@ -7,6 +7,7 @@ import "cosmos/base/v1beta1/coin.proto";
 import "cosmos/msg/v1/msg.proto";
 import "cosmos_proto/cosmos.proto";
 import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/timestamp.proto";
 import "marketplace/governance/v1/types.proto";
@@ -17,6 +18,7 @@ option go_package = "github.com/tmp/marketplace/x/governance/types";
 service Query {
   // Params queries all parameters of the governance module.
   rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/tmp/marketplace/governance/v1/params";
   }
 
   // Proposals queries all proposals based on given status.

@@ -34,19 +34,27 @@ func (k Keeper) Stake(ctx context.Context, address string, amount uint64) (strin
 		return "", err
 	}
 
-	// Create staking record with 180-day (6-month) lock period (~1555200 blocks)
+	// Create staking record with configurable lock period
 	seq, err := k.StakingSequence.Next(ctx)
 	if err != nil {
 		return "", err
+	}
+	intervals, err := k.GetModuleIntervals(ctx)
+	if err != nil {
+		return "", err
+	}
+	lockBlocks := intervals.StakingLockBlocks
+	if lockBlocks == 0 {
+		lockBlocks = types.DefaultModuleIntervals().StakingLockBlocks
 	}
 	stakeID := fmt.Sprintf("stake-%d-%s", seq, address)
 	stakeInfo := types.StakingInfo{
 		Address:       address,
 		StakedAmount:  amount,
-		StakeDate:     int64(sdkCtx.BlockHeight()), // stored as block height for duration calculations
+		StakeDate:     int64(sdkCtx.BlockHeight()),
 		RewardsEarned: 0,
 		IsActive:      true,
-		UnlockHeight:  uint64(sdkCtx.BlockHeight()) + 1555200, // ~6 months
+		UnlockHeight:  uint64(sdkCtx.BlockHeight()) + lockBlocks,
 	}
 
 	// Persist staking record
@@ -59,6 +67,13 @@ func (k Keeper) Stake(ctx context.Context, address string, amount uint64) (strin
 
 	// Record activity
 	_ = k.RecordActivity(ctx, "stake", amount, address)
+
+	sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeStake,
+		sdk.NewAttribute(types.AttributeKeyAddress, address),
+		sdk.NewAttribute(types.AttributeKeyStakeID, stakeID),
+		sdk.NewAttribute(types.AttributeKeyAmount, fmt.Sprintf("%d", amount)),
+	))
 
 	return stakeID, nil
 }
@@ -116,19 +131,33 @@ func (k Keeper) UnstakeAndClaimRewards(ctx context.Context, address string, stak
 	// Record transaction
 	_, _ = k.RecordTransaction(ctx, "staking", address, totalReturn, "reward", "Staking rewards claimed")
 
+	sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeUnstake,
+		sdk.NewAttribute(types.AttributeKeyAddress, address),
+		sdk.NewAttribute(types.AttributeKeyStakeID, stakeID),
+		sdk.NewAttribute(types.AttributeKeyAmount, fmt.Sprintf("%d", totalReturn)),
+	))
+
 	return rewards, nil
 }
 
 // CalculateRewardsForStaking calculates staking rewards based on multiple factors
 func (k Keeper) CalculateRewardsForStaking(ctx context.Context, stakedAmount, stakeDurationBlocks uint64) uint64 {
+	intervals, err := k.GetModuleIntervals(ctx)
+	if err != nil {
+		intervals = types.DefaultModuleIntervals()
+	}
 	// Get activity metrics for engagement multiplier
 	metrics, err := k.ActivityMetrics.Get(ctx)
 	if err != nil {
 		metrics = types.ActivityMetrics{EngagementScore: 500} // default middle score
 	}
 
-	// Base reward: 2% annual return (simplified)
-	blockRewards := stakedAmount / 18250 // 365 days * 50 blocks/day
+	rewardDivisor := intervals.RewardDivisor
+	if rewardDivisor == 0 {
+		rewardDivisor = types.DefaultModuleIntervals().RewardDivisor
+	}
+	blockRewards := stakedAmount / rewardDivisor
 
 	// Apply engagement multiplier (0.5x to 1.5x)
 	engagementMultiplier := metrics.EngagementScore / 1000
@@ -136,9 +165,11 @@ func (k Keeper) CalculateRewardsForStaking(ctx context.Context, stakedAmount, st
 		engagementMultiplier = 1
 	}
 
-	// Duration bonus: longer stakes earn more
-	// Add 0.1% per month of staking
-	durationMonths := stakeDurationBlocks / 129600 // blocks per month
+	blocksPerMonth := intervals.BlocksPerMonth
+	if blocksPerMonth == 0 {
+		blocksPerMonth = types.DefaultModuleIntervals().BlocksPerMonth
+	}
+	durationMonths := stakeDurationBlocks / blocksPerMonth
 	durationBonus := durationMonths / 10           // 0.1% per month
 
 	totalReward := blockRewards * engagementMultiplier * (100 + durationBonus) / 100

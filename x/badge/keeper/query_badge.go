@@ -4,11 +4,8 @@ import (
 	"context"
 )
 
-// HasUserBadge checks if a user has a badge
+// HasUserBadge checks if a user has a badge (implements the interface expected by mallpoints)
 func (k Keeper) HasUserBadge(ctx context.Context, address string) bool {
-	badge, err := k.UserBadge.Get(ctx, address)
-	if err != nil {
-		return false
-	}
-	return badge.HasBadge
+	_, err := k.UserBadge.Get(ctx, address)
+	return err == nil
 }

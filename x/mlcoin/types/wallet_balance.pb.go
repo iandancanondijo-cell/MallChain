@@ -24,10 +24,11 @@ const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 
 // WalletBalance defines the WalletBalance message.
 type WalletBalance struct {
-	Index   string `protobuf:"bytes,1,opt,name=index,proto3" json:"index,omitempty"`
-	Address string `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
-	Balance uint64 `protobuf:"varint,3,opt,name=balance,proto3" json:"balance,omitempty"`
-	Locked  uint64 `protobuf:"varint,4,opt,name=locked,proto3" json:"locked,omitempty"`
+	Index      string `protobuf:"bytes,1,opt,name=index,proto3" json:"index,omitempty"`
+	Address    string `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
+	Balance    uint64 `protobuf:"varint,3,opt,name=balance,proto3" json:"balance,omitempty"`
+	Locked     uint64 `protobuf:"varint,4,opt,name=locked,proto3" json:"locked,omitempty"`
+	UnlockTime int64  `protobuf:"varint,5,opt,name=unlock_time,json=unlockTime,proto3" json:"unlock_time,omitempty"`
 }
 
 func (m *WalletBalance) Reset()         { *m = WalletBalance{} }
@@ -91,6 +92,13 @@ func (m *WalletBalance) GetLocked() uint64 {
 	return 0
 }
 
+func (m *WalletBalance) GetUnlockTime() int64 {
+	if m != nil {
+		return m.UnlockTime
+	}
+	return 0
+}
+
 func init() {
 	proto.RegisterType((*WalletBalance)(nil), "marketplace.mlcoin.v1.WalletBalance")
 }
@@ -137,6 +145,11 @@ func (m *WalletBalance) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.UnlockTime != 0 {
+		i = encodeVarintWalletBalance(dAtA, i, uint64(m.UnlockTime))
+		i--
+		dAtA[i] = 0x28
+	}
 	if m.Locked != 0 {
 		i = encodeVarintWalletBalance(dAtA, i, uint64(m.Locked))
 		i--
@@ -194,6 +207,9 @@ func (m *WalletBalance) Size() (n int) {
 	}
 	if m.Locked != 0 {
 		n += 1 + sovWalletBalance(uint64(m.Locked))
+	}
+	if m.UnlockTime != 0 {
+		n += 1 + sovWalletBalance(uint64(m.UnlockTime))
 	}
 	return n
 }
@@ -335,6 +351,26 @@ func (m *WalletBalance) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field UnlockTime", wireType)
+			}
+			v := uint64(0)
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowWalletBalance
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.UnlockTime = int64(v)
 		default:
 			iNdEx = preIndex
 			skippy, err := skipWalletBalance(dAtA[iNdEx:])

@@ -24,12 +24,16 @@ const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 
 // EmissionState defines the EmissionState message.
 type EmissionState struct {
-	TotalSupply  uint64 `protobuf:"varint,1,opt,name=total_supply,json=totalSupply,proto3" json:"total_supply,omitempty"`
-	Circulating  uint64 `protobuf:"varint,2,opt,name=circulating,proto3" json:"circulating,omitempty"`
-	MonthlyCap   uint64 `protobuf:"varint,3,opt,name=monthly_cap,json=monthlyCap,proto3" json:"monthly_cap,omitempty"`
-	DailyLimit   uint64 `protobuf:"varint,4,opt,name=daily_limit,json=dailyLimit,proto3" json:"daily_limit,omitempty"`
-	CurrentMonth uint64 `protobuf:"varint,5,opt,name=current_month,json=currentMonth,proto3" json:"current_month,omitempty"`
-	CurrentDay   uint64 `protobuf:"varint,6,opt,name=current_day,json=currentDay,proto3" json:"current_day,omitempty"`
+	TotalSupply   uint64 `protobuf:"varint,1,opt,name=total_supply,json=totalSupply,proto3" json:"total_supply,omitempty"`
+	Circulating   uint64 `protobuf:"varint,2,opt,name=circulating,proto3" json:"circulating,omitempty"`
+	MonthlyCap    uint64 `protobuf:"varint,3,opt,name=monthly_cap,json=monthlyCap,proto3" json:"monthly_cap,omitempty"`
+	DailyLimit    uint64 `protobuf:"varint,4,opt,name=daily_limit,json=dailyLimit,proto3" json:"daily_limit,omitempty"`
+	CurrentMonth  uint64 `protobuf:"varint,5,opt,name=current_month,json=currentMonth,proto3" json:"current_month,omitempty"`
+	CurrentDay    uint64 `protobuf:"varint,6,opt,name=current_day,json=currentDay,proto3" json:"current_day,omitempty"`
+	EmittedTotal  uint64 `protobuf:"varint,7,opt,name=emitted_total,json=emittedTotal,proto3" json:"emitted_total,omitempty"`
+	BurnedTotal   uint64 `protobuf:"varint,8,opt,name=burned_total,json=burnedTotal,proto3" json:"burned_total,omitempty"`
+	BurnWallet    string `protobuf:"bytes,9,opt,name=burn_wallet,json=burnWallet,proto3" json:"burn_wallet,omitempty"`
+	BurnRateBps   uint64 `protobuf:"varint,10,opt,name=burn_rate_bps,json=burnRateBps,proto3" json:"burn_rate_bps,omitempty"`
 }
 
 func (m *EmissionState) Reset()         { *m = EmissionState{} }
@@ -107,6 +111,34 @@ func (m *EmissionState) GetCurrentDay() uint64 {
 	return 0
 }
 
+func (m *EmissionState) GetEmittedTotal() uint64 {
+	if m != nil {
+		return m.EmittedTotal
+	}
+	return 0
+}
+
+func (m *EmissionState) GetBurnedTotal() uint64 {
+	if m != nil {
+		return m.BurnedTotal
+	}
+	return 0
+}
+
+func (m *EmissionState) GetBurnWallet() string {
+	if m != nil {
+		return m.BurnWallet
+	}
+	return ""
+}
+
+func (m *EmissionState) GetBurnRateBps() uint64 {
+	if m != nil {
+		return m.BurnRateBps
+	}
+	return 0
+}
+
 func init() {
 	proto.RegisterType((*EmissionState)(nil), "marketplace.mlcoin.v1.EmissionState")
 }
@@ -157,6 +189,28 @@ func (m *EmissionState) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.BurnRateBps != 0 {
+		i = encodeVarintEmissionState(dAtA, i, uint64(m.BurnRateBps))
+		i--
+		dAtA[i] = 0x50
+	}
+	if m.BurnWallet != "" {
+		i = encodeVarintEmissionState(dAtA, i, uint64(len(m.BurnWallet)))
+		i -= len(m.BurnWallet)
+		copy(dAtA[i:], m.BurnWallet)
+		i--
+		dAtA[i] = 0x4a
+	}
+	if m.BurnedTotal != 0 {
+		i = encodeVarintEmissionState(dAtA, i, uint64(m.BurnedTotal))
+		i--
+		dAtA[i] = 0x40
+	}
+	if m.EmittedTotal != 0 {
+		i = encodeVarintEmissionState(dAtA, i, uint64(m.EmittedTotal))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.CurrentDay != 0 {
 		i = encodeVarintEmissionState(dAtA, i, uint64(m.CurrentDay))
 		i--
@@ -224,6 +278,19 @@ func (m *EmissionState) Size() (n int) {
 	}
 	if m.CurrentDay != 0 {
 		n += 1 + sovEmissionState(uint64(m.CurrentDay))
+	}
+	if m.EmittedTotal != 0 {
+		n += 1 + sovEmissionState(uint64(m.EmittedTotal))
+	}
+	if m.BurnedTotal != 0 {
+		n += 1 + sovEmissionState(uint64(m.BurnedTotal))
+	}
+	l = len(m.BurnWallet)
+	if l > 0 {
+		n += 1 + l + sovEmissionState(uint64(l))
+	}
+	if m.BurnRateBps != 0 {
+		n += 1 + sovEmissionState(uint64(m.BurnRateBps))
 	}
 	return n
 }
@@ -373,6 +440,94 @@ func (m *EmissionState) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.CurrentDay |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EmittedTotal", wireType)
+			}
+			m.EmittedTotal = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowEmissionState
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EmittedTotal |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 8:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BurnedTotal", wireType)
+			}
+			m.BurnedTotal = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowEmissionState
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.BurnedTotal |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 9:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BurnWallet", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowEmissionState
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthEmissionState
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthEmissionState
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.BurnWallet = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 10:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BurnRateBps", wireType)
+			}
+			m.BurnRateBps = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowEmissionState
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.BurnRateBps |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}

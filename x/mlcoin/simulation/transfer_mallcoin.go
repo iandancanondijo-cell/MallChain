@@ -20,13 +20,46 @@ func SimulateMsgTransferMallcoin(
 ) simtypes.Operation {
 	return func(r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context, accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
-		simAccount, _ := simtypes.RandomAcc(r, accs)
-		msg := &types.MsgTransferMallcoin{
-			Creator: simAccount.Address.String(),
+		var sender simtypes.Account
+		var senderWallet types.WalletBalance
+		var err error
+		var found bool
+
+		for i := 0; i < len(accs); i++ {
+			sender, _ = simtypes.RandomAcc(r, accs)
+			senderWallet, err = k.WalletBalance.Get(ctx, sender.Address.String())
+			if err == nil && senderWallet.Balance > 0 {
+				found = true
+				break
+			}
 		}
 
-		// TODO: Handle the TransferMallcoin simulation
+		if !found {
+			return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(&types.MsgTransferMallcoin{}), "no account with sufficient balance"), nil, nil
+		}
 
-		return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(msg), "TransferMallcoin simulation not implemented"), nil, nil
+		recipient, _ := simtypes.RandomAcc(r, accs)
+		if recipient.Address.String() == sender.Address.String() {
+			recipient, _ = simtypes.RandomAcc(r, accs)
+		}
+
+		amount := uint64(1)
+		if senderWallet.Balance > 1 {
+			amount = uint64(r.Int63n(int64(senderWallet.Balance))) + 1
+		}
+
+		msg := &types.MsgTransferMallcoin{
+			Creator: sender.Address.String(),
+			Amount:  amount,
+			To:      recipient.Address.String(),
+		}
+
+		server := keeper.NewMsgServerImpl(&k)
+		_, err = server.TransferMallcoin(ctx, msg)
+		if err != nil {
+			return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(msg), err.Error()), nil, nil
+		}
+
+		return simtypes.NewOperationMsg(msg, true, "TransferMallcoin simulation completed successfully"), nil, nil
 	}
 }

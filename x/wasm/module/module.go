@@ -3,10 +3,12 @@ package module
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"cosmossdk.io/core/appmodule"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
@@ -80,12 +82,26 @@ func (m AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterQueryServer(cfg.QueryServer(), queryServer)
 }
 
-func (AppModule) InitGenesis(ctx context.Context, cdc codec.JSONCodec, bz json.RawMessage) error {
-	return nil
+func (m AppModule) InitGenesis(ctx sdk.Context, cdc codec.JSONCodec, bz json.RawMessage) {
+	var genState types.GenesisState
+	if err := m.cdc.UnmarshalJSON(bz, &genState); err != nil {
+		panic(fmt.Errorf("failed to unmarshal %s genesis state: %w", types.ModuleName, err))
+	}
+	if err := m.keeper.InitGenesis(ctx, genState); err != nil {
+		panic(fmt.Errorf("failed to initialize %s genesis state: %w", types.ModuleName, err))
+	}
 }
 
-func (AppModule) ExportGenesis(ctx context.Context, cdc codec.JSONCodec) json.RawMessage {
-	return nil
+func (m AppModule) ExportGenesis(ctx sdk.Context, cdc codec.JSONCodec) json.RawMessage {
+	genState, err := m.keeper.ExportGenesis(ctx)
+	if err != nil {
+		panic(fmt.Errorf("failed to export %s genesis state: %w", types.ModuleName, err))
+	}
+	bz, err := m.cdc.MarshalJSON(genState)
+	if err != nil {
+		panic(fmt.Errorf("failed to marshal %s genesis state: %w", types.ModuleName, err))
+	}
+	return bz
 }
 
 func (AppModule) ConsensusVersion() uint64 { return 1 }

@@ -12,6 +12,7 @@ import (
 	_ "github.com/cosmos/cosmos-sdk/types/msgservice"
 	query "github.com/cosmos/cosmos-sdk/types/query"
 	_ "github.com/cosmos/gogoproto/gogoproto"
+	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	_ "google.golang.org/protobuf/types/known/anypb"
@@ -528,7 +529,7 @@ var File_marketplace_dex_v1_query_proto protoreflect.FileDescriptor
 
 const file_marketplace_dex_v1_query_proto_rawDesc = "" +
 	"\n" +
-	"\x1emarketplace/dex/v1/query.proto\x12\x12marketplace.dex.v1\x1a*cosmos/base/query/v1beta1/pagination.proto\x1a\x1ecosmos/base/v1beta1/coin.proto\x1a\x17cosmos/msg/v1/msg.proto\x1a\x19cosmos_proto/cosmos.proto\x1a\x14gogoproto/gogo.proto\x1a marketplace/dex/v1/genesis.proto\x1a\x19google/protobuf/any.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"?\n" +
+	"\x1emarketplace/dex/v1/query.proto\x12\x12marketplace.dex.v1\x1a*cosmos/base/query/v1beta1/pagination.proto\x1a\x1ecosmos/base/v1beta1/coin.proto\x1a\x17cosmos/msg/v1/msg.proto\x1a\x19cosmos_proto/cosmos.proto\x1a\x14gogoproto/gogo.proto\x1a\x1cgoogle/api/annotations.proto\x1a marketplace/dex/v1/genesis.proto\x1a\x19google/protobuf/any.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"?\n" +
 	"\x10QueryPoolRequest\x12+\n" +
 	"\apool_id\x18\x01 \x01(\x04B\x12\xf2\xde\x1f\x0eyaml:\"pool_id\"R\x06poolId\"G\n" +
 	"\x11QueryPoolResponse\x122\n" +
@@ -556,13 +557,13 @@ const file_marketplace_dex_v1_query_proto_rawDesc = "" +
 	"\x03fee\x18\x02 \x01(\v2\x19.cosmos.base.v1beta1.CoinB\x04\xc8\xde\x1f\x00R\x03fee\"\x14\n" +
 	"\x12QueryParamsRequest\"O\n" +
 	"\x13QueryParamsResponse\x128\n" +
-	"\x06params\x18\x01 \x01(\v2\x1a.marketplace.dex.v1.ParamsB\x04\xc8\xde\x1f\x00R\x06params2\xf6\x03\n" +
+	"\x06params\x18\x01 \x01(\v2\x1a.marketplace.dex.v1.ParamsB\x04\xc8\xde\x1f\x00R\x06params2\x9d\x04\n" +
 	"\x05Query\x12U\n" +
 	"\x04Pool\x12$.marketplace.dex.v1.QueryPoolRequest\x1a%.marketplace.dex.v1.QueryPoolResponse\"\x00\x12X\n" +
 	"\x05Pools\x12%.marketplace.dex.v1.QueryPoolsRequest\x1a&.marketplace.dex.v1.QueryPoolsResponse\"\x00\x12p\n" +
 	"\rPoolLiquidity\x12-.marketplace.dex.v1.QueryPoolLiquidityRequest\x1a..marketplace.dex.v1.QueryPoolLiquidityResponse\"\x00\x12m\n" +
-	"\fEstimateSwap\x12,.marketplace.dex.v1.QueryEstimateSwapRequest\x1a-.marketplace.dex.v1.QueryEstimateSwapResponse\"\x00\x12[\n" +
-	"\x06Params\x12&.marketplace.dex.v1.QueryParamsRequest\x1a'.marketplace.dex.v1.QueryParamsResponse\"\x00B\x19Z\x17marketplace/x/dex/typesb\x06proto3"
+	"\fEstimateSwap\x12,.marketplace.dex.v1.QueryEstimateSwapRequest\x1a-.marketplace.dex.v1.QueryEstimateSwapResponse\"\x00\x12\x81\x01\n" +
+	"\x06Params\x12&.marketplace.dex.v1.QueryParamsRequest\x1a'.marketplace.dex.v1.QueryParamsResponse\"&\x82\xd3\xe4\x93\x02 \x12\x1e/tmp/marketplace/dex/v1/paramsB\x19Z\x17marketplace/x/dex/typesb\x06proto3"
 
 var (
 	file_marketplace_dex_v1_query_proto_rawDescOnce sync.Once

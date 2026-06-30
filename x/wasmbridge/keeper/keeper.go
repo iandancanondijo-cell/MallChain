@@ -9,7 +9,6 @@ import (
 	corestore "cosmossdk.io/core/store"
 	errorsmod "cosmossdk.io/errors"
 	"github.com/cosmos/cosmos-sdk/codec"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	mlcoinkeeper "marketplace/x/mlcoin/keeper"
 	mlcointypes "marketplace/x/mlcoin/types"
@@ -31,7 +30,7 @@ func NewKeeper(
 	cdc codec.Codec,
 	addressCodec address.Codec,
 	mlcoinKeeper *mlcoinkeeper.Keeper,
-) Keeper {
+) (Keeper, error) {
 	sb := collections.NewSchemaBuilder(storeService)
 
 	k := Keeper{
@@ -44,11 +43,11 @@ func NewKeeper(
 
 	schema, err := sb.Build()
 	if err != nil {
-		panic(err)
+		return Keeper{}, err
 	}
 	k.Schema = schema
 
-	return k
+	return k, nil
 }
 
 func (k Keeper) validateAddress(address string) error {
@@ -62,6 +61,9 @@ func (k Keeper) validateAddress(address string) error {
 }
 
 func (k Keeper) HandleTransfer(ctx context.Context, msg types.MGP20TransferMsg) error {
+	if k.mlcoinKeeper == nil {
+		return errorsmod.Wrap(types.ErrInvalidRequest, "mlcoin keeper not initialized")
+	}
 	if err := k.validateAddress(msg.From); err != nil {
 		return err
 	}
@@ -72,23 +74,30 @@ func (k Keeper) HandleTransfer(ctx context.Context, msg types.MGP20TransferMsg) 
 		return errorsmod.Wrap(mlcointypes.ErrInvalidRequest, "transfer amount must be greater than zero")
 	}
 
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	return k.mlcoinKeeper.Transfer(sdkCtx, msg.From, msg.To, msg.Amount)
+	return k.mlcoinKeeper.Transfer(ctx, msg.From, msg.To, msg.Amount)
 }
 
 func (k Keeper) HandleApprove(ctx context.Context, msg types.MGP20ApproveMsg) error {
+	if k.mlcoinKeeper == nil {
+		return errorsmod.Wrap(types.ErrInvalidRequest, "mlcoin keeper not initialized")
+	}
 	if err := k.validateAddress(msg.Owner); err != nil {
 		return err
 	}
 	if err := k.validateAddress(msg.Spender); err != nil {
 		return err
 	}
+	if msg.Amount == 0 {
+		return errorsmod.Wrap(mlcointypes.ErrInvalidRequest, "approve amount must be greater than zero")
+	}
 
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	return k.mlcoinKeeper.Approve(sdkCtx, msg.Owner, msg.Spender, msg.Amount)
+	return k.mlcoinKeeper.Approve(ctx, msg.Owner, msg.Spender, msg.Amount)
 }
 
 func (k Keeper) HandleTransferFrom(ctx context.Context, msg types.MGP20TransferFromMsg) error {
+	if k.mlcoinKeeper == nil {
+		return errorsmod.Wrap(types.ErrInvalidRequest, "mlcoin keeper not initialized")
+	}
 	if err := k.validateAddress(msg.Owner); err != nil {
 		return err
 	}
@@ -102,11 +111,13 @@ func (k Keeper) HandleTransferFrom(ctx context.Context, msg types.MGP20TransferF
 		return errorsmod.Wrap(mlcointypes.ErrInvalidRequest, "transfer amount must be greater than zero")
 	}
 
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	return k.mlcoinKeeper.TransferFrom(sdkCtx, msg.Owner, msg.Spender, msg.Recipient, msg.Amount)
+	return k.mlcoinKeeper.TransferFrom(ctx, msg.Owner, msg.Spender, msg.Recipient, msg.Amount)
 }
 
 func (k Keeper) QueryBalance(ctx context.Context, address string) (uint64, error) {
+	if k.mlcoinKeeper == nil {
+		return 0, errorsmod.Wrap(types.ErrInvalidRequest, "mlcoin keeper not initialized")
+	}
 	if err := k.validateAddress(address); err != nil {
 		return 0, err
 	}
@@ -123,6 +134,9 @@ func (k Keeper) QueryBalance(ctx context.Context, address string) (uint64, error
 }
 
 func (k Keeper) QueryAllowance(ctx context.Context, owner, spender string) (uint64, error) {
+	if k.mlcoinKeeper == nil {
+		return 0, errorsmod.Wrap(types.ErrInvalidRequest, "mlcoin keeper not initialized")
+	}
 	if err := k.validateAddress(owner); err != nil {
 		return 0, err
 	}
@@ -130,5 +144,10 @@ func (k Keeper) QueryAllowance(ctx context.Context, owner, spender string) (uint
 		return 0, err
 	}
 
-	return k.mlcoinKeeper.GetAllowance(ctx, owner, spender)
+	allowance, err := k.mlcoinKeeper.GetAllowance(ctx, owner, spender)
+	if err != nil {
+		return 0, errorsmod.Wrap(err, "failed to query allowance")
+	}
+
+	return allowance, nil
 }

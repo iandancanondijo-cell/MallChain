@@ -19,7 +19,7 @@ const (
 var TreasurySnapshotKey = []byte("treasury_snapshot")
 
 // ParamsKey is the prefix to retrieve all Params
-var ParamsKey = collections.NewPrefix("p_mlcoin")
+var ParamsKey = collections.NewPrefix("p_mlcoin_params")
 
 var (
 	EmissionStateKey    = collections.NewPrefix("emissionState/value/")

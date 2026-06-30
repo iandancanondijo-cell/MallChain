@@ -2,10 +2,12 @@ package keeper
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"marketplace/x/mlcoin/types"
 
+	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -15,20 +17,48 @@ import (
 // EndBlocker handles end-of-block operations for dynamic pricing and metrics
 func (k Keeper) EndBlocker(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	intervals, err := k.GetModuleIntervals(ctx)
+	if err != nil {
+		return err
+	}
 
-	// Update activity-based pricing every N blocks (e.g., every 100 blocks)
-	if sdkCtx.BlockHeight()%100 == 0 {
+	if intervals.DynamicPricingBlocks > 0 && sdkCtx.BlockHeight()%int64(intervals.DynamicPricingBlocks) == 0 {
 		if err := k.updateDynamicPricing(ctx); err != nil {
-			// Log error but don't fail
 			sdkCtx.Logger().Error("Failed to update dynamic pricing", "error", err)
+		} else {
+			sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeDynamicPrice,
+				sdk.NewAttribute(sdk.AttributeKeyModule, types.ModuleName),
+				sdk.NewAttribute("height", fmt.Sprintf("%d", sdkCtx.BlockHeight())),
+			))
 		}
 	}
 
-	// Check and update conversion windows daily (every ~12000 blocks = 1 day)
-	if sdkCtx.BlockHeight()%12000 == 0 {
+	tick := intervals.EmissionTickBlocks
+	if tick == 0 {
+		tick = intervals.ConversionTickBlocks
+	}
+	if tick > 0 && sdkCtx.BlockHeight()%int64(tick) == 0 {
+		if err := k.updateEmissionSchedule(ctx); err != nil {
+			sdkCtx.Logger().Error("Failed to update emission schedule", "error", err)
+		} else {
+			sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeEmission,
+				sdk.NewAttribute(sdk.AttributeKeyModule, types.ModuleName),
+				sdk.NewAttribute("height", fmt.Sprintf("%d", sdkCtx.BlockHeight())),
+			))
+		}
+	}
+
+	if intervals.ConversionTickBlocks > 0 && sdkCtx.BlockHeight()%int64(intervals.ConversionTickBlocks) == 0 {
 		if err := k.updateConversionWindows(ctx); err != nil {
-			// Log error but don't fail
 			sdkCtx.Logger().Error("Failed to update conversion windows", "error", err)
+		} else {
+			sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeConversion,
+				sdk.NewAttribute(sdk.AttributeKeyModule, types.ModuleName),
+				sdk.NewAttribute("height", fmt.Sprintf("%d", sdkCtx.BlockHeight())),
+			))
 		}
 	}
 
@@ -119,9 +149,6 @@ func (k Keeper) updateDynamicPricing(ctx context.Context) error {
 
 // updateConversionWindows updates conversion window status based on date
 func (k Keeper) updateConversionWindows(ctx context.Context) error {
-	// Get mallpoints keeper to update conversion windows
-	// This is called at end of block to check if conversion window should be open
-
 	// For users WITH badges: open on 15th of each month
 	// For users WITHOUT badges: open on December 27th only
 
@@ -153,6 +180,42 @@ func (k Keeper) updateConversionWindows(ctx context.Context) error {
 	_ = k.ActivityMetrics.Set(ctx, metrics)
 
 	return nil
+}
+
+// updateEmissionSchedule updates monthly emission and tracks halving schedule
+func (k Keeper) updateEmissionSchedule(ctx context.Context) error {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	currentTime := sdkCtx.BlockTime()
+
+	emission, err := k.EmissionState.Get(ctx)
+	if err != nil {
+		return errorsmod.Wrap(types.ErrInvalidSupply, "emission state not initialized")
+	}
+
+	// Get current month (UTC)
+	currentMonth := uint64(currentTime.Year()*12 + int(currentTime.Month()))
+
+	// Calculate monthly emission for current phase
+	monthlyEmission := types.GetMonthlyEmission(currentMonth)
+	dailyEmission := monthlyEmission / types.DaysInMonth(currentTime.Month(), currentTime.Year())
+
+	// Check if we've entered a new month - update emission schedule
+	if emission.CurrentMonth != currentMonth {
+		emission.CurrentMonth = currentMonth
+		emission.EmittedTotal = 0
+	}
+
+	// Update daily limit based on current schedule and activity
+	emission.DailyLimit = dailyEmission
+
+	return k.EmissionState.Set(ctx, emission)
+}
+
+// UpdateEmissionMonthly handles month rollover and halving
+func (k Keeper) UpdateEmissionMonthly() uint64 {
+	// This is called when a new month begins
+	// Returns the new monthly emission rate
+	return 0 // placeholder - actual logic in updateEmissionSchedule
 }
 
 // RecordActivity records a transaction in activity metrics

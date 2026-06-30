@@ -5,12 +5,10 @@ import (
 	"fmt"
 
 	"cosmossdk.io/collections"
-	"cosmossdk.io/core/address"
+	"cosmossdk.io/math"
 	corestore "cosmossdk.io/core/store"
 	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
-	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 
 	"marketplace/x/governance/types"
 )
@@ -19,13 +17,14 @@ import (
 type Keeper struct {
 	storeService  corestore.KVStoreService
 	cdc           codec.Codec
-	addressCodec  address.Codec
-	bankKeeper    bankkeeper.Keeper
-	stakingKeeper *stakingkeeper.Keeper
+	addressCodec  types.AddressCodec
+	bankKeeper    types.BankKeeper
+	stakingKeeper types.StakingKeeper
 
 	// Address capable of executing a MsgUpdateParams message.
 	// Typically, this should be the x/gov module account.
 	authority []byte
+	msgRouter types.MessageRouter
 
 	// Collections
 	Schema       collections.Schema
@@ -41,13 +40,14 @@ type Keeper struct {
 func NewKeeper(
 	storeService corestore.KVStoreService,
 	cdc codec.Codec,
-	addressCodec address.Codec,
+	addressCodec types.AddressCodec,
 	authority []byte,
-	bankKeeper bankkeeper.Keeper,
-	stakingKeeper *stakingkeeper.Keeper,
-) Keeper {
+	bankKeeper types.BankKeeper,
+	stakingKeeper types.StakingKeeper,
+	msgRouter types.MessageRouter,
+) (Keeper, error) {
 	if _, err := addressCodec.BytesToString(authority); err != nil {
-		panic(fmt.Sprintf("invalid authority address %s: %s", authority, err))
+		return Keeper{}, fmt.Errorf("invalid authority address %s: %w", authority, err)
 	}
 
 	sb := collections.NewSchemaBuilder(storeService)
@@ -57,6 +57,7 @@ func NewKeeper(
 		cdc:           cdc,
 		addressCodec:  addressCodec,
 		authority:     authority,
+		msgRouter:     msgRouter,
 		bankKeeper:    bankKeeper,
 		stakingKeeper: stakingKeeper,
 
@@ -70,11 +71,11 @@ func NewKeeper(
 
 	schema, err := sb.Build()
 	if err != nil {
-		panic(err)
+		return Keeper{}, err
 	}
 	k.Schema = schema
 
-	return k
+	return k, nil
 }
 
 // GetAuthority returns the module's authority.
@@ -146,13 +147,12 @@ func (k Keeper) SubmitProposal(ctx context.Context, proposal types.Proposal) (ui
 	proposal.SubmitTime = sdkCtx.BlockTime()
 	proposal.Status = types.StatusDepositPeriod
 
-	// Set deposit end time (use 1/3 of voting period as deposit period)
+	// Set deposit end time
 	params, err := k.GetParams(ctx)
 	if err != nil {
 		return 0, err
 	}
-	// Deposit period is 1/3 of voting period (common governance pattern)
-	depositPeriod := params.VotingPeriod / 3
+	depositPeriod := params.GetDepositPeriod()
 	proposal.DepositEndTime = proposal.SubmitTime.Add(depositPeriod)
 
 	// Set proposal
@@ -258,7 +258,7 @@ func (k Keeper) AddVote(ctx context.Context, proposalID uint64, voter string, op
 	return k.SetVote(ctx, vote)
 }
 
-// TallyVotes tallies the votes for a proposal using stake-weighted voting.
+// TallyVotes tallies the votes for a proposal using stake-weighted voting power.
 func (k Keeper) TallyVotes(ctx context.Context, proposalID uint64) (types.TallyResult, error) {
 	proposal, err := k.GetProposal(ctx, proposalID)
 	if err != nil {
@@ -266,20 +266,53 @@ func (k Keeper) TallyVotes(ctx context.Context, proposalID uint64) (types.TallyR
 	}
 
 	tally := types.EmptyTally()
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
 	err = k.Votes.Walk(ctx, collections.NewPrefixedPairRange[uint64, string](proposalID), func(key collections.Pair[uint64, string], vote types.Vote) (bool, error) {
-		weight := vote.Options[0].Weight.TruncateInt()
+		if k.stakingKeeper == nil {
+			for _, option := range vote.Options {
+				weight := option.Weight.TruncateInt()
+				switch option.Option {
+				case types.OptionYes:
+					tally.YesCount = tally.YesCount.Add(weight)
+				case types.OptionNo:
+					tally.NoCount = tally.NoCount.Add(weight)
+				case types.OptionNoWithVeto:
+					tally.NoWithVetoCount = tally.NoWithVetoCount.Add(weight)
+				case types.OptionAbstain:
+					tally.AbstainCount = tally.AbstainCount.Add(weight)
+				}
+			}
+			return false, nil
+		}
+
+		voterAddr, err := sdk.AccAddressFromBech32(vote.Voter)
+		if err != nil {
+			return false, err
+		}
+		delegations, err := k.stakingKeeper.GetDelegatorDelegations(sdkCtx, voterAddr, 200)
+		if err != nil {
+			return false, err
+		}
+		stakeWeight := math.ZeroInt()
+		for _, d := range delegations {
+			stakeWeight = stakeWeight.Add(d.GetShares().TruncateInt())
+		}
+		if stakeWeight.IsZero() {
+			stakeWeight = math.OneInt()
+		}
 
 		for _, option := range vote.Options {
+			votePower := stakeWeight.ToLegacyDec().Mul(option.Weight).TruncateInt()
 			switch option.Option {
 			case types.OptionYes:
-				tally.YesCount = tally.YesCount.Add(weight)
+				tally.YesCount = tally.YesCount.Add(votePower)
 			case types.OptionNo:
-				tally.NoCount = tally.NoCount.Add(weight)
+				tally.NoCount = tally.NoCount.Add(votePower)
 			case types.OptionNoWithVeto:
-				tally.NoWithVetoCount = tally.NoWithVetoCount.Add(weight)
+				tally.NoWithVetoCount = tally.NoWithVetoCount.Add(votePower)
 			case types.OptionAbstain:
-				tally.AbstainCount = tally.AbstainCount.Add(weight)
+				tally.AbstainCount = tally.AbstainCount.Add(votePower)
 			}
 		}
 		return false, nil

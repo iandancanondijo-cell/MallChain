@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package marketplace.marketplace.v1;
+
+option go_package = "marketplace/x/marketplace/types";
+
+import "cosmos/base/v1beta1/coin.proto";
+
+message MsgCreateEscrow {
+  string buyer = 1;
+  string seller = 2;
+  string amount = 3;
+  string denom = 4;
+  string description = 5;
+  uint64 dispute_window_seconds = 6;
+}
+
+message MsgCreateEscrowResponse {
+  string escrow_id = 1;
+}
+
+message MsgReleaseFunds {
+  string escrow_id = 1;
+  string release_by = 2;
+}
+
+message MsgReleaseFundsResponse {}
+
+message MsgRefundBuyer {
+  string escrow_id = 1;
+}
+
+message MsgRefundBuyerResponse {}
+
+message MsgOpenDispute {
+  string escrow_id = 1;
+  string opener = 2;
+}
+
+message MsgOpenDisputeResponse {}

@@ -27,14 +27,8 @@ type Keeper struct {
 	ContractSeq    collections.Sequence
 	ContractState  collections.Map[collections.Pair[string, string], []byte]
 
-	wasmbridgeKeeper WasmBridgeKeeper
+	wasmbridgeKeeper types.WasmBridgeKeeper
 	wasmVM           *WasmVM
-}
-
-type WasmBridgeKeeper interface {
-	HandleTransfer(ctx context.Context, msg wasmbridgetypes.MGP20TransferMsg) error
-	HandleApprove(ctx context.Context, msg wasmbridgetypes.MGP20ApproveMsg) error
-	QueryBalance(ctx context.Context, address string) (uint64, error)
 }
 
 type ContractMetadata struct {
@@ -53,8 +47,8 @@ const (
 func NewKeeper(
 	storeService corestore.KVStoreService,
 	cdc codec.Codec,
-	wasmbridgeKeeper WasmBridgeKeeper,
-) Keeper {
+	wasmbridgeKeeper types.WasmBridgeKeeper,
+) (Keeper, error) {
 	sb := collections.NewSchemaBuilder(storeService)
 
 	k := Keeper{
@@ -70,11 +64,11 @@ func NewKeeper(
 
 	schema, err := sb.Build()
 	if err != nil {
-		panic(err)
+		return Keeper{}, err
 	}
 	k.Schema = schema
 
-	return k
+	return k, nil
 }
 
 // getWasmVM lazily initializes the WASM VM on first use
@@ -90,6 +84,17 @@ func (k Keeper) StoreCode(ctx context.Context, wasmCode []byte) (uint64, error) 
 	codeID, err := k.ContractCodeID.Next(ctx)
 	if err != nil {
 		return 0, err
+	}
+
+	if codeID == 0 {
+		codeID = 1
+		if err := k.ContractCodeID.Set(ctx, 2); err != nil {
+			return 0, err
+		}
+	}
+
+	if len(wasmCode) == 0 {
+		return 0, types.ErrInvalidRequest.Wrap("contract code is empty")
 	}
 
 	if err := k.ContractCode.Set(ctx, codeID, wasmCode); err != nil {
@@ -139,7 +144,8 @@ func (k Keeper) InstantiateContract(ctx context.Context, sender string, codeID u
 
 	// Initialize WASM contract
 	vm := k.getWasmVM(ctx)
-	_, _ = vm.InitializeWASM(ctx, wasmCode, initMsg, contractAddr)
+	gasCfg, _ := k.GetGasConfig(ctx)
+	_, _ = vm.InitializeWASM(ctx, wasmCode, initMsg, contractAddr, gasCfg.DefaultGasLimit, gasCfg.InstantiateCost)
 
 	// Emit instantiation event
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -260,7 +266,8 @@ func (k Keeper) ExecuteContract(ctx context.Context, sender string, contractAddr
 	}
 
 	// Gas accounting
-	gasLimit := DefaultGasLimit
+	gasCfg, _ := k.GetGasConfig(ctx)
+	gasLimit := gasCfg.DefaultGasLimit
 	if gl, ok := actionMsg["gas_limit"].(float64); ok {
 		gasLimit = uint64(gl)
 	}
@@ -284,7 +291,7 @@ func (k Keeper) ExecuteContract(ctx context.Context, sender string, contractAddr
 		k.emitContractEvent(sdkCtx, contractAddr, "approve", actionMsg)
 		return result, nil
 	case "wasm_execute":
-		return k.executeWASMRaw(ctx, sdkCtx, contract, msg, gasLimit)
+		return k.executeWASMRaw(ctx, sdkCtx, contract, msg, gasLimit, gasCfg)
 	default:
 		return "", types.ErrContractFailed.Wrap("unknown action")
 	}
@@ -313,30 +320,29 @@ func (k Keeper) emitContractEvent(sdkCtx sdk.Context, contractAddr, action strin
 }
 
 // executeWASMRaw executes raw WASM bytecode when VM is available
-func (k Keeper) executeWASMRaw(ctx context.Context, sdkCtx sdk.Context, contract *ContractMetadata, msg []byte, gasLimit uint64) (string, error) {
+func (k Keeper) executeWASMRaw(ctx context.Context, sdkCtx sdk.Context, contract *ContractMetadata, msg []byte, gasLimit uint64, gasCfg types.GasConfig) (string, error) {
 	wasmCode, err := k.GetCode(ctx, contract.CodeID)
 	if err != nil {
 		return "", err
 	}
 
-	// Get sender from message or context
-	senderAddr := contract.Creator // Default to creator if no explicit sender in context
-
-	// Create VM instance
+	senderAddr := contract.Creator
 	vm := k.getWasmVM(ctx)
-
-	// Execute via WebAssembly
-	result, err := vm.ExecuteWASM(ctx, wasmCode, msg, contract.Creator, senderAddr)
+	result, err := vm.ExecuteWASM(ctx, wasmCode, msg, contract.Creator, senderAddr, gasLimit, gasCfg.ExecuteBaseCost, gasCfg.ExecuteExportCost)
 	if err != nil {
 		return "", err
 	}
 
-	// Emit WASM execution event
+	if err := k.consumeSDKGas(sdkCtx, vm.GasUsed(), "wasm execute"); err != nil {
+		return "", err
+	}
+
 	sdkCtx.EventManager().EmitEvent(
 		sdk.NewEvent(
 			types.EventTypeExecute,
 			sdk.NewAttribute("contract_code_id", strconv.FormatUint(contract.CodeID, 10)),
 			sdk.NewAttribute("result", string(result)),
+			sdk.NewAttribute("gas_used", strconv.FormatUint(vm.GasUsed(), 10)),
 		),
 	)
 
@@ -413,10 +419,9 @@ func (k Keeper) queryWASMRaw(ctx context.Context, contractAddr string, queryMsg 
 	}
 
 	queryBytes, _ := json.Marshal(queryMsg)
-
-	// Execute via WebAssembly VM
+	gasCfg, _ := k.GetGasConfig(ctx)
 	vm := k.getWasmVM(ctx)
-	result, err := vm.QueryWASM(ctx, wasmCode, queryBytes, contractAddr)
+	result, err := vm.QueryWASM(ctx, wasmCode, queryBytes, contractAddr, gasCfg.DefaultGasLimit, gasCfg.QueryCost)
 	if err != nil {
 		return nil, err
 	}

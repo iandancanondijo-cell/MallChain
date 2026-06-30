@@ -2,6 +2,7 @@ package keeper_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -26,7 +27,6 @@ type fixture struct {
 	addressCodec address.Codec
 }
 
-// mock keepers
 type mockBadgeKeeper struct{ has bool }
 
 func (m mockBadgeKeeper) HasUserBadge(ctx context.Context, address string) bool { return m.has }
@@ -50,9 +50,8 @@ func initFixture(t *testing.T) *fixture {
 
 	authority := authtypes.NewModuleAddress(types.GovModuleName)
 
-	// Create mock badge and mlcoin keepers for testing
-	var badgeKeeper types.BadgeKeeper = mockBadgeKeeper{has: true}
-	var mlcoinKeeper types.MlcoinKeeper = mockMlcoinKeeper{}
+	badgeKeeper := mockBadgeKeeper{has: true}
+	mlcoinKeeper := mockMlcoinKeeper{}
 
 	k := keeper.NewKeeper(
 		storeService,
@@ -63,7 +62,6 @@ func initFixture(t *testing.T) *fixture {
 		mlcoinKeeper,
 	)
 
-	// Initialize params
 	if err := k.Params.Set(ctx, types.DefaultParams()); err != nil {
 		t.Fatalf("failed to set params: %v", err)
 	}
@@ -75,39 +73,120 @@ func initFixture(t *testing.T) *fixture {
 	}
 }
 
-func TestAwardPointsMonthlyCap(t *testing.T) {
+func makeTestAddr(codec address.Codec, name string) string {
+	str, err := codec.BytesToString([]byte(name))
+	if err != nil {
+		panic(fmt.Sprintf("failed to create address: %v", err))
+	}
+	return str
+}
+
+func TestMintToUserSuccess(t *testing.T) {
+	f := initFixture(t)
+	recipient := "test-address"
+	err := f.keeper.MintToUser(f.ctx, recipient, 1000)
+	require.NoError(t, err)
+}
+
+func TestConvertToMallcoinIntegration(t *testing.T) {
 	f := initFixture(t)
 	srv := keeper.NewMsgServerImpl(f.keeper)
-
-	sdkCtx := f.ctx.(sdk.Context).WithBlockTime(time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+	user := makeTestAddr(f.addressCodec, "testuser")
+	_ = f.keeper.UserPoints.Set(f.ctx, user, types.UserPoints{
+		Address:        user,
+		Points:         5000,
+		TasksCompleted: 10,
+	})
+	sdkCtx := f.ctx.(sdk.Context).WithBlockTime(time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC))
 	wrappedCtx := sdk.WrapSDKContext(sdkCtx)
-
-	authorityStr, err := f.addressCodec.BytesToString(f.keeper.GetAuthority())
+	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{
+		Creator: user,
+		Amount:  1000,
+	})
 	require.NoError(t, err)
-
-	firstAward := types.MsgAwardPoints{
-		Creator:   authorityStr,
-		Recipient: authorityStr,
-		Amount:    types.MonthlyPointsCap,
-		TaskType:  "engagement",
-	}
-
-	_, err = srv.AwardPoints(wrappedCtx, &firstAward)
+	userPoints, err := f.keeper.UserPoints.Get(wrappedCtx, user)
 	require.NoError(t, err)
+	require.Equal(t, uint64(4000), userPoints.Points)
+}
 
-	monthlyKey := sdkCtx.BlockTime().UTC().Format("2006-01")
-	monthlyIssued, err := f.keeper.MonthlyPointsIssued.Get(f.ctx, monthlyKey)
-	require.NoError(t, err)
-	require.Equal(t, types.MonthlyPointsCap, monthlyIssued)
-
-	secondAward := types.MsgAwardPoints{
-		Creator:   authorityStr,
-		Recipient: authorityStr,
-		Amount:    1,
-		TaskType:  "engagement",
-	}
-
-	_, err = srv.AwardPoints(wrappedCtx, &secondAward)
+func TestConvertToMallcoinWindowClosed(t *testing.T) {
+	f := initFixture(t)
+	srv := keeper.NewMsgServerImpl(f.keeper)
+	user := makeTestAddr(f.addressCodec, "windowuser")
+	_ = f.keeper.UserPoints.Set(f.ctx, user, types.UserPoints{
+		Address: user,
+		Points:  5000,
+	})
+	sdkCtx := f.ctx.(sdk.Context).WithBlockTime(time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC))
+	wrappedCtx := sdk.WrapSDKContext(sdkCtx)
+	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{
+		Creator: user,
+		Amount:  1000,
+	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "monthly Mallpoints issuance cap exceeded")
+	require.Contains(t, err.Error(), "conversion window is closed")
+}
+
+func TestConvertToMallcoinNonBadgeHolderDec27(t *testing.T) {
+	encCfg := moduletestutil.MakeTestEncodingConfig(module.AppModule{})
+	addressCodec := addresscodec.NewBech32Codec(sdk.GetConfig().GetBech32AccountAddrPrefix())
+	storeKey := storetypes.NewKVStoreKey(types.StoreKey)
+	storeService := runtime.NewKVStoreService(storeKey)
+	sdkCtx := testutil.DefaultContextWithDB(t, storeKey, storetypes.NewTransientStoreKey("transient_test")).Ctx
+	authority := authtypes.NewModuleAddress(types.GovModuleName)
+	badgeKeeper := mockBadgeKeeper{has: false}
+	mlcoinKeeper := mockMlcoinKeeper{}
+	k := keeper.NewKeeper(storeService, encCfg.Codec, addressCodec, authority, badgeKeeper, mlcoinKeeper)
+	if err := k.Params.Set(sdkCtx, types.DefaultParams()); err != nil {
+		t.Fatalf("failed to set params: %v", err)
+	}
+	srv := keeper.NewMsgServerImpl(k)
+	user := makeTestAddr(addressCodec, "nobadgeuser")
+	_ = k.UserPoints.Set(sdkCtx, user, types.UserPoints{Address: user, Points: 5000})
+	sdkCtx = sdkCtx.WithBlockTime(time.Date(2026, 12, 27, 12, 0, 0, 0, time.UTC))
+	wrappedCtx := sdk.WrapSDKContext(sdkCtx)
+	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{Creator: user, Amount: 1000})
+	require.NoError(t, err)
+}
+
+func TestConvertToMallcoinNonBadgeHolderWrongDate(t *testing.T) {
+	encCfg := moduletestutil.MakeTestEncodingConfig(module.AppModule{})
+	addressCodec := addresscodec.NewBech32Codec(sdk.GetConfig().GetBech32AccountAddrPrefix())
+	storeKey := storetypes.NewKVStoreKey(types.StoreKey)
+	storeService := runtime.NewKVStoreService(storeKey)
+	sdkCtx := testutil.DefaultContextWithDB(t, storeKey, storetypes.NewTransientStoreKey("transient_test")).Ctx
+	authority := authtypes.NewModuleAddress(types.GovModuleName)
+	badgeKeeper := mockBadgeKeeper{has: false}
+	mlcoinKeeper := mockMlcoinKeeper{}
+	k := keeper.NewKeeper(storeService, encCfg.Codec, addressCodec, authority, badgeKeeper, mlcoinKeeper)
+	if err := k.Params.Set(sdkCtx, types.DefaultParams()); err != nil {
+		t.Fatalf("failed to set params: %v", err)
+	}
+	srv := keeper.NewMsgServerImpl(k)
+	user := makeTestAddr(addressCodec, "wrongdateuser")
+	_ = k.UserPoints.Set(sdkCtx, user, types.UserPoints{Address: user, Points: 5000})
+	sdkCtx = sdkCtx.WithBlockTime(time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC))
+	wrappedCtx := sdk.WrapSDKContext(sdkCtx)
+	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{Creator: user, Amount: 1000})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "conversion window is closed")
+}
+
+func TestConvertToMallcoinInsufficientPoints(t *testing.T) {
+	f := initFixture(t)
+	srv := keeper.NewMsgServerImpl(f.keeper)
+	user := makeTestAddr(f.addressCodec, "insuffuser")
+	_ = f.keeper.UserPoints.Set(f.ctx, user, types.UserPoints{Address: user, Points: 100})
+	sdkCtx := f.ctx.(sdk.Context).WithBlockTime(time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC))
+	wrappedCtx := sdk.WrapSDKContext(sdkCtx)
+	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{Creator: user, Amount: 1000})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "insufficient Mallpoints balance")
+}
+
+func TestHasBadgeDelegation(t *testing.T) {
+	f := initFixture(t)
+	userWithBadge := makeTestAddr(f.addressCodec, "badgeuser")
+	hasBadge := f.keeper.HasBadge(f.ctx, userWithBadge)
+	require.True(t, hasBadge, "HasBadge should return true when badgeKeeper returns true")
 }

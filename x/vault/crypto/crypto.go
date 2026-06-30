@@ -7,30 +7,61 @@ import (
 	"encoding/base32"
 	"fmt"
 	"io"
+	"os"
+	"strconv"
 
 	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/argon2"
 )
 
-// Argon2Params holds parameters for Argon2id key derivation.
+const (
+	EnvArgon2Time    = "VAULT_ARGON2_TIME"
+	EnvArgon2Memory  = "VAULT_ARGON2_MEMORY"
+	EnvArgon2Threads = "VAULT_ARGON2_THREADS"
+)
+
+var (
+	productionParams = Argon2Params{
+		Time:    5,              // Increased from 3 for production
+		Memory:  128 * 1024,     // 128 MB (was 64 MB)
+		Threads: 8,              // Increased from 4 for production
+		KeyLen:  32,              // 256-bit key
+	}
+)
+
 type Argon2Params struct {
-	Time    uint32 // iterations
-	Memory  uint32 // KiB
+	Time    uint32
+	Memory  uint32
 	Threads uint8
 	KeyLen  uint32
 }
 
-// DefaultParams returns reasonable defaults tuned for development. Adjust for production.
 func DefaultParams() Argon2Params {
-	return Argon2Params{
-		Time:    3,
-		Memory:  64 * 1024, // 64 MB
-		Threads: 4,
-		KeyLen:  32,
+	params := productionParams
+
+	if v := os.Getenv(EnvArgon2Time); v != "" {
+		if t, err := strconv.ParseUint(v, 10, 32); err == nil {
+			params.Time = uint32(t)
+		}
 	}
+	if v := os.Getenv(EnvArgon2Memory); v != "" {
+		if m, err := strconv.ParseUint(v, 10, 32); err == nil {
+			params.Memory = uint32(m)
+		}
+	}
+	if v := os.Getenv(EnvArgon2Threads); v != "" {
+		if t, err := strconv.ParseUint(v, 10, 8); err == nil {
+			params.Threads = uint8(t)
+		}
+	}
+
+	return params
 }
 
-// GenerateSalt returns securely generated random bytes of given size.
+func ProductionParams() Argon2Params {
+	return productionParams
+}
+
 func GenerateSalt(n int) ([]byte, error) {
 	b := make([]byte, n)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
@@ -39,12 +70,10 @@ func GenerateSalt(n int) ([]byte, error) {
 	return b, nil
 }
 
-// DeriveKey derives a key from the password and salt using Argon2id and given params.
 func DeriveKey(password string, salt []byte, p Argon2Params) []byte {
 	return argon2.IDKey([]byte(password), salt, p.Time, p.Memory, p.Threads, p.KeyLen)
 }
 
-// Encrypt encrypts plaintext using AES-256-GCM. Returns nonce and ciphertext.
 func Encrypt(plaintext, key []byte) (nonce, ciphertext []byte, err error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -62,7 +91,6 @@ func Encrypt(plaintext, key []byte) (nonce, ciphertext []byte, err error) {
 	return nonce, ciphertext, nil
 }
 
-// Decrypt decrypts AES-GCM ciphertext using nonce and key.
 func Decrypt(nonce, ciphertext, key []byte) (plaintext []byte, err error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -79,9 +107,7 @@ func Decrypt(nonce, ciphertext, key []byte) (plaintext []byte, err error) {
 	return pt, nil
 }
 
-// GenerateTOTPSecret creates a new base32-encoded TOTP secret and provisioning URI.
 func GenerateTOTPSecret(accountName, issuer string) (secret string, provisioningURI string, err error) {
-	// Use pquerna's Generate to create a TOTP key
 	k, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      issuer,
 		AccountName: accountName,
@@ -89,17 +115,13 @@ func GenerateTOTPSecret(accountName, issuer string) (secret string, provisioning
 	if err != nil {
 		return "", "", err
 	}
-	// secret is base32 and URL is a provisioning URI
 	return k.Secret(), k.URL(), nil
 }
 
-// VerifyTOTPCode verifies a TOTP code against the secret with a standard tolerance window.
 func VerifyTOTPCode(secret, code string) bool {
-	// allow default options with +/-1 step window
 	return totp.Validate(code, secret)
 }
 
-// Helper for tests: GenerateRandomBytes
 func GenerateRandomBytes(n int) ([]byte, error) {
 	b := make([]byte, n)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
@@ -108,12 +130,10 @@ func GenerateRandomBytes(n int) ([]byte, error) {
 	return b, nil
 }
 
-// Helper: Base32Encode
 func Base32Encode(b []byte) string {
 	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
 }
 
-// Helper: Base32Decode
 func Base32Decode(s string) ([]byte, error) {
 	return base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(s)
 }

@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -23,7 +24,8 @@ var (
 	_ module.HasGenesis     = (*AppModule)(nil)
 	_ module.HasServices    = (*AppModule)(nil)
 
-	_ appmodule.AppModule = (*AppModule)(nil)
+	_ appmodule.AppModule     = (*AppModule)(nil)
+	_ appmodule.HasEndBlocker = (*AppModule)(nil)
 )
 
 // AppModuleBasic defines the basic application module used by the crosschain module.
@@ -48,8 +50,9 @@ func (a AppModuleBasic) RegisterInterfaces(reg codectypes.InterfaceRegistry) {
 
 // RegisterGRPCGatewayRoutes registers the gRPC Gateway routes for the module.
 func (AppModuleBasic) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux *runtime.ServeMux) {
-	_ = clientCtx
-	_ = mux
+	if err := types.RegisterQueryHandlerClient(clientCtx.CmdContext, mux, types.NewQueryClient(clientCtx)); err != nil {
+		panic(err)
+	}
 }
 
 // GetTxCmd returns the root tx command for the crosschain module.
@@ -85,8 +88,8 @@ func (am AppModule) IsAppModule() {}
 
 // RegisterServices registers module services.
 func (am AppModule) RegisterServices(cfg module.Configurator) {
-	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))
-	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServerImpl(am.keeper))
+	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServerImpl(&am.keeper))
+	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServerImpl(&am.keeper))
 }
 
 // DefaultGenesis returns default genesis state as raw bytes for the crosschain module.
@@ -106,15 +109,27 @@ func (am AppModule) ValidateGenesis(cdc codec.JSONCodec, config client.TxEncodin
 // InitGenesis performs genesis initialization for the crosschain module.
 func (am AppModule) InitGenesis(ctx sdk.Context, cdc codec.JSONCodec, bz json.RawMessage) {
 	var genState types.GenesisState
-	cdc.MustUnmarshalJSON(bz, &genState)
-	am.keeper.InitGenesis(ctx, genState)
+	if err := cdc.UnmarshalJSON(bz, &genState); err != nil {
+		panic(fmt.Errorf("failed to unmarshal %s genesis state: %w", types.ModuleName, err))
+	}
+	if err := am.keeper.InitGenesis(ctx, genState); err != nil {
+		panic(fmt.Errorf("failed to initialize %s genesis state: %w", types.ModuleName, err))
+	}
 }
 
 // ExportGenesis returns the exported genesis state as raw bytes for the crosschain module.
 func (am AppModule) ExportGenesis(ctx sdk.Context, cdc codec.JSONCodec) json.RawMessage {
-	genState := am.keeper.ExportGenesis(ctx)
+	genState, err := am.keeper.ExportGenesis(ctx)
+	if err != nil {
+		panic(fmt.Errorf("failed to export %s genesis state: %w", types.ModuleName, err))
+	}
 	return cdc.MustMarshalJSON(genState)
 }
 
 // ConsensusVersion implements AppModule/ConsensusVersion.
 func (AppModule) ConsensusVersion() uint64 { return 1 }
+
+// EndBlock executes crosschain timeout enforcement.
+func (am AppModule) EndBlock(ctx context.Context) error {
+	return am.keeper.EndBlocker(ctx)
+}

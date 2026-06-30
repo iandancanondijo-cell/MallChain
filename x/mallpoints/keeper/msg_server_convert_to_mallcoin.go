@@ -2,7 +2,7 @@ package keeper
 
 import (
 	"context"
-	"time"
+	"strconv"
 
 	"marketplace/x/mallpoints/types"
 
@@ -18,25 +18,28 @@ func (k msgServer) ConvertToMallcoin(ctx context.Context, msg *types.MsgConvertT
 	// Check if user has a badge
 	hasBadge := k.HasBadge(ctx, msg.Creator)
 
-	// Validate conversion window based on badge status
+	// Validate conversion window based on badge status and module params
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	currentTime := sdkCtx.BlockTime()
 	dayOfMonth := currentTime.Day()
 	monthOfYear := currentTime.Month()
 
+	intervals, err := k.Keeper.GetModuleIntervals(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	conversionAllowed := false
 
 	if hasBadge {
-		// Badge holders can convert on the 15th of every month
-		conversionAllowed = dayOfMonth == 15
+		conversionAllowed = uint64(dayOfMonth) == intervals.BadgeConversionDay
 		if !conversionAllowed {
-			return nil, errorsmod.Wrap(types.ErrConversionWindowClosed, "badge holders can only convert on the 15th of each month")
+			return nil, errorsmod.Wrap(types.ErrConversionWindowClosed, "badge holders can only convert on configured conversion day")
 		}
 	} else {
-		// Non-badge holders can only convert on December 27th
-		conversionAllowed = (monthOfYear == time.December) && (dayOfMonth == 27)
+		conversionAllowed = (uint64(monthOfYear) == intervals.NonBadgeConversionMon) && (uint64(dayOfMonth) == intervals.NonBadgeConversionDay)
 		if !conversionAllowed {
-			return nil, errorsmod.Wrap(types.ErrConversionWindowClosed, "non-badge holders can only convert on December 27th of each year")
+			return nil, errorsmod.Wrap(types.ErrConversionWindowClosed, "non-badge holders can only convert on configured annual conversion date")
 		}
 	}
 
@@ -63,6 +66,14 @@ func (k msgServer) ConvertToMallcoin(ctx context.Context, msg *types.MsgConvertT
 	if err != nil {
 		return nil, errorsmod.Wrap(err, "failed to mint Mallcoins")
 	}
+
+	sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeConvertPoints,
+		sdk.NewAttribute(sdk.AttributeKeyModule, types.ModuleName),
+		sdk.NewAttribute(types.AttributeKeyUser, msg.Creator),
+		sdk.NewAttribute(types.AttributeKeyPoints, strconv.FormatUint(msg.Amount, 10)),
+		sdk.NewAttribute(types.AttributeKeyAmount, strconv.FormatUint(msg.Amount, 10)),
+	))
 
 	return &types.MsgConvertToMallcoinResponse{}, nil
 }

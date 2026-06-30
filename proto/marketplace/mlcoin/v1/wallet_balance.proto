@@ -9,4 +9,6 @@ message WalletBalance {
   string address = 2;
   uint64 balance = 3;
   uint64 locked = 4;
+  // unlock_time is the unix timestamp when locked tokens can be released
+  int64 unlock_time = 5;
 }

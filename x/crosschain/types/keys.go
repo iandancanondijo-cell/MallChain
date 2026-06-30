@@ -6,28 +6,17 @@ import (
 )
 
 const (
-	// ModuleName defines the module name
 	ModuleName = "crosschain"
-
-	// StoreKey defines the primary module store key
-	StoreKey = ModuleName
-
-	// RouterKey defines the module's message routing key
-	RouterKey = ModuleName
-
-	// MemStoreKey defines the in-memory store key
+	StoreKey   = ModuleName
+	RouterKey  = ModuleName
 	MemStoreKey = "mem_crosschain"
+	GovModuleName = "gov"
 )
 
 const (
-	// BridgeTransferKeyPrefix is the prefix to retrieve all BridgeTransfer
 	BridgeTransferKeyPrefix = "BridgeTransfer/value/"
-
-	// BridgeStateKey is the key to retrieve the BridgeState
-	BridgeStateKey = "BridgeState/value/"
-
-	// ParamsKey is the key to retrieve the Params
-	ParamsKey = "Params/value/"
+	BridgeStateKey        = "BridgeState/value/"
+	ParamsKey             = "Params/value/"
 )
 
 // BridgeTransferKey returns the store key to retrieve a BridgeTransfer from the index fields

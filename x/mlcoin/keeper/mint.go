@@ -2,34 +2,19 @@ package keeper
 
 import (
 	"context"
-	"sync/atomic"
 
 	"marketplace/x/mlcoin/types"
 
 	errorsmod "cosmossdk.io/errors"
+	"sync/atomic"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
-// reentryGuard provides a call-depth counter to detect nested/recursive minting
-// across the WithMintingEnabled / MintToWallet boundary. It is NOT a substitute
-// for proper RBAC (see TODO below).
-type reentryGuard struct {
-	depth int32
-}
-
-func (g *reentryGuard) enter() bool {
-	return atomic.AddInt32(&g.depth, 1) == 1
-}
-
-func (g *reentryGuard) exit() {
-	atomic.AddInt32(&g.depth, -1)
-}
-
-// MintToWallet mints Mallcoins to a user's wallet.
+// MintToWallet mints Mallcoins to a user's wallet with integrated burning.
 // The caller MUST ensure minting authorisation is established via WithMintingEnabled.
-// TODO: Replace WithMintingEnabled / atomic flag with proper role-based authorisation
-// stored in params (e.g. a list of authorised minter addresses). See PHASE1_TODO.md.
-func (k Keeper) MintToWallet(ctx context.Context, address string, amount uint64) error {
+// Automatic burn: burn_rate_bps from emission state (e.g., 100 = 1% burn)
+func (k *Keeper) MintToWallet(ctx context.Context, address string, amount uint64) error {
 	// Re-entry guard prevents nested calls from bypassing WithMintingEnabled.
 	if atomic.LoadInt32(&k.internalMinting) == 0 {
 		return errorsmod.Wrap(types.ErrUnauthorized, "minting not enabled for this caller")
@@ -39,6 +24,9 @@ func (k Keeper) MintToWallet(ctx context.Context, address string, amount uint64)
 	if err != nil {
 		return errorsmod.Wrap(types.ErrInvalidSupply, "emission state not initialized")
 	}
+
+	// Get daily limit from emission state
+	dailyLimit := emissionState.DailyLimit
 
 	// Overflow-safe supply check
 	newCirculating, err := safeAdd(emissionState.Circulating, amount)
@@ -50,7 +38,7 @@ func (k Keeper) MintToWallet(ctx context.Context, address string, amount uint64)
 	}
 
 	// Check daily limit
-	if amount > emissionState.DailyLimit {
+	if amount > dailyLimit {
 		return errorsmod.Wrap(types.ErrDailyLimitExceeded, "amount exceeds daily emission limit")
 	}
 
@@ -64,8 +52,12 @@ func (k Keeper) MintToWallet(ctx context.Context, address string, amount uint64)
 		}
 	}
 
-	// Overflow-safe balance update
-	newBalance, err := safeAdd(walletBalance.Balance, amount)
+	// Calculate burn amount (automatic burning based on burn_rate_bps)
+	burnAmount := amount * emissionState.BurnRateBps / 10000
+	netAmount := amount - burnAmount
+
+	// Overflow-safe balance update (net amount after burn)
+	newBalance, err := safeAdd(walletBalance.Balance, netAmount)
 	if err != nil {
 		return errorsmod.Wrap(types.ErrInvalidSupply, "wallet balance overflow on mint")
 	}
@@ -74,8 +66,11 @@ func (k Keeper) MintToWallet(ctx context.Context, address string, amount uint64)
 		return err
 	}
 
-	// Update circulating supply
-	emissionState.Circulating = newCirculating
+	// Update circulating supply (only net amount counts toward circulating)
+	newCirc := newCirculating - burnAmount
+	emissionState.Circulating = newCirc
+	emissionState.EmittedTotal += amount
+	emissionState.BurnedTotal += burnAmount
 	if err := k.EmissionState.Set(ctx, emissionState); err != nil {
 		return err
 	}
@@ -84,6 +79,13 @@ func (k Keeper) MintToWallet(ctx context.Context, address string, amount uint64)
 	if _, err := k.RecordTransaction(ctx, "system", address, amount, "mint", "Minted from conversion or reward"); err != nil {
 		sdkCtx := sdk.UnwrapSDKContext(ctx)
 		sdkCtx.Logger().Info("mint recording failed (mint succeeded)", "address", address, "amount", amount, "error", err)
+	}
+
+	// Record burn transaction if any
+	if burnAmount > 0 {
+		if _, err := k.RecordTransaction(ctx, "system", "burn", burnAmount, "burn", "Auto-burn on mint"); err != nil {
+			// Non-fatal log
+		}
 	}
 
 	return nil

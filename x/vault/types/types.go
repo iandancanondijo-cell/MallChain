@@ -28,3 +28,20 @@ type VaultBlob struct {
 	LockedUntilUnix     int64        `json:"locked_until_unix"`
 	PublicKey           string       `json:"public_key"` // base64
 }
+
+// GenesisState defines the vault module genesis state
+type GenesisState struct {
+	Vault *VaultBlob `json:"vault,omitempty"`
+}
+
+func (GenesisState) Reset()         {}
+func (GenesisState) String() string { return "GenesisState{}" }
+func (GenesisState) ProtoMessage()  {}
+
+func DefaultGenesis() GenesisState {
+	return GenesisState{}
+}
+
+func (gs GenesisState) Validate() error {
+	return nil
+}

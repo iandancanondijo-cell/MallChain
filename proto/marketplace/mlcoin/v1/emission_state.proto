@@ -11,4 +11,10 @@ message EmissionState {
   uint64 daily_limit = 4;
   uint64 current_month = 5;
   uint64 current_day = 6;
+  
+  // Tracking fields for halving schedule and burning
+  uint64 emitted_total = 7;     // Total MLCNS emitted to date
+  uint64 burned_total = 8;      // Total MLCNS burned to date
+  string burn_wallet = 9;       // Address to receive burned coins (sent to sink)
+  uint64 burn_rate_bps = 10;    // Burn rate basis points (e.g., 100 = 1% of all mints)
 }

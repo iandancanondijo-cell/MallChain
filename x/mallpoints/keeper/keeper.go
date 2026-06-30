@@ -24,6 +24,7 @@ type Keeper struct {
 
 	Schema              collections.Schema
 	Params              collections.Item[types.Params]
+	Intervals           collections.Item[types.ModuleIntervals]
 	UserPoints          collections.Map[string, types.UserPoints]
 	MonthlyPointsIssued collections.Map[string, uint64]
 	ConversionWindow    collections.Item[types.ConversionWindow]
@@ -53,6 +54,7 @@ func NewKeeper(
 		mlcoinKeeper: mlcoinKeeper,
 
 		Params:              collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[types.Params](cdc)),
+		Intervals:           collections.NewItem(sb, collections.NewPrefix("p_mallpoints_intervals"), "intervals", collections.NewJSONValueCodec[types.ModuleIntervals]()),
 		UserPoints:          collections.NewMap(sb, types.UserPointsKey, "userPoints", collections.StringKey, codec.CollValue[types.UserPoints](cdc)),
 		MonthlyPointsIssued: collections.NewMap(sb, types.MonthlyPointsIssuedKey, "monthlyPointsIssued", collections.StringKey, collections.Uint64Value),
 		ConversionWindow:    collections.NewItem(sb, types.ConversionWindowKey, "conversionWindow", codec.CollValue[types.ConversionWindow](cdc)),

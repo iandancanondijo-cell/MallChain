@@ -21,12 +21,39 @@ func SimulateMsgIssueBadge(
 	return func(r *rand.Rand, app *baseapp.BaseApp, ctx sdk.Context, accs []simtypes.Account, chainID string,
 	) (simtypes.OperationMsg, []simtypes.FutureOperation, error) {
 		simAccount, _ := simtypes.RandomAcc(r, accs)
-		msg := &types.MsgIssueBadge{
-			Creator: simAccount.Address.String(),
+
+		badgeTypes := []string{"verified", "merchant", "premium", "founder", "early_adopter"}
+
+		var recipient simtypes.Account
+		var badgeType string
+		var found bool
+
+		for i := 0; i < len(accs); i++ {
+			recipient, _ = simtypes.RandomAcc(r, accs)
+			badgeType = badgeTypes[r.Intn(len(badgeTypes))]
+			_, err := k.UserBadge.Get(ctx, recipient.Address.String())
+			if err != nil {
+				found = true
+				break
+			}
 		}
 
-		// TODO: Handle the IssueBadge simulation
+		if !found {
+			return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(&types.MsgIssueBadge{}), "no account available without badge"), nil, nil
+		}
 
-		return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(msg), "IssueBadge simulation not implemented"), nil, nil
+		msg := &types.MsgIssueBadge{
+			Creator:   simAccount.Address.String(),
+			Recipient: recipient.Address.String(),
+			BadgeType: badgeType,
+		}
+
+		server := keeper.NewMsgServerImpl(k)
+		_, err := server.IssueBadge(ctx, msg)
+		if err != nil {
+			return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(msg), err.Error()), nil, nil
+		}
+
+		return simtypes.NewOperationMsg(msg, true, "IssueBadge simulation completed successfully"), nil, nil
 	}
 }

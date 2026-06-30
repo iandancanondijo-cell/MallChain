@@ -7,6 +7,7 @@ import "cosmos/base/v1beta1/coin.proto";
 import "cosmos/msg/v1/msg.proto";
 import "cosmos_proto/cosmos.proto";
 import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/timestamp.proto";
 import "marketplace/crosschain/v1/tx.proto";
@@ -25,7 +26,9 @@ service Query {
   rpc BridgeState(QueryBridgeStateRequest) returns (QueryBridgeStateResponse);
 
   // Params queries all parameters of the crosschain module.
-  rpc Params(QueryParamsRequest) returns (QueryParamsResponse);
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/tmp/marketplace/crosschain/v1/params";
+  }
 }
 
 // QueryBridgeTransferRequest is the request type for the Query/BridgeTransfer RPC method.

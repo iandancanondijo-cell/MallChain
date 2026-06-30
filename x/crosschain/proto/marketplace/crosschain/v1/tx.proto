@@ -75,6 +75,29 @@ message MsgUpdateParams {
   Params params = 2 [(gogoproto.nullable) = false];
 }
 
+// MsgSetChainRoute sets the IBC route for a destination chain
+message MsgSetChainRoute {
+  option (cosmos.msg.v1.msg) = {
+    signers: ["authority"]
+  };
+
+  string authority = 1 [(cosmos.msg.v1.field) = {ordering: "unordered"}];
+  string chain_name = 2;
+  string chain_id = 3;
+  string channel_id = 4;
+  string port_id = 5;
+}
+
+// MsgPruneTransfers prunes old completed transfers to reduce state bloat
+message MsgPruneTransfers {
+  option (cosmos.msg.v1.msg) = {
+    signers: ["authority"]
+  };
+
+  string authority = 1 [(cosmos.msg.v1.field) = {ordering: "unordered"}];
+  uint64 max_transfers_to_keep = 2;
+}
+
 // QueryBridgeTransferRequest queries a specific bridge transfer
 message QueryBridgeTransferRequest {
   uint64 transfer_id = 1;
