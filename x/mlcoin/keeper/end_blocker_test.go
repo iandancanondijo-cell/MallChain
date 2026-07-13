@@ -195,7 +195,7 @@ func TestEndBlockerConversionWindow(t *testing.T) {
 
 	metrics, err := k.ActivityMetrics.Get(ctx)
 	require.NoError(t, err)
-	require.Equal(t, "badge_conversion_15th", metrics.CurrentPeriod)
+	require.Equal(t, "badge_conversion_open", metrics.CurrentPeriod)
 }
 
 func TestEndBlockerConversionWindowDec27(t *testing.T) {
@@ -211,7 +211,7 @@ func TestEndBlockerConversionWindowDec27(t *testing.T) {
 
 	metrics, err := k.ActivityMetrics.Get(ctx)
 	require.NoError(t, err)
-	require.Equal(t, "all_users_conversion_27th_dec", metrics.CurrentPeriod)
+	require.Equal(t, "all_users_conversion_open", metrics.CurrentPeriod)
 }
 
 func TestAccumulateFees(t *testing.T) {

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
- import { Wallet as WalletIcon, Copy, Plus, ArrowUp, ArrowDown, RefreshCw, Loader, ShieldCheck, Lock, CircleDollarSign, CalendarDays, BarChart3, AlertTriangle, ArrowRight } from 'lucide-react'
+import { Wallet as WalletIcon, Copy, Plus, ArrowUp, RefreshCw, Loader, ShieldCheck, Lock, CircleDollarSign, BarChart3, AlertTriangle, ArrowRight } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { Link } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
+import { loadWallet, clearWallet } from '../core/wallet/walletUtils'
 import {
   fetchMlcnsBalance,
   fetchMallpointsBalance,
@@ -12,11 +13,35 @@ import {
 } from '../core/wallet/mallcoinApi'
 import { TOKENS, kesFromMlcns } from '../config/tokens'
 import { initiateWithdrawMpesa } from '../core/withdraw/withdrawApi'
+import { useSocket } from '../core/socket/useSocket'
+import KeystoreModal from '../components/KeystoreModal'
+
+function formatUnlockTime(unlockTime) {
+  if (!unlockTime || unlockTime <= 0) return 'never'
+  const now = Math.floor(Date.now() / 1000)
+  const remaining = unlockTime - now
+  if (remaining <= 0) return 'soon'
+  const days = Math.floor(remaining / 86400)
+  const years = Math.floor(days / 365)
+  const months = Math.floor((days % 365) / 30)
+  const dayCount = days % 30
+  return `${years}y ${months}mo ${dayCount}d`
+}
 
 export default function Wallet() {
-  const [loading, setLoading] = useState(true)
-  const [wallet, setWallet] = useState(null)
+  const navigate = useNavigate()
+  const initialWallet = loadWallet()
+  const [loading, setLoading] = useState(Boolean(initialWallet))
+  const [wallet] = useState(initialWallet)
+  const walletAddress = wallet?.address || ''
+
+  const handleSwitchWallet = () => {
+    clearWallet()
+    navigate('/wallet/create')
+  }
   const [mlcnsBalance, setMlcnsBalance] = useState(0)
+  const [mlcnsLocked, setMlcnsLocked] = useState(0)
+  const [mlcnsUnlockTime, setMlcnsUnlockTime] = useState(0)
   const [mallpoints, setMallpoints] = useState(0)
   const [mallpointsChain, setMallpointsChain] = useState(0)
   const [mallpointsDb, setMallpointsDb] = useState(0)
@@ -25,49 +50,58 @@ export default function Wallet() {
   const [priceKes, setPriceKes] = useState(TOKENS.mallcoin.basePriceKes)
   const [pointPriceKes, setPointPriceKes] = useState(TOKENS.mallpoints.basePriceKes)
   const [mlcnsProfile, setMlcnsProfile] = useState(null)
-  const [conversionWindow, setConversionWindow] = useState(null)
   const [conversionStatus, setConversionStatus] = useState(null)
   const [badge, setBadge] = useState({ exists: false })
   const [lastConversionAt, setLastConversionAt] = useState(null)
-  const [walletAddress, setWalletAddress] = useState('')
   const [showKeystore, setShowKeystore] = useState(false)
   const [fetchError, setFetchError] = useState(null)
+  const { on, emit } = useSocket()
 
-  useEffect(() => {
-    const savedWallet = localStorage.getItem('wallet')
-    if (savedWallet) {
-      const walletData = JSON.parse(savedWallet)
-      setWallet(walletData)
-      setWalletAddress(walletData.address)
-      fetchBalances(walletData.address)
-    } else {
-      setLoading(false)
+  const fetchBalanceData = async (address) => {
+    const [mlcns, points, price, faucet] = await Promise.all([
+      fetchMlcnsBalance(address),
+      fetchMallpointsBalance(address),
+      fetchMlcnsPrice().catch(() => null),
+      fetchFaucetStatus().catch(() => ({ enabled: false })),
+    ])
+    return {
+      mlcnsBalance: Number(mlcns.availableDisplay || 0),
+      mlcnsLocked: Number(mlcns.lockedDisplay || 0),
+      mlcnsUnlockTime: mlcns.unlockTime || 0,
+      mallpoints: points.balance,
+      mallpointsChain: points.chainPoints ?? 0,
+      mallpointsDb: points.dbPoints ?? 0,
+      conversionStatus: points.conversionStatus || null,
+      badge: points.badge || { exists: false },
+      pointPriceKes: points.pointPriceKes || TOKENS.mallpoints.basePriceKes,
+      lastConversionAt: points.lastConversionAt || null,
+      faucetEnabled: Boolean(faucet?.enabled && faucet?.configured),
+      mlcnsProfile: price,
+      priceKes: price?.market?.midPriceKes,
     }
-  }, [])
+  }
+
+  const applyBalanceData = (data) => {
+    setMlcnsBalance(data.mlcnsBalance)
+    setMlcnsLocked(data.mlcnsLocked)
+    setMlcnsUnlockTime(data.mlcnsUnlockTime)
+    setMallpoints(data.mallpoints)
+    setMallpointsChain(data.mallpointsChain)
+    setMallpointsDb(data.mallpointsDb)
+    setConversionStatus(data.conversionStatus)
+    setBadge(data.badge)
+    setPointPriceKes(data.pointPriceKes)
+    setLastConversionAt(data.lastConversionAt)
+    setFaucetEnabled(data.faucetEnabled)
+    setMlcnsProfile(data.mlcnsProfile)
+    if (data.priceKes > 0) setPriceKes(data.priceKes)
+  }
 
   const fetchBalances = async (address) => {
     setLoading(true)
     setFetchError(null)
     try {
-      const [mlcns, points, price, faucet] = await Promise.all([
-        fetchMlcnsBalance(address),
-        fetchMallpointsBalance(address),
-        fetchMlcnsPrice().catch(() => null),
-        fetchFaucetStatus().catch(() => ({ enabled: false })),
-      ])
-      setMlcnsBalance(Number(mlcns.availableDisplay || 0))
-      setMallpoints(points.balance)
-      setMallpointsChain(points.chainPoints ?? 0)
-      setMallpointsDb(points.dbPoints ?? 0)
-      setConversionWindow(points.conversionWindow || null)
-      setConversionStatus(points.conversionStatus || null)
-      setBadge(points.badge || { exists: false })
-      setPointPriceKes(points.pointPriceKes || TOKENS.mallpoints.basePriceKes)
-      setLastConversionAt(points.lastConversionAt || null)
-      setFaucetEnabled(Boolean(faucet?.enabled && faucet?.configured))
-      setMlcnsProfile(price)
-      const mid = Number(price?.market?.midPriceKes || 0)
-      if (mid > 0) setPriceKes(mid)
+      applyBalanceData(await fetchBalanceData(address))
     } catch (error) {
       console.error('Error fetching balances:', error)
       setFetchError('Unable to load wallet balances. Please check your connection.')
@@ -77,6 +111,50 @@ export default function Wallet() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!walletAddress) return
+
+    let mounted = true
+    fetchBalanceData(walletAddress)
+      .then((data) => {
+        if (!mounted) return
+        setFetchError(null)
+        applyBalanceData(data)
+      })
+      .catch((error) => {
+        if (!mounted) return
+        console.error('Error fetching balances:', error)
+        setFetchError('Unable to load wallet balances. Please check your connection.')
+        setMlcnsBalance(0)
+        setMallpoints(0)
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+
+    const unsubscribe = on('wallet:update', (update) => {
+      if (!mounted) return
+      if (update.address && update.address !== walletAddress) return
+      if (update.mallcoin_balance != null) setMlcnsBalance(Number(update.mallcoin_balance))
+      if (update.mallpoints_balance != null) setMallpoints(Number(update.mallpoints_balance))
+      if (update.mallpoints != null) setMallpoints(Number(update.mallpoints))
+      if (update.chain_points != null) setMallpointsChain(Number(update.chain_points))
+      if (update.db_points != null) setMallpointsDb(Number(update.db_points))
+      if (update.conversion_status != null) setConversionStatus(update.conversion_status)
+      if (update.badge != null) setBadge(update.badge)
+      // Server signals a completed transfer — re-fetch authoritative balance from chain
+      if (update.refresh) fetchBalances(walletAddress)
+    })
+
+    emit('subscribe:wallet', walletAddress)
+
+    return () => {
+      mounted = false
+      unsubscribe()
+      emit('unsubscribe:wallet', walletAddress)
+    }
+  }, [walletAddress, on, emit])
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text)
@@ -150,12 +228,23 @@ export default function Wallet() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
         >
-          <h1 className="text-4xl font-black text-white mb-2">
-            My Wallet
-          </h1>
-          <p className="text-slate-400">
-            Manage your wallet and assets
-          </p>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-4xl font-black text-white mb-2">
+                My Wallet
+              </h1>
+              <p className="text-slate-400">
+                Manage your wallet and assets
+              </p>
+            </div>
+            <button
+              onClick={handleSwitchWallet}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:border-cyan-500/50 hover:text-white transition-all text-sm font-medium"
+            >
+              <Wallet className="w-4 h-4" />
+              Switch Wallet
+            </button>
+          </div>
         </motion.div>
 
         {/* Error Banner */}
@@ -248,7 +337,6 @@ export default function Wallet() {
         {/* Mallcoin details */}
         <MallcoinDetailsCard
           profile={mlcnsProfile}
-          conversionWindow={conversionWindow}
           conversionStatus={conversionStatus}
           badge={badge}
           pointPriceKes={pointPriceKes}
@@ -281,6 +369,19 @@ export default function Wallet() {
                     <div className="text-slate-400 text-sm">≈ KSh {kesFromMlcns(mlcnsBalance, priceKes).toFixed(2)}</div>
                   </div>
                 </div>
+                {mlcnsLocked > 0 && (
+                  <div className="px-6 pb-4">
+                    <div className="flex items-center gap-2 text-rose-400 text-xs">
+                      <Lock className="w-4 h-4" />
+                      <span>{mlcnsLocked.toFixed(4)} MLCNS locked</span>
+                      {mlcnsUnlockTime > 0 && (
+                        <span className="text-slate-400">
+                          • Unlocks {formatUnlockTime(mlcnsUnlockTime)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="p-6 flex items-center justify-between">
                   <div>
                     <div className="text-white font-bold">Mallpoints</div>
@@ -326,12 +427,12 @@ export default function Wallet() {
                 <div className="flex items-start gap-3">
                   <ShieldCheck className="w-5 h-5 text-green-400 shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-green-200 font-semibold mb-1">✓ Private Key Secure</p>
+                    <p className="text-green-200 font-semibold mb-1">✓ Secure Signing Available</p>
                     <p className="text-green-200/70 text-sm">
-                      Your private key is never stored on disk. It exists only in memory during signing and is immediately cleared afterward.
+                      Signing uses your recovery phrase in memory only and clears sensitive keys after use.
                     </p>
                     <p className="text-green-200/70 text-sm mt-2">
-                      Keep your recovery phrase safe and secure. You'll need it to sign transactions.
+                      Optionally store an encrypted key in the browser keystore for faster access without exposing your mnemonic.
                     </p>
                   </div>
                 </div>
@@ -350,19 +451,9 @@ export default function Wallet() {
   )
 }
 
-// Render Keystore modal at root of Wallet page
-export function WalletKeystoreWrapper({ address, visible, onClose }) {
-  return <KeystoreModal isOpen={visible} onClose={onClose} address={address} />
-}
-
-
-// Add Keystore modal import at bottom to avoid top-level changes
-import KeystoreModal from '../components/KeystoreModal'
-
 
 function MallcoinDetailsCard({
   profile,
-  conversionWindow,
   conversionStatus,
   badge,
   pointPriceKes,
@@ -574,10 +665,4 @@ function StatPill({ icon, label, value, tone = 'slate' }) {
       <div className="mt-2 text-sm font-semibold break-words">{value}</div>
     </div>
   )
-}
-
-function formatUnits(value) {
-  const n = Number(value || 0)
-  if (!Number.isFinite(n)) return '—'
-  return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 }

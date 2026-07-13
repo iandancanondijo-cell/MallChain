@@ -1,21 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { QRCodeSVG } from 'qrcode.react'
 import { Copy, Download, Share2, CheckCircle, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { loadWallet, clearWallet } from '../core/wallet/walletUtils'
 
 export default function Receive() {
-  const [walletAddress, setWalletAddress] = useState('')
+  const navigate = useNavigate()
+  const [walletAddress] = useState(() => loadWallet()?.address || '')
   const [amount, setAmount] = useState('')
   const [showQR, setShowQR] = useState(true)
 
-  useEffect(() => {
-    const savedWallet = localStorage.getItem('wallet')
-    if (savedWallet) {
-      const wallet = JSON.parse(savedWallet)
-      setWalletAddress(wallet.address)
-    }
-  }, [])
+  const handleSwitchWallet = () => {
+    clearWallet()
+    navigate('/wallet/create')
+  }
 
   const copyAddress = () => {
     navigator.clipboard.writeText(walletAddress)
@@ -101,12 +101,23 @@ export default function Receive() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
         >
-          <h1 className="text-4xl font-black text-white mb-2">
-            Receive Mallcoin
-          </h1>
-          <p className="text-slate-400">
-            Share your address to receive payments
-          </p>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-4xl font-black text-white mb-2">
+                Receive Mallcoin
+              </h1>
+              <p className="text-slate-400">
+                Share your address to receive payments
+              </p>
+            </div>
+            <button
+              onClick={handleSwitchWallet}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:border-cyan-500/50 hover:text-white transition-all text-sm font-medium"
+            >
+              <Wallet className="w-4 h-4" />
+              Switch Wallet
+            </button>
+          </div>
         </motion.div>
 
         {/* QR Code Section */}

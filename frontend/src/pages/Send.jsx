@@ -26,10 +26,11 @@ import {
 import { QRCodeSVG } from 'qrcode.react'
 import toast from 'react-hot-toast'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { loadWallet } from '../core/wallet/walletUtils'
+import { loadWallet, clearWallet } from '../core/wallet/walletUtils'
 import SecureSigningModal from '../components/SecureSigningModal'
 import { withSigningKey } from '../core/wallet/secureSigner'
 import { transferMlcns } from '../core/wallet/mallcoinTx'
+import { requestGasFunding } from '../core/wallet/mallcoinApi'
 import {
   validateRecipient,
   fetchSendContext,
@@ -42,6 +43,7 @@ import {
 } from '../core/wallet/sendApi'
 import { TOKENS, FX_FROM_KES } from '../config/tokens'
 import { appConfig } from '../config/app'
+import { useChainHealth, startHealthPolling } from '../core/store/chainHealthStore'
 
 const SYMBOL = TOKENS.mallcoin.symbol
 const DECIMALS = TOKENS.mallcoin.decimals
@@ -49,6 +51,11 @@ const DECIMALS = TOKENS.mallcoin.decimals
 export default function Send() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+
+  const handleSwitchWallet = () => {
+    clearWallet()
+    navigate('/wallet/create')
+  }
 
   const [wallet, setWallet] = useState(null)
   const [balance, setBalance] = useState(0)
@@ -68,16 +75,26 @@ export default function Send() {
   const [preflight, setPreflight] = useState(null)
 
   const [isSending, setIsSending] = useState(false)
+  const [isFundingGas, setIsFundingGas] = useState(false)
   const [txResult, setTxResult] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [chainStatus, setChainStatus] = useState(null)
   const [showConfirm, setShowConfirm] = useState(false)
   const [recentRecipients, setRecentRecipients] = useState([])
   const [showInviteQr, setShowInviteQr] = useState(false)
   const [showSigningModal, setShowSigningModal] = useState(false)
 
+  // Shared health — no duplicate polling
+  const { chainStatus } = useChainHealth()
+  useEffect(() => startHealthPolling(), [])
+
   const amountRef = useRef(amount)
   const lastNotifiedRecipient = useRef('')
+  const searchParamsRef = useRef(searchParams)
+  const hasLoadedWalletDataRef = useRef(false)
+
+  useEffect(() => {
+    searchParamsRef.current = searchParams
+  }, [searchParams])
 
   const selectedCountry = FX_FROM_KES[country] || FX_FROM_KES.Kenya
   const liveRateKes = priceInsight?.midPriceKes ?? TOKENS.mallcoin.basePriceKes
@@ -89,9 +106,6 @@ export default function Send() {
   }, [amount])
 
   const fiatValue = useMemo(() => amountValue * liveRate, [amountValue, liveRate])
-
-  const gasFeeDisplay = feeEstimate?.feeDisplay ?? null
-  const gasDenom = feeEstimate?.feeDisplayDenom || appConfig.chain.displayDenom
 
   const canEstimateFee =
     recipientState.status === 'valid' &&
@@ -116,8 +130,9 @@ export default function Send() {
       setGasBalance(ctx.gas)
       setPriceInsight(buildPriceInsight(ctx.price))
 
-      const toParam = searchParams.get('to')
-      const amountParam = searchParams.get('amount')
+      const params = searchParamsRef.current
+      const toParam = params.get('to')
+      const amountParam = params.get('amount')
       if (toParam) setRecipient(toParam)
       if (amountParam) setAmount(String(amountParam))
     } catch (error) {
@@ -126,28 +141,13 @@ export default function Send() {
     } finally {
       setIsLoading(false)
     }
-  }, [navigate, searchParams])
+  }, [navigate])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (hasLoadedWalletDataRef.current) return
+    hasLoadedWalletDataRef.current = true
     loadWalletData()
   }, [loadWalletData])
-
-  useEffect(() => {
-    const loadChainStatus = async () => {
-      try {
-        const response = await fetch(`${appConfig.apiBase}/api/health`)
-        if (!response.ok) throw new Error('health unavailable')
-        const data = await response.json()
-        setChainStatus(data?.chain || null)
-      } catch {
-        setChainStatus(null)
-      }
-    }
-    loadChainStatus()
-    const timer = setInterval(loadChainStatus, 15000)
-    return () => clearInterval(timer)
-  }, [])
 
   useEffect(() => {
     amountRef.current = amount
@@ -220,27 +220,13 @@ export default function Send() {
             lastNotifiedRecipient.current = trimmed
             toast.error('Invalid recipient address', { id: 'recipient-invalid' })
           }
-        } else if (!info.exists) {
-          setRecipientState({
-            status: 'unavailable',
-            info: {
-              ...info,
-              message:
-                'No MLCNS wallet on Mallchain for this address. Invite them to join, then send again.',
-            },
-          })
-          if (lastNotifiedRecipient.current !== trimmed) {
-            lastNotifiedRecipient.current = trimmed
-            toast.error('Recipient wallet not available on chain', { id: 'recipient-unavailable' })
-            setShowInviteQr(true)
-          }
         } else {
           lastNotifiedRecipient.current = ''
           setRecipientState({
             status: 'valid',
             info: {
               ...info,
-              exists: true,
+              exists: info.exists ?? false,
             },
           })
         }
@@ -315,17 +301,54 @@ export default function Send() {
     if (amountValue > balance) {
       toast.error(`Insufficient ${SYMBOL} balance`)
       return false
-    }
-    if (preflight && !preflight.ok) {
+    }    if (preflight && !preflight.ok) {
       toast.error(preflight.issues[0]?.message || 'Cannot send this transfer')
       return false
     }
-    if (gasBalance && !gasBalance.sufficient && (!gasFeeDisplay || gasFeeDisplay > gasBalance.display)) {
-      toast.error(`Add ${gasDenom} for network gas (use Wallet faucet in dev)`)
-      return false
+    if (gasBalance && !gasBalance.sufficient) {
+      toast(`Low MAL for gas. The app will try to auto-fund stake for this send session.`, {
+        icon: '⛽',
+        duration: 4000,
+      })
     }
     return true
   }
+
+  const ensureGasBalance = useCallback(async () => {
+    if (!wallet?.address) throw new Error('Wallet required')
+    if (!gasBalance || gasBalance.sufficient) return true
+
+    setIsFundingGas(true)
+    try {
+      const fundingResult = await requestGasFunding(wallet.address)
+      if (!fundingResult?.success && !fundingResult?.funded) {
+        throw new Error(fundingResult?.error || 'Gas funding did not complete')
+      }
+
+      toast.success('Gas funding requested. Waiting for MAL to arrive…', { id: 'gas-funding' })
+
+      const deadline = Date.now() + 15000
+      let lastGas = gasBalance
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+        const ctx = await fetchSendContext(wallet.address)
+        const nextGas = ctx?.gas
+        if (nextGas) {
+          setGasBalance(nextGas)
+          lastGas = nextGas
+        }
+        if (nextGas?.sufficient) {
+          toast.success('MAL is ready for gas. Proceeding…', { id: 'gas-funding' })
+          return true
+        }
+      }
+
+      if (lastGas?.sufficient) return true
+      throw new Error('Gas funding did not become available in time')
+    } finally {
+      setIsFundingGas(false)
+    }
+  }, [gasBalance, wallet?.address])
 
   const handleStartReview = () => {
     if (!validateForm()) return
@@ -342,9 +365,19 @@ export default function Send() {
 
     setIsSending(true)
     try {
-      // Use secure signer with mnemonic (key never stored, only in-memory during signing)
-      await withSigningKey(mnemonic, async (privateKeyHex) => {
-        const result = await transferMlcns({
+      let gasAutoFunded = false
+      if (gasBalance && !gasBalance.sufficient) {
+        try {
+          await ensureGasBalance()
+          gasAutoFunded = true
+        } catch (fundingError) {
+          console.warn('Gas auto-funding failed, continuing with transfer attempt', fundingError)
+          toast.error(fundingError.message || 'Gas auto-funding failed')
+        }
+      }
+
+      const result = await withSigningKey(mnemonic, async (privateKeyHex) => {
+        const transferResult = await transferMlcns({
           privateKeyHex,
           fromAddress: wallet.address,
           toAddress: recipient.trim(),
@@ -353,17 +386,22 @@ export default function Send() {
         })
 
         saveRecentRecipient(recipient.trim())
-        setTxResult({
-          success: true,
-          txHash: result.txHash,
-          amount: amountValue,
-          recipient: recipient.trim(),
-          fiat: fiatValue,
-        })
+        return transferResult
       })
 
+      setTxResult({
+        success: true,
+        txHash: result.txHash,
+        amount: amountValue,
+        recipient: recipient.trim(),
+        fiat: fiatValue,
+        gasAutoFunded,
+      })
       setShowConfirm(false)
+      setShowSigningModal(false)
     } catch (e) {
+      console.error('Transfer failed', e)
+      setTxResult({ success: false, error: e.message || 'Transfer failed' })
       toast.error(e.message || 'Transfer failed')
     } finally {
       setIsSending(false)
@@ -404,8 +442,8 @@ export default function Send() {
             <Row label="Amount" value={`${Number(txResult.amount).toFixed(6)} ${SYMBOL}`} />
             <Row label="Fiat (est.)" value={`${selectedCountry.symbol}${Number(txResult.fiat).toFixed(2)}`} />
             <Row label="To" value={txResult.recipient} mono />
-            {txResult.fee != null && (
-              <Row label="Gas paid" value={`~${Number(txResult.fee).toFixed(6)} ${gasDenom}`} />
+            {txResult.gasAutoFunded && (
+              <Row label="Gas auto-funded" value="Yes (dev mode)" />
             )}
             <div className="flex justify-between items-center gap-2">
               <span className="text-slate-400">Tx hash</span>
@@ -454,11 +492,20 @@ export default function Send() {
             Send <span className="text-cyan-400">{SYMBOL}</span>
           </h1>
           <p className="text-slate-400 mt-2 max-w-xl">
-            Wallet-to-wallet Mallcoins on Mallchain. Fees are paid in {gasDenom}; the full amount
-            reaches the recipient in {SYMBOL}.
+            Wallet-to-wallet Mallcoins on Mallchain. A 0.0097% fee is charged on top of the amount
+            sent — recipient receives the full amount you specify.
           </p>
         </div>
-        <PriceBadge insight={priceInsight} country={selectedCountry} liveRate={liveRate} liveRateKes={liveRateKes} />
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleSwitchWallet}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 text-slate-200 border border-slate-600 hover:bg-slate-700 hover:border-cyan-500/50 hover:text-cyan-300 transition-all text-sm font-medium"
+          >
+            <Wallet className="w-4 h-4" />
+            Switch Wallet
+          </button>
+          <PriceBadge insight={priceInsight} country={selectedCountry} liveRate={liveRate} liveRateKes={liveRateKes} />
+        </div>
       </div>
 
       {preflight?.issues?.length > 0 && (
@@ -473,16 +520,16 @@ export default function Send() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 space-y-6">
-          <BalanceHeader
-            balance={balance}
-            locked={lockedBalance}
-            gasBalance={gasBalance}
-            gasDenom={gasDenom}
-            fiatSymbol={selectedCountry.symbol}
-            fiatValue={balance * liveRate}
-            onRefresh={loadWalletData}
-          />
+<section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 space-y-6">
+           <BalanceHeader
+             balance={balance}
+             locked={lockedBalance}
+             gasBalance={gasBalance}
+             fiatSymbol={selectedCountry.symbol}
+             fiatValue={balance * liveRate}
+             onRefresh={loadWalletData}
+             walletAddress={wallet?.address}
+           />
 
           <div>
             <label className="text-sm font-medium text-slate-300 mb-2 block">Amount ({SYMBOL})</label>
@@ -567,18 +614,17 @@ export default function Send() {
             <p className="text-xs text-slate-500 mt-1">{memo.length}/256</p>
           </div>
 
-          <FeeAndNetworkRow
-            feeLoading={feeLoading}
-            gasFeeDisplay={gasFeeDisplay}
-            gasDenom={gasDenom}
-            amountValue={amountValue}
-            chainStatus={chainStatus}
-          />
+<FeeAndNetworkRow
+             feeLoading={feeLoading}
+             feeEstimate={feeEstimate}
+             amountValue={amountValue}
+             chainStatus={chainStatus}
+           />
 
           <button
             type="button"
             onClick={handleStartReview}
-            disabled={isSending || !amountValue || recipientState.status !== 'valid'}
+            disabled={isSending || isFundingGas || !amountValue || recipientState.status !== 'valid'}
             className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <SendIcon className="w-5 h-5" />
@@ -595,7 +641,6 @@ export default function Send() {
             recipient={recipient}
             recipientState={recipientState}
             feeEstimate={feeEstimate}
-            gasDenom={gasDenom}
             liveRateKes={liveRateKes}
             priceInsight={priceInsight}
           />
@@ -612,8 +657,6 @@ export default function Send() {
             symbol={SYMBOL}
             recipient={recipient}
             memo={memo}
-            gasFeeDisplay={gasFeeDisplay}
-            gasDenom={gasDenom}
             preflight={preflight}
             isSending={isSending}
             onCancel={() => setShowConfirm(false)}
@@ -666,7 +709,23 @@ function PriceBadge({ insight, country, liveRate, liveRateKes }) {
   )
 }
 
-function BalanceHeader({ balance, locked, gasBalance, gasDenom, fiatSymbol, fiatValue, onRefresh }) {
+function BalanceHeader({ balance, locked, gasBalance, fiatSymbol, fiatValue, onRefresh, walletAddress }) {
+  const [fundingGas, setFundingGas] = useState(false)
+
+  const handleFundGas = async () => {
+    if (!walletAddress) return
+    setFundingGas(true)
+    try {
+      const result = await requestGasFunding(walletAddress)
+      toast.success(`Funded ${result.amount ?? 'gas'} MAL`)
+      onRefresh()
+    } catch (e) {
+      toast.error(e.message || 'Failed to fund gas')
+    } finally {
+      setFundingGas(false)
+    }
+  }
+
   return (
     <div className="flex items-start justify-between gap-4">
       <div>
@@ -684,8 +743,20 @@ function BalanceHeader({ balance, locked, gasBalance, gasDenom, fiatSymbol, fiat
         {gasBalance && (
           <p className={`text-xs mt-2 flex items-center gap-1 ${gasBalance.sufficient ? 'text-slate-500' : 'text-amber-400'}`}>
             <Fuel className="w-3 h-3" />
-            Gas: {gasBalance.display.toFixed(4)} {gasDenom}
-            {!gasBalance.sufficient && ' — low, fund wallet for fees'}
+            Gas: {gasBalance.display.toFixed(4)} MAL
+            {!gasBalance.sufficient && (
+              <>
+                {' — low, '}
+                <button
+                  type="button"
+                  onClick={handleFundGas}
+                  disabled={fundingGas}
+                  className="underline hover:text-cyan-300 disabled:opacity-50"
+                >
+                  fund gas
+                </button>
+              </>
+            )}
           </p>
         )}
       </div>
@@ -922,7 +993,9 @@ function RecipientValidation({ state, onOpenInvite }) {
         <p className="text-slate-400 mt-0.5">
           {state.info?.message ||
             (state.status === 'valid'
-              ? `On-chain balance: ${state.info?.recipientBalance ?? 0} ${SYMBOL}`
+              ? state.info?.exists === false
+                ? 'Valid Mallchain address. Their MLCNS wallet will be created when the transfer lands.'
+                : `On-chain balance: ${state.info?.recipientBalance ?? 0} ${SYMBOL}`
               : '')}
         </p>
         {(state.status === 'unavailable' || state.status === 'invalid') && onOpenInvite && (
@@ -939,25 +1012,30 @@ function RecipientValidation({ state, onOpenInvite }) {
   )
 }
 
-function FeeAndNetworkRow({ feeLoading, gasFeeDisplay, gasDenom, amountValue, chainStatus }) {
+function FeeAndNetworkRow({ feeLoading, feeEstimate, amountValue, chainStatus }) {
+  const feeDisplay = feeEstimate?.feeDisplay   // gas fee in stake (MAL)
+  const feeDenom = feeEstimate?.feeDisplayDenom || 'MAL'
+
   return (
     <div className="grid sm:grid-cols-2 gap-3">
       <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4">
         <p className="text-xs text-slate-500 flex items-center gap-1">
-          <Fuel className="w-3 h-3" /> Network fee (gas)
+          <Fuel className="w-3 h-3" /> Gas fee (MAL)
         </p>
         <p className="text-lg font-bold text-white mt-1">
           {feeLoading ? (
             <Loader2 className="w-5 h-5 animate-spin inline" />
-          ) : gasFeeDisplay != null ? (
-            `~${gasFeeDisplay.toFixed(6)} ${gasDenom}`
+          ) : feeDisplay != null ? (
+            `~${feeDisplay.toFixed(4)} ${feeDenom}`
           ) : amountValue > 0 ? (
-            'Enter recipient to estimate'
+            'Enter recipient'
           ) : (
             '—'
           )}
         </p>
-        <p className="text-xs text-slate-500 mt-1">Paid in {gasDenom}, not deducted from {SYMBOL} sent</p>
+        <p className="text-xs text-slate-500 mt-1">
+          Fixed 200 000 gas · paid in MAL (stake)
+        </p>
       </div>
       <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4">
         <p className="text-xs text-slate-500 flex items-center gap-1">
@@ -966,6 +1044,7 @@ function FeeAndNetworkRow({ feeLoading, gasFeeDisplay, gasDenom, amountValue, ch
         <p className="text-lg font-bold text-cyan-300 mt-1">
           {amountValue > 0 ? `${amountValue.toFixed(6)} ${SYMBOL}` : '—'}
         </p>
+        <p className="text-xs text-emerald-400 mt-1">Full amount — no MLCNS deducted</p>
         <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
           <Clock3 className="w-3 h-3" />
           Block {chainStatus?.latestHeight ?? '…'}
@@ -983,7 +1062,6 @@ function SessionSummary({
   recipient,
   recipientState,
   feeEstimate,
-  gasDenom,
   liveRateKes,
   priceInsight,
 }) {
@@ -997,13 +1075,14 @@ function SessionSummary({
       <SummaryRow label="To" value={recipient || '—'} mono />
       <SummaryRow label="MLCNS" value={amountValue > 0 ? amountValue.toFixed(6) : '—'} />
       <SummaryRow label="Fiat (est.)" value={amountValue > 0 ? `${fiatSymbol}${fiatValue.toFixed(2)}` : '—'} />
+      <SummaryRow label="Rate" value={priceInsight ? `${liveRateKes.toFixed(4)} KES / ${SYMBOL}` : '—'} />
       <SummaryRow
-        label="Rate"
-        value={priceInsight ? `${liveRateKes.toFixed(4)} KES / ${SYMBOL}` : '—'}
+        label="Gas fee (MAL)"
+        value={feeEstimate ? `~${feeEstimate.feeDisplay.toFixed(4)} MAL` : '—'}
       />
       <SummaryRow
-        label="Gas (est.)"
-        value={feeEstimate ? `~${feeEstimate.feeDisplay.toFixed(6)} ${gasDenom}` : '—'}
+        label="Recipient gets"
+        value={amountValue > 0 ? `${amountValue.toFixed(6)} ${SYMBOL}` : '—'}
       />
       <SummaryRow
         label="Recipient status"
@@ -1063,8 +1142,6 @@ function ConfirmModal({
   symbol,
   recipient,
   memo,
-  gasFeeDisplay,
-  gasDenom,
   preflight,
   isSending,
   onCancel,
@@ -1103,9 +1180,17 @@ function ConfirmModal({
             </div>
           )}
           <div className="flex justify-between rounded-xl bg-slate-800 px-4 py-3">
-            <span className="text-slate-500">Gas (est.)</span>
-            <span className="font-semibold">
-              {gasFeeDisplay != null ? `~${gasFeeDisplay.toFixed(6)} ${gasDenom}` : '—'}
+            <span className="text-slate-500">Recipient receives</span>
+            <span className="font-semibold text-cyan-300">
+              {amountValue.toFixed(6)} {symbol}
+            </span>
+          </div>
+          <div className="flex justify-between rounded-xl bg-slate-800 px-4 py-3">
+            <span className="text-slate-500">Gas fee (MAL / stake)</span>
+            <span className="font-semibold text-slate-300">
+              {preflight?.feeEstimate?.feeDisplay != null
+                ? `~${Number(preflight.feeEstimate.feeDisplay).toFixed(4)} MAL`
+                : '~0.002 MAL'}
             </span>
           </div>
           {preflight?.ok === false && (
