@@ -59,6 +59,7 @@ blockchain_working/data/priv_validator_state.json
 
 # Blockchain data (large, regeneratable)
 blockchain_working/data/
+blockchain_working/config/write-file-atomic-*
 
 # Backup files
 backup-handwritten/

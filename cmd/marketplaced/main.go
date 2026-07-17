@@ -8,9 +8,11 @@ import (
 
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/server"
-	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	svrcmd "github.com/cosmos/cosmos-sdk/server/cmd"
+	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+
+	cmtcfg "github.com/cometbft/cometbft/config"
 
 	"cosmossdk.io/log"
 	"github.com/spf13/cobra"
@@ -23,7 +25,7 @@ func main() {
 		Use:   app.Name,
 		Short: app.Name + " application node",
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			return server.InterceptConfigsPreRunHandler(cmd, "", nil, nil)
+			return server.InterceptConfigsPreRunHandler(cmd, "", nil, cmtcfg.DefaultConfig())
 		},
 	}
 
@@ -35,7 +37,6 @@ func main() {
 }
 
 func addModuleInitFlags(startCmd *cobra.Command) {
-	startCmd.Flags().Uint64("inv-check-period", 0, "Block period for the inv app version check (0 to disable)")
 }
 
 func newApp(
