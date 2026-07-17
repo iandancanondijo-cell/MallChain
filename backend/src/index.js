@@ -35,6 +35,7 @@ const inviteRoutes = require('./routes/invite');
 const historyRoutes = require('./routes/history');
 const faucetRoutes = require('./routes/faucet');
 const treasuryRoutes = require('./routes/treasury');
+const adminPanelRoutes = require('./routes/adminPanel');
 const axios = require('axios');
 
 const http = require('http')
@@ -190,6 +191,11 @@ app.use('/api/invite', inviteRoutes);
 app.use('/api/history', historyRoutes);
 app.use('/api/faucet', faucetRoutes);
 app.use('/api/treasury', treasuryRoutes);
+const minesRoutes = require('./routes/mines');
+app.use('/api/mines', minesRoutes);
+app.use('/api/admin', adminPanelRoutes);
+const taskAssignmentRoutes = require('./routes/taskAssignment');
+app.use('/api/task-assignment', taskAssignmentRoutes);
 const mallwalletRoutes = require('./routes/mallwallet');
 app.use('/api/mallwallet', mallwalletRoutes);
 // Mallwallet integrations (moved from separate project)

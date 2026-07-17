@@ -5,9 +5,13 @@ const router = express.Router();
 const liquidityController = require('../controllers/liquidityController');
 const mallcoinService = require('../services/mallcoinService');
 const { runReconciliationJob } = require('../services/reconciliationService');
+const { requireAdmin } = require('../middleware/adminAuth');
 const { Console } = require('console');
 const { stdout, stderr } = require('process');
 const console = new Console(stdout, stderr);
+
+// All admin routes require admin authentication
+router.use(requireAdmin);
 
 // Trigger a one-off reconcile/report of on-chain pools and emission metrics
 router.post('/reconcile', async (req, res) => {

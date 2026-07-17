@@ -2,11 +2,12 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
+const { requireAdmin } = require('../middleware/adminAuth');
 
 const User = require('../models/user');
+const TaskSubmission = require('../models/TaskSubmission');
 
 const Campaign = mongoose.models.Campaign || mongoose.model('Campaign', new mongoose.Schema({}, { strict: false }));
-const TaskSubmission = mongoose.models.TaskSubmission || mongoose.model('TaskSubmission', new mongoose.Schema({}, { strict: false }));
 const WalletTransaction = mongoose.models.WalletTransaction || mongoose.model('WalletTransaction', new mongoose.Schema({}, { strict: false }));
 
 function getJwtSecret() {
@@ -131,50 +132,63 @@ router.post('/submissions', verifyToken, async (req, res) => {
   } catch (e) { res.status(400).json(fail(e)); }
 });
 
-router.put('/submissions/:id', async (req, res) => {
+router.put('/submissions/:id', verifyToken, async (req, res) => {
   try {
     const row = await TaskSubmission.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true }).lean();
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }
 });
 
-router.get('/submissions/pending', async (_req, res) => {
+router.get('/submissions/pending', requireAdmin, async (_req, res) => {
   try {
     const rows = await TaskSubmission.find({ status: 'manual_review' }).sort({ created_at: -1 }).limit(50).lean();
     res.json(ok(rows));
   } catch (e) { res.json(ok([])); }
 });
 
-router.post('/submissions/:id/approve', async (req, res) => {
+router.post('/submissions/:id/approve', requireAdmin, async (req, res) => {
   try {
     const { rewardAmount } = req.body || {};
     const sub = await TaskSubmission.findById(req.params.id).lean();
     if (!sub) return res.status(404).json(fail('submission not found'));
 
+    // Determine reward: use provided amount, or auto-use campaign rate_per_task
+    let finalReward = rewardAmount || 0;
+    if (sub.campaign_id && !rewardAmount) {
+      const campaign = await Campaign.findById(sub.campaign_id).lean();
+      if (campaign && campaign.rate_per_task) {
+        finalReward = campaign.rate_per_task;
+      }
+    }
+
     const updated = await TaskSubmission.findByIdAndUpdate(
       req.params.id,
-      { $set: { status: 'auto_approved', completed_at: new Date().toISOString() } },
+      { $set: { status: 'auto_approved', completed_at: new Date().toISOString(), reward_amount: finalReward } },
       { new: true }
     ).lean();
 
+    // Create wallet transaction record
     await WalletTransaction.create({
       user_id: sub.miner_id,
       type: 'credit',
-      amount: rewardAmount || 0,
+      amount: finalReward,
       currency: 'MLPTS',
       description: 'Task reward approved by admin',
     });
 
+    // Update user's mlpts_balance directly
+    await User.findByIdAndUpdate(sub.miner_id, { $inc: { mlpts_balance: finalReward } });
+
     if (sub.campaign_id) {
       await Campaign.findByIdAndUpdate(sub.campaign_id, {
-        $inc: { completions_count: 1, budget_remaining: -(rewardAmount || 0) },
+        $inc: { completions_count: 1, budget_remaining: -finalReward },
       });
     }
     res.json(ok(updated));
   } catch (e) { res.status(500).json(fail(e)); }
 });
 
-router.post('/submissions/:id/reject', async (req, res) => {
+router.post('/submissions/:id/reject', requireAdmin, async (req, res) => {
   try {
     const { note } = req.body || {};
     const row = await TaskSubmission.findByIdAndUpdate(

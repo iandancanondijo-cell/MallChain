@@ -7,7 +7,9 @@ import {
 } from 'react-router-dom'
 
 import AppLayout from '../layouts/AppLayout'
+import AdminLayout from '../layouts/AdminLayout'
 import ProtectedRoute from '../components/shared/ProtectedRoute'
+import AdminRoute from '../components/shared/AdminRoute'
 
 // Auth Pages
 const Login = lazy(() => import('../pages/Auth/Login'))
@@ -34,15 +36,27 @@ const MyValidatorCenter = lazy(() => import('../pages/MyValidatorCenter'))
 const Explorer = lazy(() => import('../pages/Explorer'))
 const Contracts = lazy(() => import('../pages/Contracts'))
 
-
-
-
-
 const Liquidity = lazy(() => import('../pages/Liquidity'))
 const WalletConvert = lazy(() => import('../pages/WalletConvert'))
 const Economics = lazy(() => import('../pages/Economics'))
+const Mine = lazy(() => import('../pages/Mine'))
+const MinesBridge = lazy(() => import('../pages/MinesBridge'))
 
 const NotFound = lazy(() => import('../pages/NotFound'))
+
+// Admin Pages
+const AdminDashboard = lazy(() => import('../pages/Admin/AdminDashboard'))
+const AdminUsers = lazy(() => import('../pages/Admin/AdminUsers'))
+const AdminValidators = lazy(() => import('../pages/Admin/AdminValidators'))
+const AdminTreasury = lazy(() => import('../pages/Admin/AdminTreasury'))
+const AdminMining = lazy(() => import('../pages/Admin/AdminMining'))
+const AdminGovernance = lazy(() => import('../pages/Admin/AdminGovernance'))
+const AdminAudit = lazy(() => import('../pages/Admin/AdminAudit'))
+const AdminSettings = lazy(() => import('../pages/Admin/AdminSettings'))
+const AdminTaskAssignment = lazy(() => import('../pages/Admin/AdminTaskAssignment'))
+
+// Validator Pages
+const ValidatorVoting = lazy(() => import('../pages/ValidatorVoting'))
 
 function PageLoader() {
   return (
@@ -169,6 +183,24 @@ export default function AppRouter() {
               element={<Economics />}
             />
 
+            {/* Mines */}
+            <Route
+              path="/mines"
+              element={<Mine />}
+            />
+
+            {/* Mines Bridge (iframe) */}
+            <Route
+              path="/mines/bridge"
+              element={<MinesBridge />}
+            />
+
+            {/* Validator Voting */}
+            <Route
+              path="/validator-voting"
+              element={<ValidatorVoting />}
+            />
+
             {/* Home */}
             <Route
               path="/"
@@ -178,6 +210,26 @@ export default function AppRouter() {
 
           {/* 404 */}
           <Route path="*" element={<NotFound />} />
+
+          {/* Admin Routes */}
+          <Route
+            path="/admin"
+            element={
+              <AdminRoute>
+                <AdminLayout />
+              </AdminRoute>
+            }
+          >
+            <Route index element={<AdminDashboard />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="validators" element={<AdminValidators />} />
+            <Route path="treasury" element={<AdminTreasury />} />
+            <Route path="mining" element={<AdminMining />} />
+            <Route path="task-assignment" element={<AdminTaskAssignment />} />
+            <Route path="governance" element={<AdminGovernance />} />
+            <Route path="audit" element={<AdminAudit />} />
+            <Route path="settings" element={<AdminSettings />} />
+          </Route>
         </Routes>
       </Suspense>
     </BrowserRouter>
