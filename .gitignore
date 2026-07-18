@@ -57,9 +57,12 @@ blockchain_working/data/priv_validator_state.json
 .kiro/
 .mines/
 
-# Blockchain data (large, regeneratable)
+# Blockchain data (large, regeneratable — never commit)
 blockchain_working/data/
 blockchain_working/config/write-file-atomic-*
+
+# Compiled binary
+marketplaced
 
 # Backup files
 backup-handwritten/
