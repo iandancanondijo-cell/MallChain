@@ -3,17 +3,9 @@ const router = express.Router();
 const txCtrl = require('../controllers/txController');
 const auth = require('../middleware/auth');
 
-router.get('/', auth, txCtrl.list);
-router.get('/:id', auth, txCtrl.get);
-// Relay signed txs (authenticated endpoint)
-router.post('/relay', auth, txCtrl.relay);
-
-// Authenticated create
-router.post('/', auth, txCtrl.create);
-
 // ---- Transactions history for frontend ----
+// MUST be before /:id wildcard or it gets caught by it
 // GET /api/tx/history?address=...&status=all|confirmed|pending|failed&page=1&limit=20
-// This wraps on-chain history from /api/history/:address and normalizes the shape.
 router.get('/history', async (req, res) => {
   try {
     const {
@@ -37,42 +29,54 @@ router.get('/history', async (req, res) => {
     const chainRest = process.env.CHAIN_REST || process.env.MALL_CHAIN_REST || 'http://127.0.0.1:1317';
     const base = chainRest.replace(/\/$/, '');
 
-    // Reuse backend on-chain query semantics similar to routes/history.js
     const url = `${base}/cosmos/tx/v1beta1/txs`;
-    const events = [
-      `message.sender='${address}'`,
-      `transfer.recipient='${address}'`,
-    ].join('&events=');
 
-    const fullUrl = `${url}?events=${events}&order_by=ORDER_BY_DESC&pagination.offset=${offset}&pagination.limit=${limitNum}`;
-
+    // Fetch sent and received txs separately then merge
     const axios = require('axios');
-    const r = await axios.get(fullUrl, { timeout: 10000 });
 
-    const latestBlockUrl = `${base}/cosmos/base/tendermint/v1beta1/blocks/latest`;
-    const latestRes = await axios.get(latestBlockUrl, { timeout: 5000 }).catch(() => null);
-    const latestHeight = Number(latestRes?.data?.block?.header?.height || 0);
+    async function fetchTxsByEvent(event, paginationLimit) {
+      const fullUrl = `${url}?events=${encodeURIComponent(event)}&order_by=ORDER_BY_DESC&pagination.limit=${paginationLimit}`;
+      try {
+        const r = await axios.get(fullUrl, { timeout: 10000 });
+        return r.data.txs || [];
+      } catch (e) {
+        return [];
+      }
+    }
 
-    const txs = (r.data.txs || []).map((tx) => {
+    const [sentTxs, receivedTxs] = await Promise.all([
+      fetchTxsByEvent(`message.sender='${address}'`, limitNum * 2),
+      fetchTxsByEvent(`transfer.recipient='${address}'`, limitNum * 2),
+    ]);
+
+    // Merge and deduplicate by hash
+    const seen = new Set();
+    const allTxs = [...sentTxs, ...receivedTxs].filter(tx => {
+      if (seen.has(tx.txhash)) return false;
+      seen.add(tx.txhash);
+      return true;
+    });
+
+    // Sort by height descending
+    allTxs.sort((a, b) => Number(b.height || 0) - Number(a.height || 0));
+
+    const txs = allTxs.map((tx) => {
       const msg = tx.body && tx.body.messages && tx.body.messages[0] ? tx.body.messages[0] : {};
       const from = msg.from_address || msg.creator || '';
       const to = msg.to_address || msg.to || '';
-      const amount = (msg.amount && msg.amount[0] && msg.amount[0].amount) || msg.amount || '';
+      const rawAmount = (msg.amount && msg.amount[0] && msg.amount[0].amount) || msg.amount || '0';
       const txHash = tx.txhash || '';
       const timestamp = tx.timestamp || '';
-
-      // Map Cosmos tx code to status when available; fallback to pending.
       const code = tx.code;
       const statusMapped = code === 0 || code === undefined ? 'confirmed' : 'failed';
-      const pending = code === undefined;
 
       return {
         hash: txHash,
         from,
         to,
-        amount,
+        amount: rawAmount,
         type: from === address ? 'send' : 'receive',
-        status: pending ? 'pending' : statusMapped,
+        status: statusMapped,
         timestamp,
         block: tx.height,
       };
@@ -80,12 +84,13 @@ router.get('/history', async (req, res) => {
 
     const filtered = status === 'all' ? txs : txs.filter((t) => t.status === status);
 
-    // Best-effort total: if pagination.total exists in response, use it; else approximate.
-    const total = Number(r.data?.pagination?.total ?? filtered.length);
+    // Apply manual pagination on the merged + filtered result
+    const total = filtered.length;
+    const paginated = filtered.slice(offset, offset + limitNum);
 
     res.json({
       success: true,
-      transactions: filtered,
+      transactions: paginated,
       total,
       page: pageNum,
       limit: limitNum,
@@ -98,6 +103,11 @@ router.get('/history', async (req, res) => {
     });
   }
 });
+
+router.get('/', auth, txCtrl.list);
+router.get('/:id', auth, txCtrl.get);
+router.post('/relay', auth, txCtrl.relay);
+router.post('/', auth, txCtrl.create);
 
 module.exports = router;
 

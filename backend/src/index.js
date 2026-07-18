@@ -196,6 +196,9 @@ app.use('/api/mines', minesRoutes);
 app.use('/api/admin', adminPanelRoutes);
 const taskAssignmentRoutes = require('./routes/taskAssignment');
 app.use('/api/task-assignment', taskAssignmentRoutes);
+
+const economyRoutes = require('./routes/economy');
+app.use('/api/economy', economyRoutes);
 const mallwalletRoutes = require('./routes/mallwallet');
 app.use('/api/mallwallet', mallwalletRoutes);
 // Mallwallet integrations (moved from separate project)
