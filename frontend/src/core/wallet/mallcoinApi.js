@@ -84,6 +84,21 @@ export async function convertMallpointsToMlcns(address) {
   return data
 }
 
+/**
+ * Request gas funding (stake) for a wallet address so it can afford transaction fees.
+ * Hits the faucet endpoint with fund_gas=true.
+ */
+export async function requestGasFunding(address) {
+  const res = await fetch(`${API}/faucet/fund-gas`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address }),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || data.detail || 'Gas funding failed')
+  return data
+}
+
 export function formatMlcnsDisplay(walletBalancePayload) {
   const available =
     walletBalancePayload?.availableDisplay ??

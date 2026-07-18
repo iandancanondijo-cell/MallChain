@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { CheckCircle, XCircle, Clock, RefreshCw, AlertTriangle } from 'lucide-react'
-import { getMyAssignedTasks, castVote } from '../../core/admin/adminApi'
+import { getMyAssignedTasks, castVote } from '../core/admin/adminApi'
 
 export default function ValidatorVoting() {
   const [tasks, setTasks] = useState([])

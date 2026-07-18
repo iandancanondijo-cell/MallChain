@@ -139,9 +139,53 @@ async function getFaucetStatus() {
   };
 }
 
+/**
+ * Fund only stake (gas) to a wallet — used when the user already has MLCNS
+ * but needs native stake tokens to pay transaction fees.
+ */
+async function fundGas(address) {
+  if (!isFaucetEnabled()) {
+    const err = new Error('Faucet is disabled');
+    err.status = 403;
+    throw err;
+  }
+
+  const mnemonic = getFaucetMnemonic();
+  if (!mnemonic) {
+    const err = new Error('Faucet mnemonic not configured');
+    err.status = 503;
+    throw err;
+  }
+
+  if (!isValidAddress(address)) {
+    const err = new Error('Invalid recipient address');
+    err.status = 400;
+    throw err;
+  }
+
+  checkCooldown(address);
+
+  const result = await fundStakeFromMnemonic({
+    mnemonic,
+    toAddress: address,
+    amountStake: DEFAULT_STAKE,
+  });
+
+  lastRequestByAddress.set(address, Date.now());
+
+  return {
+    success: true,
+    funded: true,
+    amount: DEFAULT_STAKE,
+    denom: 'stake',
+    result,
+  };
+}
+
 module.exports = {
   isFaucetEnabled,
   creditMlcns,
+  fundGas,
   getFaucetStatus,
   getFaucetMnemonic,
 };

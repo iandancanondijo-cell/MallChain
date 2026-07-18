@@ -241,7 +241,7 @@ export default function Wallet() {
               onClick={handleSwitchWallet}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:border-cyan-500/50 hover:text-white transition-all text-sm font-medium"
             >
-              <Wallet className="w-4 h-4" />
+              <WalletIcon className="w-4 h-4" />
               Switch Wallet
             </button>
           </div>

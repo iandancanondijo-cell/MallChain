@@ -9,5 +9,6 @@ const faucetLimiter = createLimiter({
 
 router.get('/status', ctrl.status);
 router.post('/mlcns', faucetLimiter, ctrl.requestMlcns);
+router.post('/fund-gas', faucetLimiter, ctrl.fundGas);
 
 module.exports = router;
