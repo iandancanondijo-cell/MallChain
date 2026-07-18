@@ -36,7 +36,8 @@ async function fetchHealth() {
     const res = await fetchWithTimeout(`${appConfig.apiBase}/api/health`, { timeout: 8_000 })
     if (!res.ok) throw new Error('health unavailable')
     const data = await res.json()
-    const chain = data?.dependencies?.chain || {}
+    // Response shape: { status, backend, chain: { status, chainId, moniker, latestHeight, latestBlockTime } }
+    const chain = data?.chain || data?.dependencies?.chain || {}
 
     const latestBlockTime = chain.latestBlockTime || ''
     const blockTime = latestBlockTime ? new Date(latestBlockTime).getTime() : Date.now()

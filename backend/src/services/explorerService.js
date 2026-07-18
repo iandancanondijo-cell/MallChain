@@ -16,10 +16,14 @@ function formatTimes(isoString) {
     iso: date.toISOString(),
     unix: Math.floor(date.getTime() / 1000),
     utc: date.toUTCString(),
+    // Use separate dateStyle/timeStyle options without timeZoneName to avoid conflict
     local: date.toLocaleString(undefined, {
-      dateStyle: 'medium',
-      timeStyle: 'medium',
-      timeZoneName: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
     }),
   };
 }
