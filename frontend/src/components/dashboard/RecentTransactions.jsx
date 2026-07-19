@@ -49,11 +49,19 @@ export default function RecentTransactions() {
     <div className="rounded-3xl border border-slate-800 bg-slate-900/50 backdrop-blur-xl p-6">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold">Recent Transactions</h2>
-        {!loading && !error && (
-          <span className="text-xs text-slate-500">
-            {transactions.length} tx{transactions.length !== 1 ? 's' : ''}
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {!loading && error && (
+            <button onClick={() => {
+              setLoading(true); setError(null)
+              fetch(`${appConfig.apiBase}/api/blockchain/tx/all?limit=10`)
+                .then(r => r.json()).then(d => { setTransactions(d?.transactions || []); setLoading(false) })
+                .catch(e => { setError(e.message); setLoading(false) })
+            }} className="text-xs text-cyan-400 hover:text-cyan-300">Retry</button>
+          )}
+          {!loading && !error && (
+            <span className="text-xs text-slate-500">{transactions.length} tx{transactions.length !== 1 ? 's' : ''}</span>
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -96,7 +104,18 @@ export default function RecentTransactions() {
 
               <div className="text-right">
                 <div className="text-emerald-400 font-bold text-sm">
-                  {tx.gas_used ? `${tx.gas_used} gas` : '—'}
+                  {(() => {
+                    // Extract transfer amount from messages
+                    const msgs = tx.messages || []
+                    const transfer = msgs.find(m => m['@type']?.includes('MsgSend') || m.amount)
+                    if (transfer?.amount) {
+                      const amt = Array.isArray(transfer.amount)
+                        ? transfer.amount.map(a => `${Number(a.amount).toLocaleString()} ${a.denom?.toUpperCase() || 'MLCNS'}`).join(', ')
+                        : `${transfer.amount} MLCNS`
+                      return amt
+                    }
+                    return tx.gas_used ? `${tx.gas_used} gas` : '—'
+                  })()}
                 </div>
                 {tx.timestamp && (
                   <p className="text-slate-500 text-xs mt-1">

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Users, CheckCircle, XCircle, Clock, RefreshCw, ChevronDown, ChevronUp, Star } from 'lucide-react'
+import toast from 'react-hot-toast'
 import {
   getTasksPendingAssignment,
   getTasksInVoting,
@@ -46,6 +47,9 @@ export default function AdminTaskAssignment() {
 
   useEffect(() => { loadAll() }, [])
 
+  // Reset validator selection whenever a different task is expanded
+  useEffect(() => { setSelectedValidators([]) }, [expandedTask])
+
   const handleExpandTask = async (taskId) => {
     if (expandedTask === taskId) {
       setExpandedTask(null)
@@ -53,12 +57,13 @@ export default function AdminTaskAssignment() {
       return
     }
     setExpandedTask(taskId)
+    setTaskDetails(null)
     setLoadingDetails(true)
     try {
       const res = await getTaskDetails(taskId)
       setTaskDetails(res.data)
     } catch (e) {
-      console.error(e)
+      toast.error(e.message)
     } finally {
       setLoadingDetails(false)
     }
@@ -72,7 +77,7 @@ export default function AdminTaskAssignment() {
 
   const handleAssign = async (taskId) => {
     if (selectedValidators.length !== 6) {
-      alert('You must select exactly 6 validators')
+      toast.error('Select exactly 6 validators')
       return
     }
     setAssigning(taskId)
@@ -82,31 +87,33 @@ export default function AdminTaskAssignment() {
       setExpandedTask(null)
       await loadAll()
     } catch (e) {
-      alert(e.message)
+      toast.error(e.message)
     } finally {
       setAssigning(null)
     }
   }
 
   const handleFinalApprove = async (taskId) => {
-    const amount = prompt('Reward amount (MLPTS):', '0')
+    const amount = window.prompt('Reward amount (MLPTS):', '0')
     if (amount === null) return
     try {
       await finalApproveTask(taskId, Number(amount))
+      toast.success('Task approved')
       await loadAll()
     } catch (e) {
-      alert(e.message)
+      toast.error(e.message)
     }
   }
 
   const handleFinalReject = async (taskId) => {
-    const note = prompt('Rejection reason:', '')
+    const note = window.prompt('Rejection reason:', '')
     if (note === null) return
     try {
       await finalRejectTask(taskId, note)
+      toast.success('Task rejected')
       await loadAll()
     } catch (e) {
-      alert(e.message)
+      toast.error(e.message)
     }
   }
 
