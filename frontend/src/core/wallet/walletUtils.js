@@ -8,6 +8,7 @@ import * as bip39 from 'bip39'
 import { HDKey } from '@scure/bip32'
 import { bech32 } from 'bech32'
 import { sha256 } from '@noble/hashes/sha2.js'
+import { ripemd160 } from '@noble/hashes/legacy.js'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 
 // Polyfill for Buffer in browser environment
@@ -46,14 +47,15 @@ const CHAIN_ID = appConfig.chain.id
 
 /**
  * Generate address from public key using bech32
- * @param {Uint8Array} publicKey - Public key bytes
+ * Cosmos address derivation: RIPEMD160(SHA256(pubkey)) → bech32
+ * @param {Uint8Array} publicKey - Compressed secp256k1 public key (33 bytes)
  * @returns {string} Bech32 encoded address
  */
 function generateAddressFromPublicKey(publicKey) {
-  // Hash public key with SHA256
-  const hash = sha256(publicKey)
-  // Convert to bech32 words and encode
-  const words = bech32.toWords(Buffer.from(hash))
+  // Cosmos standard: RIPEMD160(SHA256(compressed_pubkey)) → 20 bytes
+  const hash = ripemd160(sha256(publicKey))
+  // Convert 20-byte hash to 5-bit bech32 words and encode
+  const words = bech32.toWords(hash)
   return bech32.encode(HRP, words)
 }
 
