@@ -39,9 +39,19 @@ export default function Login() {
     try {
       const response = await apiClient.post('/auth/login', formData)
       if (response.data.token) {
-        login({ token: response.data.token, user: response.data.user })
+        // Fetch the full user profile so role is available for AdminRoute
+        const profileRes = await apiClient.get('/auth/me', {
+          headers: { Authorization: `Bearer ${response.data.token}` }
+        }).catch(() => null)
+        const user = profileRes?.data?.user || response.data.user || null
+        login({ token: response.data.token, user })
         toast.success('Login successful!')
-        navigate('/dashboard')
+        // Redirect admins directly to admin panel
+        if (user?.role === 'admin' || user?.role === 'superadmin') {
+          navigate('/admin')
+        } else {
+          navigate('/dashboard')
+        }
       }
     } catch (error) {
       toast.error(error.response?.data?.error || 'Login failed. Please try again.')

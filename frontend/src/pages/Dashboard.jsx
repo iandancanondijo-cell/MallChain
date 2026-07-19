@@ -1,610 +1,213 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-
 import socket from '../core/socket/socket'
+import { useChainHealth, startHealthPolling } from '../core/store/chainHealthStore'
 import HeroMetrics from '../components/dashboard/HeroMetrics'
 import LiveChart from '../components/dashboard/LiveChart'
 import RecentTransactions from '../components/dashboard/RecentTransactions'
 import NetworkActivity from '../components/dashboard/NetworkActivity'
-import LoadingState from '../components/shared/LoadingState'
-import ErrorState from '../components/shared/ErrorState'
+import { appConfig } from '../config/app'
 
 export default function Dashboard() {
+  const { chainStatus, healthState } = useChainHealth()
+  const [blocks, setBlocks]           = useState([])
+  const [marketEvents, setMarketEvents] = useState([])
+  const [priceData, setPriceData]     = useState(null)
+  const [treasury, setTreasury]       = useState(null)
+  const [archiveTxs, setArchiveTxs]   = useState([])
+  const [showArchive, setShowArchive] = useState(false)
 
-  const [blocks, setBlocks] =
-    useState([])
+  // Use shared health store — no extra polling here
+  useEffect(() => startHealthPolling(), [])
 
-  const [marketEvents, setMarketEvents] =
-    useState([])
-
-  const [priceData, setPriceData] =
-    useState(null)
-
-  const [treasury, setTreasury] =
-    useState(null)
-
-  const [health, setHealth] =
-    useState(null)
-
-  const [healthState, setHealthState] =
-    useState('loading')
-
-  const [archiveTxs, setArchiveTxs] =
-    useState([])
-
-  const [showArchive, setShowArchive] =
-    useState(false)
-
-  const [error, setError] =
-    useState(null)
-
+  // Load archive transactions once on mount
   useEffect(() => {
-    const base = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
-
-    const loadHealth = async () => {
-      try {
-        const response = await fetch(`${base}/api/health`)
-        if (!response.ok) throw new Error('health unavailable')
-        const data = await response.json()
-        const latest = data?.chain || null
-        const blockTime = latest?.latestBlockTime ? new Date(latest.latestBlockTime).getTime() : Date.now()
-        const stale = Date.now() - blockTime > 30000
-        setHealth(latest)
-        setHealthState(stale ? 'retrying' : 'live')
-        setError(null)
-      } catch {
-        setHealth(null)
-        setHealthState('down')
-        setError('Unable to reach the blockchain node. Retrying…')
-      }
-    }
-
-    loadHealth()
-    const timer = setInterval(loadHealth, 10000)
-    return () => clearInterval(timer)
+    fetch(`${appConfig.apiBase}/api/blockchain/tx/all?limit=20`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.transactions) setArchiveTxs(d.transactions) })
+      .catch(() => {})
   }, [])
 
+  // Socket subscriptions
   useEffect(() => {
-    const base = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
-
-    const loadArchive = async () => {
-      try {
-        const response = await fetch(`${base}/api/blockchain/tx/all?limit=25`)
-        if (!response.ok) throw new Error('archive unavailable')
-        const data = await response.json()
-        setArchiveTxs(data?.transactions || [])
-      } catch {
-        setArchiveTxs([])
-      }
-    }
-
-    loadArchive()
-  }, [])
-
-  useEffect(() => {
-
     socket.emit('subscribe:blocks')
-
     socket.emit('subscribe:market')
-
     socket.emit('subscribe:price')
 
-    socket.on(
-      'block:new',
-      block => {
-
-        setBlocks(prev => [
-          block,
-          ...prev.slice(0, 9)
-        ])
-
-      }
-    )
-
-    socket.on(
-      'market:event',
-      event => {
-
-        setMarketEvents(prev => [
-          event,
-          ...prev.slice(0, 9)
-        ])
-
-      }
-    )
-
-    socket.on(
-      'price:update',
-      data => {
-        setPriceData(data)
-      }
-    )
-
-    socket.on(
-      'treasury_update',
-      data => {
-        setTreasury(data)
-      }
-    )
+    socket.on('block:new',      b => setBlocks(p => [b, ...p.slice(0, 9)]))
+    socket.on('market:event',   e => setMarketEvents(p => [e, ...p.slice(0, 9)]))
+    socket.on('price:update',   d => setPriceData(d))
+    socket.on('treasury_update',d => setTreasury(d))
 
     return () => {
-
       socket.off('block:new')
-
       socket.off('market:event')
-
       socket.off('price:update')
-
       socket.off('treasury_update')
-
     }
-
   }, [])
 
-  const networkBars = useMemo(() => healthState === 'live' ? 5 : healthState === 'retrying' ? 3 : 1, [healthState])
+  const networkBars = healthState === 'live' ? 5 : healthState === 'retrying' ? 3 : 1
 
-  const currentBlockTxs = useMemo(() => {
-    const latestHeight = Number(health?.latestHeight || 0)
-    if (!latestHeight) return []
-    return archiveTxs.filter(tx => Number(tx.height) === latestHeight)
-  }, [archiveTxs, health?.latestHeight])
+  const statusTone = {
+    live: 'bg-emerald-500', retrying: 'bg-amber-400',
+    down: 'bg-rose-500', loading: 'bg-slate-500',
+  }[healthState]
+
+  const statusLabel = {
+    live: 'Live', retrying: 'Retrying', down: 'Offline', loading: 'Checking',
+  }[healthState]
 
   const formatAmount = (amount) => {
     if (!amount) return '0'
-    if (Array.isArray(amount)) {
-      return amount
-        .map(item => `${item.amount || 0} ${item.denom || ''}`.trim())
-        .filter(Boolean)
-        .join(', ')
-    }
-    if (typeof amount === 'string') return amount
+    if (Array.isArray(amount)) return amount.map(a => `${a.amount || 0} ${a.denom || ''}`.trim()).filter(Boolean).join(', ')
     if (typeof amount === 'object') return `${amount.amount || 0} ${amount.denom || ''}`.trim()
     return String(amount)
   }
 
-  const truncate = (value, length = 12) => {
-    if (!value) return '—'
-    return value.length > length ? `${value.slice(0, length)}…` : value
-  }
-
-  const statusTone = {
-    live: 'bg-emerald-500',
-    retrying: 'bg-amber-400',
-    down: 'bg-rose-500',
-    loading: 'bg-slate-500'
-  }[healthState]
-
-  const statusLabel = {
-    live: 'Live',
-    retrying: 'Retrying',
-    down: 'Offline',
-    loading: 'Checking'
-  }[healthState]
+  const trunc = (v, n = 14) => !v ? '—' : v.length > n ? `${v.slice(0, n)}…` : v
 
   return (
-    <div
-      className="
-        min-h-screen
-        bg-slate-950
-        text-white
-        p-8
-      "
-    >
+    <div className="max-w-7xl mx-auto space-y-10 py-6 px-2">
 
-      <div
-        className="
-          max-w-7xl
-          mx-auto
-        "
-      >
+      {/* Header */}
+      <div>
+        <h1 className="text-4xl font-black text-white">Mallcoin Network</h1>
+        <p className="text-slate-400 mt-2">Real-time blockchain dashboard</p>
+      </div>
 
-        <div className="mb-10">
+      {/* Health + metrics row */}
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_auto] gap-6">
+        <motion.div whileHover={{y:-2}}
+          className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <p className="text-slate-400 text-sm">Network Health</p>
+              <p className="text-4xl font-black text-white mt-2">
+                #{chainStatus.latestHeight || '—'}
+              </p>
+              <p className="text-slate-400 text-sm mt-1">{chainStatus.moniker || 'Mallchain'} · {chainStatus.chainId}</p>
+            </div>
+            <div className="flex items-center gap-2 px-4 py-3 rounded-2xl border border-slate-700 bg-slate-800/80 text-sm">
+              <span className={`h-2.5 w-2.5 rounded-full ${statusTone}`}/>
+              <span>{statusLabel}</span>
+            </div>
+          </div>
+          <div className="mt-4 flex gap-1.5" aria-label="Network speed bars">
+            {Array.from({length:5},(_,i) => (
+              <span key={i} className={`h-4 w-2 rounded-full ${i < networkBars ? 'bg-emerald-400' : 'bg-slate-700'}`}/>
+            ))}
+          </div>
+        </motion.div>
 
-          <h1
-            className="
-              text-5xl
-              font-black
-            "
-          >
-            Mallcoin Network
-          </h1>
-
-          <p
-            className="
-              text-slate-400
-              mt-3
-            "
-          >
-            Realtime blockchain dashboard
-          </p>
-
+        <div className="flex flex-col gap-3 xl:min-w-[200px]">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 flex-1">
+            <p className="text-slate-500 text-xs uppercase tracking-widest">Live Blocks</p>
+            <p className="text-2xl font-black text-white mt-1">{blocks.length}</p>
+            <p className="text-slate-500 text-xs mt-1">this session</p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 flex-1">
+            <p className="text-slate-500 text-xs uppercase tracking-widest">Market Events</p>
+            <p className="text-2xl font-black text-white mt-1">{marketEvents.length}</p>
+            <p className="text-slate-500 text-xs mt-1">this session</p>
+          </div>
         </div>
+      </div>
 
-        <div className="mb-10 grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-          <motion.div
-            whileHover={{ y: -4 }}
-            className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 backdrop-blur-xl"
-          >
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-slate-400">Network Health</p>
-                <h2 className="mt-2 text-2xl font-black">Live Blocks</h2>
-                <p className="mt-2 text-sm text-slate-400">Real block height from the chain endpoint, with live status and network bars.</p>
-              </div>
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-800 bg-slate-800/80 px-4 py-3 text-sm text-slate-200">
-                <span className={`h-3 w-3 rounded-full ${statusTone}`} />
-                <span>{statusLabel}</span>
-              </div>
-            </div>
-            <div className="mt-6 flex flex-wrap items-end gap-4">
-              <div>
-                <div className="text-slate-400 text-xs uppercase tracking-[0.25em]">Current block</div>
-                <div className="mt-2 text-4xl font-black text-white">#{health?.latestHeight || '—'}</div>
-              </div>
-              <div className="rounded-2xl border border-slate-800 bg-slate-800/80 px-4 py-3 text-sm text-slate-300">
-                {health?.moniker || 'Mallchain'}
-              </div>
-            </div>
-            <div className="mt-6 flex items-center gap-2" aria-label="Blockchain speed bars">
-              {Array.from({ length: 5 }, (_, index) => (
-                <span
-                  key={index}
-                  className={`h-5 w-2 rounded-full ${index < networkBars ? 'bg-emerald-400' : 'bg-slate-700'}`}
-                />
-              ))}
-            </div>
-            <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-200">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Current block activity</p>
-                  <p className="mt-1 text-slate-300">{currentBlockTxs.length ? `${currentBlockTxs.length} transaction${currentBlockTxs.length === 1 ? '' : 's'} recorded in this block.` : 'No on-chain transactions were recorded in the current block yet.'}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowArchive(v => !v)}
-                  className="rounded-full border border-cyan-400/40 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.25em] text-cyan-200 transition hover:bg-cyan-400/20"
-                >
-                  {showArchive ? 'Hide archive' : 'View archive'}
-                </button>
-              </div>
-              <div className="mt-4 space-y-3">
-                {currentBlockTxs.length === 0 ? (
-                  <div className="flex min-h-[120px] items-center justify-center rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 px-6 text-center text-slate-300">
-                    <div>
-                      <div className="text-lg font-semibold text-white">No transaction</div>
-                      <p className="mt-1 text-sm text-slate-400">This block currently has no transaction data to display.</p>
-                    </div>
-                  </div>
-                ) : currentBlockTxs.slice(0, 3).map((tx, idx) => {
-                  const transfers = (tx.messages || []).filter(message => message['@type']?.includes('MsgSend') || message['@type']?.includes('Transfer'))
-                  return (
-                    <div key={`${tx.txHash || idx}`} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-                        <span className="font-semibold uppercase tracking-[0.25em] text-cyan-200">Tx {idx + 1}</span>
-                        <span>{tx.timestamp ? new Date(tx.timestamp).toLocaleString() : 'Timestamp unavailable'}</span>
-                      </div>
-                      <div className="mt-2 text-sm text-white">{truncate(tx.txHash || 'Unknown tx hash', 18)}</div>
-                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-300">
-                        <span className="rounded-full bg-emerald-400/10 px-2 py-1">Gas used: {tx.gas_used || 0}</span>
-                        <span className="rounded-full bg-violet-400/10 px-2 py-1">Status: {tx.code === 0 ? 'Success' : 'Failed'}</span>
-                      </div>
-                      {transfers.length > 0 ? (
-                        <ul className="mt-3 space-y-2 text-xs text-slate-300">
-                          {transfers.map((message, txIndex) => (
-                            <li key={`${tx.txHash || idx}-${txIndex}`} className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-                              <div className="font-semibold text-slate-100">{message['@type'] || 'Transfer'}</div>
-                              <div className="mt-1">From: {truncate(message.from_address || message.sender || 'Unknown')}</div>
-                              <div>To: {truncate(message.to_address || message.recipient || 'Unknown')}</div>
-                              <div>Amount: {formatAmount(message.amount)}</div>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="mt-3 text-xs text-slate-400">No transfer message was decoded from this transaction payload.</p>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-            {showArchive && (
-              <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-200">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Archive transactions</p>
-                    <p className="mt-1 text-slate-300">Recent chain history pulled from the archive endpoint for deeper review.</p>
-                  </div>
-                </div>
-                <div className="mt-4 max-h-96 space-y-3 overflow-auto pr-1">
-                  {archiveTxs.slice(0, 12).map((tx, idx) => (
-                    <div key={`${tx.txHash || idx}-archive`} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-                        <span className="font-semibold uppercase tracking-[0.25em] text-cyan-200">#{tx.height || '—'}</span>
-                        <span>{tx.timestamp ? new Date(tx.timestamp).toLocaleString() : 'Timestamp unavailable'}</span>
-                      </div>
-                      <div className="mt-2 text-sm text-white">{truncate(tx.txHash || 'Unknown tx hash', 18)}</div>
-                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-300">
-                        <span className="rounded-full bg-emerald-400/10 px-2 py-1">Gas used: {tx.gas_used || 0}</span>
-                        <span className="rounded-full bg-violet-400/10 px-2 py-1">Status: {tx.code === 0 ? 'Success' : 'Failed'}</span>
-                      </div>
-                      {(tx.messages || []).slice(0, 2).map((message, i) => (
-                        <div key={`${tx.txHash || idx}-${i}`} className="mt-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-300">
-                          <div className="font-semibold text-slate-100">{message['@type'] || 'Transfer'}</div>
-                          <div className="mt-1">From: {truncate(message.from_address || message.sender || 'Unknown')}</div>
-                          <div>To: {truncate(message.to_address || message.recipient || 'Unknown')}</div>
-                          <div>Amount: {formatAmount(message.amount)}</div>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </motion.div>
-
-          <MetricCard title="Latest Height" value={health?.latestHeight ? `#${health.latestHeight}` : '—'} />
+      {/* Down banner */}
+      {healthState === 'down' && (
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 flex gap-3">
+          <span className="h-3 w-3 rounded-full bg-red-500 animate-pulse mt-0.5 flex-shrink-0"/>
+          <p className="text-red-200 text-sm">Unable to reach the blockchain node. Retrying…</p>
         </div>
+      )}
 
-        {/* Error Banner */}
-        {error && healthState === 'down' && (
-          <div className="mb-8 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 flex items-center gap-3">
-            <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
-            <p className="text-red-200 text-sm">{error}</p>
+      {/* Hero metrics */}
+      <HeroMetrics priceData={priceData} treasury={treasury} health={chainStatus}
+        validators={null} loading={healthState === 'loading'}/>
+
+      {/* Chart + Activity */}
+      <div className="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-6">
+        <LiveChart priceData={priceData} loading={healthState === 'loading'}/>
+        <NetworkActivity health={chainStatus} healthState={healthState} validators={null}/>
+      </div>
+
+      {/* Recent transactions */}
+      <RecentTransactions/>
+
+      {/* Live feeds */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <FeedPanel title="Live Blocks" empty="Waiting for blocks…">
+          {blocks.map((b, i) => (
+            <FeedCard key={i} title={`Block #${b.height}`} value={`${b.transactions ?? 0} txs`} sub={b.time}/>
+          ))}
+        </FeedPanel>
+        <FeedPanel title="Market Activity" empty="Waiting for activity…">
+          {marketEvents.map((e, i) => (
+            <FeedCard key={i} title={e.type} value={e.amount} sub={e.user}/>
+          ))}
+        </FeedPanel>
+      </div>
+
+      {/* Archive */}
+      <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">Recent On-Chain Transactions</h2>
+          <button onClick={() => setShowArchive(v => !v)}
+            className="px-4 py-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 text-cyan-300 text-xs font-semibold hover:bg-cyan-400/20 transition">
+            {showArchive ? 'Hide' : 'Show'} archive
+          </button>
+        </div>
+        {showArchive && (
+          <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+            {archiveTxs.length === 0 ? (
+              <p className="text-slate-500 text-center py-8">No on-chain transactions found</p>
+            ) : archiveTxs.map((tx, i) => (
+              <div key={tx.txHash || i} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+                <div className="flex justify-between text-xs text-slate-400 mb-1">
+                  <span className="text-cyan-300 font-mono">#{tx.height || '—'}</span>
+                  <span>{tx.timestamp ? new Date(tx.timestamp).toLocaleString() : '—'}</span>
+                </div>
+                <p className="text-sm text-white font-mono">{trunc(tx.txHash, 24)}</p>
+                <div className="flex gap-2 mt-1 text-xs">
+                  <span className="bg-emerald-400/10 rounded-full px-2 py-0.5">Gas: {tx.gas_used || 0}</span>
+                  <span className="bg-violet-400/10 rounded-full px-2 py-0.5">{tx.code===0 ? 'Success' : 'Failed'}</span>
+                </div>
+                {(tx.messages||[]).slice(0,1).map((m,mi) => (
+                  <div key={mi} className="mt-2 text-xs text-slate-400">
+                    {m.from_address && <span>From: {trunc(m.from_address)} → {trunc(m.to_address)} · {formatAmount(m.amount)}</span>}
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         )}
-
-        {/* Live Hero Metrics */}
-        <div className="mb-10">
-          <HeroMetrics
-            priceData={priceData}
-            treasury={treasury}
-            health={health}
-            validators={null}
-            loading={healthState === 'loading'}
-          />
-        </div>
-
-        {/* Live Chart + Network Activity */}
-        <div className="grid grid-cols-1 xl:grid-cols-[2fr_1fr] gap-8 mb-10">
-          <LiveChart priceData={priceData} loading={healthState === 'loading'} />
-          <NetworkActivity health={health} healthState={healthState} validators={null} />
-        </div>
-
-        {/* Recent Transactions */}
-        <div className="mb-10">
-          <RecentTransactions />
-        </div>
-
-        <div
-          className="
-            grid
-            grid-cols-1
-            xl:grid-cols-2
-            gap-8
-          "
-        >
-
-          <Panel title="Live Blocks">
-
-            {
-              blocks.length === 0 && (
-                <EmptyState
-                  text="Waiting for blocks..."
-                />
-              )
-            }
-
-            {
-              blocks.map(
-                (block, index) => (
-
-                  <LiveCard
-                    key={index}
-
-                    title={
-                      `Block #${block.height}`
-                    }
-
-                    value={
-                      block.transactions
-                    }
-
-                    sub={
-                      block.time
-                    }
-                  />
-
-                )
-              )
-            }
-
-          </Panel>
-
-          <Panel title="Market Activity">
-
-            {
-              marketEvents.length === 0 && (
-                <EmptyState
-                  text="Waiting for activity..."
-                />
-              )
-            }
-
-            {
-              marketEvents.map(
-                (event, index) => (
-
-                  <LiveCard
-                    key={index}
-
-                    title={event.type}
-
-                    value={event.amount}
-
-                    sub={event.user}
-                  />
-
-                )
-              )
-            }
-
-          </Panel>
-
-        </div>
-
       </div>
-
     </div>
   )
 }
 
-function MetricCard({
-  title,
-  value
-}) {
-
+function FeedPanel({ title, empty, children }) {
+  const hasChildren = Array.isArray(children) ? children.some(Boolean) : !!children
   return (
-    <motion.div
-
-      whileHover={{
-        y: -5
-      }}
-
-      className="
-        rounded-3xl
-        border
-        border-slate-800
-        bg-slate-900/70
-        p-6
-        backdrop-blur-xl
-      "
-    >
-
-      <div className="text-slate-400">
-        {title}
+    <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6">
+      <h2 className="text-xl font-bold mb-4">{title}</h2>
+      <div className="space-y-3">
+        {hasChildren ? children : <p className="text-slate-500 text-center py-8">{empty}</p>}
       </div>
+    </div>
+  )
+}
 
-      <div
-        className="
-          text-3xl
-          font-black
-          mt-4
-        "
-      >
-        {value}
+function FeedCard({ title, value, sub }) {
+  return (
+    <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}}
+      className="bg-slate-800/60 rounded-2xl p-4 flex justify-between items-start">
+      <div>
+        <p className="font-bold text-sm">{title}</p>
+        {sub && <p className="text-slate-400 text-xs mt-0.5">{sub}</p>}
       </div>
-
+      {value != null && <p className="text-cyan-400 text-sm font-semibold">{value}</p>}
     </motion.div>
-  )
-}
-
-function Panel({
-  title,
-  children
-}) {
-
-  return (
-    <div
-      className="
-        rounded-3xl
-        border
-        border-slate-800
-        bg-slate-900/70
-        p-6
-      "
-    >
-
-      <h2
-        className="
-          text-2xl
-          font-bold
-          mb-6
-        "
-      >
-        {title}
-      </h2>
-
-      <div className="space-y-4">
-        {children}
-      </div>
-
-    </div>
-  )
-}
-
-function LiveCard({
-  title,
-  value,
-  sub
-}) {
-
-  return (
-    <motion.div
-
-      initial={{
-        opacity: 0,
-        y: 10
-      }}
-
-      animate={{
-        opacity: 1,
-        y: 0
-      }}
-
-      className="
-        bg-slate-800/60
-        rounded-2xl
-        p-4
-      "
-    >
-
-      <div
-        className="
-          flex
-          justify-between
-        "
-      >
-
-        <div>
-          <div className="font-bold">
-            {title}
-          </div>
-
-          <div
-            className="
-              text-slate-400
-              text-sm
-              mt-1
-            "
-          >
-            {sub}
-          </div>
-
-        </div>
-
-        <div className="text-cyan-400">
-          {value}
-        </div>
-
-      </div>
-
-    </motion.div>
-  )
-}
-
-function EmptyState({
-  text
-}) {
-
-  return (
-    <div
-      className="
-        text-slate-500
-        py-10
-        text-center
-      "
-    >
-      {text}
-    </div>
   )
 }

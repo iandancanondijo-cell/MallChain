@@ -35,6 +35,21 @@ exports.login = async (req, res) => {
   res.json({ token });
 };
 
+exports.me = async (req, res) => {
+  const auth = req.headers.authorization
+  if (!auth) return res.status(401).json({ error: 'missing token' })
+  const token = auth.split(' ')[1]
+  if (!token) return res.status(401).json({ error: 'bad auth header' })
+  try {
+    const decoded = jwt.verify(token, getJwtSecret())
+    const user = await User.findById(decoded.id).select('-password')
+    if (!user) return res.status(401).json({ error: 'user not found' })
+    return res.json({ user })
+  } catch (e) {
+    return res.status(401).json({ error: 'invalid token' })
+  }
+};
+
 exports.googleCallback = async (req, res) => {
   // passport attaches profile in req.user
   const profile = req.user;

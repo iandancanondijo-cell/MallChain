@@ -5,6 +5,7 @@ const passport = require('passport');
 
 router.post('/register', authCtrl.register);
 router.post('/login', authCtrl.login);
+router.get('/me', authCtrl.me);
 
 // Google OAuth routes
 router.get('/google', passport.authenticate('google', { scope: ['profile','email'] }));

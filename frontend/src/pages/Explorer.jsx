@@ -161,8 +161,10 @@ export default function Explorer() {
         const data = await apiFetch(`/explorer/tx/${encodeURIComponent(hash)}`)
         setTransaction(data.transaction)
       } else {
-        const data = await apiFetch(`/wasm/contract/${encodeURIComponent(query.trim())}`)
-        setContract(data.contract)
+        // CosmWasm not yet deployed on Mallchain
+        toast.error('Smart contract lookup is not yet available on Mallchain')
+        setLoading(false)
+        return
       }
     } catch (err) {
       toast.error(err.message || 'Lookup failed')
