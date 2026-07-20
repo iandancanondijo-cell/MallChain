@@ -6,8 +6,6 @@ const AuditLog = require('../models/AuditLog')
 const { createLimiter } = require('../middleware/rateLimiter')
 const limiter = createLimiter({ windowMs: 60*1000, max: 60 })
 
-const crypto = require('crypto')
-
 // POST /api/payment/mpesa/initiate
 // Expects { method, phone, amountFiat, amountMallcoin }
 router.post('/mpesa/initiate', limiter, async (req, res) => {
