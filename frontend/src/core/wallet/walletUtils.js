@@ -19,7 +19,7 @@ const BufferPolyfill = {
         const hex = input.replace(/[^a-fA-F0-9]/g, '')
         const bytes = new Uint8Array(hex.length / 2)
         for (let i = 0; i < hex.length; i += 2) {
-          bytes[i / 2] = parseInt(hex.substr(i, 2), 16)
+          bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16)
         }
         return bytes
       }
@@ -107,8 +107,6 @@ export function createWallet() {
     // Derive wallet from mnemonic
     const wallet = deriveWalletFromMnemonic(mnemonic)
     
-    console.log('Wallet created successfully:', wallet.address)
-    
     return {
       address: wallet.address,
       publicKey: wallet.publicKey,
@@ -116,7 +114,6 @@ export function createWallet() {
       mnemonic: mnemonic
     }
   } catch (error) {
-    console.error('Wallet creation error:', error)
     throw error
   }
 }
@@ -137,8 +134,6 @@ export function importWallet(mnemonic) {
     // Derive wallet from mnemonic
     const wallet = deriveWalletFromMnemonic(mnemonic)
     
-    console.log('Wallet imported successfully:', wallet.address)
-    
     return {
       address: wallet.address,
       publicKey: wallet.publicKey,
@@ -146,7 +141,6 @@ export function importWallet(mnemonic) {
       mnemonic: mnemonic
     }
   } catch (error) {
-    console.error('Wallet import error:', error)
     throw error
   }
 }

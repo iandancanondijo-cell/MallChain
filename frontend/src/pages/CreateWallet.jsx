@@ -73,21 +73,17 @@ export default function CreateWallet() {
   const wordList = wallet?.mnemonic ? wallet.mnemonic.split(' ') : []
 
   const handleCreateWallet = () => {
-    console.log('Create Wallet button clicked')
     setIsCreating(true)
     try {
-      console.log('Calling createWallet()...')
-      // Small delay to show loading state
       setTimeout(() => {
         const newWallet = createWallet()
-        console.log('Wallet created:', newWallet)
         setWallet(newWallet)
         setStep(2)
         toast.success('Wallet created successfully!')
         setIsCreating(false)
       }, 100)
     } catch (error) {
-      console.error('Wallet creation error:', error)
+      console.error('Wallet creation error:', error.message)
       toast.error(error.message || 'Failed to create wallet')
       setIsCreating(false)
     }

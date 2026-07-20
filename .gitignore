@@ -8,9 +8,10 @@ coverage/
 node_modules/
 **/node_modules/
 
-# Environment files
+# Environment files — never commit secrets
 .env
 .env.*
+!.env.example
 
 # Logs and outputs
 *.log
@@ -51,6 +52,12 @@ blockchain_working/config/priv_validator_key.json
 blockchain_working/config/node_key.json
 blockchain_working/keyring-test/
 blockchain_working/data/priv_validator_state.json
+blockchain_working/config/gentx/
+
+# Test/marketplace node keys
+.marketplace_test/config/priv_validator_key.json
+.marketplace_test/config/node_key.json
+.marketplace_test/data/priv_validator_state.json
 
 # Agent metadata - do not commit
 .kilocode/

@@ -214,7 +214,7 @@ async function getMonthlyBreakdown(req, res) {
           const amount = Number(t.mlcn_amount || t.mlcnAmount || t.mlcnAmount || t.MlcnAmount || 0) / 1_000_000
           if (key) sumMap(boughtMap, key, amount)
         }
-      } catch (e) {}
+      } catch (e) { /* non-critical enrichment — continue */ }
     })
 
     // transactions: inspect mints and memos
@@ -234,7 +234,7 @@ async function getMonthlyBreakdown(req, res) {
             sumMap(awardedMap, key, amount)
           }
         }
-      } catch (e) {}
+      } catch (e) { /* non-critical enrichment — continue */ }
     })
 
     // build months union from seen keys (limit to last 12 months)

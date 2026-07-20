@@ -15,7 +15,6 @@ export default function MinesBridge() {
     if (!iframe) return
     const handleLoad = () => {
       setReady(true)
-      console.log('[MinesBridge] iframe loaded, sending auth:change', { hasToken: !!token, user: user?.id })
       if (!token) return
       try {
         iframe.contentWindow?.postMessage(
@@ -23,15 +22,13 @@ export default function MinesBridge() {
           MINES_ORIGIN,
         )
       } catch (e) {
-        console.warn('[MinesBridge] postMessage failed', e)
+        // postMessage can fail if iframe is cross-origin locked
       }
     }
 
-    // Also listen for auth:request from mines iframe
     const handleMessage = (event) => {
       if (event.origin !== MINES_ORIGIN) return
       if (event.data?.type === 'auth:request') {
-        console.log('[MinesBridge] Received auth:request from mines')
         if (token && event.source) {
           try {
             event.source.postMessage(
@@ -39,7 +36,7 @@ export default function MinesBridge() {
               event.origin,
             )
           } catch (e) {
-            console.warn('[MinesBridge] postMessage auth:share failed', e)
+            // ignore
           }
         }
       }

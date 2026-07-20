@@ -1,5 +1,6 @@
 /* eslint-env node */
 /* global require, module, process */
+const crypto = require('crypto')
 const axios = require('axios')
 const { addLiquidityOnChain, toBaseUnits, getAddressFromMnemonic } = require('../services/dexTxBuilder')
 const { Console } = require('console')
@@ -380,8 +381,8 @@ async function removeLiquidity(req, res) {
 
     const shareOfPool = pool.totalLiquidity > 0 ? (((pool.userPositions[userAddress] || 0) / pool.totalLiquidity) * 100) : 0
 
-    // Emit transaction to blockchain (simulated)
-    const txHash = 'tx_' + Math.random().toString(36).substr(2, 16).toUpperCase()
+    // Emit transaction to blockchain (simulated — replace with real on-chain call)
+    const txHash = 'tx_' + crypto.randomBytes(8).toString('hex').toUpperCase()
 
     return res.json({
       success: true,

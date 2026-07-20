@@ -83,7 +83,7 @@ router.get('/state', async (req, res) => {
       const url = `${CHAIN_REST.replace(/\/$/, '')}/tmp/marketplace/mlcoin/v1/emission_state`
       const response = await axios.get(url, { timeout: 3000 })
       onChainEmission = response.data?.emission_state || response.data || null
-    } catch (e) {}
+    } catch (e) { /* chain query unavailable — fallback used */ }
 
     let mlcnsPriceKes = 0.62
     try {
@@ -91,7 +91,7 @@ router.get('/state', async (req, res) => {
       const marketPrice = priceRes.data?.market_price || priceRes.data || {}
       const midPrice = Number(marketPrice.mid) || Number(marketPrice.midPrice) || 62
       mlcnsPriceKes = midPrice / 100
-    } catch (e) {}
+    } catch (e) { /* chain query unavailable — fallback used */ }
 
     const monthlyEmission = getMonthlyEmission(currentMonth)
     const dailyEmission = monthlyEmission / 30
@@ -128,7 +128,7 @@ router.get('/state', async (req, res) => {
             valueRatio: (2 / mlcnsPriceKes).toFixed(2)
           }
         }
-      } catch (e) {}
+      } catch (e) { /* chain query unavailable — fallback used */ }
     }
 
     const walletBalances = await fetchWalletBalances().catch(() => null)
@@ -211,7 +211,7 @@ router.get('/user/:address', async (req, res) => {
       const marketPrice = priceRes.data?.market_price || priceRes.data || {}
       const midPrice = Number(marketPrice.mid) || Number(marketPrice.midPrice) || 62
       mlcnsPriceKes = midPrice / 100
-    } catch (e) {}
+    } catch (e) { /* chain query unavailable — fallback used */ }
 
     const mpRes = await axios.get(`${CHAIN_REST.replace(/\/$/, '')}/tmp/marketplace/mallpoints/v1/user_points/${address}`, { timeout: 3000 }).catch(() => ({}))
     const mallpoints = Number(mpRes.data?.user_points?.points || mpRes.data?.userPoints?.Points || 0)

@@ -6,12 +6,15 @@ const AuditLog = require('../models/AuditLog')
 const { createLimiter } = require('../middleware/rateLimiter')
 const limiter = createLimiter({ windowMs: 60*1000, max: 60 })
 
+const crypto = require('crypto')
+
 // POST /api/payment/mpesa/initiate
 // Expects { method, phone, amountFiat, amountMallcoin }
 router.post('/mpesa/initiate', limiter, async (req, res) => {
   try {
     const { method, phone, amountFiat, amountMallcoin, metadata } = req.body || {}
-    const providerRef = `mpesa-${Date.now()}-${Math.random().toString(36).slice(2,8)}`
+    // Use cryptographically random reference — Math.random() is not suitable for payment IDs
+    const providerRef = `mpesa-${Date.now()}-${crypto.randomBytes(6).toString('hex')}`
     const doc = await PendingPayment.create({ providerRef, method, phone, amountFiat, amountMallcoin, metadata, status: 'pending' })
     await AuditLog.create({ action: 'payment_initiate', actor: phone || 'unknown', data: { providerRef, amountFiat, amountMallcoin } })
     return res.json({ status: 'pending', providerRef })

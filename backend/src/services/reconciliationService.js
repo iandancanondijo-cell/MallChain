@@ -61,8 +61,15 @@ async function compensateFailedLiquidity(recon) {
     // const reverseTx = await transferMlcnsReverse(recon.walletAddress, recon.mlcnsAmount);
     // recon.compensationTx = reverseTx.txHash;
 
-    recon.status = 'resolved';
-    recon.resolvedAt = new Date();
+    // Mark as pending_manual — do NOT auto-resolve without a real on-chain reversal.
+    // Silently marking 'resolved' without a reversal is a financial integrity bug.
+    recon.status = 'pending_manual';
+    recon.resolvedAt = null;
+    console.warn(
+      `[Reconciliation] MANUAL ACTION REQUIRED: compensate ${recon.mlcnsAmount} MLCNS ` +
+      `for ${recon.walletAddress} (purchaseId: ${recon.purchaseId}). ` +
+      'Implement on-chain reversal before enabling auto-resolution.'
+    );
     await recon.save();
 
     return recon;

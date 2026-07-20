@@ -1,7 +1,17 @@
-// Dummy reward function for Mallcoins. Replace with actual chain logic.
-module.exports = async function rewardMallcoins(address, amount) {
-  // TODO: Implement actual chain transaction to send Mallcoins
-  console.log(`Rewarding ${amount} Mallcoins to ${address}`);
-  // Simulate async
-  return true;
+/**
+ * rewardMallcoins — on-chain MLCNS reward transfer.
+ *
+ * IMPLEMENTATION STATUS: stub — no on-chain transaction is sent.
+ * Any call to this function will throw so callers fail loudly rather than
+ * silently returning `true` while no funds move.
+ *
+ * TODO: replace the throw with a real MsgTransferMallcoin using the treasury
+ * mnemonic (see mallcoinTxBuilder.transferFromMnemonic).
+ */
+module.exports = async function rewardMallcoins(_address, _amount) {
+  throw new Error(
+    'rewardMallcoins is not yet implemented. ' +
+    'No on-chain transaction has been sent. ' +
+    'Implement via mallcoinTxBuilder.transferFromMnemonic before enabling.'
+  );
 };
