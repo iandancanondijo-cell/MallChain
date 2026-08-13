@@ -306,29 +306,28 @@ describe('Validation Service', () => {
   });
 
   describe('Address Validation', () => {
-    it('should accept valid Ethereum address', () => {
-      const result = validateAddress('0x1234567890123456789012345678901234567890');
+    it('should accept a valid Mallchain (bech32) address', () => {
+      const result = validateAddress('mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg');
       expect(result.valid).toBe(true);
     });
 
-    it('should accept lowercase address without checksum', () => {
-      const result = validateAddress('0xabcdefabcdefabcdefabcdefabcdefabcdefabcd');
-      expect(result.valid).toBe(true);
-      expect(result.isLowercase).toBe(true);
-    });
-
-    it('should reject address without 0x prefix', () => {
-      const result = validateAddress('1234567890123456789012345678901234567890');
+    it('should reject an address without the mall1 prefix', () => {
+      const result = validateAddress('cosmos1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg');
       expect(result.valid).toBe(false);
     });
 
-    it('should reject address with wrong length', () => {
-      const result = validateAddress('0x12345678901234567890123456789012345');
+    it('should reject an address that is too short', () => {
+      const result = validateAddress('mall1short');
       expect(result.valid).toBe(false);
     });
 
-    it('should reject address with non-hex characters', () => {
-      const result = validateAddress('0x123456789G123456789012345678901234567890');
+    it('should reject an address with uppercase characters', () => {
+      const result = validateAddress('mall1P9F39UYLKJV956XELTKDTSEL5Y6XU36XH2M6QG');
+      expect(result.valid).toBe(false);
+    });
+
+    it('should reject an Ethereum-style address', () => {
+      const result = validateAddress('0x5aAeb6053ba3F0Fb6671C7a1957ba39D2eFf7e3d');
       expect(result.valid).toBe(false);
     });
 
@@ -336,12 +335,6 @@ describe('Validation Service', () => {
       const result = validateAddress('');
       expect(result.valid).toBe(false);
       expect(result.message).toMatch(/required/i);
-    });
-
-    it('should validate checksum for mixed case addresses', () => {
-      // Valid checksum address
-      const result = validateAddress('0x5aAeb6053ba3F0Fb6671C7a1957ba39D2eFf7e3d');
-      expect(result.message).toMatch(/checksum|valid/i);
     });
   });
 

@@ -6,7 +6,7 @@ import { useStoreVersion, toast } from '../../components/ui';
 export default function WalletReceive() {
   useStoreVersion();
   const st = store.state;
-  const addr = st.wallet.address || '0x7A9fC2b81eD04d8cB3fAa61e5D7b0c93E1a4D6f8';
+  const addr = st.wallet.address || 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg';
   const [awaiting, setAwaiting] = useState(false);
   const [paid, setPaid] = useState(false);
 
@@ -81,7 +81,7 @@ export default function WalletReceive() {
           )}
           {paid && <div style={{ textAlign: 'center', color: 'var(--green-2)', fontWeight: 800 }}>✓ Payment received — balance updated</div>}
         </div>
-        <div className="tiny" style={{ marginTop: 12 }}>Address format: 0x-prefixed 42-char checksummed hex (EIP-55). QR payload: <span className="mono">mallchain:pay?to={addr.slice(0, 8)}…</span></div>
+        <div className="tiny" style={{ marginTop: 12 }}>Address format: bech32, prefixed "mall1". QR payload: <span className="mono">mallchain:pay?to={addr.slice(0, 8)}…</span></div>
       </div>
     </div>
   );

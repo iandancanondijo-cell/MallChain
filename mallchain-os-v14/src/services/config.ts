@@ -121,6 +121,17 @@ export const config: MallchainConfig = {
 };
 
 /**
+ * Chain parameters needed for client-side transaction signing (mallcoinTx.ts).
+ * Defaults mirror the backend's (backend/src/config/index.js) so a real wallet
+ * signs transactions the chain will actually accept.
+ */
+export const chain = {
+  chainId: (import.meta.env.VITE_CHAIN_ID as string) || 'mallchain-1',
+  addressPrefix: (import.meta.env.VITE_CHAIN_PREFIX as string) || 'mall',
+  gasPrice: (import.meta.env.VITE_GAS_PRICE as string) || '0.01stake',
+};
+
+/**
  * Simulation controller — centralized so all timers/streams can be paused
  * the moment a real API base URL is configured.
  * 

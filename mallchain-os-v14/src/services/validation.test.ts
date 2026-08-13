@@ -381,29 +381,29 @@ describe('Task 4.5: Mnemonic Validation', () => {
 });
 
 describe('Task 4.6: Address Validation', () => {
-  it('should accept valid lowercase addresses', () => {
-    const result = validateAddress('0x1234567890123456789012345678901234567890');
+  it('should accept a valid mall1 bech32 address', () => {
+    const result = validateAddress('mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg');
     expect(result.valid).toBe(true);
   });
 
-  it('should accept valid uppercase addresses', () => {
-    const result = validateAddress('0x1234567890abcdefABCDEF1234567890abcdefAB');
+  it('should accept another valid mall1 bech32 address', () => {
+    const result = validateAddress('mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6');
     expect(result.valid).toBe(true);
   });
 
   describe('Task 4.10: Address edge cases', () => {
-    it('should reject address without 0x prefix', () => {
-      const result = validateAddress('1234567890123456789012345678901234567890');
+    it('should reject address without the mall1 prefix', () => {
+      const result = validateAddress('p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg');
       expect(result.valid).toBe(false);
     });
 
-    it('should reject address with wrong length', () => {
-      const result = validateAddress('0x123456789012345678901234567890123456');
+    it('should reject address that is too short', () => {
+      const result = validateAddress('mall1short');
       expect(result.valid).toBe(false);
     });
 
-    it('should reject address with invalid characters', () => {
-      const result = validateAddress('0x123456789012345678901234567890123456789G');
+    it('should reject address with invalid (uppercase) characters', () => {
+      const result = validateAddress('mall1P9F39UYLKJV956XELTKDTSEL5Y6XU36XH2M6QG');
       expect(result.valid).toBe(false);
     });
 
@@ -413,9 +413,9 @@ describe('Task 4.6: Address Validation', () => {
       expect(result.message).toContain('required');
     });
 
-    it('should accept mixed case and verify checksum attempt', () => {
+    it('should reject an Ethereum-style address', () => {
       const result = validateAddress('0x5aAeb6053ba3eF8C9Bc9a8b328f5d6250b6cB1e6');
-      expect(result.valid).toBe(true);
+      expect(result.valid).toBe(false);
     });
   });
 });

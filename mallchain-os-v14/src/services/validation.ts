@@ -52,8 +52,9 @@ const PASSWORD_SYMBOL = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/;
 // Task 4.4: PIN pattern - 4-8 digits
 const PIN_PATTERN = /^\d{4,8}$/;
 
-// Task 4.6: Ethereum address pattern
-const ETH_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
+// Task 4.6: Mallchain address pattern — bech32 with the "mall" HRP, matching the
+// backend's validator (backend/src/routes/send.js addressParamSchema).
+const MALL_ADDRESS_PATTERN = /^mall1[a-z0-9]{38,58}$/;
 
 /* ============== SIMPLE WORD DICTIONARY (Task 4.5) ============== */
 
@@ -524,8 +525,9 @@ export function validateMnemonic(mnemonic: string): ValidationResult {
 /* ============== ADDRESS VALIDATION (Task 4.6) ============== */
 
 /**
- * Task 4.6: Address validation for wallet imports
- * Validates Ethereum addresses with optional checksum verification
+ * Task 4.6: Address validation for wallet imports/sends.
+ * Validates Mallchain bech32 addresses (HRP "mall"), matching the backend's
+ * validator (backend/src/routes/send.js addressParamSchema / mallcoinService.isValidAddress).
  */
 export function validateAddress(address: string): AddressValidation {
   // Handle empty/whitespace
@@ -539,38 +541,11 @@ export function validateAddress(address: string): AddressValidation {
 
   const trimmed = address.trim();
 
-  // Check basic hex format
-  if (!ETH_ADDRESS_PATTERN.test(trimmed)) {
+  if (!MALL_ADDRESS_PATTERN.test(trimmed)) {
     return {
       valid: false,
-      message: 'Invalid address format. Must be 0x followed by 40 hex characters',
+      message: 'Invalid address format. Must start with "mall1" followed by 38-58 lowercase letters/digits',
       severity: 'error',
-    };
-  }
-
-  // Check if all lowercase (no checksum)
-  const isLowercase = trimmed === trimmed.toLowerCase();
-
-  // Check if all uppercase (no checksum)
-  const isUppercase = trimmed === trimmed.toUpperCase();
-
-  // If mixed case, verify checksum
-  if (!isLowercase && !isUppercase) {
-    const isChecksumValid = verifyEthereumChecksum(trimmed);
-    if (!isChecksumValid) {
-      return {
-        valid: false,
-        message: 'Invalid address checksum. Please verify the address case.',
-        severity: 'error',
-        isChecksum: false,
-      };
-    }
-    return {
-      valid: true,
-      message: 'Valid checksum address',
-      severity: 'info',
-      isChecksum: true,
-      isLowercase: false,
     };
   }
 
@@ -578,49 +553,7 @@ export function validateAddress(address: string): AddressValidation {
     valid: true,
     message: 'Valid wallet address',
     severity: 'info',
-    isChecksum: false,
-    isLowercase,
   };
-}
-
-/**
- * Verify Ethereum address checksum (EIP-55)
- */
-function verifyEthereumChecksum(address: string): boolean {
-  try {
-    // Remove 0x prefix
-    const addr = address.slice(2);
-
-    // Hash with Keccak-256 (using SHA3 as approximation for client-side)
-    // For production, use proper Keccak-256 library
-    const hash = simpleHashAddress(addr);
-
-    for (let i = 0; i < 40; i++) {
-      const charInt = parseInt(hash[i], 16);
-      if (charInt > 7) {
-        if (addr[i] !== addr[i].toUpperCase()) return false;
-      } else {
-        if (addr[i] !== addr[i].toLowerCase()) return false;
-      }
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Simple hash for checksum verification (note: in production use proper Keccak-256)
- */
-function simpleHashAddress(addr: string): string {
-  let hash = 0;
-  for (let i = 0; i < addr.length; i++) {
-    const char = addr.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return Math.abs(hash).toString(16).padStart(40, '0');
 }
 
 /* ============== VALIDATION STATE MANAGEMENT ============== */

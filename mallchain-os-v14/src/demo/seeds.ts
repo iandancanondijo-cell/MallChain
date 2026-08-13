@@ -32,7 +32,7 @@ function applySeeds(st: AppState) {
   Object.assign(st.balances, { MALL: 1284.5, MLPTS: 3462, USD_M: 482.15, KES: 0, EUR: 0, GBP: 0 });
 
   // ---- wallet ----
-  st.wallet.address = '0x7A9fC2b81eD04d8cB3fAa61e5D7b0c93E1a4D6f8';
+  st.wallet.address = 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg';
 
   // ---- transactions ----
   st.txs = [
@@ -40,7 +40,7 @@ function applySeeds(st: AppState) {
     { id: 'tx02', type: 'stake', amount: 500, asset: 'MALL', status: 'confirmed', to: 'validator-pool', ts: Date.now() - 86400e3, note: 'Validator stake deposit' },
     { id: 'tx03', type: 'receive', amount: 0.8, asset: 'MALL', status: 'confirmed', to: st.wallet.address, ts: Date.now() - 86400e3 * 2, note: 'Consensus-matched review reward' },
     { id: 'tx04', type: 'swap', amount: 120, asset: 'MALL', status: 'confirmed', to: 'pool:MALL/USD-M', ts: Date.now() - 86400e3 * 3, note: 'Swapped to USD-M' },
-    { id: 'tx05', type: 'send', amount: 40, asset: 'MALL', status: 'confirmed', to: '0x3Bc1f2A9e7D4c5b8A0f6E3d2C9b1F8a7D4E5c6B', ts: Date.now() - 86400e3 * 4, note: 'Payment to Jua Digital' },
+    { id: 'tx05', type: 'send', amount: 40, asset: 'MALL', status: 'confirmed', to: 'mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6', ts: Date.now() - 86400e3 * 4, note: 'Payment to Jua Digital' },
   ];
 
   // ---- notifications ----
@@ -154,8 +154,8 @@ function applySeeds(st: AppState) {
     { h: 1482029, txs: 231, ts: Date.now() - 15e3, hash: '0x4d08…c3f2' },
   ];
   st.explorer.txs = [
-    { hash: '0xab12…9f01', from: st.wallet.address, to: '0x3Bc1…5c6B', val: 25, ts: Date.now() - 4e3 },
-    { hash: '0xcd34…2b33', from: '0x9E41…a2D7', to: st.wallet.address, val: 0.8, ts: Date.now() - 9e3 },
+    { hash: '0xab12…9f01', from: st.wallet.address, to: 'mall1x9ve…dyvvxm6', val: 25, ts: Date.now() - 4e3 },
+    { hash: '0xcd34…2b33', from: 'mall1fgfc…zewqa5', to: st.wallet.address, val: 0.8, ts: Date.now() - 9e3 },
   ];
 
   // ---- messaging ----

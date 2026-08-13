@@ -1,6 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
+import { config } from '../../services/config';
+import { sendMallcoinTransfer, MallcoinTxError } from '../../services/mallcoinTx';
+
+const MALL_ADDRESS_PATTERN = /^mall1[a-z0-9]{38,58}$/;
+// Fallback word list only used in demo mode, where there's no real mnemonic to check against.
+const DEMO_WORDS = ['ocean', 'vault', 'golden', 'raptor', 'silver', 'matrix', 'cobalt', 'falcon', 'summit', 'helix', 'ember', 'quest'];
 
 /** Send MALL — full flow: address validation → amount + fee → review → sign → broadcast. */
 export default function WalletSend() {
@@ -12,15 +18,22 @@ export default function WalletSend() {
   const [step, setStep] = useState<0 | 1 | 2 | 3>(0);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const [wordIdx] = useState(7);
+  const [txHash, setTxHash] = useState('');
 
-  const validAddr = /^0x[a-fA-F0-9]{40}$/.test(addr);
+  const mnemonicWords = useMemo(() => (st.wallet.mnemonic ? st.wallet.mnemonic.trim().split(/\s+/) : []), [st.wallet.mnemonic]);
+  // Pick once per mount so it doesn't shift between the "sign" and "authorize" steps.
+  const [wordIdx] = useState(() => {
+    const len = mnemonicWords.length || DEMO_WORDS.length;
+    return 1 + Math.floor(Math.random() * len);
+  });
+
+  const validAddr = MALL_ADDRESS_PATTERN.test(addr);
   const max = st.balances.MALL;
 
   const review = () => {
     setErr('');
     const amt = parseFloat(amount);
-    if (!validAddr) { setErr('Invalid address — must be a 42-char 0x-prefixed hex address (EIP-55 checksummed).'); return; }
+    if (!validAddr) { setErr('Invalid address — must start with "mall1" followed by 38-58 lowercase letters/digits.'); return; }
     if (!amt || amt <= 0) { setErr('Enter a valid amount.'); return; }
     if (amt + fee > max) { setErr(`Insufficient balance — you have ${max.toFixed(2)} MALL.`); return; }
     setStep(1);
@@ -30,16 +43,55 @@ export default function WalletSend() {
     setBusy(true);
     setErr('');
     setTimeout(() => {
-      // security check: wrong word index
       setStep(2);
       setBusy(false);
     }, 600);
   };
 
-  const authorize = (word: string) => {
-    const words = ['ocean', 'vault', 'golden', 'raptor', 'silver', 'matrix', 'cobalt', 'falcon', 'summit', 'helix', 'ember', 'quest'];
-    if (word.trim().toLowerCase() !== words[wordIdx - 1]) { setErr('Incorrect word — try again.'); return; }
+  const authorize = async (word: string) => {
+    const expected = config.apiBaseUrl ? mnemonicWords[wordIdx - 1] : DEMO_WORDS[wordIdx - 1];
+    if (!expected || word.trim().toLowerCase() !== expected.toLowerCase()) {
+      setErr('Incorrect word — try again.');
+      return;
+    }
+
     setBusy(true);
+    setErr('');
+
+    if (config.apiBaseUrl) {
+      // Real backend: sign a MsgTransferMallcoin client-side and broadcast it.
+      if (!st.wallet.mnemonic || !st.wallet.address) {
+        setBusy(false);
+        toast('No wallet loaded — import or create a wallet first', false);
+        return;
+      }
+      try {
+        const result = await sendMallcoinTransfer({
+          mnemonic: st.wallet.mnemonic,
+          fromAddress: st.wallet.address,
+          toAddress: addr,
+          amountMlcns: parseFloat(amount),
+        });
+        store.applyTx({
+          type: 'send', amount: parseFloat(amount), asset: 'MALL', kind: 'debit', to: addr, fee,
+          note: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
+          notifTitle: `Sent ${amount} MALL`, notifKind: 'tx',
+          activityText: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
+        });
+        setTxHash(result.txHash);
+        setBusy(false);
+        toast('Transaction broadcast — pending confirmation');
+        setStep(3);
+      } catch (e) {
+        setBusy(false);
+        const message = e instanceof MallcoinTxError || e instanceof Error ? e.message : 'Failed to send';
+        setErr(message);
+        toast(message, false);
+      }
+      return;
+    }
+
+    // Demo mode: purely local simulation, no real chain interaction.
     setTimeout(() => {
       const res = store.applyTx({
         type: 'send', amount: parseFloat(amount), asset: 'MALL', kind: 'debit', to: addr, fee,
@@ -48,8 +100,11 @@ export default function WalletSend() {
         activityText: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
       });
       setBusy(false);
-      if (res.ok) { toast('Transaction broadcast — pending confirmation'); setStep(3); }
-      else toast(res.error || 'Failed', false);
+      if (res.ok) {
+        setTxHash(`0x${Date.now().toString(16)}…${Math.floor(Math.random() * 0xffff).toString(16)}`);
+        toast('Transaction broadcast — pending confirmation');
+        setStep(3);
+      } else toast(res.error || 'Failed', false);
     }, 900);
   };
 
@@ -62,7 +117,7 @@ export default function WalletSend() {
           <div style={{ textAlign: 'center', padding: 18 }}>
             <div style={{ fontSize: 42 }}>✅</div>
             <h2 style={{ margin: '8px 0' }}>Sent {amt} MALL</h2>
-            <div className="muted mono" style={{ fontSize: 12 }}>tx 0x{Date.now().toString(16)}…{Math.floor(Math.random() * 0xffff).toString(16)}</div>
+            <div className="muted mono" style={{ fontSize: 12 }}>tx {txHash}</div>
             <div className="row" style={{ justifyContent: 'center', marginTop: 16 }}>
               <button className="btn btn-ghost" onClick={() => navigate('/explorer')}>View in Explorer</button>
               <button className="btn btn-primary" onClick={() => navigate('/wallet')}>Back to Wallet</button>
@@ -81,9 +136,9 @@ export default function WalletSend() {
           <>
             <div className="field">
               <label>Recipient address</label>
-              <input className={'input mono' + (addr && !validAddr ? ' err' : '')} placeholder="0x… (42-char checksummed address)" value={addr} onChange={(e) => setAddr(e.target.value)} />
-              {addr && !validAddr && <div className="hint" style={{ color: 'var(--red-2)' }}>⚠ Invalid address format — expected 42-char 0x hex.</div>}
-              {validAddr && <div className="hint" style={{ color: 'var(--green-2)' }}>✓ Valid checksummed address</div>}
+              <input className={'input mono' + (addr && !validAddr ? ' err' : '')} placeholder="mall1… (bech32 address)" value={addr} onChange={(e) => setAddr(e.target.value)} />
+              {addr && !validAddr && <div className="hint" style={{ color: 'var(--red-2)' }}>⚠ Invalid address format — expected mall1… bech32 address.</div>}
+              {validAddr && <div className="hint" style={{ color: 'var(--green-2)' }}>✓ Valid address</div>}
             </div>
             <div className="field">
               <label>Amount (MALL) — balance {max.toFixed(2)}</label>
