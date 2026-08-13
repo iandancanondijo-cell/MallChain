@@ -203,8 +203,9 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   };
 
   // Crypto helpers for encryption
-  const bufToB64 = (buf: ArrayBuffer): string => {
-    return btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const bufToB64 = (buf: ArrayBuffer | Uint8Array): string => {
+    const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    return btoa(String.fromCharCode(...bytes));
   };
 
   const b64ToBuf = (str: string): Uint8Array => {
@@ -220,7 +221,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       ['deriveKey']
     );
     return crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt, iterations: 250000, hash: 'SHA-256' },
+      { name: 'PBKDF2', salt: salt as BufferSource, iterations: 250000, hash: 'SHA-256' },
       keyMaterial,
       { name: 'AES-GCM', length: 256 },
       false,
@@ -247,9 +248,9 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   const decryptMnemonic = async (entry: VaultEntry, pwd: string): Promise<string> => {
     const key = await deriveKey(pwd, b64ToBuf(entry.saltB64));
     const plainBuf = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: b64ToBuf(entry.ivB64) },
+      { name: 'AES-GCM', iv: b64ToBuf(entry.ivB64) as BufferSource },
       key,
-      b64ToBuf(entry.cipherB64)
+      b64ToBuf(entry.cipherB64) as BufferSource
     );
     return new TextDecoder().decode(plainBuf);
   };
@@ -335,15 +336,16 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       const res = await api.post<{ success: boolean; address: string; accountId: string; chainId: string }>('/api/wallet/create', { mnemonic: words.join(' ') });
       
       if (res.ok && res.data?.success) {
+        const address = res.data.address;
         // Optionally store encrypted
         if (importPassword) {
           const enc = await encryptMnemonic(words.join(' '), importPassword);
           const entry: VaultEntry = {
-            address: res.data.address,
+            address,
             ...enc,
             savedAt: Date.now()
           };
-          const newVault = [...vault.filter(v => v.address !== res.data.address), entry];
+          const newVault = [...vault.filter(v => v.address !== address), entry];
           setVault(newVault);
           localStorage.setItem('mallchain_vault', JSON.stringify(newVault));
         }

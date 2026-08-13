@@ -195,7 +195,10 @@ export default function LoginFlow({ navigate }: { navigate: (p: string) => void 
 
     // Task 3.10: Attempt tracking and lockout
     const sessionToken = sessionStorage.getItem('session_token') || '';
-    const res = await api.post<{ token: string }>(
+    // NOTE: backend has no POST /api/auth/verify-pin route yet (see authController.js) —
+    // this call currently 404s against a real backend. walletAddress is typed optional
+    // until that endpoint exists; keep the client-side fallback below either way.
+    const res = await api.post<{ token: string; walletAddress?: string }>(
       '/api/auth/verify-pin',
       { sessionToken, pin }
     );
