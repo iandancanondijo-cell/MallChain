@@ -1,0 +1,256 @@
+/**
+ * PIN Entry Component Styling
+ * Phase 3 Section 10: PIN Entry & Verification
+ * Enhanced keyboard and numpad support
+ */
+
+.pin-entry-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  transition: opacity 0.2s;
+}
+
+.pin-entry-wrapper.locked {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* PIN Input Container */
+.pin-input-container {
+  position: relative;
+  user-select: none;
+}
+
+.pin-input-hidden {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Visual PIN Display */
+.pin-display {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2rem 1rem;
+  background: linear-gradient(135deg, #0d111b 0%, #1a1f2e 100%);
+  border: 2px solid #f3ba2f33;
+  border-radius: 12px;
+  font-size: 2.5rem;
+  letter-spacing: 0.5rem;
+  font-weight: 600;
+  color: #f3ba2f;
+  cursor: pointer;
+  transition: all 0.3s;
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pin-display:hover {
+  border-color: #f3ba2f;
+  box-shadow: 0 0 20px rgba(243, 186, 47, 0.2);
+}
+
+.pin-display:focus-within {
+  border-color: #ffcc66;
+  box-shadow: 0 0 20px rgba(243, 186, 47, 0.3);
+}
+
+/* PIN Status Messages */
+.attempt-counter {
+  text-align: center;
+  font-size: 0.9rem;
+  color: #b0b0b0;
+  padding: 0.5rem;
+}
+
+.attempt-counter.warning {
+  color: #ff6b6b;
+  background-color: #3a1a1a22;
+  border: 1px solid #ff6b6b33;
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-weight: 500;
+}
+
+.pin-locked-message {
+  background-color: #3a1a1a;
+  border: 1px solid #ff6b6b;
+  color: #ff6b6b;
+  padding: 1rem;
+  border-radius: 6px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.pin-status {
+  text-align: center;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+/* PIN Numpad */
+.pin-numpad {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.numpad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  padding: 1rem;
+  background: linear-gradient(135deg, #0d111b 0%, #1a1f2e 100%);
+  border: 1px solid #f3ba2f33;
+  border-radius: 12px;
+}
+
+.numpad-btn {
+  aspect-ratio: 1;
+  padding: 0;
+  background-color: #1a1f2e;
+  border: 1px solid #f3ba2f;
+  border-radius: 8px;
+  color: #e0e0e0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+}
+
+.numpad-btn:hover:not(:disabled) {
+  background-color: #252d3d;
+  border-color: #ffcc66;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(243, 186, 47, 0.3);
+}
+
+.numpad-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(243, 186, 47, 0.2);
+}
+
+.numpad-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: #555;
+}
+
+.numpad-digit {
+  grid-column: span 1;
+}
+
+.numpad-zero {
+  grid-column: 1;
+}
+
+.numpad-backspace {
+  grid-column: 2 / 4;
+  font-size: 1.2rem;
+  background-color: #2a1f1a;
+  border-color: #ff6b6b;
+  color: #ff6b6b;
+}
+
+.numpad-backspace:hover:not(:disabled) {
+  background-color: #3a2f2a;
+  border-color: #ffaa66;
+  box-shadow: 0 4px 12px rgba(255, 107, 107, 0.2);
+}
+
+/* Confirm Button */
+.numpad-confirm {
+  width: 100%;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, #f3ba2f 0%, #ffcc66 100%);
+  color: #050810;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.numpad-confirm:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(243, 186, 47, 0.3);
+}
+
+.numpad-confirm:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.numpad-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Responsive Design */
+@media (max-width: 480px) {
+  .pin-display {
+    font-size: 2rem;
+    padding: 1.5rem 1rem;
+    min-height: 80px;
+    letter-spacing: 0.3rem;
+  }
+
+  .numpad-grid {
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+
+  .numpad-btn {
+    font-size: 1.25rem;
+  }
+
+  .pin-entry-wrapper {
+    gap: 1rem;
+  }
+}
+
+/* Accessibility - Focus States */
+.pin-display:focus,
+.numpad-btn:focus,
+.numpad-confirm:focus {
+  outline: 2px solid #f3ba2f;
+  outline-offset: 2px;
+}
+
+/* Dark mode - already implemented */
+/* Light mode compatibility (if needed) */
+@media (prefers-color-scheme: light) {
+  .pin-display {
+    background-color: #f5f5f5;
+    border-color: #ddd;
+    color: #d4af37;
+  }
+
+  .numpad-grid {
+    background-color: #f5f5f5;
+    border-color: #ddd;
+  }
+
+  .numpad-btn {
+    background-color: #fff;
+    border-color: #ccc;
+    color: #333;
+  }
+
+  .numpad-btn:hover:not(:disabled) {
+    background-color: #f0f0f0;
+    border-color: #d4af37;
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "name": "mallchain-os-v14",
+  "private": true,
+  "version": "14.0.0",
+  "type": "module",
+  "description": "Mallchain Mission Control Web3 OS — production-grade frontend (v14)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:run": "vitest run"
+  },
+  "dependencies": {
+    "@cosmjs/proto-signing": "^0.39.0",
+    "@cosmjs/stargate": "^0.39.0",
+    "bcryptjs": "^3.0.3",
+    "bip39": "^3.1.0",
+    "crypto-js": "^4.2.0",
+    "ed25519-hd-key": "^2.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "socket.io-client": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/crypto-js": "^4.2.2",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "@vitest/ui": "^1.0.0",
+    "happy-dom": "^20.11.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^1.0.0"
+  }
+}

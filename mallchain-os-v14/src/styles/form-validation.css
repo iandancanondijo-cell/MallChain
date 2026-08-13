@@ -1,0 +1,515 @@
+/**
+ * Form Validation Styles
+ * Task 4.7: Inline error messages styling
+ * 
+ * Supports:
+ * - .field-error: Red border and text for invalid fields
+ * - .field-warning: Orange border for warnings
+ * - .field-success: Green indicator for valid fields
+ * - .error-text: Red error message below field
+ * - .warning-text: Orange warning message
+ * - Password strength indicator
+ * - Animated validation states
+ */
+
+/* ============== FIELD STATES ============== */
+
+/* Base field styling */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+textarea.form-field {
+  border: 2px solid var(--bg-3, #e5e7eb);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 14px;
+  transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
+  background-color: var(--bg-2, #f9fafb);
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+textarea.form-field:focus {
+  outline: none;
+  border-color: var(--primary, #3b82f6);
+  background-color: #fff;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Task 4.7: Error state - Red border and background tint */
+.field-error,
+input.field-error,
+input.field-error:focus {
+  border-color: #dc2626;
+  background-color: rgba(220, 38, 38, 0.03);
+}
+
+input.field-error:focus {
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+
+/* Task 4.7: Warning state - Orange border */
+.field-warning,
+input.field-warning,
+input.field-warning:focus {
+  border-color: #f97316;
+  background-color: rgba(249, 115, 22, 0.03);
+}
+
+input.field-warning:focus {
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+}
+
+/* Task 4.7: Success state - Green border */
+.field-success,
+input.field-success,
+input.field-success:focus {
+  border-color: #16a34a;
+  background-color: rgba(22, 163, 74, 0.02);
+}
+
+input.field-success:focus {
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.1);
+}
+
+/* Task 4.7: Disabled state */
+input:disabled,
+textarea:disabled {
+  background-color: var(--bg-3, #f3f4f6);
+  color: var(--text-3, #9ca3af);
+  cursor: not-allowed;
+  border-color: var(--bg-3, #e5e7eb);
+}
+
+/* ============== ERROR/WARNING TEXT ============== */
+
+/* Task 4.7: Error text below field */
+.error-text,
+.field-error-message {
+  display: block;
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 4px;
+  line-height: 1.4;
+  animation: slideInDown 0.2s ease-out;
+}
+
+/* Task 4.7: Warning text */
+.warning-text,
+.field-warning-message {
+  display: block;
+  color: #f97316;
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 4px;
+  line-height: 1.4;
+  animation: slideInDown 0.2s ease-out;
+}
+
+/* Success text */
+.success-text,
+.field-success-message {
+  display: block;
+  color: #16a34a;
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* Info text */
+.info-text,
+.field-info-message {
+  display: block;
+  color: var(--text-2, #6b7280);
+  font-size: 12px;
+  font-weight: 400;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* ============== FORM GROUP ============== */
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-1, #1f2937);
+}
+
+.form-group label .required {
+  color: #dc2626;
+}
+
+.form-group input,
+.form-group textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ============== PASSWORD STRENGTH INDICATOR ============== */
+
+/* Task 4.3: Password strength bar */
+.password-strength-container {
+  margin-top: 8px;
+}
+
+.password-strength-bar {
+  height: 4px;
+  background-color: var(--bg-3, #e5e7eb);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.password-strength-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+/* Very weak - red */
+.strength-0 .password-strength-fill,
+.strength-1 .password-strength-fill {
+  background-color: #dc2626;
+  width: 20%;
+}
+
+/* Weak - orange */
+.strength-2 .password-strength-fill {
+  background-color: #f97316;
+  width: 40%;
+}
+
+/* Fair - yellow */
+.strength-3 .password-strength-fill {
+  background-color: #eab308;
+  width: 60%;
+}
+
+/* Good - light green */
+.strength-4 .password-strength-fill {
+  background-color: #84cc16;
+  width: 80%;
+}
+
+/* Strong/Very Strong - dark green */
+.strength-5 .password-strength-fill {
+  background-color: #16a34a;
+  width: 100%;
+}
+
+.password-strength-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.password-strength-label .level {
+  color: var(--text-2, #6b7280);
+}
+
+.password-strength-label .stars {
+  color: #f97316;
+  letter-spacing: 2px;
+}
+
+/* ============== FEEDBACK LIST ============== */
+
+.feedback-list {
+  margin-top: 12px;
+  list-style: none;
+  padding: 0;
+}
+
+.feedback-list li {
+  font-size: 12px;
+  color: var(--text-2, #6b7280);
+  margin-bottom: 4px;
+  padding-left: 20px;
+  position: relative;
+  line-height: 1.4;
+}
+
+/* Task 4.9: Feedback indicator (checked/pending) */
+.feedback-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  border: 2px solid var(--text-3, #d1d5db);
+  background-color: transparent;
+}
+
+.feedback-list li.met::before {
+  border-color: #16a34a;
+  background-color: #16a34a;
+  content: '✓';
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: bold;
+}
+
+.feedback-list li.pending::before {
+  border-color: #f97316;
+  background-color: #f97316;
+}
+
+/* ============== PIN INPUT ============== */
+
+.pin-input-group {
+  display: flex;
+  gap: 8px;
+}
+
+.pin-input {
+  width: 48px;
+  height: 48px;
+  text-align: center;
+  font-size: 24px;
+  font-weight: 600;
+  border: 2px solid var(--bg-3, #e5e7eb);
+  border-radius: 6px;
+  background-color: var(--bg-2, #f9fafb);
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.pin-input:focus {
+  outline: none;
+  border-color: var(--primary, #3b82f6);
+  background-color: #fff;
+}
+
+.pin-input.field-error {
+  border-color: #dc2626;
+  background-color: rgba(220, 38, 38, 0.03);
+}
+
+/* ============== MNEMONIC INPUT ============== */
+
+.mnemonic-input {
+  min-height: 120px;
+  resize: vertical;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  letter-spacing: 0.5px;
+}
+
+.mnemonic-word-count {
+  font-size: 12px;
+  color: var(--text-2, #6b7280);
+  margin-top: 6px;
+}
+
+.mnemonic-word-count .count {
+  font-weight: 600;
+  color: var(--text-1, #1f2937);
+}
+
+/* Progress bar for word count */
+.mnemonic-progress {
+  height: 3px;
+  background-color: var(--bg-3, #e5e7eb);
+  border-radius: 1.5px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.mnemonic-progress-fill {
+  height: 100%;
+  background-color: var(--primary, #3b82f6);
+  transition: width 0.3s ease;
+}
+
+/* ============== ADDRESS INPUT ============== */
+
+.address-input {
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+
+.address-info {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.address-checksum {
+  color: var(--text-2, #6b7280);
+  background-color: var(--bg-3, #f3f4f6);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-weight: 600;
+}
+
+.address-checksum.valid {
+  color: #16a34a;
+  background-color: rgba(22, 163, 74, 0.1);
+}
+
+.address-checksum.warning {
+  color: #f97316;
+  background-color: rgba(249, 115, 22, 0.1);
+}
+
+/* ============== ANIMATIONS ============== */
+
+@keyframes slideInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  75% {
+    transform: translateX(4px);
+  }
+}
+
+.field-shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+/* ============== FORM SUBMISSION STATES ============== */
+
+.form-submitting input,
+.form-submitting textarea {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-error-summary {
+  background-color: rgba(220, 38, 38, 0.1);
+  border: 2px solid #dc2626;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.form-error-summary-title {
+  font-weight: 600;
+  color: #dc2626;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.form-error-summary-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.form-error-summary-list li {
+  font-size: 13px;
+  color: #991b1b;
+  margin-bottom: 4px;
+  padding-left: 20px;
+  position: relative;
+}
+
+.form-error-summary-list li::before {
+  content: '✕';
+  position: absolute;
+  left: 0;
+  font-weight: bold;
+  color: #dc2626;
+}
+
+/* ============== RESPONSIVE ============== */
+
+@media (max-width: 640px) {
+  .pin-input-group {
+    gap: 6px;
+  }
+
+  .pin-input {
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+  }
+
+  .mnemonic-input {
+    min-height: 100px;
+  }
+}
+
+/* ============== ACCESSIBILITY ============== */
+
+/* Focus visible for keyboard navigation */
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--primary, #3b82f6);
+  outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: more) {
+  .field-error {
+    border-width: 3px;
+  }
+
+  .field-warning {
+    border-width: 3px;
+  }
+
+  .field-success {
+    border-width: 3px;
+  }
+
+  .error-text,
+  .warning-text {
+    font-weight: 700;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  input,
+  textarea {
+    transition: none;
+  }
+
+  .password-strength-fill {
+    transition: none;
+  }
+
+  .field-shake {
+    animation: none;
+  }
+
+  .error-text,
+  .warning-text {
+    animation: none;
+  }
+}

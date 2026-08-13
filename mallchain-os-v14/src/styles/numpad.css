@@ -1,0 +1,244 @@
+/**
+ * Mallchain Mission Control v14 — Numpad Styles
+ * Phase 1, Section 3: Login Flow UI (Task 3.6)
+ * 
+ * 3x3 grid layout with:
+ * - Keys 1-9 in 3 rows
+ * - 0 key (centered)
+ * - Backspace and Confirm buttons
+ * - Dark theme, responsive, touch-friendly
+ */
+
+/* ============================================================
+   Numpad Container & Grid Layout
+   ============================================================ */
+
+.numpad {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.numpad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+
+/* ============================================================
+   Numpad Keys — Base Styling
+   ============================================================ */
+
+.numpad-key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding: 0;
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+  background: var(--bg-2);
+  color: var(--txt-1);
+  font-size: 18px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s var(--ease);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.numpad-key:hover:not(:disabled) {
+  border-color: var(--gold);
+  background: var(--bg-3);
+  box-shadow: 0 4px 12px rgba(243, 186, 47, 0.15);
+  transform: translateY(-1px);
+}
+
+.numpad-key:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(243, 186, 47, 0.1);
+}
+
+.numpad-key:focus-visible {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(243, 186, 47, 0.15);
+}
+
+/* Disabled state */
+.numpad-key:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: var(--bg-2);
+  border-color: var(--line-1);
+}
+
+/* ============================================================
+   Digit Keys (1-9, 0)
+   ============================================================ */
+
+.numpad-digit {
+  background: var(--bg-2);
+  color: var(--txt-1);
+  border-color: var(--line-1);
+}
+
+.numpad-digit:hover:not(:disabled) {
+  background: var(--bg-3);
+  border-color: var(--gold);
+}
+
+.numpad-digit:active:not(:disabled) {
+  background: var(--bg-3);
+}
+
+/* ============================================================
+   Backspace Key
+   ============================================================ */
+
+.numpad-backspace {
+  background: var(--bg-2);
+  border-color: var(--line-1);
+  color: var(--txt-2);
+  font-size: 20px;
+}
+
+.numpad-backspace:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.numpad-backspace:active:not(:disabled) {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.numpad-backspace:disabled {
+  color: var(--txt-3);
+}
+
+/* ============================================================
+   Confirm Button
+   ============================================================ */
+
+.numpad-confirm {
+  background: var(--gold);
+  color: #16181d;
+  border-color: var(--gold);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.numpad-confirm:hover:not(:disabled) {
+  background: var(--gold-2);
+  border-color: var(--gold-2);
+  box-shadow: 0 4px 16px rgba(243, 186, 47, 0.25);
+}
+
+.numpad-confirm:active:not(:disabled) {
+  background: var(--gold);
+  box-shadow: 0 2px 8px rgba(243, 186, 47, 0.15);
+}
+
+.numpad-confirm:disabled {
+  background: var(--bg-3);
+  color: var(--txt-3);
+  border-color: var(--line-1);
+  opacity: 0.4;
+}
+
+/* ============================================================
+   Responsive Adjustments — Tablet
+   ============================================================ */
+
+@media (max-width: 1023px) {
+  .numpad-grid {
+    gap: 9px;
+  }
+
+  .numpad-key {
+    min-height: 48px;
+    font-size: 16px;
+    border-radius: 9px;
+  }
+}
+
+/* ============================================================
+   Responsive Adjustments — Mobile
+   ============================================================ */
+
+@media (max-width: 639px) {
+  .numpad-grid {
+    gap: 8px;
+  }
+
+  .numpad-key {
+    min-height: 44px;
+    font-size: 16px;
+    border-radius: 8px;
+    padding: 0 4px;
+  }
+
+  /* Larger touch targets on mobile */
+  .numpad-key:active {
+    background: var(--bg-3);
+  }
+}
+
+/* ============================================================
+   Dark mode optimizations (already in dark theme)
+   ============================================================ */
+
+/* Ensure proper contrast for disabled state */
+.numpad-key:disabled {
+  opacity: 0.35;
+}
+
+/* Smooth transitions */
+.numpad-key {
+  transition-property: all;
+  transition-duration: 0.15s;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ============================================================
+   Accessibility
+   ============================================================ */
+
+/* High contrast mode support */
+@media (prefers-contrast: more) {
+  .numpad-key {
+    border-width: 2px;
+  }
+
+  .numpad-key:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .numpad-key {
+    transition: none;
+  }
+
+  .numpad-key:hover:not(:disabled) {
+    transform: none;
+  }
+
+  .numpad-key:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* Print styles */
+@media print {
+  .numpad {
+    display: none;
+  }
+}

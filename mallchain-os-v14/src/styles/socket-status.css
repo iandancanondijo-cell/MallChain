@@ -1,0 +1,88 @@
+/**
+ * Socket Status Component Styles
+ * Task 5.12: Connection status indicator UI
+ */
+
+.socket-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: default;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.socket-status.connected {
+  background-color: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.socket-status.disconnected {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.socket-status.connecting,
+.socket-status.reconnecting {
+  background-color: rgba(234, 179, 8, 0.1);
+  color: #eab308;
+  border: 1px solid rgba(234, 179, 8, 0.2);
+}
+
+.socket-status.reconnecting {
+  animation: pulse-reconnect 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse-reconnect {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.socket-icon {
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.socket-text {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.socket-count {
+  background-color: rgba(0, 0, 0, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .socket-status {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .socket-icon {
+    font-size: 12px;
+  }
+
+  .socket-text {
+    display: none;
+  }
+
+  .socket-count {
+    display: none;
+  }
+}

@@ -1,0 +1,253 @@
+/**
+ * Mallchain Mission Control v14 — Wallet Data Integration Styles
+ * 
+ * Task 13: Real Data Integration & Backend Connection
+ * Styles for loading skeletons, error states, modals, and pagination
+ */
+
+/* ========== Loading Skeleton Animation ========== */
+@keyframes skeleton-pulse {
+  0% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0.6;
+  }
+}
+
+.skeleton-item {
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  background-color: var(--bg-2);
+  border-radius: 4px;
+}
+
+/* ========== Modal Overlay ========== */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fade-in 0.2s ease-in-out;
+}
+
+.modal-overlay .card {
+  max-width: 500px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  position: relative;
+  animation: slide-up 0.3s ease-in-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* ========== Error Card ========== */
+.error-card {
+  background-color: rgba(255, 59, 48, 0.1);
+  border: 1px solid rgba(255, 59, 48, 0.3);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.error-card .error-text {
+  color: var(--red, #ff3b30);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.error-card .error-icon {
+  font-size: 16px;
+}
+
+.error-card .retry-btn {
+  margin-left: 8px;
+  color: var(--cyan, #00d9ff);
+  cursor: pointer;
+  text-decoration: underline;
+  background: none;
+  border: none;
+  font-size: 13px;
+  font-family: inherit;
+  transition: opacity 0.2s;
+}
+
+.error-card .retry-btn:hover {
+  opacity: 0.8;
+}
+
+/* ========== Real-time Status Indicator ========== */
+.realtime-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  opacity: 0.7;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: rgba(0, 217, 255, 0.1);
+  color: var(--cyan, #00d9ff);
+}
+
+.realtime-indicator::before {
+  content: '●';
+  animation: pulse-dot 1s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* ========== Pagination Controls ========== */
+.pagination-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  margin-top: 16px;
+}
+
+.pagination-container .pagination-btn {
+  padding: 8px 12px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background-color: transparent;
+  border: 1px solid rgba(0, 217, 255, 0.3);
+  color: var(--cyan, #00d9ff);
+}
+
+.pagination-container .pagination-btn:hover:not(:disabled) {
+  background-color: rgba(0, 217, 255, 0.1);
+  border-color: rgba(0, 217, 255, 0.6);
+}
+
+.pagination-container .pagination-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.pagination-container .pagination-info {
+  font-size: 13px;
+  opacity: 0.7;
+  min-width: 120px;
+  text-align: center;
+}
+
+/* ========== Transaction List Row (Clickable) ========== */
+.transaction-row {
+  cursor: pointer;
+  transition: all 0.2s;
+  border-radius: 4px;
+}
+
+.transaction-row:hover {
+  background-color: rgba(0, 217, 255, 0.05);
+  transform: translateX(4px);
+}
+
+.transaction-row.pending {
+  opacity: 0.8;
+}
+
+/* ========== Filter Row ========== */
+.filter-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.filter-row .input {
+  flex: 1;
+  min-width: 150px;
+}
+
+/* ========== Responsive Design ========== */
+@media (max-width: 768px) {
+  .modal-overlay .card {
+    max-width: 95%;
+    max-height: 85vh;
+  }
+
+  .pagination-container {
+    flex-wrap: wrap;
+  }
+
+  .pagination-container .pagination-btn {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+
+  .filter-row {
+    flex-direction: column;
+  }
+
+  .filter-row .input {
+    width: 100%;
+  }
+}
+
+/* ========== Dark Theme Adjustments ========== */
+:root {
+  --wallet-loading-bg: var(--bg-2, rgba(255, 255, 255, 0.05));
+  --wallet-error-bg: rgba(255, 59, 48, 0.1);
+  --wallet-success-bg: rgba(76, 217, 100, 0.1);
+}
+
+/* ========== Accessibility ========== */
+.modal-overlay .card {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+.modal-overlay .card:focus-within {
+  outline-color: var(--cyan, #00d9ff);
+}
+
+/* ========== Animation Preferences ========== */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

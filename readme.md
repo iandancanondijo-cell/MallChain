@@ -6,7 +6,7 @@ This repository contains the Marketplace blockchain app, its Cosmos SDK chain, t
 
 - Blockchain node: `marketplaced`
 - Backend API: `backend/`
-- Frontend UI: `frontend/`
+- Frontend UI: `mallchain-os-v14/` (Mallchain OS — see `mallchain-os-v14/README.md`)
 - Local startup helpers: `START_ALL.sh`, `STOP_ALL.sh`
 
 ## Quick start
@@ -45,7 +45,7 @@ cd backend && npm start
 ### 3. Frontend
 
 ```sh
-cd frontend && npm run dev -- --host 127.0.0.1
+cd mallchain-os-v14 && npm run dev -- --host 127.0.0.1
 ```
 
 ## Manual stop commands
@@ -76,7 +76,7 @@ If you changed genesis or `chain_id`, reset local chain data:
 ## Development notes
 
 - The backend expects the blockchain REST endpoint on `http://127.0.0.1:1317`.
-- The frontend uses Vite and will start on the next available port if `5173` is already occupied.
+- The frontend (`mallchain-os-v14/`) uses Vite and will start on the next available port if `5173` is already occupied.
 - The startup helper in `START_ALL.sh` is the preferred way to bring up the full local stack.
 
 ## Release
