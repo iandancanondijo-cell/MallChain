@@ -16,6 +16,7 @@ node_modules/
 # Logs and outputs
 *.log
 *.out
+*.rdb
 
 # OS files
 .DS_Store
@@ -78,6 +79,14 @@ backup-handwritten/
 docs/
 *.md
 !README.md
+!CONTRIBUTING.md
+!CODE_OF_CONDUCT.md
+!CHANGELOG.md
+!SECURITY.md
+!PRODUCTION.md
+!API_REFERENCE.md
+!TODO.md
+!INSTALL.md
 
 # Wallet data (sensitive)
 wallet_data/
