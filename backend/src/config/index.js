@@ -12,6 +12,25 @@ function required(name, value) {
   return value;
 }
 
+function validateMongoUri(uri) {
+  if (!uri) {
+    throw new Error('MONGO_URI is required');
+  }
+  
+  // MongoDB URI must start with mongodb:// or mongodb+srv://
+  if (!uri.startsWith('mongodb://') && !uri.startsWith('mongodb+srv://')) {
+    throw new Error(`MONGO_URI must start with "mongodb://" or "mongodb+srv://", got: ${uri.substring(0, 50)}...`);
+  }
+  
+  // Basic format validation: must have at least host
+  const uriPattern = /^mongodb(\+srv)?:\/\/.+/i;
+  if (!uriPattern.test(uri)) {
+    throw new Error(`MONGO_URI has invalid format: ${uri.substring(0, 50)}...`);
+  }
+  
+  return uri;
+}
+
 function requireSecret(name, value, { allowInDev = false } = {}) {
   if (isProduction) {
     return required(name, value);
@@ -27,13 +46,17 @@ const chainPrefix = process.env.CHAIN_PREFIX || process.env.COSMOS_PREFIX || 'ma
 const baseDenom = process.env.CHAIN_BASE_DENOM || 'stake';
 const gasPrice = process.env.GAS_PRICE || `0.01${baseDenom}`;
 
+// Validate MONGO_URI format early
+const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/marketplace';
+validateMongoUri(mongoUri);
+
 const config = {
   env: process.env.NODE_ENV || 'development',
   isProduction,
 
   port: Number(process.env.PORT || 4000),
 
-  mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/marketplace',
+  mongoUri: mongoUri,
 
   redis: {
     host: process.env.REDIS_HOST || '127.0.0.1',
@@ -82,6 +105,41 @@ const config = {
     apiMax: Number(process.env.RATE_LIMIT_MAX || 120),
     txMax: Number(process.env.RATE_LIMIT_TX_MAX || 40),
   },
+
+  payment: {
+    safaricom: {
+      apiBaseUrl: process.env.SAFARICOM_API || 'https://sandbox.safaricom.co.ke',
+      consumerKey: process.env.SAFARICOM_KEY || '',
+      consumerSecret: process.env.SAFARICOM_SECRET || '',
+      businessShortCode: process.env.BUSINESS_SHORT_CODE || '174379',
+      passkey: process.env.PASSKEY || '',
+      stkCallbackUrl:
+        process.env.CALLBACK_URL ||
+        `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/buy/mpesa/callback`,
+      payoutCallbackUrl:
+        process.env.PAYOUT_CALLBACK_URL ||
+        `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/buy/payout/callback`,
+      b2cInitiatorName: process.env.B2C_INITIATOR_NAME || 'testapi',
+      securityCredential: process.env.SECURITY_CREDENTIAL || '',
+      commandId: process.env.COMMAND_ID || 'BusinessPayment',
+      autoPayoutEnabled: String(process.env.ENABLE_WITHDRAWAL_AUTO_PAYOUT || '').toLowerCase() === 'true',
+      cashoutReceiverAddress: process.env.CASHOUT_RECEIVER_ADDRESS || '',
+    },
+    envPlacement: [
+      'SAFARICOM_API',
+      'SAFARICOM_KEY',
+      'SAFARICOM_SECRET',
+      'BUSINESS_SHORT_CODE',
+      'PASSKEY',
+      'CALLBACK_URL',
+      'PAYOUT_CALLBACK_URL',
+      'B2C_INITIATOR_NAME',
+      'SECURITY_CREDENTIAL',
+      'COMMAND_ID',
+      'ENABLE_WITHDRAWAL_AUTO_PAYOUT',
+      'CASHOUT_RECEIVER_ADDRESS',
+    ],
+  },
 };
 
 function validateRuntimeSecrets() {
@@ -92,10 +150,25 @@ function validateRuntimeSecrets() {
     required('ADMIN_API_KEY', process.env.ADMIN_API_KEY);
   }
 
-  // Warn about operator/faucet mnemonics in non-production; disallow unsafe defaults
-  if (config.secrets.operatorMnemonic && isProduction) {
-    // operator mnemonic present in production - recommend secure secret manager
-    console.warn('Operator mnemonic loaded from env; ensure this is a secure secret store, rotate regularly.');
+  // Validate JWT_SECRET length (>= 32 characters for security)
+  if (process.env.JWT_SECRET) {
+    if (process.env.JWT_SECRET.length < 32) {
+      throw new Error(`JWT_SECRET must be at least 32 characters long (currently ${process.env.JWT_SECRET.length}). Generate with: openssl rand -hex 16`);
+    }
+  }
+
+  // Validate SESSION_SECRET length (>= 32 characters for security)
+  if (process.env.SESSION_SECRET) {
+    if (process.env.SESSION_SECRET.length < 32) {
+      throw new Error(`SESSION_SECRET must be at least 32 characters long (currently ${process.env.SESSION_SECRET.length}). Generate with: openssl rand -hex 16`);
+    }
+  }
+
+  // C9: Require mnemonics in production
+  if (isProduction) {
+    required('OPERATOR_MNEMONIC', config.secrets.operatorMnemonic);
+    required('FAUCET_MNEMONIC', config.secrets.faucetMnemonic);
+    required('TREASURY_MNEMONIC', config.secrets.treasuryMnemonic);
   }
 }
 
@@ -125,4 +198,4 @@ function getAllowedOrigins() {
   };
 }
 
-module.exports = { config, getAllowedOrigins };
+module.exports = { config, getAllowedOrigins, validateRuntimeSecrets };

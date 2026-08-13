@@ -65,5 +65,16 @@ const TransactionSchema = new mongoose.Schema(
   }
 )
 
+// Add indexes for common query patterns
+TransactionSchema.index({ from: 1 })
+TransactionSchema.index({ to: 1 })
+TransactionSchema.index({ txHash: 1 }, { unique: true, sparse: true })
+TransactionSchema.index({ status: 1 })
+TransactionSchema.index({ userId: 1 })
+TransactionSchema.index({ createdAt: -1 })
+TransactionSchema.index({ from: 1, status: 1 })
+TransactionSchema.index({ to: 1, status: 1 })
+TransactionSchema.index({ blockHeight: 1 })
+
 
 module.exports = mongoose.model('Transaction', TransactionSchema)

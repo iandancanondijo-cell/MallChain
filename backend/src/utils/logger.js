@@ -28,6 +28,7 @@ class Logger {
       service: this.serviceName,
       context,
       message,
+      correlationId: data.correlationId || 'none',
       ...data,
     }
   }
@@ -99,6 +100,7 @@ class Logger {
       statusCode: res.statusCode,
       duration: `${duration}ms`,
       ip: req.ip,
+      correlationId: req.correlationId || 'none',
     }
     if (req && req._rawBodyForLogging) {
       try {

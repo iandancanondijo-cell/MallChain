@@ -17,4 +17,14 @@ const MallcoinSaleSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// Add indexes for common query patterns
+MallcoinSaleSchema.index({ sellerAddress: 1 })
+MallcoinSaleSchema.index({ status: 1 })
+MallcoinSaleSchema.index({ phone: 1 })
+MallcoinSaleSchema.index({ txHash: 1 })
+MallcoinSaleSchema.index({ burnTxHash: 1 })
+MallcoinSaleSchema.index({ createdAt: -1 })
+MallcoinSaleSchema.index({ sellerAddress: 1, status: 1 })
+MallcoinSaleSchema.index({ status: 1, createdAt: -1 })
+
 module.exports = mongoose.model('MallcoinSale', MallcoinSaleSchema);

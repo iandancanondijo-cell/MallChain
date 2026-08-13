@@ -20,4 +20,15 @@ const B2CPayoutSchema = new mongoose.Schema({
   payoutAttemptedAt: { type: Date },
 });
 
+// Add indexes for common query patterns
+B2CPayoutSchema.index({ sellerAddress: 1 })
+B2CPayoutSchema.index({ sellerPhone: 1 })
+B2CPayoutSchema.index({ payoutStatus: 1 })
+B2CPayoutSchema.index({ txHash: 1 })
+B2CPayoutSchema.index({ payoutRef: 1 })
+B2CPayoutSchema.index({ createdAt: -1 })
+B2CPayoutSchema.index({ payoutAttemptedAt: -1 })
+B2CPayoutSchema.index({ sellerAddress: 1, payoutStatus: 1 })
+B2CPayoutSchema.index({ payoutStatus: 1, createdAt: -1 })
+
 module.exports = mongoose.model('B2CPayout', B2CPayoutSchema);

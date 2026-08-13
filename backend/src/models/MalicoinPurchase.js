@@ -23,4 +23,16 @@ const MallcoinPurchaseSchema = new mongoose.Schema({
   expiresAt: { type: Date, default: () => new Date(Date.now() + 10 * 60 * 1000) }, // 10 min
 });
 
+// Add indexes for common query patterns
+MallcoinPurchaseSchema.index({ walletAddress: 1 })
+MallcoinPurchaseSchema.index({ status: 1 })
+MallcoinPurchaseSchema.index({ phone: 1 })
+MallcoinPurchaseSchema.index({ paymentId: 1 })
+MallcoinPurchaseSchema.index({ mpesaRef: 1 })
+MallcoinPurchaseSchema.index({ txHash: 1 })
+MallcoinPurchaseSchema.index({ createdAt: -1 })
+MallcoinPurchaseSchema.index({ expiresAt: 1 })
+MallcoinPurchaseSchema.index({ walletAddress: 1, status: 1 })
+MallcoinPurchaseSchema.index({ status: 1, createdAt: -1 })
+
 module.exports = mongoose.model('MallcoinPurchase', MallcoinPurchaseSchema);

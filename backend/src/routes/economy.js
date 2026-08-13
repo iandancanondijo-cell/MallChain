@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const axios = require('axios')
+const { getMarketPrice } = require('../services/mallcoinService')
 
 const CHAIN_REST = process.env.CHAIN_REST || 'http://localhost:1317'
 const TOTAL_SUPPLY = 670000000
@@ -85,13 +86,8 @@ router.get('/state', async (req, res) => {
       onChainEmission = response.data?.emission_state || response.data || null
     } catch (e) { /* chain query unavailable — fallback used */ }
 
-    let mlcnsPriceKes = 0.62
-    try {
-      const priceRes = await axios.get(`${CHAIN_REST.replace(/\/$/, '')}/tmp/marketplace/mlcoin/v1/market/price`, { timeout: 2000 })
-      const marketPrice = priceRes.data?.market_price || priceRes.data || {}
-      const midPrice = Number(marketPrice.mid) || Number(marketPrice.midPrice) || 62
-      mlcnsPriceKes = midPrice / 100
-    } catch (e) { /* chain query unavailable — fallback used */ }
+    const marketPrice = await getMarketPrice()
+    const mlcnsPriceKes = Number(marketPrice?.midPriceKes || 0.62)
 
     const monthlyEmission = getMonthlyEmission(currentMonth)
     const dailyEmission = monthlyEmission / 30
@@ -136,6 +132,7 @@ router.get('/state', async (req, res) => {
     return res.json({
       success: true,
       mlcnsPriceKes,
+      market: marketPrice,
       pointPriceKes: 2,
       emission: {
         currentMonth,
@@ -205,13 +202,8 @@ router.get('/user/:address', async (req, res) => {
     const currentMonth = getCurrentMonthNumber()
     const monthlyEmission = getMonthlyEmission(currentMonth)
 
-    let mlcnsPriceKes = 0.62
-    try {
-      const priceRes = await axios.get(`${CHAIN_REST.replace(/\/$/, '')}/tmp/marketplace/mlcoin/v1/market/price`, { timeout: 2000 })
-      const marketPrice = priceRes.data?.market_price || priceRes.data || {}
-      const midPrice = Number(marketPrice.mid) || Number(marketPrice.midPrice) || 62
-      mlcnsPriceKes = midPrice / 100
-    } catch (e) { /* chain query unavailable — fallback used */ }
+    const marketPrice = await getMarketPrice()
+    const mlcnsPriceKes = Number(marketPrice?.midPriceKes || 0.62)
 
     const mpRes = await axios.get(`${CHAIN_REST.replace(/\/$/, '')}/tmp/marketplace/mallpoints/v1/user_points/${address}`, { timeout: 3000 }).catch(() => ({}))
     const mallpoints = Number(mpRes.data?.user_points?.points || mpRes.data?.userPoints?.Points || 0)
@@ -226,6 +218,7 @@ router.get('/user/:address', async (req, res) => {
       mlcns: mlcnsBalance,
       mallpoints,
       mlcnsPriceKes,
+      market: marketPrice,
       monthlyEmissionCap: monthlyEmission,
       estimatedKesValue: mlcnsBalance * mlcnsPriceKes + mallpoints * 2,
       valueRatio: (2 / mlcnsPriceKes).toFixed(2)

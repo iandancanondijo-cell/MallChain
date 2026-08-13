@@ -9,7 +9,46 @@ function getJwtSecret() {
 }
 
 function signToken(user) {
-  return jwt.sign({ id: user._id, email: user.email }, getJwtSecret(), { expiresIn: '7d' });
+  // Task 4.1: Generate JWT with correct payload: {userId, username, exp}
+  // exp is set automatically by jsonwebtoken with expiresIn option
+  const sessionTtlMin = parseInt(process.env.SESSION_TTL_MIN || '120', 10);
+  return jwt.sign(
+    { 
+      userId: String(user._id),
+      username: user.username || user.email,
+    }, 
+    getJwtSecret(), 
+    { expiresIn: `${sessionTtlMin}m` }
+  );
+}
+
+function toPublicUser(user) {
+  return {
+    _id: user._id,
+    id: user._id,
+    email: user.email,
+    username: user.username || null,
+    phone: user.phone || null,
+    role: user.role || 'user',
+    creator_level: String(user.creator_level ?? 0),
+    mlpts_balance: Number(user.mlpts_balance || 0),
+    mallcoin_balance: Number(user.mallcoin_balance || 0),
+    streak_count: Number(user.streak_count || 0),
+    tasks_completed: Number(user.tasks_completed || 0),
+    rank_points: Number(user.rank_points || 0),
+    fraud_strikes: Number(user.fraud_strikes || 0),
+    fraud_status: user.fraud_status || 'clear',
+    created_at: user.createdAt || new Date().toISOString(),
+    updated_at: user.updatedAt || user.createdAt || new Date().toISOString(),
+  };
+}
+
+function normalizeUsername(username) {
+  return String(username || '').trim().toLowerCase();
+}
+
+function makeSyntheticEmail(username) {
+  return `${username}@mines.mallchain.local`;
 }
 
 exports.register = async (req, res) => {
@@ -35,6 +74,51 @@ exports.login = async (req, res) => {
   res.json({ token });
 };
 
+exports.registerUsername = async (req, res) => {
+  const username = normalizeUsername(req.body?.username);
+  const password = req.body?.password;
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password required' });
+  }
+  if (!/^[a-z0-9_]{3,32}$/.test(username)) {
+    return res.status(400).json({ error: 'username must be 3-32 chars using letters, numbers, or underscores' });
+  }
+
+  const existingUsername = await User.findOne({ username });
+  if (existingUsername) return res.status(400).json({ error: 'username exists' });
+
+  const syntheticEmail = makeSyntheticEmail(username);
+  const existingEmail = await User.findOne({ email: syntheticEmail });
+  if (existingEmail) return res.status(400).json({ error: 'username exists' });
+
+  const hash = await bcrypt.hash(password, 10);
+  const u = await User.create({ username, email: syntheticEmail, password: hash });
+  const token = signToken(u);
+  res.json({ token, user: toPublicUser(u) });
+};
+
+exports.loginUsername = async (req, res) => {
+  const username = normalizeUsername(req.body?.username);
+  const password = req.body?.password;
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password required' });
+  }
+
+  const u = await User.findOne({ username });
+  if (!u) return res.status(400).json({ error: 'invalid credentials' });
+  if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
+  const ok = await bcrypt.compare(password, u.password);
+  if (!ok) return res.status(400).json({ error: 'invalid credentials' });
+
+  u.lastLoginAt = new Date();
+  await u.save();
+
+  const token = signToken(u);
+  res.json({ token, user: toPublicUser(u) });
+};
+
 exports.me = async (req, res) => {
   const auth = req.headers.authorization
   if (!auth) return res.status(401).json({ error: 'missing token' })
@@ -42,9 +126,11 @@ exports.me = async (req, res) => {
   if (!token) return res.status(401).json({ error: 'bad auth header' })
   try {
     const decoded = jwt.verify(token, getJwtSecret())
-    const user = await User.findById(decoded.id).select('-password')
+    // Task 4.1: Handle both old (id) and new (userId) token formats for compatibility
+    const userId = decoded.userId || decoded.id;
+    const user = await User.findById(userId).select('-password')
     if (!user) return res.status(401).json({ error: 'user not found' })
-    return res.json({ user })
+    return res.json({ user: toPublicUser(user) })
   } catch (e) {
     return res.status(401).json({ error: 'invalid token' })
   }

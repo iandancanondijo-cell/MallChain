@@ -67,15 +67,20 @@ async function getStats(req, res) {
 
     const chainId = nodeRes?.default_node_info?.network || 'unknown'
     const moniker = nodeRes?.default_node_info?.moniker || 'unknown'
-    const latestHeight = blockRes?.block?.header?.height || '0'
+    const latestHeight = parseInt(blockRes?.block?.header?.height || '0', 10)
     const txCount = blockRes?.block?.data?.txs?.length || 0
+    const nodeVersion = nodeRes?.default_node_info?.version || 'unknown'
+    const blockTime = blockRes?.block?.header?.time || new Date().toISOString()
 
     return res.json({
-      chain: chainId,
-      latestHeight,
-      txCount,
-      moniker,
-      timestamp: new Date().toISOString(),
+      height: latestHeight,
+      chainId,
+      numTxs: txCount,
+      totalTxs: latestHeight, // Approximate total as height for now
+      averageBlockTime: 6, // Default 6s for Cosmos SDK
+      lastBlockHeight: latestHeight,
+      nodeVersion,
+      time: blockTime,
     })
   } catch (err) {
     if (err instanceof AppError) throw err

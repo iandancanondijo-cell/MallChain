@@ -3,14 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "start": "node -r dotenv/config src/index.js",
+    "dev": "nodemon -r dotenv/config src/index.js",
     "wallet-service": "node wallet-service.js",
     "explorer:init-db": "node explorer/init-db.js",
     "explorer:indexer": "node explorer/indexer.js",
     "explorer:api": "node explorer/server.js",
     "explorer:dev": "nodemon explorer/server.js",
-    "explorer:all": "concurrently \"npm run explorer:indexer\" \"npm run explorer:api\""
+    "explorer:all": "concurrently \"npm run explorer:indexer\" \"npm run explorer:api\"",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "@cosmjs/proto-signing": "^0.28.8",
@@ -24,6 +27,7 @@
     "bip39": "^3.1.0",
     "bullmq": "^1.81.0",
     "cors": "^2.8.6",
+    "csurf": "^1.11.0",
     "dotenv": "^17.2.3",
     "elliptic": "^6.6.1",
     "ethers": "^6.0.0",
@@ -43,6 +47,9 @@
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
-    "nodemon": "^3.1.11"
+    "eslint": "^8.57.1",
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.11",
+    "supertest": "^6.3.3"
   }
 }

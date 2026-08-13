@@ -5,6 +5,8 @@ const User = require('../models/user');
 const AuditLog = require('../models/AuditLog');
 const ValidatorApplication = require('../models/ValidatorApplication');
 const TaskSubmission = require('../models/TaskSubmission');
+const LiquidityReconciliation = require('../models/LiquidityReconciliation');
+const WithdrawalRequest = require('../models/WithdrawalRequest');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/adminAuth');
 const { BurnPolicy, DynamicBurnThreshold } = require('../models/BurnPolicy');
 const TreasuryLedger = require('../models/TreasuryLedger');
@@ -482,6 +484,42 @@ router.post('/reconciliation/run', async (req, res) => {
     const result = await runReconciliationJob();
     await auditLog('system_reconciliation_run', req.user, 'Reconciliation job triggered');
     return res.json({ ok: true, result });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+router.get('/reconciliation/items', async (req, res) => {
+  try {
+    const { status, limit = 100 } = req.query;
+    const query = {};
+    if (status) query.status = status;
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const items = await LiquidityReconciliation.find(query)
+      .sort({ createdAt: -1 })
+      .limit(safeLimit)
+      .lean();
+
+    return res.json({ ok: true, items, total: items.length });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+router.get('/withdrawals', async (req, res) => {
+  try {
+    const { status, limit = 100 } = req.query;
+    const query = {};
+    if (status) query.status = status;
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const withdrawals = await WithdrawalRequest.find(query)
+      .sort({ createdAt: -1 })
+      .limit(safeLimit)
+      .lean();
+
+    return res.json({ ok: true, withdrawals, total: withdrawals.length });
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err) });
   }

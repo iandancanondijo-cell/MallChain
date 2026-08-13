@@ -249,14 +249,17 @@ async function getLatest() {
     // status-only fallback
   }
 
+  // Return in format expected by frontend BlockData interface
   return {
-    success: true,
-    latestBlock: Number(sync.latest_block_height || 0),
-    latestHash: sync.latest_block_hash,
-    latestBlockTime: time,
-    catchingUp: Boolean(sync.catching_up),
+    height: Number(sync.latest_block_height || 0),
+    hash: sync.latest_block_hash || '',
+    time: time.iso || new Date().toISOString(),
+    timestamp: time.unix || Math.floor(Date.now() / 1000),
+    numTxs: block?.txCount || 0,
+    proposer: block?.proposer || '',
+    gasUsed: 0,
+    gasWanted: 0,
     chainId: sync.chain_id || config.chain.id,
-    block,
   };
 }
 

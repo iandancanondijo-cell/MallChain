@@ -57,6 +57,14 @@ const quoteIdSchema = Joi.string().required().messages({
   'any.required': 'Quote ID is required',
 })
 
+const phoneSchema = Joi.string()
+  .pattern(/^254\d{9}$/)
+  .required()
+  .messages({
+    'string.pattern.base': 'Phone number must be in Kenyan format 2547XXXXXXXX',
+    'any.required': 'Phone number is required',
+  })
+
 /**
  * Signature validation
  */
@@ -202,6 +210,33 @@ const buyCreditSchema = Joi.object({
   }),
 }).required()
 
+const buyReserveSchema = Joi.object({
+  walletAddress: addressSchema,
+  phone: phoneSchema,
+  amount: amountSchema,
+  fiat: Joi.alternatives().try(Joi.number().positive(), Joi.string().trim().min(1)).required(),
+  currency: Joi.string().valid('KES').default('KES'),
+}).required()
+
+const buyMpesaInitiateSchema = Joi.object({
+  quoteId: quoteIdSchema,
+  phone: phoneSchema,
+  amount: amountSchema,
+  description: memoSchema,
+}).required()
+
+const buyStatusParamSchema = Joi.object({
+  paymentId: Joi.string().required(),
+}).required()
+
+const withdrawMpesaSchema = Joi.object({
+  walletAddress: addressSchema,
+  phone: phoneSchema,
+  amountMlcns: amountSchema,
+  amountKes: amountSchema,
+  currency: Joi.string().valid('KES').default('KES'),
+}).required()
+
 /**
  * WALLET CONNECTION SCHEMA
  * Validates: POST /api/wallet-connection/connect
@@ -276,29 +311,6 @@ function validateQuery(schema) {
 }
 
 module.exports = {
-  addressSchema,
-  amountSchema,
-  txHashSchema,
-  memoSchema,
-  quoteIdSchema,
-  signatureSchema,
-  gasPriceSchema,
-  sendSchema,
-  sendMallcoinsSchema,
-  processPaymentSchema,
-  txHashParamSchema,
-  stakingActionSchema,
-  governanceVoteSchema,
-  liquiditySchema,
-  buyQuoteSchema,
-  walletConnectionSchema,
-  sellSchema,
-  validate,
-  validateRequest,
-  validateQuery,
-}
-
-module.exports = {
   // Schemas
   addressSchema,
   amountSchema,
@@ -314,7 +326,11 @@ module.exports = {
   governanceVoteSchema,
   liquiditySchema,
   buyQuoteSchema,
+  buyReserveSchema,
+  buyMpesaInitiateSchema,
+  buyStatusParamSchema,
   buyCreditSchema,
+  withdrawMpesaSchema,
   walletConnectionSchema,
   sellSchema,
 

@@ -1,14 +1,15 @@
 const express = require('express')
 const router = express.Router()
 const ctrl = require('../controllers/marketController')
+const { preventNoSQLInjection, sanitizeInputs, limitPayloadSize } = require('../middleware/inputValidation')
 
-// GET /api/market/price
-router.get('/price', ctrl.getMarketPrice)
-// GET /api/market/supply
-router.get('/supply', ctrl.getTotalSupply)
-// GET /api/market/monthly_emissions
-router.get('/monthly_emissions', ctrl.getMonthlyEmissions)
-// GET /api/market/monthly_breakdown
-router.get('/monthly_breakdown', ctrl.getMonthlyBreakdown)
+// Task 8.6: Apply input validation and sanitization middleware to market routes
+// Protect against NoSQL injection and XSS attacks on all endpoints
+
+// GET endpoints - prevent NoSQL injection on queries
+router.get('/price', preventNoSQLInjection, ctrl.getMarketPrice)
+router.get('/supply', preventNoSQLInjection, ctrl.getTotalSupply)
+router.get('/monthly_emissions', preventNoSQLInjection, ctrl.getMonthlyEmissions)
+router.get('/monthly_breakdown', preventNoSQLInjection, ctrl.getMonthlyBreakdown)
 
 module.exports = router

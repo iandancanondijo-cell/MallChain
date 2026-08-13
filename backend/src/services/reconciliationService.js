@@ -6,6 +6,7 @@ const console = new Console(stdout, stderr);
 
 const MallcoinPurchase = require('../models/MalicoinPurchase');
 const LiquidityReconciliation = require('../models/LiquidityReconciliation');
+const logger = require('../utils/logger');
 
 // Scan for purchases with creditTxHash but liquidityError set
 async function detectFailedLiquidityAdds() {
@@ -55,7 +56,13 @@ async function compensateFailedLiquidity(recon) {
     // Pull back MLCNS from user wallet to faucet operator
     // This is a reversal; in production, implement via MsgTransfer with from=userWallet, to=faucetAddress
     // For now, log and mark as resolved without actual reversal (manual review needed)
-    console.log(`[Reconciliation] Attempting compensation for ${recon.purchaseId}: refund ${recon.mlcnsAmount} MLCNS from ${recon.walletAddress}`);
+    const redactedAddress = recon.walletAddress ? `${recon.walletAddress.slice(0, 6)}...${recon.walletAddress.slice(-4)}` : 'unknown';
+    logger.info('[Reconciliation] Attempting compensation', {
+      purchaseId: recon.purchaseId,
+      mlcnsAmount: recon.mlcnsAmount,
+      walletAddress: redactedAddress,
+      action: 'compensation_attempt'
+    });
 
     // TODO: implement actual on-chain reversal (e.g., MsgTransfer from user to faucet)
     // const reverseTx = await transferMlcnsReverse(recon.walletAddress, recon.mlcnsAmount);
@@ -65,16 +72,21 @@ async function compensateFailedLiquidity(recon) {
     // Silently marking 'resolved' without a reversal is a financial integrity bug.
     recon.status = 'pending_manual';
     recon.resolvedAt = null;
-    console.warn(
-      `[Reconciliation] MANUAL ACTION REQUIRED: compensate ${recon.mlcnsAmount} MLCNS ` +
-      `for ${recon.walletAddress} (purchaseId: ${recon.purchaseId}). ` +
-      'Implement on-chain reversal before enabling auto-resolution.'
-    );
+    logger.warn('[Reconciliation] Manual action required', {
+      mlcnsAmount: recon.mlcnsAmount,
+      walletAddress: redactedAddress,
+      purchaseId: recon.purchaseId,
+      action: 'manual_review_needed'
+    });
     await recon.save();
 
     return recon;
   } catch (err) {
-    console.error('[Reconciliation] Compensation failed:', err.message || err);
+    logger.error('[Reconciliation] Compensation failed', {
+      purchaseId: recon.purchaseId,
+      error: err.message || err,
+      action: 'compensation_failed'
+    });
     recon.status = 'detected'; // reset to detected for retry
     await recon.save();
     return null;
@@ -84,19 +96,19 @@ async function compensateFailedLiquidity(recon) {
 // Run periodic reconciliation job
 async function runReconciliationJob() {
   try {
-    console.log('[Reconciliation] Job started');
+    logger.info('[Reconciliation] Job started');
 
     const detected = await detectFailedLiquidityAdds();
-    console.log(`[Reconciliation] Detected ${detected.length} failed liquidity adds`);
+    logger.info('[Reconciliation] Detected failed liquidity adds', { count: detected.length });
 
     for (const recon of detected) {
       await compensateFailedLiquidity(recon);
     }
 
-    console.log('[Reconciliation] Job completed');
+    logger.info('[Reconciliation] Job completed');
     return { detected: detected.length };
   } catch (err) {
-    console.error('[Reconciliation] Job failed:', err.message || err);
+    logger.error('[Reconciliation] Job failed', { error: err.message || err });
     return { error: err.message };
   }
 }

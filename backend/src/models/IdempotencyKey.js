@@ -17,4 +17,10 @@ const IdempotencyKeySchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now, index: { expires: 86400 } }, // auto-expire after 24h
 });
 
+// Add indexes for common query patterns
+IdempotencyKeySchema.index({ walletAddress: 1 })
+IdempotencyKeySchema.index({ status: 1 })
+IdempotencyKeySchema.index({ 'result.txHash': 1 })
+IdempotencyKeySchema.index({ walletAddress: 1, status: 1 })
+
 module.exports = mongoose.model('IdempotencyKey', IdempotencyKeySchema);

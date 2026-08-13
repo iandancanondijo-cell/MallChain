@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
 const WalletTransactionSchema = new Schema({
-  user_id: { type: Schema.Types.Mixed, required: true, index: true },
+  user_id: { type: Schema.Types.ObjectId, required: true, index: true, ref: 'User' },
   type: { type: String, enum: ['credit', 'debit'], required: true },
   amount: { type: Number, required: true },
   currency: { type: String, default: 'MLPTS' },

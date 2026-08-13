@@ -1,3 +1,7 @@
+// Load environment variables - disable dotenvx if present
+if (process.env.DOTENVX_LOADED) {
+  console.warn('dotenvx detected, using standard dotenv instead');
+}
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -11,6 +15,9 @@ const { createLimiter } = require('./middleware/rateLimiter')
 const apiKeyAuth = require('./middleware/apiKeyAuth')
 const { errorHandler } = require('./utils/errorHandler')
 const logger = require('./utils/logger')
+const correlationId = require('./middleware/correlationId')
+const { metricsMiddleware, register } = require('./utils/metrics')
+const { initCacheService } = require('./services/cacheService')
 
 const authRoutes = require('./routes/auth');
 const vaultRoutes = require('./routes/vault');
@@ -20,8 +27,10 @@ const sendRoutes = require('./routes/send');
 const blockchainRoutes = require('./routes/blockchain');
 const blockchainTxRoutes = require('./routes/blockchainTx');
 const walletsRoutes = require('./routes/wallets');
+const kycRoutes = require('./routes/kyc');
 const { startBlockchainListener } = require('./services/blockchainListener');
 const walletConnectionRoutes = require('./routes/walletConnection');
+const walletCreationRoutes = require('./routes/walletCreation');
 const governanceRoutes = require('./routes/governance');
 const liquidityRoutes = require('./routes/liquidity');
 const mallpointsRoutes = require('./routes/mallpoints');
@@ -41,6 +50,7 @@ const axios = require('axios');
 const http = require('http')
 const net = require('net')
 const { Server } = require('socket.io')
+const csurf = require('csurf')
 
 // Real-time services
 const { startBlockListener } = require('../services/blockListener');
@@ -60,16 +70,16 @@ if (config.isProduction) {
   app.set('trust proxy', 1);
 }
 
-if (!JWT_SECRET) console.warn('JWT_SECRET is not configured; authentication tokens are insecure.');
-if (!SESSION_SECRET) console.warn('SESSION_SECRET is not configured; session cookies are insecure.');
+if (!JWT_SECRET) logger.warn('JWT_SECRET is not configured; authentication tokens are insecure.');
+if (!SESSION_SECRET) logger.warn('SESSION_SECRET is not configured; session cookies are insecure.');
 
 app.use(helmet({
   contentSecurityPolicy: config.isProduction
     ? {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'"],
           imgSrc: ["'self'", "data:", "blob:"],
           connectSrc: ["'self'", config.frontendUrl || 'http://localhost:5173'],
           fontSrc: ["'self'"],
@@ -79,10 +89,47 @@ app.use(helmet({
       }
     : false,
   crossOriginResourcePolicy: { policy: 'cross-origin' },
+  hsts: config.isProduction ? {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+    force: true,
+  } : false,
 }));
 app.disable('x-powered-by');
+app.use(correlationId);
+app.use(metricsMiddleware);
+/**
+ * Task 3.1-3.6: CORS (Cross-Origin Resource Sharing) Configuration
+ * 
+ * CORS allows the frontend (at different domain/port) to make requests to the backend.
+ * Without proper CORS configuration, browsers block cross-origin requests.
+ * 
+ * Configuration:
+ * - getAllowedOrigins() reads FRONTEND_URL and CORS_ORIGINS env vars
+ * - CORS_ORIGINS: comma-separated list of allowed origins (e.g., "http://localhost:5173,https://app.example.com")
+ * - credentials: true allows cookies and Authorization headers in requests
+ * 
+ * How it works:
+ * 1. Browser makes request from origin A to server at origin B
+ * 2. Browser checks Access-Control-Allow-Origin response header
+ * 3. If origin A matches, browser allows script to access response
+ * 4. If no match or missing, browser blocks access (CORS error)
+ * 
+ * Security considerations:
+ * - Only specific origins can access backend (not "*" in production)
+ * - credentials: true requires explicit origin (cannot use "*")
+ * - Frontend must set Authorization header in requests (handled in API service)
+ * - Preflight requests (OPTIONS) are handled automatically by cors middleware
+ */
 app.use(cors({
+  // getAllowedOrigins() returns array of origins from FRONTEND_URL and CORS_ORIGINS env vars
+  // Example: ["http://localhost:5173", "https://app.example.com"]
   origin: getAllowedOrigins(),
+  
+  // Allow credentials (cookies, auth headers) in cross-origin requests
+  // Without this, Authorization: Bearer headers are blocked by browser
+  // Task 3.5: credentials: true enables Authorization header passing from frontend
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));
@@ -90,9 +137,28 @@ const sanitizeSensitive = require('./middleware/sanitizeSensitive');
 app.use(sanitizeSensitive);
 app.use(morgan(config.isProduction ? 'combined' : 'dev'));
 
+// Task 7.1: API Rate Limiting
+// 
+// Protects backend from abuse by limiting request rate per IP address
+// Prevents denial of service (DoS) attacks and runaway client loops
+//
+// Configuration:
+// - windowMs: Time window in milliseconds (e.g., 15 minutes)
+// - max: Maximum requests per window per IP
+//
+// Example: max 100 requests per 15 minutes = 6.7 requests/minute (reasonable for most APIs)
+// Rejected requests get 429 Too Many Requests status code
+//
+// Task 6.3: 429 error handling on frontend - user sees "wait X seconds" message
+
 const apiLimiter = createLimiter({
   windowMs: config.rateLimit.apiWindowMs,
   max: config.rateLimit.txMax,
+});
+
+const minesLimiter = createLimiter({
+  windowMs: 60000,
+  max: 100,
 });
 
 app.use((req, res, next) => {
@@ -103,8 +169,21 @@ app.use((req, res, next) => {
   })
   next()
 })
+
+// Apply rate limiting to specific critical routes
+// Task 7.1: Transaction endpoint uses apiLimiter (strict limits on expensive operations)
 app.use('/api/tx', apiLimiter);
+// Task 7.1: Treasury endpoint uses apiLimiter (financial operations need rate limiting)
 app.use('/api/mallwallet/treasury', apiLimiter);
+// Task 7.1: Mines endpoint uses minesLimiter (gaming feature, moderate rate limiting)
+app.use('/api/mines', minesLimiter);
+
+// Request ID middleware for tracing
+app.use((req, res, next) => {
+  req.id = req.headers['x-request-id'] || `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  res.setHeader('X-Request-ID', req.id);
+  next();
+});
 
 // Passport for OAuth (Google)
 app.use(session({
@@ -112,19 +191,30 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax'
+    secure: config.isProduction,
+    sameSite: 'strict',
+    httpOnly: true
   }
 }));
 app.use(passport.initialize());
 app.use(passport.session());
 require('./utils/passport');
 
+// CSRF protection - only apply to specific session-based routes
+// Disabled globally to prevent issues with public API endpoints
+// CSRF can be applied to specific routes that need session protection (e.g., OAuth callbacks)
+const csrfProtection = csurf({ cookie: true });
+
+// CSRF token endpoint for frontend (if needed for session-based auth)
+app.get('/api/csrf-token', csrfProtection, (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
+});
+
 // Validate critical runtime secrets and configuration early
 try {
   if (typeof validateRuntimeSecrets === 'function') validateRuntimeSecrets();
 } catch (err) {
-  console.error('Runtime secret validation failed:', err.message);
+  logger.error('Runtime secret validation failed', { error: err.message });
   process.exit(1);
 }
 
@@ -156,11 +246,68 @@ async function checkChainHealth() {
 app.get('/api/health', async (req, res) => {
   try {
     const chainStatus = await checkChainHealth();
-    return res.json({ status: 'ok', backend: 'ok', chain: chainStatus });
+    
+    // Check database connectivity
+    let dbStatus = 'ok';
+    try {
+      if (mongoose.connection.readyState === 1) {
+        dbStatus = 'ok';
+      } else {
+        dbStatus = 'disconnected';
+      }
+    } catch (dbErr) {
+      dbStatus = 'error';
+    }
+
+    // Check Redis connectivity
+    let redisStatus = 'ok';
+    try {
+      if (global.redisClient) {
+        await global.redisClient.ping();
+        redisStatus = 'ok';
+      } else {
+        redisStatus = 'not_configured';
+      }
+    } catch (redisErr) {
+      redisStatus = 'error';
+    }
+
+    return res.json({ 
+      status: 'ok', 
+      backend: 'ok', 
+      chain: chainStatus,
+      database: { status: dbStatus },
+      redis: { status: redisStatus }
+    });
   } catch (err) {
-    console.warn('Chain health check failed:', err.message || err);
+    logger.warn('Chain health check failed', { error: err.message || err });
     return res.status(503).json({ status: 'degraded', backend: 'ok', chain: { status: 'down', error: err.message || 'chain unavailable' } });
   }
+});
+
+// Readiness probe - checks if service can accept traffic
+app.get('/api/ready', async (req, res) => {
+  try {
+    // Check if blockchain is responding
+    const chainStatus = await checkChainHealth();
+    if (chainStatus.status !== 'ok') {
+      return res.status(503).json({ status: 'not_ready', reason: 'blockchain_unavailable' });
+    }
+
+    // Check database
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ status: 'not_ready', reason: 'database_unavailable' });
+    }
+
+    return res.json({ status: 'ready' });
+  } catch (err) {
+    return res.status(503).json({ status: 'not_ready', reason: err.message });
+  }
+});
+
+// Liveness probe - checks if service is running
+app.get('/api/live', (req, res) => {
+  res.json({ status: 'alive' });
 });
 
 app.get('/api', (req, res) => res.json({
@@ -168,6 +315,12 @@ app.get('/api', (req, res) => res.json({
   version: process.env.npm_package_version || '0.1.0',
   routes: ['/api/auth', '/api/vault', '/api/tx', '/api/market', '/api/send', '/api/blockchain', '/api/blockchain/tx', '/api/mallwallet', '/metrics'],
 }));
+
+// Prometheus metrics endpoint
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', register.contentType);
+  res.end(await register.metrics());
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/vault', vaultRoutes);
@@ -177,13 +330,17 @@ app.use('/api/send', sendRoutes);
 app.use('/api/blockchain', blockchainRoutes);
 app.use('/api/blockchain/tx', blockchainTxRoutes);
 app.use('/api/wallets', walletsRoutes);
+app.use('/api/kyc', kycRoutes);
 app.use('/api/walletConnection', walletConnectionRoutes);
+app.use('/api/wallet', walletCreationRoutes);
 app.use('/api/governance', governanceRoutes);
 app.use('/api/liquidity', liquidityRoutes);
 app.use('/api/mallpoints', mallpointsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/buy', buyRoutes);
+const withdrawRoutes = require('./routes/withdraw');
+app.use('/api/withdraw', withdrawRoutes);
 app.use('/api/staking', stakingRoutes);
 app.use('/api/validators', validatorsRoutes);
 app.use('/api/onchain', onchainRoutes);
@@ -238,15 +395,15 @@ async function startBackgroundWorkers() {
     const redisReady = await checkRedisAvailable(redisHost, redisPort)
 
     if (!redisReady) {
-      console.warn('Redis is unavailable; background workers will remain disabled')
+      logger.warn('Redis is unavailable; background workers will remain disabled')
       return
     }
 
     require('./mallwallet/workers/transactionWorker');
     require('./workers/transactionWorker');
-    console.log('Background workers started')
+    logger.info('Background workers started')
   } catch (err) {
-    console.warn('Background workers were not started:', err.message || err)
+    logger.warn('Background workers were not started', { error: err.message || err })
   }
 }
 
@@ -258,7 +415,7 @@ try {
     res.end(await register.metrics());
   });
 } catch (err) {
-  console.warn('Prometheus monitoring not available:', err.message || err);
+  logger.warn('Prometheus monitoring not available', { error: err.message || err });
 }
 
 app.get('/api/protected', require('./middleware/auth'), (req, res) => {
@@ -270,101 +427,187 @@ async function start() {
   mongoose.set('strictQuery', false);
   try {
     await mongoose.connect(mongo);
-    console.log('Mongo connected to', mongo);
+    logger.info('Mongo connected', { mongo });
     await initializeDefaultBurnPolicies();
     await initializeDefaultDynamicThresholds();
   } catch (err) {
-    console.warn('MongoDB unavailable; starting server in degraded mode:', err.message || err);
+    logger.warn('MongoDB unavailable; starting server in degraded mode', { error: err.message || err });
   }
-  // create HTTP server and Socket.IO for realtime updates
-  const server = http.createServer(app)
-  const io = new Server(server, {
-    cors: {
-      origin: process.env.FRONTEND_URL || '*',
-      methods: ['GET', 'POST']
-    },
-    transports: ['websocket', 'polling']
+
+  // Initialize Redis cache service if Redis is available
+  if (global.redisClient) {
+    try {
+      initCacheService(global.redisClient);
+      logger.info('Redis cache service initialized');
+    } catch (err) {
+      logger.warn('Failed to initialize cache service', { error: err.message });
+    }
+  }
+
+  // Task 5.1-5.12: Socket.IO Real-Time Communication Setup
+// 
+// Socket.IO provides WebSocket connection for real-time updates:
+// - Wallet balance changes
+// - New blocks mined
+// - Market activity
+// - Price updates
+//
+// Connection flow:
+// 1. Frontend connects to backend Socket.IO server on app startup
+// 2. Socket.IO handles fallback to polling if WebSocket unavailable
+// 3. Backend broadcasts events to subscribed rooms (e.g., wallet:address)
+// 4. Frontend listens on event listeners to update UI
+//
+// Room isolation:
+// - Each wallet address gets its own room (wallet:mall1abc...)
+// - Multiple clients can subscribe to same wallet
+// - Server broadcasts wallet:update only to subscribed clients
+// - Prevents unauthorized access to other wallets' data
+const server = http.createServer(app)
+const allowedOrigins = [process.env.FRONTEND_URL, 'http://localhost:5173', 'http://127.0.0.1:5173'].filter(Boolean)
+const io = new Server(server, {
+  // CORS configuration for Socket.IO connections
+  // Must match frontend origin to allow WebSocket handshake
+  cors: {
+    origin: allowedOrigins.length > 0 ? allowedOrigins : ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
+  // Support both WebSocket and HTTP long-polling transports
+  // Polling fallback ensures connections work even with restrictive proxies
+  transports: ['websocket', 'polling']
+})
+
+global.io = io
+
+// C13: Global error handler (must be after all routes)
+const errorHandler = require('./middleware/errorHandler');
+app.use(errorHandler);
+
+// Task 5.1: Main connection handler for new Socket.IO clients
+io.on('connection', socket => {
+  logger.info('Socket connected', { socketId: socket.id })
+
+  // Send initial connection message to notify client of successful connection
+  // Timestamp helps detect connection delays in real-time debug scenarios
+  socket.emit('system', {
+    message: 'Connected to Mallcoin realtime network',
+    timestamp: Date.now()
   })
 
-  global.io = io
+  // Task 5.3: Handle wallet subscription requests
+  // Clients emit 'subscribe:wallet' with their address to receive balance updates
+  socket.on('subscribe:wallet', (address) => {
+    // Task 8.7: Validate wallet address before allowing subscription
+    // Prevents malformed subscriptions from filling server memory or causing errors
+    if (!address || typeof address !== 'string') {
+      logger.warn('Invalid wallet subscription attempt', { socketId: socket.id, address })
+      socket.emit('error', { message: 'Invalid wallet address format' })
+      return
+    }
 
-  io.on('connection', socket => {
-    console.log('✅ Socket connected:', socket.id)
+    // Validate Mallchain address format: mall1<38-58 lowercase alphanumeric>
+    // Format requirement prevents subscription to arbitrary room names
+    // Malformed addresses like "mail1abc" or "mall1ABC" are rejected
+    const addressPattern = /^mall1[a-z0-9]{38,58}$/
+    if (!addressPattern.test(address)) {
+      logger.warn('Invalid wallet address format', { socketId: socket.id, address })
+      socket.emit('error', { message: 'Invalid wallet address: must be mall1...' })
+      return
+    }
 
-    // Send initial connection message
-    socket.emit('system', {
-      message: 'Connected to Mallcoin realtime network',
-      timestamp: Date.now()
-    })
+    // Add socket to named room
+    // Socket.IO automatically handles room broadcast (e.g., io.to('wallet:address').emit())
+    socket.join(`wallet:${address}`)
+    logger.info('Socket subscribed to wallet', { socketId: socket.id, address })
 
-    // Handle wallet subscription
-    socket.on('subscribe:wallet', (address) => {
-      socket.join(`wallet:${address}`)
-      console.log(`📊 Socket ${socket.id} subscribed to wallet ${address}`)
-
-      // Send current cached wallet data if available
-      const cached = walletSyncService.getCachedWallet(address)
-      if (cached) {
-        socket.emit('wallet:update', cached)
-      }
-    })
-
-    // Handle wallet unsubscription
-    socket.on('unsubscribe:wallet', (address) => {
-      socket.leave(`wallet:${address}`)
-      console.log(`🚫 Socket ${socket.id} unsubscribed from wallet ${address}`)
-    })
-
-    // Handle market feed subscription
-    socket.on('subscribe:market', () => {
-      socket.join('market:feed')
-      socket.emit('market:feed', marketFeed.getRecentEvents(50))
-    })
-
-    // Handle price updates subscription
-    socket.on('subscribe:price', () => {
-      socket.join('price:updates')
-      socket.emit('price:current', priceEngine.getMarketData())
-    })
-
-    // Handle block updates subscription
-    socket.on('subscribe:blocks', () => {
-      socket.join('blocks:live')
-      console.log(`📦 Socket ${socket.id} subscribed to block updates`)
-    })
-
-    socket.on('disconnect', () => {
-      console.log('❌ Socket disconnected:', socket.id)
-    })
-
-    // Error handling
-    socket.on('error', (error) => {
-      console.error('Socket error:', error)
-    })
+    // Task 5.6: Send cached wallet data if available
+    // Prevents initial UI flicker by providing immediate data
+    // walletSyncService maintains cache of recent wallet states
+    const cached = walletSyncService.getCachedWallet(address)
+    if (cached) {
+      socket.emit('wallet:update', cached)
+    }
   })
 
-  server.listen(PORT, async () => {
-    console.log('🚀 Server listening on', PORT);
-    
-    // Start background workers
-    await startBackgroundWorkers()
-    
-    // Start blockchain event listener (pulls from RPC)
-    const stopBlockListener = startBlockListener()
+  // Task 5.4: Handle wallet unsubscription requests
+  // Clients emit 'unsubscribe:wallet' when leaving a wallet view
+  socket.on('unsubscribe:wallet', (address) => {
+    // Task 8.7: Validate wallet address before unsubscribing
+    // Same validation as subscribe to prevent room injection
+    if (!address || typeof address !== 'string') {
+      logger.warn('Invalid wallet unsubscribe attempt', { socketId: socket.id, address })
+      return
+    }
 
-    // Daily volume reset
-    setInterval(() => {
-      priceEngine.resetDailyVolume()
-      console.log('💵 Daily volume reset')
-    }, 24 * 60 * 60 * 1000)
+    const addressPattern = /^mall1[a-z0-9]{38,58}$/
+    if (!addressPattern.test(address)) {
+      logger.warn('Invalid wallet address format for unsubscribe', { socketId: socket.id, address })
+      return
+    }
 
-    // Cleanup on shutdown
-    process.on('SIGINT', () => {
-      console.log('\nShutting down...')
-      if (stopBlockListener) stopBlockListener()
-      process.exit(0)
-    })
-  });
+    // Remove socket from room - stops receiving updates for this wallet
+    socket.leave(`wallet:${address}`)
+    logger.info('Socket unsubscribed from wallet', { socketId: socket.id, address })
+  })
+
+  // Task 5.5: Market feed subscription
+  // All clients subscribe to single "market:feed" room for market-wide updates
+  socket.on('subscribe:market', () => {
+    socket.join('market:feed')
+    // Send recent market events to new subscriber
+    socket.emit('market:feed', marketFeed.getRecentEvents(50))
+  })
+
+  // Task 5.5: Price updates subscription
+  // All clients subscribe to "price:updates" room for price data
+  socket.on('subscribe:price', () => {
+    socket.join('price:updates')
+    // Send current market prices to new subscriber
+    socket.emit('price:current', priceEngine.getMarketData())
+  })
+
+  // Task 5.5: Live blocks subscription
+  // All clients subscribe to "blocks:live" room for new blockchain blocks
+  socket.on('subscribe:blocks', () => {
+    socket.join('blocks:live')
+    logger.info('Socket subscribed to block updates', { socketId: socket.id })
+  })
+
+  // Task 5.1: Handle socket disconnection
+  // Cleanup: Socket.IO automatically removes socket from all rooms
+  socket.on('disconnect', () => {
+    logger.info('Socket disconnected', { socketId: socket.id })
+  })
+
+  // Handle socket errors
+  // Logs errors for debugging connection issues
+  socket.on('error', (error) => {
+    logger.error('Socket error', { socketId: socket.id, error })
+  })
+})
+
+  server.listen(PORT);
+  logger.info('Server listening', { port: PORT });
+  
+  // Start background workers (non-blocking)
+  startBackgroundWorkers().catch(err => logger.error('Background workers failed', { error: err }));
+  
+  // Start blockchain event listener (pulls from RPC)
+  const stopBlockListener = startBlockListener()
+
+  // Daily volume reset
+  setInterval(() => {
+    priceEngine.resetDailyVolume()
+    logger.info('Daily volume reset')
+  }, 24 * 60 * 60 * 1000)
+
+  // Cleanup on shutdown
+  process.on('SIGINT', () => {
+    logger.info('Shutting down...')
+    if (stopBlockListener) stopBlockListener()
+    process.exit(0)
+  })
 }
 
-start().catch(err => { console.error(err); process.exit(1); });
+start().catch(err => { logger.error('Server startup failed', { error: err }); process.exit(1); });

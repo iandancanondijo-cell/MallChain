@@ -11,7 +11,7 @@ const LiquidityReconciliationSchema = new mongoose.Schema({
   mlcnsAmount: { type: Number, required: true },
   fiatAmount: { type: Number, required: true },
   reason: { type: String }, // error message from failed liquidity add
-  status: { type: String, enum: ['detected', 'compensating', 'resolved'], default: 'detected' },
+  status: { type: String, enum: ['detected', 'compensating', 'pending_manual', 'resolved'], default: 'detected' },
   compensationTx: { type: String }, // tx hash of compensation (e.g., refund or rollback)
   createdAt: { type: Date, default: Date.now },
   resolvedAt: { type: Date },

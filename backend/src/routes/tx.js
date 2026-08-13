@@ -2,25 +2,41 @@ const express = require('express');
 const router = express.Router();
 const txCtrl = require('../controllers/txController');
 const auth = require('../middleware/auth');
+const { preventNoSQLInjection, sanitizeInputs, limitPayloadSize, validateQuery, schemas } = require('../middleware/inputValidation');
+const Joi = require('joi');
+
+// Task 8.6: Input validation for transaction query parameters
+const historyQuerySchema = Joi.object({
+  address: Joi.string()
+    .pattern(/^mall1[a-z0-9]{38,58}$/)
+    .required()
+    .messages({
+      'string.pattern.base': 'Invalid Mallchain address format',
+    }),
+  status: Joi.string()
+    .valid('all', 'confirmed', 'pending', 'failed')
+    .default('all'),
+  page: Joi.string()
+    .pattern(/^\d+$/)
+    .default('1'),
+  limit: Joi.string()
+    .pattern(/^\d+$/)
+    .default('20'),
+});
 
 // ---- Transactions history for frontend ----
 // MUST be before /:id wildcard or it gets caught by it
 // GET /api/tx/history?address=...&status=all|confirmed|pending|failed&page=1&limit=20
-router.get('/history', async (req, res) => {
+router.get('/history', 
+  validateQuery(historyQuerySchema),
+  async (req, res) => {
   try {
     const {
       address,
       status = 'all',
       page = '1',
       limit = '20',
-    } = req.query;
-
-    if (!address) {
-      return res.status(400).json({
-        success: false,
-        error: 'address_required',
-      });
-    }
+    } = req.validatedQuery;
 
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.min(Math.max(1, parseInt(limit) || 20), 100);
@@ -104,10 +120,33 @@ router.get('/history', async (req, res) => {
   }
 });
 
-router.get('/', auth, txCtrl.list);
-router.get('/:id', auth, txCtrl.get);
-router.post('/relay', auth, txCtrl.relay);
-router.post('/', auth, txCtrl.create);
+// Task 8.6: Apply input validation to all GET requests with parameters
+const getSchema = Joi.object({
+  id: Joi.string()
+    .alphanum()
+    .max(64)
+    .optional()
+    .messages({
+      'string.alphanum': 'ID must contain only alphanumeric characters',
+    }),
+});
+
+router.get('/', auth, preventNoSQLInjection, txCtrl.list);
+router.get('/:id', auth, preventNoSQLInjection, txCtrl.get);
+router.post('/relay', 
+  auth,
+  limitPayloadSize(0.5),
+  preventNoSQLInjection,
+  sanitizeInputs,
+  txCtrl.relay
+);
+router.post('/', 
+  auth,
+  limitPayloadSize(0.5),
+  preventNoSQLInjection,
+  sanitizeInputs,
+  txCtrl.create
+);
 
 module.exports = router;
 

@@ -74,7 +74,8 @@ async function addLiquidityOnChain({ mnemonic, providerAddress, poolId, tokenA, 
   }
 
   const estimatedGas = await client.simulate(providerAddress, [msg], memo).catch(() => 250000)
-  const gas = Math.min(Math.ceil(estimatedGas * 1.3), 800000)
+  // Reduce gas buffer from 1.3 to 1.15 to minimize overpayment while maintaining safety margin
+  const gas = Math.min(Math.ceil(estimatedGas * 1.15), 800000)
   const fee = calculateFee(gas, GasPrice.fromString(config.chain.gasPrice))
 
   const result = await client.signAndBroadcast(providerAddress, [msg], fee, memo)

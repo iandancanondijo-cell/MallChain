@@ -361,18 +361,26 @@ router.post('/tasks/:id/final-approve', requireAdmin, async (req, res) => {
     task.reward_amount = finalReward;
     await task.save();
 
-    // Credit reward to miner via WalletTransaction
-    const WalletTransaction = require('../models/WalletTransaction');
-    await WalletTransaction.create({
-      user_id: task.miner_id,
-      type: 'credit',
-      amount: finalReward,
-      currency: task.reward_currency || 'MLPTS',
-      description: `Task reward approved after ${yesVotes} YES / ${noVotes} NO validator votes`,
-    });
+    // Use transaction for atomic balance update
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        // Credit reward to miner via WalletTransaction
+        const WalletTransaction = require('../models/WalletTransaction');
+        await WalletTransaction.create([{
+          user_id: task.miner_id,
+          type: 'credit',
+          amount: finalReward,
+          currency: task.reward_currency || 'MLPTS',
+          description: `Task reward approved after ${yesVotes} YES / ${noVotes} NO validator votes`,
+        }], { session });
 
-    // Update miner's mlpts_balance directly
-    await User.findByIdAndUpdate(task.miner_id, { $inc: { mlpts_balance: finalReward } });
+        // Update miner's mlpts_balance atomically
+        await User.findByIdAndUpdate(task.miner_id, { $inc: { mlpts_balance: finalReward } }).session(session);
+      });
+    } finally {
+      session.endSession();
+    }
 
     // Update campaign budget if applicable
     const Campaign = mongoose.models.Campaign || mongoose.model('Campaign', new mongoose.Schema({}, { strict: false }));

@@ -121,7 +121,8 @@ router.post('/award', createLimiter({ windowMs: 60*1000, max: 20 }), async (req,
   }
 })
 
-// POST /api/mallpoints/convert - convert mallpoints to mallcoins once per month (on 15th)
+// POST /api/mallpoints/convert - convert mallpoints to mallcoins using the same
+// eligibility rules exposed by the status/sync endpoints.
 // body: { address }
 router.post('/convert', async (req, res) => {
   try {
@@ -133,18 +134,19 @@ router.post('/convert', async (req, res) => {
 
     const today = new Date()
     const allowAnyDay = process.env.MALLPOINTS_CONVERT_ANY_DAY === 'true'
-    if (!allowAnyDay && today.getUTCDate() !== 15) {
-      return res.status(400).json({
-        error: 'conversion window closed: conversion allowed only on the 15th of each month (set MALLPOINTS_CONVERT_ANY_DAY=true in dev)',
-      })
-    }
+    const badge = await getUserBadgeInfo(address)
+    const conversionStatus = buildConversionStatus({
+      hasBadge: badge.exists,
+      lastConversionAt: acc.lastConversionAt,
+      now: today,
+      allowAnyDay,
+    })
 
-    // Ensure one conversion per calendar month
-    if (acc.lastConversionAt) {
-      const last = new Date(acc.lastConversionAt)
-      if (last.getUTCFullYear() === today.getUTCFullYear() && last.getUTCMonth() === today.getUTCMonth()) {
-        return res.status(400).json({ error: 'already converted this month' })
-      }
+    if (!conversionStatus.canConvert) {
+      return res.status(400).json({
+        error: conversionStatus.reason || 'conversion window closed',
+        conversionStatus,
+      })
     }
 
     // fetch live mlcoin mid price (via backend market controller)

@@ -32,6 +32,17 @@ const ValidatorActivitySchema = new Schema({
   timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
 });
 
+// Add additional indexes for common query patterns
+ValidatorActivitySchema.index({ validator_address: 1 }, { sparse: true })
+ValidatorActivitySchema.index({ moniker: 1 }, { sparse: true })
+ValidatorActivitySchema.index({ is_active: 1 })
+ValidatorActivitySchema.index({ mining_reputation: -1 })
+ValidatorActivitySchema.index({ total_earnings: -1 })
+ValidatorActivitySchema.index({ last_vote_at: -1 })
+ValidatorActivitySchema.index({ last_assigned_at: -1 })
+ValidatorActivitySchema.index({ is_active: 1, mining_reputation: -1 })
+ValidatorActivitySchema.index({ created_at: -1 })
+
 // Calculate derived stats before saving
 ValidatorActivitySchema.pre('save', function(next) {
   if (this.tasks_voted > 0) {

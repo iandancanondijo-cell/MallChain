@@ -1,6 +1,37 @@
 const { config } = require('../config');
 const { isValidAddress, getWalletBalance } = require('./mallcoinService');
-const { transferFromMnemonic, fundStakeFromMnemonic } = require('./mallcoinTxBuilder');
+const {
+  transferFromMnemonic,
+  transferFromPrivateKey,
+  fundStakeFromMnemonic,
+  fundStakeFromPrivateKey,
+} = require('./mallcoinTxBuilder');
+const { DirectSecp256k1Wallet, DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
+const Redis = require('ioredis');
+
+const redis = new Redis({
+  host: config.redis.host || '127.0.0.1',
+  port: config.redis.port || 6379,
+});
+
+redis.on('error', (err) => console.error('Redis client error:', err));
+
+// In production, require Redis for faucet operations
+const isProduction = process.env.NODE_ENV === 'production';
+let redisConnected = false;
+
+redis.connect()
+  .then(() => {
+    redisConnected = true;
+    console.log('Redis connected for faucet cooldown');
+  })
+  .catch(() => {
+    if (isProduction) {
+      console.error('Redis unavailable in production - faucet service disabled');
+    } else {
+      console.warn('Redis unavailable, faucet cooldown will be in-memory only (development mode)');
+    }
+  });
 
 function isFaucetEnabled() {
   if (process.env.FAUCET_ENABLED === 'false') return false;
@@ -24,20 +55,122 @@ function getFaucetMnemonic() {
   return null;
 }
 
+function getFaucetPrivateKeyHex() {
+  return process.env.FAUCET_PRIVATE_KEY_HEX || null;
+}
+
+async function getFundingAccount() {
+  const privateKeyHex = getFaucetPrivateKeyHex();
+  if (privateKeyHex) {
+    const wallet = await DirectSecp256k1Wallet.fromKey(
+      Uint8Array.from(Buffer.from(privateKeyHex.replace(/^0x/, ''), 'hex')),
+      config.chain.prefix
+    );
+    const [account] = await wallet.getAccounts();
+    return {
+      source: 'private_key',
+      privateKeyHex,
+      address: account.address,
+    };
+  }
+
+  const mnemonic = getFaucetMnemonic();
+  if (!mnemonic) return null;
+
+  const wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
+    prefix: config.chain.prefix,
+  });
+  const [account] = await wallet.getAccounts();
+  return {
+    source: 'mnemonic',
+    mnemonic,
+    address: account.address,
+  };
+}
+
 const DEFAULT_MLCNS = Number(process.env.FAUCET_MLCNS_AMOUNT || 1000);
 const DEFAULT_STAKE = process.env.FAUCET_STAKE_AMOUNT || '100';
 const MAX_PER_REQUEST = Number(process.env.FAUCET_MAX_MLCNS || 10000);
 const COOLDOWN_MS = Number(process.env.FAUCET_COOLDOWN_MS || 60_000);
 
+// Fallback in-memory Map only for development/test mode
 const lastRequestByAddress = new Map();
 
-function checkCooldown(address) {
-  const last = lastRequestByAddress.get(address);
-  if (last && Date.now() - last < COOLDOWN_MS) {
+// Pure predicate: has enough time passed since lastRequestTime to allow another request?
+function checkCooldown(lastRequestTime, cooldownMs) {
+  if (!lastRequestTime) return true;
+  return Date.now() - lastRequestTime >= cooldownMs;
+}
+
+async function checkAddressCooldown(address) {
+  const cooldownKey = `faucet_cooldown:${address}`;
+
+  // In production, require Redis
+  if (isProduction && !redisConnected) {
+    const err = new Error('Faucet service unavailable: Redis required in production');
+    err.status = 503;
+    throw err;
+  }
+
+  let last = null;
+  try {
+    const stored = await redis.get(cooldownKey);
+    last = stored ? parseInt(stored, 10) : null;
+  } catch (redisErr) {
+    // In production, fail fast if Redis fails
+    if (isProduction) {
+      const err = new Error('Faucet service unavailable: Redis connection failed');
+      err.status = 503;
+      throw err;
+    }
+    // Development mode: fallback to in-memory
+    last = lastRequestByAddress.get(address) || null;
+  }
+
+  if (!checkCooldown(last, COOLDOWN_MS)) {
     const waitSec = Math.ceil((COOLDOWN_MS - (Date.now() - last)) / 1000);
     const err = new Error(`Faucet cooldown: try again in ${waitSec}s`);
     err.status = 429;
     throw err;
+  }
+}
+
+// Pure validation: is this faucet request well-formed? Does not check cooldown or funding.
+function validateFaucetRequest({ walletAddress, amount } = {}) {
+  if (!isValidAddress(walletAddress)) {
+    return { valid: false, error: 'Invalid address' };
+  }
+
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    return { valid: false, error: 'Amount must be greater than 0' };
+  }
+  if (numericAmount > MAX_PER_REQUEST) {
+    return { valid: false, error: `Amount exceeds maximum of ${MAX_PER_REQUEST} MLCNS per request` };
+  }
+
+  return { valid: true };
+}
+
+async function setCooldown(address) {
+  const cooldownKey = `faucet_cooldown:${address}`;
+  
+  // In production, require Redis
+  if (isProduction && !redisConnected) {
+    console.error('Cannot set cooldown: Redis unavailable in production');
+    return;
+  }
+  
+  try {
+    await redis.setEx(cooldownKey, COOLDOWN_MS / 1000, Date.now().toString());
+  } catch (redisErr) {
+    // In production, fail fast if Redis fails
+    if (isProduction) {
+      console.error('Cannot set cooldown: Redis connection failed');
+      return;
+    }
+    // Development mode: fallback to in-memory
+    lastRequestByAddress.set(address, Date.now());
   }
 }
 
@@ -51,10 +184,10 @@ async function creditMlcns(address, amountMlcns = DEFAULT_MLCNS) {
     throw err;
   }
 
-  const mnemonic = getFaucetMnemonic();
-  if (!mnemonic) {
+  const fundingAccount = await getFundingAccount();
+  if (!fundingAccount) {
     const err = new Error(
-      'Set FAUCET_MNEMONIC or OPERATOR_MNEMONIC (wallet must hold MLCNS + stake for gas)'
+      'Set FAUCET_PRIVATE_KEY_HEX, FAUCET_MNEMONIC, or OPERATOR_MNEMONIC (wallet must hold MLCNS + stake for gas)'
     );
     err.status = 503;
     throw err;
@@ -73,29 +206,44 @@ async function creditMlcns(address, amountMlcns = DEFAULT_MLCNS) {
     throw err;
   }
 
-  checkCooldown(address);
+  await checkAddressCooldown(address);
 
-  const transfer = await transferFromMnemonic({
-    mnemonic,
-    toAddress: address,
-    amountMlcns: amount,
-    memo: 'dev faucet MLCNS',
-  });
+  const transfer =
+    fundingAccount.source === 'private_key'
+      ? await transferFromPrivateKey({
+          privateKeyHex: fundingAccount.privateKeyHex,
+          toAddress: address,
+          amountMlcns: amount,
+          memo: 'dev faucet MLCNS',
+        })
+      : await transferFromMnemonic({
+          mnemonic: fundingAccount.mnemonic,
+          toAddress: address,
+          amountMlcns: amount,
+          memo: 'dev faucet MLCNS',
+        });
 
   let gasFunding = null;
   if (process.env.FAUCET_FUND_GAS !== 'false') {
     try {
-      gasFunding = await fundStakeFromMnemonic({
-        mnemonic,
-        toAddress: address,
-        amountStake: DEFAULT_STAKE,
-      });
+      gasFunding =
+        fundingAccount.source === 'private_key'
+          ? await fundStakeFromPrivateKey({
+              privateKeyHex: fundingAccount.privateKeyHex,
+              toAddress: address,
+              amountStake: DEFAULT_STAKE,
+            })
+          : await fundStakeFromMnemonic({
+              mnemonic: fundingAccount.mnemonic,
+              toAddress: address,
+              amountStake: DEFAULT_STAKE,
+            });
     } catch (e) {
       gasFunding = { error: e.message, note: 'MLCNS sent; fund stake manually if sends fail' };
     }
   }
 
-  lastRequestByAddress.set(address, Date.now());
+  await setCooldown(address);
 
   const balance = await getWalletBalance(address);
 
@@ -109,19 +257,32 @@ async function creditMlcns(address, amountMlcns = DEFAULT_MLCNS) {
 }
 
 async function getFaucetStatus() {
+  const privateKeyHex = getFaucetPrivateKeyHex();
   const mnemonic = getFaucetMnemonic();
   let faucetBalance = null;
   let faucetAddress = null;
+  let source = null;
 
-  if (mnemonic) {
+  try {
+    const fundingAccount = await getFundingAccount();
+    if (fundingAccount) {
+      faucetAddress = fundingAccount.address;
+      faucetBalance = await getWalletBalance(fundingAccount.address);
+      source = fundingAccount.source;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  if (!faucetAddress && mnemonic) {
     try {
-      const { DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
       const wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
         prefix: config.chain.prefix,
       });
       const [account] = await wallet.getAccounts();
       faucetAddress = account.address;
       faucetBalance = await getWalletBalance(account.address);
+      source = 'mnemonic';
     } catch {
       /* ignore */
     }
@@ -129,9 +290,10 @@ async function getFaucetStatus() {
 
   return {
     enabled: isFaucetEnabled(),
-    configured: Boolean(mnemonic),
+    configured: Boolean(privateKeyHex || mnemonic),
     faucetAddress,
     faucetBalance,
+    source,
     defaultMlcns: DEFAULT_MLCNS,
     defaultStake: DEFAULT_STAKE,
     maxMlcns: MAX_PER_REQUEST,
@@ -150,9 +312,9 @@ async function fundGas(address) {
     throw err;
   }
 
-  const mnemonic = getFaucetMnemonic();
-  if (!mnemonic) {
-    const err = new Error('Faucet mnemonic not configured');
+  const fundingAccount = await getFundingAccount();
+  if (!fundingAccount) {
+    const err = new Error('Faucet funding source not configured');
     err.status = 503;
     throw err;
   }
@@ -163,15 +325,22 @@ async function fundGas(address) {
     throw err;
   }
 
-  checkCooldown(address);
+  await checkAddressCooldown(address);
 
-  const result = await fundStakeFromMnemonic({
-    mnemonic,
-    toAddress: address,
-    amountStake: DEFAULT_STAKE,
-  });
+  const result =
+    fundingAccount.source === 'private_key'
+      ? await fundStakeFromPrivateKey({
+          privateKeyHex: fundingAccount.privateKeyHex,
+          toAddress: address,
+          amountStake: DEFAULT_STAKE,
+        })
+      : await fundStakeFromMnemonic({
+          mnemonic: fundingAccount.mnemonic,
+          toAddress: address,
+          amountStake: DEFAULT_STAKE,
+        });
 
-  lastRequestByAddress.set(address, Date.now());
+  await setCooldown(address);
 
   return {
     success: true,
@@ -188,4 +357,7 @@ module.exports = {
   fundGas,
   getFaucetStatus,
   getFaucetMnemonic,
+  getFaucetPrivateKeyHex,
+  checkCooldown,
+  validateFaucetRequest,
 };

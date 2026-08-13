@@ -4,8 +4,12 @@ const logger = require('../utils/logger')
 const { createBlockchainBackoff } = require('../utils/circuitBreaker')
 
 const CHAIN_REST = process.env.CHAIN_REST_URL || process.env.CHAIN_REST || 'http://localhost:1317'
-const POLL_INTERVAL_MS = Number(process.env.BLOCKCHAIN_LISTENER_INTERVAL_MS || 3000)
+const BASE_POLL_INTERVAL_MS = Number(process.env.BLOCKCHAIN_LISTENER_INTERVAL_MS || 3000)
+const MAX_POLL_INTERVAL_MS = Number(process.env.BLOCKCHAIN_LISTENER_MAX_INTERVAL_MS || 30000)
 const backoff = createBlockchainBackoff()
+
+let currentIntervalMs = BASE_POLL_INTERVAL_MS
+let consecutiveErrors = 0
 
 function chainUrl(path) {
   return `${CHAIN_REST.replace(/\/$/, '')}${path}`
@@ -28,6 +32,9 @@ async function reconcilePendingTransactions() {
     })
 
     if (!pendingTxs.length) {
+      // No pending transactions - reset interval on success
+      consecutiveErrors = 0
+      currentIntervalMs = BASE_POLL_INTERVAL_MS
       return
     }
 
@@ -68,14 +75,40 @@ async function reconcilePendingTransactions() {
         })
       }
     }))
+
+    // Reset error counter on successful reconciliation
+    consecutiveErrors = 0
+    currentIntervalMs = BASE_POLL_INTERVAL_MS
   } catch (err) {
-    logger.error('blockchainListener', 'Blockchain listener failed', err)
+    consecutiveErrors++
+    // Exponential backoff: double interval on each error, capped at MAX_POLL_INTERVAL_MS
+    currentIntervalMs = Math.min(
+      BASE_POLL_INTERVAL_MS * Math.pow(2, consecutiveErrors),
+      MAX_POLL_INTERVAL_MS
+    )
+    logger.error('blockchainListener', 'Blockchain listener failed', err, {
+      consecutiveErrors,
+      nextIntervalMs: currentIntervalMs,
+    })
   }
 }
 
 function startBlockchainListener() {
-  logger.info('blockchainListener', 'Started transaction listener', { intervalMs: POLL_INTERVAL_MS })
-  setInterval(reconcilePendingTransactions, POLL_INTERVAL_MS)
+  logger.info('blockchainListener', 'Started transaction listener', {
+    baseIntervalMs: BASE_POLL_INTERVAL_MS,
+    maxIntervalMs: MAX_POLL_INTERVAL_MS,
+  })
+  
+  // Use recursive setTimeout to support dynamic interval changes
+  function scheduleNext() {
+    setTimeout(() => {
+      reconcilePendingTransactions().finally(() => {
+        scheduleNext()
+      })
+    }, currentIntervalMs)
+  }
+  
+  scheduleNext()
 }
 
 module.exports = {

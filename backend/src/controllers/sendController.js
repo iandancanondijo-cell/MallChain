@@ -347,35 +347,8 @@ exports.transferMlcns = async (req, res) => {
       return exports.sendMallcoins(req, res);
     }
 
-    if (privateKey) {
-      // Disallow raw privateKey submission in production.
-      if (process.env.NODE_ENV === 'production') {
-        return res.status(400).json({ error: 'Sending raw privateKey in request is forbidden in production.' });
-      }
-      // Require explicit opt-in in development to allow insecure privateKey payloads
-      if (process.env.ALLOW_INSECURE_PRIVATE_KEY !== 'true') {
-        return res.status(400).json({
-          error: 'privateKey payloads are disallowed. Set ALLOW_INSECURE_PRIVATE_KEY=true in your local dev environment to enable (not recommended).',
-        });
-      }
-      const result = await signAndBroadcastTransfer({
-        privateKeyHex: privateKey,
-        fromAddress: from,
-        toAddress: to,
-        amountMlcns: amount,
-        memo: memo || '',
-      });
-      return res.json({
-        success: true,
-        txHash: result.txHash,
-        from,
-        to,
-        amountMlcns: amount,
-        denom: 'MLCNS',
-        warning: 'Server-side signing is for development only (explicitly enabled)',
-      });
-    }
-
+    // Private key handling completely removed for security
+    // All transactions must be signed client-side and submitted as txBytes
     return res.status(400).json({
       error: 'txBytes_required',
       message: 'Sign MsgTransferMallcoin in the wallet client and submit txBytes',

@@ -35,4 +35,15 @@ const UserSchema = new Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// Add additional indexes for common query patterns
+UserSchema.index({ googleId: 1 }, { sparse: true })
+UserSchema.index({ phone: 1 }, { sparse: true })
+UserSchema.index({ username: 1 }, { sparse: true })
+UserSchema.index({ banned: 1 })
+UserSchema.index({ fraud_status: 1 })
+UserSchema.index({ createdAt: -1 })
+UserSchema.index({ lastLoginAt: -1 })
+UserSchema.index({ role: 1, banned: 1 })
+UserSchema.index({ fraud_status: 1, banned: 1 })
+
 module.exports = mongoose.models.User || mongoose.model('User', UserSchema);
