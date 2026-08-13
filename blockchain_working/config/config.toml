@@ -87,11 +87,13 @@ filter_peers = false
 [rpc]
 
 # TCP or UNIX socket address for the RPC server to listen on
+# SECURITY: Bound to localhost only to prevent external access
+# If external access is required, use a reverse proxy with authentication
 laddr = "tcp://127.0.0.1:26657"
 
 # A list of origins a cross-domain request can be executed from
 # Default value '[]' disables cors support
-# Use '["*"]' to allow any origin
+# SECURITY: CORS disabled to prevent unauthorized cross-origin requests
 cors_allowed_origins = []
 
 # A list of methods the client is allowed to use with cross-domain requests

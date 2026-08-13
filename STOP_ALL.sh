@@ -11,7 +11,7 @@ pkill -TERM -f "marketplaced start" 2>/dev/null && echo "  Stopping blockchain..
 pkill -TERM -f "node src/index.js"  2>/dev/null && echo "  Stopping backend..."    || true
 pkill -TERM -f "vite"               2>/dev/null && echo "  Stopping frontend..."   || true
 
-# Also handle npm-wrapped processes
+# Also handle npm-wrapped processes in mallchain-frontend directory
 pkill -TERM -f "npm start"          2>/dev/null || true
 pkill -TERM -f "npm run dev"        2>/dev/null || true
 
