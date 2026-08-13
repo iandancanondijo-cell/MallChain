@@ -2,10 +2,12 @@ package keeper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"marketplace/x/mlcoin/types"
 
+	"cosmossdk.io/collections"
 	errorsmod "cosmossdk.io/errors"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"cosmossdk.io/math"
@@ -42,6 +44,11 @@ func (k msgServer) TransferMallcoin(ctx context.Context, msg *types.MsgTransferM
 		}
 	}
 
+	// Prevent transfers from locked wallets
+	if wallet.Locked > 0 {
+		return nil, errorsmod.Wrap(types.ErrLockedFunds, "cannot transfer from locked wallet")
+	}
+
 	// Calculate transfer fee: 0.0097% of amount (percentage-based)
 	// Fee is slashed from recipient's received amount
 	amount := math.NewIntFromUint64(msg.Amount)
@@ -58,7 +65,7 @@ func (k msgServer) TransferMallcoin(ctx context.Context, msg *types.MsgTransferM
 
 	totalDeduction := amount.Add(fee)
 	if wallet.Balance < totalDeduction.Uint64() {
-		return nil, errorsmod.Wrap(err, "insufficient balance")
+		return nil, errorsmod.Wrap(types.ErrInsufficientBalance, "insufficient balance")
 	}
 
 	// Overflow-safe deduction from sender (amount + fee)
@@ -88,7 +95,10 @@ func (k msgServer) TransferMallcoin(ctx context.Context, msg *types.MsgTransferM
 	// Update transaction fees accumulator
 	feesAcc, err := k.Keeper.FeesAccumulated.Get(ctx)
 	if err != nil {
-		return nil, errorsmod.Wrap(err, "failed to get fees accumulator")
+		if !errors.Is(err, collections.ErrNotFound) {
+			return nil, errorsmod.Wrap(err, "failed to get fees accumulator")
+		}
+		feesAcc = types.FeesAccumulated{}
 	}
 	feesAcc.TransactionFees += fee.Uint64()
 	if err := k.Keeper.FeesAccumulated.Set(ctx, feesAcc); err != nil {

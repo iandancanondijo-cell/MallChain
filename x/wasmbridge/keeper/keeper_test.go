@@ -26,10 +26,21 @@ func newWasmbridgeTestKeeper(t *testing.T) (*wasmbridgekeeper.Keeper, context.Co
 
 	wasmbridgeStoreKey := storetypes.NewKVStoreKey(wasmbridgetypes.StoreKey)
 	wasmbridgeStoreService := runtime.NewKVStoreService(wasmbridgeStoreKey)
-	ctx := testutil.DefaultContextWithDB(t, wasmbridgeStoreKey, storetypes.NewTransientStoreKey("transient_test")).Ctx
 
 	mlcoinStoreKey := storetypes.NewKVStoreKey(mlcointypes.StoreKey)
 	mlcoinStoreService := runtime.NewKVStoreService(mlcoinStoreKey)
+
+	// Both keepers share one multistore so wasmbridge->mlcoin calls can find the mlcoin store.
+	ctx := testutil.DefaultContextWithKeys(
+		map[string]*storetypes.KVStoreKey{
+			wasmbridgetypes.StoreKey: wasmbridgeStoreKey,
+			mlcointypes.StoreKey:     mlcoinStoreKey,
+		},
+		map[string]*storetypes.TransientStoreKey{
+			"transient_test": storetypes.NewTransientStoreKey("transient_test"),
+		},
+		nil,
+	)
 
 	mlcoinK := mlcoinkeeper.NewKeeper(
 		mlcoinStoreService,

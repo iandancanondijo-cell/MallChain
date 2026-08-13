@@ -63,10 +63,14 @@ func (k Keeper) Stake(ctx context.Context, address string, amount uint64) (strin
 	}
 
 	// Record transaction
-	_, _ = k.RecordTransaction(ctx, address, "staking", amount, "stake", "Staked for rewards")
+	if _, err := k.RecordTransaction(ctx, address, "staking", amount, "stake", "Staked for rewards"); err != nil {
+		sdkCtx.Logger().Error("Failed to record stake transaction", "error", err)
+	}
 
 	// Record activity
-	_ = k.RecordActivity(ctx, "stake", amount, address)
+	if err := k.RecordActivity(ctx, "stake", amount, address); err != nil {
+		sdkCtx.Logger().Error("Failed to record stake activity", "error", err)
+	}
 
 	sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeStake,
@@ -129,7 +133,9 @@ func (k Keeper) UnstakeAndClaimRewards(ctx context.Context, address string, stak
 	}
 
 	// Record transaction
-	_, _ = k.RecordTransaction(ctx, "staking", address, totalReturn, "reward", "Staking rewards claimed")
+	if _, err := k.RecordTransaction(ctx, "staking", address, totalReturn, "reward", "Staking rewards claimed"); err != nil {
+		sdkCtx.Logger().Error("Failed to record unstake reward transaction", "error", err)
+	}
 
 	sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeUnstake,
@@ -170,7 +176,7 @@ func (k Keeper) CalculateRewardsForStaking(ctx context.Context, stakedAmount, st
 		blocksPerMonth = types.DefaultModuleIntervals().BlocksPerMonth
 	}
 	durationMonths := stakeDurationBlocks / blocksPerMonth
-	durationBonus := durationMonths / 10           // 0.1% per month
+	durationBonus := durationMonths / 10 // 0.1% per month
 
 	totalReward := blockRewards * engagementMultiplier * (100 + durationBonus) / 100
 

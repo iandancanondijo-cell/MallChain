@@ -9,6 +9,7 @@ import "marketplace/mlcoin/v1/params.proto";
 import "marketplace/mlcoin/v1/wallet_balance.proto";
 import "marketplace/mlcoin/v1/transaction.proto";
 import "marketplace/mlcoin/v1/market.proto";
+import "marketplace/mlcoin/v1/activity_metrics.proto";
 
 option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
 
@@ -26,4 +27,5 @@ message GenesisState {
   MarketPrice market_price = 6;
   repeated KesBalance kes_balance_map = 7 [(gogoproto.nullable) = false];
   repeated Trade trade_history = 8 [(gogoproto.nullable) = false];
+  FeesAccumulated fees_accumulated = 9;
 }

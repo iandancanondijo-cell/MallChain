@@ -22,4 +22,5 @@ var (
 	ErrInvalidRequest        = errors.Register(ModuleName, 1111, "invalid request")
 	ErrUnauthorized          = errors.Register(ModuleName, 1112, "unauthorized")
 	ErrInvalidSignature      = errors.Register(ModuleName, 1113, "invalid signature")
+	ErrLockedFunds           = errors.Register(ModuleName, 1114, "cannot transfer from locked wallet")
 )

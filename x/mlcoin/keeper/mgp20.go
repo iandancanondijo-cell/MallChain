@@ -8,6 +8,7 @@ import (
 
 	"cosmossdk.io/collections"
 	errorsmod "cosmossdk.io/errors"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 func allowanceKey(owner, spender string) string {
@@ -85,6 +86,12 @@ func (k Keeper) TransferFrom(ctx context.Context, owner, spender, recipient stri
 		recipientWallet = types.WalletBalance{Address: recipient, Balance: 0}
 	}
 
+	// Update allowance BEFORE updating balances to prevent reentrancy attacks
+	// This follows the checks-effects-interactions pattern
+	if err := k.SetAllowance(ctx, owner, spender, allowance-amount); err != nil {
+		return errorsmod.Wrap(err, "failed to update allowance")
+	}
+
 	ownerWallet.Balance -= amount
 	recipientWallet.Balance += amount
 
@@ -95,11 +102,10 @@ func (k Keeper) TransferFrom(ctx context.Context, owner, spender, recipient stri
 		return errorsmod.Wrap(err, "failed to update recipient balance")
 	}
 
-	if err := k.SetAllowance(ctx, owner, spender, allowance-amount); err != nil {
-		return errorsmod.Wrap(err, "failed to update allowance")
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	if _, err := k.RecordTransaction(ctx, owner, recipient, amount, "transfer_from", "Allowed transfer"); err != nil {
+		sdkCtx.Logger().Error("Failed to record transfer_from transaction", "error", err)
 	}
-
-	_, _ = k.RecordTransaction(ctx, owner, recipient, amount, "transfer_from", "Allowed transfer")
 
 	return nil
 }

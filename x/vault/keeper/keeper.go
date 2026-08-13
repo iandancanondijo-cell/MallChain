@@ -114,13 +114,22 @@ func (k Keeper) ConfirmVault(ctx context.Context, password, totpCode string, pri
 		return errors.New("vault not initialized")
 	}
 	// derive key
-	salt, _ := base64.StdEncoding.DecodeString(vb.Salt)
+	salt, err := base64.StdEncoding.DecodeString(vb.Salt)
+	if err != nil {
+		return errors.New("invalid vault salt encoding")
+	}
 	params := crypto.Argon2Params{Time: vb.Params.Time, Memory: vb.Params.Memory, Threads: vb.Params.Threads, KeyLen: vb.Params.KeyLen}
 	key := crypto.DeriveKey(password, salt, crypto.Argon2Params{Time: params.Time, Memory: params.Memory, Threads: params.Threads, KeyLen: params.KeyLen})
 
 	// decrypt TOTP secret (use dedicated nonce)
-	ct, _ := base64.StdEncoding.DecodeString(vb.EncryptedTOTPSecret)
-	nonceTOTP, _ := base64.StdEncoding.DecodeString(vb.NonceTOTP)
+	ct, err := base64.StdEncoding.DecodeString(vb.EncryptedTOTPSecret)
+	if err != nil {
+		return errors.New("invalid TOTP secret encoding")
+	}
+	nonceTOTP, err := base64.StdEncoding.DecodeString(vb.NonceTOTP)
+	if err != nil {
+		return errors.New("invalid TOTP nonce encoding")
+	}
 	secretBytes, err := crypto.Decrypt(nonceTOTP, ct, key)
 	if err != nil {
 		return err
@@ -163,18 +172,29 @@ func (k Keeper) UnlockAndSign(ctx context.Context, password, totpCode string, me
 	if vb.LockedUntilUnix > sdkCtx.BlockTime().Unix() {
 		return nil, errors.New("vault locked due to failed attempts")
 	}
-	salt, _ := base64.StdEncoding.DecodeString(vb.Salt)
+	salt, err := base64.StdEncoding.DecodeString(vb.Salt)
+	if err != nil {
+		return nil, errors.New("invalid vault salt encoding")
+	}
 	// Use stored vault params instead of defaults
 	params := crypto.Argon2Params{Time: vb.Params.Time, Memory: vb.Params.Memory, Threads: vb.Params.Threads, KeyLen: vb.Params.KeyLen}
 	key := crypto.DeriveKey(password, salt, params)
 
 	// decrypt TOTP secret (use dedicated nonce)
-	ctT, _ := base64.StdEncoding.DecodeString(vb.EncryptedTOTPSecret)
-	nonceT, _ := base64.StdEncoding.DecodeString(vb.NonceTOTP)
+	ctT, err := base64.StdEncoding.DecodeString(vb.EncryptedTOTPSecret)
+	if err != nil {
+		return nil, errors.New("invalid TOTP secret encoding")
+	}
+	nonceT, err := base64.StdEncoding.DecodeString(vb.NonceTOTP)
+	if err != nil {
+		return nil, errors.New("invalid TOTP nonce encoding")
+	}
 	secretBytes, err := crypto.Decrypt(nonceT, ctT, key)
 	if err != nil {
 		vb.FailedAttempts++
-		_ = k.setVault(ctx, vb)
+		if err := k.setVault(ctx, vb); err != nil {
+			sdkCtx.Logger().Error("Failed to update vault failed attempts after decryption error", "error", err)
+		}
 		return nil, errors.New("invalid credentials")
 	}
 	if !crypto.VerifyTOTPCode(string(secretBytes), totpCode) {
@@ -183,13 +203,21 @@ func (k Keeper) UnlockAndSign(ctx context.Context, password, totpCode string, me
 			vb.LockedUntilUnix = sdkCtx.BlockTime().Add(5 * time.Minute).Unix()
 		}
 
-		_ = k.setVault(ctx, vb)
+		if err := k.setVault(ctx, vb); err != nil {
+			sdkCtx.Logger().Error("Failed to update vault failed attempts after invalid TOTP", "error", err)
+		}
 		return nil, errors.New("invalid totp code")
 	}
 
 	// decrypt private key (use dedicated nonce)
-	ctPriv, _ := base64.StdEncoding.DecodeString(vb.Ciphertext)
-	noncePriv, _ := base64.StdEncoding.DecodeString(vb.NoncePriv)
+	ctPriv, err := base64.StdEncoding.DecodeString(vb.Ciphertext)
+	if err != nil {
+		return nil, errors.New("invalid private key ciphertext encoding")
+	}
+	noncePriv, err := base64.StdEncoding.DecodeString(vb.NoncePriv)
+	if err != nil {
+		return nil, errors.New("invalid private key nonce encoding")
+	}
 	privBytes, err := crypto.Decrypt(noncePriv, ctPriv, key)
 	if err != nil {
 		return nil, err
@@ -202,7 +230,9 @@ func (k Keeper) UnlockAndSign(ctx context.Context, password, totpCode string, me
 	// reset failed attempts on success
 	vb.FailedAttempts = 0
 	vb.LockedUntilUnix = 0
-	_ = k.setVault(ctx, vb)
+	if err := k.setVault(ctx, vb); err != nil {
+		sdkCtx.Logger().Error("Failed to reset vault failed attempts on success", "error", err)
+	}
 
 	return sig, nil
 }
@@ -217,12 +247,21 @@ func (k Keeper) DisableVault(ctx context.Context, password, totpCode string) err
 		return errors.New("vault not initialized")
 	}
 	// verify password+totp as in UnlockAndSign but simpler: attempt to decrypt TOTP
-	salt, _ := base64.StdEncoding.DecodeString(vb.Salt)
+	salt, err := base64.StdEncoding.DecodeString(vb.Salt)
+	if err != nil {
+		return errors.New("invalid vault salt encoding")
+	}
 	// Use stored vault params instead of defaults
 	params := crypto.Argon2Params{Time: vb.Params.Time, Memory: vb.Params.Memory, Threads: vb.Params.Threads, KeyLen: vb.Params.KeyLen}
 	key := crypto.DeriveKey(password, salt, params)
-	ctT, _ := base64.StdEncoding.DecodeString(vb.EncryptedTOTPSecret)
-	nonceT, _ := base64.StdEncoding.DecodeString(vb.NonceTOTP)
+	ctT, err := base64.StdEncoding.DecodeString(vb.EncryptedTOTPSecret)
+	if err != nil {
+		return errors.New("invalid TOTP secret encoding")
+	}
+	nonceT, err := base64.StdEncoding.DecodeString(vb.NonceTOTP)
+	if err != nil {
+		return errors.New("invalid TOTP nonce encoding")
+	}
 	secretBytes, err := crypto.Decrypt(nonceT, ctT, key)
 	if err != nil {
 		return errors.New("invalid credentials")

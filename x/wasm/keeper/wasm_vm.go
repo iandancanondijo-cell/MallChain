@@ -12,18 +12,18 @@ import (
 
 const (
 	// Production WASM limits
-	MaxWasmMemoryPages = uint32(64 * 1024 / 4) // 64MB max memory (64KB pages)
-	MaxWasmCodeSize    = int(256 * 1024)        // 256KB max contract code size
-	WasmExecutionTimeout = 5 * time.Second        // Hard timeout for WASM execution
+	MaxWasmMemoryPages   = uint32(64 * 1024 / 4) // 64MB max memory (64KB pages)
+	MaxWasmCodeSize      = int(256 * 1024)       // 256KB max contract code size
+	WasmExecutionTimeout = 5 * time.Second       // Hard timeout for WASM execution
 )
 
 type WasmVM struct {
-	Runtime      wazero.Runtime
-	keeper       *Keeper
-	gasUsed      uint64
-	gasLimit     uint64
-	codeSize     int
-	callLimit    int
+	Runtime   wazero.Runtime
+	keeper    *Keeper
+	gasUsed   uint64
+	gasLimit  uint64
+	codeSize  int
+	callLimit int
 }
 
 func NewWasmVM(ctx context.Context) *WasmVM {
@@ -93,7 +93,9 @@ func (vm *WasmVM) ExecuteWASM(ctx context.Context, wasmBytes []byte, msg []byte,
 		if err := vm.consumeGas(exportCost); err != nil {
 			return nil, err
 		}
-		_, _ = fn.Call(ctx)
+		if _, err := fn.Call(ctx); err != nil {
+			return nil, fmt.Errorf("WASM execute function failed: %w", err)
+		}
 	}
 
 	return []byte(`{"success":true,"gas_used":` + strconv.FormatUint(vm.gasUsed, 10) + `}`), nil

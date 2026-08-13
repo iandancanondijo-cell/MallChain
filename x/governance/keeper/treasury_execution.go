@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	types "marketplace/x/governance/types"
+
 	"cosmossdk.io/collections"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	govkeeper "github.com/cosmos/cosmos-sdk/x/gov/keeper"
-	types "marketplace/x/governance/types"
 )
 
 func (k Keeper) ExecuteTreasuryProposal(ctx context.Context, proposalId uint64, govKeeper *govkeeper.Keeper) error {
@@ -92,6 +93,7 @@ func (k Keeper) CalculateStakeWeightedTally(ctx context.Context, proposalID uint
 
 // CheckProposalPassed checks if a proposal has passed based on tally results.
 func (k Keeper) CheckProposalPassed(ctx context.Context, proposalID uint64) (bool, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	proposal, err := k.GetProposal(ctx, proposalID)
 	if err != nil {
 		return false, err
@@ -113,7 +115,9 @@ func (k Keeper) CheckProposalPassed(ctx context.Context, proposalID uint64) (boo
 	noWithVetoPower := tally.NoWithVetoCount.ToLegacyDec().Quo(totalVotes.ToLegacyDec())
 	if noWithVetoPower.GT(quorumThreshold) {
 		proposal.Status = types.StatusRejected
-		_ = k.SetProposal(ctx, proposal)
+		if err := k.SetProposal(ctx, proposal); err != nil {
+			sdkCtx.Logger().Error("Failed to set proposal status to rejected", "proposal_id", proposal.Id, "error", err)
+		}
 		return false, nil
 	}
 
@@ -121,7 +125,9 @@ func (k Keeper) CheckProposalPassed(ctx context.Context, proposalID uint64) (boo
 	yesPower := tally.YesCount.ToLegacyDec().Quo(totalVotes.ToLegacyDec())
 	if yesPower.GTE(yesThreshold) {
 		proposal.Status = types.StatusPassed
-		_ = k.SetProposal(ctx, proposal)
+		if err := k.SetProposal(ctx, proposal); err != nil {
+			sdkCtx.Logger().Error("Failed to set proposal status to passed", "proposal_id", proposal.Id, "error", err)
+		}
 		return true, nil
 	}
 

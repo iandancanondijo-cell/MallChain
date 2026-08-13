@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"testing"
 
-	"cosmossdk.io/math"
 	"cosmossdk.io/core/address"
+	"cosmossdk.io/log"
+	"cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
-	addresscodec "github.com/cosmos/cosmos-sdk/codec/address"
 	"github.com/cosmos/cosmos-sdk/codec"
+	addresscodec "github.com/cosmos/cosmos-sdk/codec/address"
 	cdctypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
@@ -18,19 +19,18 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
 	ibcexported "github.com/cosmos/ibc-go/v10/modules/core/exported"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/assert"
-	"cosmossdk.io/log"
+	"github.com/stretchr/testify/require"
 
 	"marketplace/x/crosschain/keeper"
 	"marketplace/x/crosschain/types"
 )
 
 type fixture struct {
-	ctx    sdk.Context
-	k      keeper.Keeper
-	codec  address.Codec
-	bank   *mockBankKeeper
+	ctx   sdk.Context
+	k     keeper.Keeper
+	codec address.Codec
+	bank  *mockBankKeeper
 }
 
 type mockBankKeeper struct {
@@ -88,17 +88,22 @@ func (m mockStakingKeeper) GetValidatorByConsAddr(ctx context.Context, consAddr 
 }
 
 type mockIBCTransferKeeper struct{}
+
 func (m mockIBCTransferKeeper) Transfer(ctx context.Context, msg *ibctransfertypes.MsgTransfer) (*ibctransfertypes.MsgTransferResponse, error) {
 	return &ibctransfertypes.MsgTransferResponse{}, nil
 }
 
 type mockIBCClientKeeper struct{}
+
 func (m mockIBCClientKeeper) Route(ctx sdk.Context, clientID string) (ibcexported.LightClientModule, error) {
 	return nil, fmt.Errorf("client not found")
 }
 
 type mockAccountKeeper struct{}
-func (m mockAccountKeeper) GetAccount(ctx context.Context, addr sdk.AccAddress) sdk.AccountI { return nil }
+
+func (m mockAccountKeeper) GetAccount(ctx context.Context, addr sdk.AccAddress) sdk.AccountI {
+	return nil
+}
 
 func initFixture(t *testing.T) *fixture {
 	t.Helper()
@@ -215,8 +220,8 @@ func TestCompleteBridgeTransfer(t *testing.T) {
 		errSubstr string
 	}{
 		{
-			name: "not found",
-			msg: &types.MsgCompleteBridgeTransfer{TransferId: 999, Validator: "validator", Proof: "proof"},
+			name:      "not found",
+			msg:       &types.MsgCompleteBridgeTransfer{TransferId: 999, Validator: "validator", Proof: "proof"},
 			expectErr: true, errSubstr: "transfer not found",
 		},
 		{
@@ -224,7 +229,7 @@ func TestCompleteBridgeTransfer(t *testing.T) {
 			setup: func(f *fixture) {
 				f.k.SetBridgeTransfer(f.ctx, types.BridgeTransfer{Id: 2, Sender: "s", Recipient: "r", Amount: &sdk.Coin{Denom: "uatom", Amount: math.NewInt(500)}, Status: "completed"})
 			},
-			msg: &types.MsgCompleteBridgeTransfer{TransferId: 2, Validator: "validator", Proof: "proof"},
+			msg:       &types.MsgCompleteBridgeTransfer{TransferId: 2, Validator: "validator", Proof: "proof"},
 			expectErr: true, errSubstr: "already completed",
 		},
 	}
@@ -354,7 +359,7 @@ func TestEndBlockerTimeout(t *testing.T) {
 
 func TestMsgServerInitiateBridgeTransfer(t *testing.T) {
 	f := initFixture(t)
-	srv := keeper.NewMsgServerImpl(f.k)
+	srv := keeper.NewMsgServerImpl(&f.k)
 
 	sender := sdk.AccAddress([]byte("test_address_______"))
 	f.bank.balances[sender.String()] = sdk.NewCoins(sdk.NewCoin("uatom", math.NewInt(1000)))
@@ -369,7 +374,7 @@ func TestMsgServerInitiateBridgeTransfer(t *testing.T) {
 
 func TestMsgServerCompleteBridgeTransfer(t *testing.T) {
 	f := initFixture(t)
-	srv := keeper.NewMsgServerImpl(f.k)
+	srv := keeper.NewMsgServerImpl(&f.k)
 	resp, err := srv.CompleteBridgeTransfer(f.ctx, &types.MsgCompleteBridgeTransfer{TransferId: 999, Validator: "validator", Proof: "proof"})
 	assert.Error(t, err)
 	assert.Nil(t, resp)
@@ -377,12 +382,12 @@ func TestMsgServerCompleteBridgeTransfer(t *testing.T) {
 
 func TestMsgServerUpdateParams(t *testing.T) {
 	f := initFixture(t)
-	srv := keeper.NewMsgServerImpl(f.k)
+	srv := keeper.NewMsgServerImpl(&f.k)
 	authority := authtypes.NewModuleAddress(types.ModuleName).String()
 
 	resp, err := srv.UpdateParams(f.ctx, &types.MsgUpdateParams{
 		Authority: authority,
-		Params: types.Params{SupportedChains: []string{"osmosis", "juno"}, MinTransferAmount: 500, MaxTransferAmount: 500000, TransferTimeoutBlocks: 500},
+		Params:    types.Params{SupportedChains: []string{"osmosis", "juno"}, MinTransferAmount: 500, MaxTransferAmount: 500000, TransferTimeoutBlocks: 500},
 	})
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
@@ -394,7 +399,7 @@ func TestMsgServerUpdateParams(t *testing.T) {
 
 func TestMsgServerUpdateParamsUnauthorized(t *testing.T) {
 	f := initFixture(t)
-	srv := keeper.NewMsgServerImpl(f.k)
+	srv := keeper.NewMsgServerImpl(&f.k)
 	resp, err := srv.UpdateParams(f.ctx, &types.MsgUpdateParams{Authority: "unauthorized", Params: types.Params{}})
 	assert.Error(t, err)
 	assert.Nil(t, resp)
@@ -402,7 +407,7 @@ func TestMsgServerUpdateParamsUnauthorized(t *testing.T) {
 
 func TestQueryServerBridgeTransfer(t *testing.T) {
 	f := initFixture(t)
-	q := keeper.NewQueryServerImpl(f.k)
+	q := keeper.NewQueryServerImpl(&f.k)
 
 	_, err := q.BridgeTransfer(f.ctx, &types.QueryBridgeTransferRequest{TransferId: 999})
 	assert.Error(t, err)
@@ -417,7 +422,7 @@ func TestQueryServerBridgeTransfer(t *testing.T) {
 
 func TestQueryServerBridgeState(t *testing.T) {
 	f := initFixture(t)
-	q := keeper.NewQueryServerImpl(f.k)
+	q := keeper.NewQueryServerImpl(&f.k)
 	resp, err := q.BridgeState(f.ctx, &types.QueryBridgeStateRequest{})
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(1), resp.State.NextTransferId)
@@ -425,7 +430,7 @@ func TestQueryServerBridgeState(t *testing.T) {
 
 func TestQueryServerParams(t *testing.T) {
 	f := initFixture(t)
-	q := keeper.NewQueryServerImpl(f.k)
+	q := keeper.NewQueryServerImpl(&f.k)
 	resp, err := q.Params(f.ctx, &types.QueryParamsRequest{})
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"osmosis"}, resp.Params.SupportedChains)

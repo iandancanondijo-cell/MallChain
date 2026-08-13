@@ -59,7 +59,7 @@ func TestStoreCode(t *testing.T) {
 func TestInstantiateContract(t *testing.T) {
 	k, ctx := newWasmTestKeeper(t)
 
-	codeID, err := k.StoreCode(ctx, []byte("mock wasm code"))
+	codeID, err := k.StoreCode(ctx, minimalValidWasm)
 	require.NoError(t, err)
 
 	addr, err := k.InstantiateContract(ctx, "cosmos1wdjkuer9wf0kzerywfjhxu6lta047h6lta047h6ltukxm685", codeID, "test-contract", []byte("{}"))
@@ -75,7 +75,7 @@ func TestInstantiateContract(t *testing.T) {
 func TestContractState(t *testing.T) {
 	k, ctx := newWasmTestKeeper(t)
 
-	codeID, err := k.StoreCode(ctx, []byte("mock wasm code"))
+	codeID, err := k.StoreCode(ctx, minimalValidWasm)
 	require.NoError(t, err)
 
 	addr, err := k.InstantiateContract(ctx, "cosmos1wdjkuer9wf0kzerywfjhxu6lta047h6lta047h6ltukxm685", codeID, "test-contract", []byte("{}"))
@@ -96,7 +96,7 @@ func TestContractState(t *testing.T) {
 func TestExecuteContractTransfer(t *testing.T) {
 	k, ctx := newWasmTestKeeper(t)
 
-	codeID, err := k.StoreCode(ctx, []byte("mock wasm code"))
+	codeID, err := k.StoreCode(ctx, minimalValidWasm)
 	require.NoError(t, err)
 
 	addr, err := k.InstantiateContract(ctx, "cosmos1wdjkuer9wf0kzerywfjhxu6lta047h6lta047h6ltukxm685", codeID, "test-contract", []byte("{}"))
@@ -111,7 +111,7 @@ func TestExecuteContractTransfer(t *testing.T) {
 func TestExecuteContractApprove(t *testing.T) {
 	k, ctx := newWasmTestKeeper(t)
 
-	codeID, err := k.StoreCode(ctx, []byte("mock wasm code"))
+	codeID, err := k.StoreCode(ctx, minimalValidWasm)
 	require.NoError(t, err)
 
 	addr, err := k.InstantiateContract(ctx, "cosmos1wdjkuer9wf0kzerywfjhxu6lta047h6lta047h6ltukxm685", codeID, "test-contract", []byte("{}"))
@@ -126,7 +126,7 @@ func TestExecuteContractApprove(t *testing.T) {
 func TestExecuteContractUnauthorized(t *testing.T) {
 	k, ctx := newWasmTestKeeper(t)
 
-	codeID, err := k.StoreCode(ctx, []byte("mock wasm code"))
+	codeID, err := k.StoreCode(ctx, minimalValidWasm)
 	require.NoError(t, err)
 
 	addr, err := k.InstantiateContract(ctx, "cosmos1wdjkuer9wf0kzerywfjhxu6lta047h6lta047h6ltukxm685", codeID, "test-contract", []byte("{}"))
@@ -141,7 +141,7 @@ func TestExecuteContractUnauthorized(t *testing.T) {
 func TestQueryContract(t *testing.T) {
 	k, ctx := newWasmTestKeeper(t)
 
-	codeID, err := k.StoreCode(ctx, []byte("mock wasm code"))
+	codeID, err := k.StoreCode(ctx, minimalValidWasm)
 	require.NoError(t, err)
 
 	addr, err := k.InstantiateContract(ctx, "cosmos1wdjkuer9wf0kzerywfjhxu6lta047h6lta047h6ltukxm685", codeID, "test-contract", []byte("{}"))
@@ -164,7 +164,7 @@ func TestGetAllContracts(t *testing.T) {
 	assert.Empty(t, contracts)
 
 	for i := 0; i < 3; i++ {
-		codeID, err := k.StoreCode(ctx, []byte("mock wasm code"))
+		codeID, err := k.StoreCode(ctx, minimalValidWasm)
 		require.NoError(t, err)
 		_, err = k.InstantiateContract(ctx, "cosmos1wdjkuer9wf0kzerywfjhxu6lta047h6lta047h6ltukxm685", codeID, "test-contract", []byte("{}"))
 		require.NoError(t, err)
@@ -242,7 +242,7 @@ func TestWasmVMEmptyCodeRejected(t *testing.T) {
 func TestAuthorizeAction(t *testing.T) {
 	k, ctx := newWasmTestKeeper(t)
 
-	codeID, err := k.StoreCode(ctx, []byte("mock wasm code"))
+	codeID, err := k.StoreCode(ctx, minimalValidWasm)
 	require.NoError(t, err)
 
 	addr, err := k.InstantiateContract(ctx, "cosmos1wdjkuer9wf0kzerywfjhxu6lta047h6lta047h6ltukxm685", codeID, "test-contract", []byte("{}"))

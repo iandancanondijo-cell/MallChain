@@ -88,8 +88,8 @@ func (k Keeper) CreateEscrow(sdkCtx sdk.Context, buyer, seller, amount, denom, d
 		DisputeWindow: int64(disputeWindowSeconds),
 	}
 
-	// Generate unique escrow ID
-	escrowID := fmt.Sprintf("%s-%d", buyer, sdkCtx.BlockTime().UnixNano())
+	// Generate unique escrow ID using block height and timestamp to avoid collisions
+	escrowID := fmt.Sprintf("%s-%d-%d", buyer, sdkCtx.BlockHeight(), sdkCtx.BlockTime().UnixNano())
 	escrow.ID = escrowID
 
 	if err := k.Escrows.Set(sdkCtx, escrowID, escrow); err != nil {

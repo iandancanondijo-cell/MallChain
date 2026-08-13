@@ -5,12 +5,13 @@ package types
 
 import (
 	fmt "fmt"
-	_ "github.com/cosmos/cosmos-sdk/types/tx/amino"
-	_ "github.com/cosmos/gogoproto/gogoproto"
-	proto "github.com/cosmos/gogoproto/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
+
+	_ "github.com/cosmos/cosmos-sdk/types/tx/amino"
+	_ "github.com/cosmos/gogoproto/gogoproto"
+	proto "github.com/cosmos/gogoproto/proto"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -35,6 +36,7 @@ type GenesisState struct {
 	MarketPrice      *MarketPrice    `protobuf:"bytes,6,opt,name=market_price,json=marketPrice,proto3" json:"market_price,omitempty"`
 	KesBalanceMap    []KesBalance    `protobuf:"bytes,7,rep,name=kes_balance_map,json=kesBalanceMap,proto3" json:"kes_balance_map"`
 	TradeHistory     []Trade         `protobuf:"bytes,8,rep,name=trade_history,json=tradeHistory,proto3" json:"trade_history"`
+	FeesAccumulated  FeesAccumulated `protobuf:"bytes,9,opt,name=fees_accumulated,json=feesAccumulated,proto3" json:"feesAccumulated"`
 }
 
 func (m *GenesisState) Reset()         { *m = GenesisState{} }

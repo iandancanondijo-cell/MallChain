@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"cosmossdk.io/collections"
@@ -32,12 +33,12 @@ type Keeper struct {
 }
 
 type ContractMetadata struct {
-	CodeID     uint64 `json:"code_id"`
-	Creator    string `json:"creator"`
-	Label      string `json:"label"`
-	InitMsg    []byte `json:"init_msg"`
-	Admin      string `json:"admin,omitempty"`
-	Version    string `json:"version,omitempty"`
+	CodeID  uint64 `json:"code_id"`
+	Creator string `json:"creator"`
+	Label   string `json:"label"`
+	InitMsg []byte `json:"init_msg"`
+	Admin   string `json:"admin,omitempty"`
+	Version string `json:"version,omitempty"`
 }
 
 const (
@@ -52,13 +53,13 @@ func NewKeeper(
 	sb := collections.NewSchemaBuilder(storeService)
 
 	k := Keeper{
-		storeService: storeService,
-		cdc:          cdc,
-		ContractCode: collections.NewMap(sb, []byte("code/"), "contractCode", collections.Uint64Key, collections.BytesValue),
-		ContractCodeID: collections.NewSequence(sb, []byte("codeSeq/"), "contractCodeID"),
-		Contracts: collections.NewMap(sb, []byte("contract/"), "contracts", collections.StringKey, collections.BytesValue),
-		ContractSeq: collections.NewSequence(sb, []byte("contractSeq/"), "contractSeq"),
-		ContractState: collections.NewMap(sb, []byte("contractState/"), "contractState", collections.PairKeyCodec(collections.StringKey, collections.StringKey), collections.BytesValue),
+		storeService:     storeService,
+		cdc:              cdc,
+		ContractCode:     collections.NewMap(sb, []byte("code/"), "contractCode", collections.Uint64Key, collections.BytesValue),
+		ContractCodeID:   collections.NewSequence(sb, []byte("codeSeq/"), "contractCodeID"),
+		Contracts:        collections.NewMap(sb, []byte("contract/"), "contracts", collections.StringKey, collections.BytesValue),
+		ContractSeq:      collections.NewSequence(sb, []byte("contractSeq/"), "contractSeq"),
+		ContractState:    collections.NewMap(sb, []byte("contractState/"), "contractState", collections.PairKeyCodec(collections.StringKey, collections.StringKey), collections.BytesValue),
 		wasmbridgeKeeper: wasmbridgeKeeper,
 	}
 
@@ -144,8 +145,13 @@ func (k Keeper) InstantiateContract(ctx context.Context, sender string, codeID u
 
 	// Initialize WASM contract
 	vm := k.getWasmVM(ctx)
-	gasCfg, _ := k.GetGasConfig(ctx)
-	_, _ = vm.InitializeWASM(ctx, wasmCode, initMsg, contractAddr, gasCfg.DefaultGasLimit, gasCfg.InstantiateCost)
+	gasCfg, err := k.GetGasConfig(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get gas config: %w", err)
+	}
+	if _, err := vm.InitializeWASM(ctx, wasmCode, initMsg, contractAddr, gasCfg.DefaultGasLimit, gasCfg.InstantiateCost); err != nil {
+		return "", fmt.Errorf("failed to initialize WASM contract: %w", err)
+	}
 
 	// Emit instantiation event
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -273,7 +279,9 @@ func (k Keeper) ExecuteContract(ctx context.Context, sender string, contractAddr
 	}
 
 	// Store execution in contract state
-	k.setExecutionResult(ctx, contractAddr, "last_action", action)
+	if err := k.setExecutionResult(ctx, contractAddr, "last_action", action); err != nil {
+		return "", fmt.Errorf("failed to store execution result: %w", err)
+	}
 
 	switch action {
 	case "transfer":
@@ -297,9 +305,12 @@ func (k Keeper) ExecuteContract(ctx context.Context, sender string, contractAddr
 	}
 }
 
-func (k Keeper) setExecutionResult(ctx context.Context, contractAddr, key, value string) {
+func (k Keeper) setExecutionResult(ctx context.Context, contractAddr, key, value string) error {
 	resultBz := []byte(value)
-	_ = k.SetContractState(ctx, contractAddr, key, resultBz)
+	if err := k.SetContractState(ctx, contractAddr, key, resultBz); err != nil {
+		return fmt.Errorf("failed to set execution result for contract %s: %w", contractAddr, err)
+	}
+	return nil
 }
 
 func (k Keeper) emitContractEvent(sdkCtx sdk.Context, contractAddr, action string, msg map[string]interface{}) {

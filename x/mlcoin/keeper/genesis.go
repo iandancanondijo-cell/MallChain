@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"cosmossdk.io/collections"
 	"marketplace/x/mlcoin/types"
+
+	"cosmossdk.io/collections"
 )
 
 // InitGenesis initializes the module's state from a provided genesis state.
@@ -25,6 +26,20 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 		if err := k.EmissionState.Set(ctx, *genState.EmissionState); err != nil {
 			return err
 		}
+	}
+
+	// Initialize FeesAccumulated from genesis or use default
+	feesAcc := genState.FeesAccumulated
+	if feesAcc.TransactionFees == 0 && feesAcc.TradingFees == 0 && feesAcc.ConversionFees == 0 {
+		feesAcc = types.FeesAccumulated{
+			TransactionFees:      0,
+			TradingFees:          0,
+			ConversionFees:       0,
+			LastDistributionTime: 0,
+		}
+	}
+	if err := k.FeesAccumulated.Set(ctx, feesAcc); err != nil {
+		return err
 	}
 
 	if err := k.Params.Set(ctx, genState.Params); err != nil {
@@ -61,6 +76,12 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 		return nil, err
 	}
 	genesis.EmissionState = &emissionState
+
+	feesAcc, err := k.FeesAccumulated.Get(ctx)
+	if err != nil && !errors.Is(err, collections.ErrNotFound) {
+		return nil, err
+	}
+	genesis.FeesAccumulated = feesAcc
 
 	return genesis, nil
 }

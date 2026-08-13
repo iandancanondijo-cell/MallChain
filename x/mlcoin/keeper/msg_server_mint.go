@@ -41,7 +41,10 @@ func (k msgServer) MintMallcoin(ctx context.Context, msg *types.MsgMintMallcoin)
 	}
 
 	// Record a transaction with unique ID
-	txid, _ := k.Keeper.RecordTransaction(ctx, authStr, msg.Recipient, msg.Amount, "mint", "Authority mint")
+	txid, err := k.Keeper.RecordTransaction(ctx, authStr, msg.Recipient, msg.Amount, "mint", "Authority mint")
+	if err != nil {
+		sdkCtx.Logger().Error("Failed to record mint transaction", "error", err)
+	}
 
 	return &types.MsgMintMallcoinResponse{TxId: txid}, nil
 }

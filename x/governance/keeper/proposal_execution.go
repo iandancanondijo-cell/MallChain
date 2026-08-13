@@ -48,7 +48,9 @@ func (k Keeper) ExecuteProposal(ctx context.Context, proposal types.Proposal) er
 				sdk.NewAttribute("message_index", strconv.Itoa(i)),
 			)
 			proposal.Status = types.StatusFailed
-			_ = k.SetProposal(ctx, proposal)
+			if err := k.SetProposal(ctx, proposal); err != nil {
+				sdkCtx.Logger().Error("Failed to set proposal status to failed", "proposal_id", proposal.Id, "error", err)
+			}
 			return fmt.Errorf("proposal %d message %d failed: %w", proposal.Id, i, err)
 		}
 	}

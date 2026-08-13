@@ -26,14 +26,13 @@ var _ types.MsgServer = msgServer{}
 func (k msgServer) SubmitProposal(ctx context.Context, msg *types.MsgSubmitProposal) (*types.MsgSubmitProposalResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
-	// Create proposal with messages
+	// Create proposal with messages (status will be set by SubmitProposal)
 	proposal := types.Proposal{
 		Title:        msg.Title,
 		Summary:      msg.Summary,
 		Metadata:     msg.Metadata,
 		Proposer:     msg.Proposer,
 		Messages:     msg.Messages,
-		Status:       types.StatusDepositPeriod,
 		TotalDeposit: msg.InitialDeposit,
 		SubmitTime:   sdkCtx.BlockTime(),
 		Expedited:    msg.Expedited,
