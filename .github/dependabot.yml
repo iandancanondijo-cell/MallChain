@@ -1,0 +1,43 @@
+version: 2
+updates:
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Enable version updates for Go modules
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+
+  # Enable version updates for npm (backend)
+  - package-ecosystem: "npm"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    groups:
+      backend-dependencies:
+        patterns:
+          - "*"
+
+  # Enable version updates for npm (frontend)
+  - package-ecosystem: "npm"
+    directory: "/mallchain-os-v14"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    groups:
+      frontend-dependencies:
+        patterns:
+          - "*"

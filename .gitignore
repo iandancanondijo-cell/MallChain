@@ -62,6 +62,7 @@ blockchain_working/config/gentx/
 
 # Agent metadata - do not commit
 .kilocode/
+.kilo/
 .kiro/
 .mines/
 
