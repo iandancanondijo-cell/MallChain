@@ -2,6 +2,10 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
 const ValidatorApplicationSchema = new Schema({
+  // The logged-in account that submitted this (auth middleware sets req.user
+  // at apply-time) — lets us notify the applicant on review without having
+  // to reverse-map a chain address back to an account (no such mapping exists).
+  userId: { type: Schema.Types.ObjectId, ref: 'User' },
   applicantAddress: { type: String, required: true, index: true },
   validatorAddress: { type: String, default: '' },
   moniker: { type: String, required: true },

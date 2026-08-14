@@ -5,6 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { authService, type JwtPayload } from '../auth';
+import { store, OS_KEY } from '../../store/store';
 
 describe('AuthService', () => {
   beforeEach(() => {
@@ -164,10 +165,12 @@ describe('AuthService', () => {
   });
 
   describe('localStorage error handling', () => {
+    // Note: happy-dom's localStorage is Proxy-backed — plain assignment like
+    // `localStorage.setItem = fn` silently no-ops (the Proxy trap ignores it),
+    // and Storage.prototype.* is also not what real calls resolve through.
+    // vi.spyOn is the only thing that reliably intercepts calls here.
     it('should handle localStorage unavailable gracefully', () => {
-      // Mock localStorage to throw error
-      const originalSetItem = Storage.prototype.setItem;
-      Storage.prototype.setItem = vi.fn(() => {
+      const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
         throw new Error('localStorage is full');
       });
 
@@ -175,31 +178,74 @@ describe('AuthService', () => {
         authService.storeToken('test-token');
       }).toThrow();
 
-      Storage.prototype.setItem = originalSetItem;
+      spy.mockRestore();
     });
 
     it('should handle localStorage getItem error gracefully', () => {
-      const originalGetItem = Storage.prototype.getItem;
-      Storage.prototype.getItem = vi.fn(() => {
+      const spy = vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
         throw new Error('localStorage access denied');
       });
 
       const token = authService.getToken();
       expect(token).toBeNull();
 
-      Storage.prototype.getItem = originalGetItem;
+      spy.mockRestore();
     });
 
     it('should handle localStorage removeItem error gracefully', () => {
-      const originalRemoveItem = Storage.prototype.removeItem;
-      Storage.prototype.removeItem = vi.fn(() => {
+      const spy = vi.spyOn(localStorage, 'removeItem').mockImplementation(() => {
         throw new Error('localStorage access denied');
       });
 
       // Should not throw
       authService.clearToken();
 
-      Storage.prototype.removeItem = originalRemoveItem;
+      spy.mockRestore();
+    });
+  });
+
+  describe('logout', () => {
+    afterEach(() => {
+      store.reset();
+    });
+
+    it('clears the token', () => {
+      authService.storeToken(createMockToken({ userId: '1', username: 'x', exp: Math.floor(Date.now() / 1000) + 3600 }));
+      authService.logout();
+      expect(authService.getToken()).toBeNull();
+    });
+
+    it('fully resets the store, not just the auth flag', () => {
+      store.state.balances.MALL = 500;
+      store.state.user.authed = true;
+
+      authService.logout();
+
+      expect(store.state.user.authed).toBe(false);
+      expect(store.state.balances.MALL).toBe(0);
+    });
+
+    it('navigates via the provided navigate function when given', () => {
+      const navigate = vi.fn();
+      authService.logout(navigate);
+      expect(navigate).toHaveBeenCalledWith('/landing');
+    });
+
+    it('falls back to setting the hash directly when no navigate is provided', () => {
+      window.location.hash = '#/wallet';
+      authService.logout();
+      expect(window.location.hash).toBe('#/landing');
+    });
+
+    it('removes OS_KEY from localStorage', () => {
+      store.commit();
+      expect(localStorage.getItem(OS_KEY)).not.toBeNull();
+      authService.logout();
+      // reset() removes then immediately re-persists an empty state, so the
+      // key exists again — but its contents must be the fresh empty state.
+      const persisted = JSON.parse(localStorage.getItem(OS_KEY)!);
+      expect(persisted.user.authed).toBe(false);
+      expect(persisted.balances.MALL).toBe(0);
     });
   });
 

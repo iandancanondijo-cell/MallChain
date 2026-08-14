@@ -15,6 +15,7 @@
 import React, { useState } from 'react';
 import { verifyPin, decryptMnemonic } from '../services/security';
 import { toast } from './ui';
+import { getSessionDraft, setSessionDraft } from '../services/sessionDraft';
 import '../styles/private-key-export.css';
 
 interface PrivateKeyExportProps {
@@ -25,18 +26,37 @@ interface PrivateKeyExportProps {
 
 type ExportStep = 'warning' | 'pin-entry' | 'display';
 
+const PIN_ATTEMPTS_DRAFT_KEY = 'privateKeyExportPinAttempts';
+
 export function PrivateKeyExport({
   encryptedMnemonic,
   walletAddress,
   onClose,
 }: PrivateKeyExportProps) {
+  // `step` deliberately stays local (never persisted): every mount must start
+  // at 'warning' and re-verify the PIN — persisting it into the session tier
+  // like a normal wizard would let a reopen skip straight to 'display' and
+  // leak the decrypted key without re-authenticating.
   const [step, setStep] = useState<ExportStep>('warning');
   const [pin, setPin] = useState('');
   const [privateKey, setPrivateKey] = useState<string | null>(null);
   const [showPrivateKey, setShowPrivateKey] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [pinAttempts, setPinAttempts] = useState(0);
+
+  // Failed-attempt count DOES persist (session tier), so closing and
+  // reopening this modal can no longer reset the lockout — previously
+  // pinAttempts was plain useState and trivially bypassed that way.
+  const [pinAttempts, setPinAttemptsState] = useState<number>(
+    () => getSessionDraft<{ count: number }>(PIN_ATTEMPTS_DRAFT_KEY)?.data.count ?? 0
+  );
+  const setPinAttempts = (updater: number | ((n: number) => number)) => {
+    setPinAttemptsState((prev) => {
+      const next = typeof updater === 'function' ? (updater as (n: number) => number)(prev) : updater;
+      setSessionDraft<{ count: number }>(PIN_ATTEMPTS_DRAFT_KEY, { data: { count: next } });
+      return next;
+    });
+  };
 
   // Task 12.2: Warning modal before access
   const handleProceedToPin = () => {
@@ -75,6 +95,9 @@ export function PrivateKeyExport({
         }
         return;
       }
+
+      // Successful verification clears the persisted failed-attempt count.
+      setPinAttempts(0);
 
       // In production, derive private key from mnemonic
       // For now, use mnemonic as placeholder

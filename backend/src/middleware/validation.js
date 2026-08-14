@@ -48,6 +48,44 @@ const faucetRequestSchema = Joi.object({
   walletAddress: addressSchema,
 });
 
+// buy.js's /reserve, /mpesa, and /credit routes were all validated against
+// paymentSchema (amount/phone/userId only), which — combined with
+// stripUnknown: true below — silently deleted every field those handlers
+// actually read (fiat, currency, walletAddress, quoteId, description,
+// idempotencyKey) before the handler ever saw them. These match each
+// handler's real destructuring in routes/buy.js.
+const buyReserveSchema = Joi.object({
+  amount: amountSchema, // MLCNS amount requested
+  fiat: Joi.alternatives().try(Joi.number(), Joi.string()).required(), // may include a currency symbol/prefix
+  currency: Joi.string().max(8).optional(),
+  walletAddress: addressSchema,
+  phone: Joi.string()
+    .pattern(/^254\d{9}$/)
+    .required()
+    .messages({
+      'string.pattern.base': 'Invalid phone number format (use 254XXXXXXXXX)',
+    }),
+});
+
+const buyMpesaInitiateSchema = Joi.object({
+  quoteId: Joi.string().required(),
+  phone: Joi.string()
+    .pattern(/^254\d{9}$/)
+    .required()
+    .messages({
+      'string.pattern.base': 'Invalid phone number format (use 254XXXXXXXXX)',
+    }),
+  amount: amountSchema,
+  description: Joi.string().max(256).optional(),
+});
+
+const buyCreditSchema = Joi.object({
+  quoteId: Joi.string().optional(),
+  walletAddress: addressSchema.optional(),
+  amount: amountSchema.optional(),
+  idempotencyKey: Joi.string().optional(),
+}).or('quoteId', 'walletAddress');
+
 const stakingSchema = Joi.object({
   validator: Joi.string()
     .pattern(/^mallvaloper1[a-z0-9]{38,58}$/)
@@ -129,6 +167,9 @@ module.exports = {
   schemas: {
     transfer: transferSchema,
     payment: paymentSchema,
+    buyReserve: buyReserveSchema,
+    buyMpesaInitiate: buyMpesaInitiateSchema,
+    buyCredit: buyCreditSchema,
     faucetRequest: faucetRequestSchema,
     staking: stakingSchema,
     governance: governanceSchema,

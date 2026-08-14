@@ -65,7 +65,8 @@ const GROUPS: NavGroup[] = [
       { label: 'Leaderboard', path: '/mines/leaderboard', icon: '🏆' },
       { label: 'Analytics', path: '/mines/analytics', icon: '📊' },
       { label: 'History', path: '/mines/history', icon: '🕘' },
-      { label: 'Validator Queue', path: '/mines/validator-queue', icon: '🛂' },
+      { label: 'Proof Reviewer Queue', path: '/mines/validator-queue', icon: '🛂' },
+      { label: 'Stake to Review', path: '/mines/reviewer/stake', icon: '🔒' },
     ],
   },
   {
@@ -73,14 +74,8 @@ const GROUPS: NavGroup[] = [
     items: [
       { label: 'Become a Validator', path: '/validators', icon: '🛡' },
       { label: 'Apply', path: '/validators/apply', icon: '📝' },
-      { label: 'Stake', path: '/validators/stake', icon: '🔒' },
-      { label: 'Training', path: '/validators/training', icon: '🎓' },
-      { label: 'Approval', path: '/validators/approval', icon: '⏳' },
-      { label: 'Dashboard', path: '/validators/dashboard', icon: '📟' },
-      { label: 'Rewards Calculator', path: '/validators/calculator', icon: '🧮' },
-      { label: 'Rewards Leaderboard', path: '/validators/rewards-leaderboard', icon: '🏅' },
       { label: 'Leaderboard', path: '/validators/leaderboard', icon: '🏆' },
-      { label: 'Profile', path: '/validators/profile', icon: '👤' },
+      { label: 'My Application', path: '/validators/profile', icon: '👤' },
     ],
   },
   {

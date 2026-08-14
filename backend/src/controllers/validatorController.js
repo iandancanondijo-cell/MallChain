@@ -5,6 +5,7 @@ const { SigningStargateClient } = require('@cosmjs/stargate');
 const { config } = require('../config');
 const { getValidatorLeaderboard, getValidatorDetail } = require('../services/validatorCenterService');
 const ValidatorApplication = require('../models/ValidatorApplication');
+const { notify } = require('../services/notify');
 
 const RPC = config.chain.rpc;
 const CHAIN_REST = config.chain.rest;
@@ -76,6 +77,7 @@ exports.applyValidator = async (req, res) => {
     }
 
     const application = await ValidatorApplication.create({
+      userId: req.user?._id,
       applicantAddress,
       validatorAddress,
       moniker,
@@ -127,6 +129,14 @@ exports.reviewApplication = async (req, res) => {
     }
 
     await application.save();
+
+    if (application.userId) {
+      notify(application.userId, {
+        kind: 'validators',
+        title: status === 'approved' ? 'Validator application approved' : 'Validator application rejected',
+        body: reviewNotes || `Your validator application for ${application.moniker} was ${status}`,
+      });
+    }
 
     return res.json({ success: true, application });
   } catch (e) {

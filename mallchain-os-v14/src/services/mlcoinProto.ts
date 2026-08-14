@@ -88,9 +88,68 @@ const MsgTransferMallcoinType = {
   },
 };
 
+export const MSG_STAKE = '/marketplace.mlcoin.v1.MsgStake';
+export const MSG_UNSTAKE = '/marketplace.mlcoin.v1.MsgUnstake';
+
+export interface MsgStakeValue {
+  creator: string;
+  amount: string;
+}
+
+export interface MsgUnstakeValue {
+  creator: string;
+  stakeId: string;
+}
+
+export function encodeMsgStake(msg: Partial<MsgStakeValue>): Uint8Array {
+  const parts: Uint8Array[] = [];
+  if (msg.creator) parts.push(encodeStringField(1, msg.creator));
+  if (msg.amount) parts.push(encodeUint64Field(2, msg.amount));
+  return concatBytes(...parts);
+}
+
+export function encodeMsgUnstake(msg: Partial<MsgUnstakeValue>): Uint8Array {
+  const parts: Uint8Array[] = [];
+  if (msg.creator) parts.push(encodeStringField(1, msg.creator));
+  if (msg.stakeId) parts.push(encodeStringField(2, msg.stakeId));
+  return concatBytes(...parts);
+}
+
+const MsgStakeType = {
+  create(base: Partial<MsgStakeValue> = {}): MsgStakeValue {
+    return { creator: base.creator || '', amount: base.amount || '0' };
+  },
+  encode(message: MsgStakeValue) {
+    return { finish: () => encodeMsgStake(message) };
+  },
+  fromPartial(object: Partial<MsgStakeValue> = {}) {
+    return MsgStakeType.create(object);
+  },
+  decode(): MsgStakeValue {
+    throw new Error('MsgStake decode is not implemented in this client helper');
+  },
+};
+
+const MsgUnstakeType = {
+  create(base: Partial<MsgUnstakeValue> = {}): MsgUnstakeValue {
+    return { creator: base.creator || '', stakeId: base.stakeId || '' };
+  },
+  encode(message: MsgUnstakeValue) {
+    return { finish: () => encodeMsgUnstake(message) };
+  },
+  fromPartial(object: Partial<MsgUnstakeValue> = {}) {
+    return MsgUnstakeType.create(object);
+  },
+  decode(): MsgUnstakeValue {
+    throw new Error('MsgUnstake decode is not implemented in this client helper');
+  },
+};
+
 export function createMlcoinRegistry(): Registry {
   return new Registry([
     ...defaultRegistryTypes,
     [MSG_TRANSFER_MALLCOIN, MsgTransferMallcoinType as unknown as GeneratedType],
+    [MSG_STAKE, MsgStakeType as unknown as GeneratedType],
+    [MSG_UNSTAKE, MsgUnstakeType as unknown as GeneratedType],
   ]);
 }

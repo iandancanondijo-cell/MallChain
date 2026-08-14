@@ -56,6 +56,7 @@ export interface Activity {
 export interface AppState {
   version: number;
   user: {
+    id: string;
     authed: boolean;
     name: string;
     email: string;
@@ -64,6 +65,7 @@ export interface AppState {
     bio: string;
     frozen: boolean;
     kycLevel: number;
+    role: 'user' | 'admin' | 'superadmin';
   };
   balances: Balance;
   txs: Tx[];
@@ -163,6 +165,8 @@ export interface AppState {
   };
   learning: boolean[];
   socialTasks: boolean[];
+  /** Durable-tier in-progress wizard/flow state, keyed by flow id. See hooks/useWizard.ts. */
+  flows: Record<string, { step: string; data: Record<string, unknown>; updatedAt: number }>;
 }
 
 export interface Campaign {
@@ -222,6 +226,8 @@ export interface ValidatorsSlice {
   stakeLocked: number;
   stakeTx: string | null;
   training: { score: number; passed: boolean; attempts: number; ts: string } | null;
+  /** In-progress quiz position, separate from `training` (which only holds a completed attempt's result). */
+  trainingInProgress: { idx: number; score: number } | null;
   approval: { start: string; ends: string; approved: boolean } | null;
   daily: {
     reviewed: number;
@@ -251,6 +257,7 @@ function emptyState(): AppState {
   return {
     version: 14,
     user: {
+      id: '',
       authed: false,
       name: 'Campaign Participant',
       email: '',
@@ -259,6 +266,7 @@ function emptyState(): AppState {
       bio: '',
       frozen: false,
       kycLevel: 1,
+      role: 'user',
     },
     balances: { MALL: 0, MLPTS: 0, USD_M: 0, KES: 0, EUR: 0, GBP: 0 },
     txs: [],
@@ -297,6 +305,7 @@ function emptyState(): AppState {
     ] },
     learning: [false, false, false, false],
     socialTasks: [false, false, false, false],
+    flows: {},
   };
 }
 
@@ -307,6 +316,7 @@ function emptyValidators(): ValidatorsSlice {
     stakeLocked: 0,
     stakeTx: null,
     training: null,
+    trainingInProgress: null,
     approval: null,
     daily: { reviewed: 0, approved: 0, rejected: 0, matched: 0, incorrect: 0, reward: 0 },
     reputation: { accuracy: 0, votes: 0, correct: 0, incorrect: 0, fraud: 0, speed: 0, trust: 0, rank: 'Unranked' },
@@ -386,6 +396,7 @@ class Store {
       messaging: { ...base.messaging, ...saved.messaging },
       referrals: { ...base.referrals, ...saved.referrals },
       admin: { ...base.admin, ...saved.admin },
+      flows: { ...base.flows, ...saved.flows },
     };
     return out;
   }
@@ -472,6 +483,42 @@ class Store {
   pushNotification(title: string, body = '', kind: Notification['kind'] = 'system') {
     this.state.notifications.unshift({ id: 'n' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), kind, title, body, read: false, ts: Date.now() });
     if (this.state.notifications.length > 80) this.state.notifications.length = 80;
+  }
+
+  /** Durable-tier wizard/flow progress — see hooks/useWizard.ts. */
+  setFlow(key: string, patch: { step?: string; data?: Record<string, unknown> }) {
+    const cur = this.state.flows[key] ?? { step: '', data: {}, updatedAt: 0 };
+    this.state.flows[key] = {
+      step: patch.step ?? cur.step,
+      data: patch.data ? { ...cur.data, ...patch.data } : cur.data,
+      updatedAt: Date.now(),
+    };
+    this.commit();
+  }
+
+  getFlow(key: string) {
+    return this.state.flows[key];
+  }
+
+  clearFlow(key: string) {
+    delete this.state.flows[key];
+    this.commit();
+  }
+
+  /**
+   * Apply a full snapshot already persisted by another tab (via a `storage` event).
+   * Unlike every other mutation path this does NOT re-persist — the snapshot is
+   * already on disk — it only merges into memory and notifies subscribers.
+   */
+  applyExternalState(newState: AppState) {
+    this.state = this.merge(newState);
+    this.listeners.forEach((fn) => {
+      try {
+        fn();
+      } catch {
+        /* listener error must not break the store */
+      }
+    });
   }
 
   reset() {

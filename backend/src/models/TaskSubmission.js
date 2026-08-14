@@ -27,6 +27,8 @@ const TaskSubmissionSchema = new Schema({
   votes_required: { type: Number, default: 6 },
   votes_yes: { type: Number, default: 0 },
   votes_no: { type: Number, default: 0 },
+  votes_yes_weight: { type: Number, default: 0 }, // reputation-weighted tally, see minesReviewService.js
+  votes_no_weight: { type: Number, default: 0 },
   voting_deadline: { type: Date },
 
   // Reward

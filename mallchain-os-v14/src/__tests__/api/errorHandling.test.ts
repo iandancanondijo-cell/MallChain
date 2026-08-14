@@ -187,7 +187,7 @@ describe('Error Handling', () => {
     it('should retry request on transient error', async () => {
       let attempts = 0;
 
-      mockFetch.mockImplementationOnce(async () => {
+      mockFetch.mockImplementation(async () => {
         attempts++;
         if (attempts === 1) {
           return { ok: false, status: 503 };

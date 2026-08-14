@@ -208,18 +208,18 @@ describe('errorHandler', () => {
       vi.useRealTimers();
     });
 
-    it('should redirect to login by default', () => {
+    it('should redirect to landing by default (via authService.logout)', () => {
       vi.useFakeTimers();
 
       const originalLocation = window.location;
       delete (window as any).location;
-      window.location = { href: '' } as any;
+      window.location = { href: '', hash: '' } as any;
 
       handle401Error({ action: 'test' });
 
       vi.advanceTimersByTime(1000);
 
-      expect(window.location.href).toBe('/login');
+      expect(window.location.hash).toBe('#/landing');
 
       window.location = originalLocation;
       vi.useRealTimers();

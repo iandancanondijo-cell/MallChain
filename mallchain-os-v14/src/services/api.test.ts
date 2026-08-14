@@ -26,8 +26,10 @@ vi.mock('./config', () => ({
 }));
 
 vi.mock('../store/store', () => ({
+  OS_KEY: 'mallchain_os_v1_v14',
   store: {
     state: {
+      user: { authed: true },
       balances: { MALL: 1000, USDT: 500 },
       txs: [],
       notifications: [],
@@ -37,6 +39,8 @@ vi.mock('../store/store', () => ({
       explorer: { blocks: [] },
     },
     applyTx: vi.fn(() => ({ ok: true, tx: { id: 'tx123', amount: 100 } })),
+    // authService.logout() (called by handle401Error) does a full store.reset()
+    reset: vi.fn(),
   },
 }));
 
@@ -62,9 +66,9 @@ describe('API Service - Real Backend Mode', () => {
     // Clear localStorage
     localStorage.clear();
     
-    // Reset location.href mock
+    // Reset location mock
     delete (window as any).location;
-    (window as any).location = { href: '' };
+    (window as any).location = { href: '', hash: '' };
   });
 
   afterEach(() => {
@@ -444,7 +448,7 @@ describe('API Service - Real Backend Mode', () => {
       // The redirect happens asynchronously in the error handler
       // Verify the token is cleared immediately
       await new Promise(resolve => setTimeout(resolve, 1500));
-      expect(window.location.href).toBe('/login');
+      expect(window.location.hash).toBe('#/landing');
     });
 
     it('should handle 401 for POST requests', async () => {
@@ -462,7 +466,7 @@ describe('API Service - Real Backend Mode', () => {
       
       // The redirect happens asynchronously in the error handler
       await new Promise(resolve => setTimeout(resolve, 1500));
-      expect(window.location.href).toBe('/login');
+      expect(window.location.hash).toBe('#/landing');
     });
 
     it('should handle localStorage removal failure on 401', async () => {

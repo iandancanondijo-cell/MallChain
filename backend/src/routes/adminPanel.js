@@ -10,6 +10,7 @@ const WithdrawalRequest = require('../models/WithdrawalRequest');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/adminAuth');
 const { BurnPolicy, DynamicBurnThreshold } = require('../models/BurnPolicy');
 const TreasuryLedger = require('../models/TreasuryLedger');
+const { notify } = require('../services/notify');
 
 const Campaign = mongoose.models.Campaign || mongoose.model('Campaign', new mongoose.Schema({}, { strict: false }));
 const WalletTransaction = mongoose.models.WalletTransaction || mongoose.model('WalletTransaction', new mongoose.Schema({}, { strict: false }));
@@ -136,6 +137,7 @@ router.put('/users/:id/role', requireSuperAdmin, async (req, res) => {
     if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
 
     await auditLog('user_role_change', req.user, { targetUserId: req.params.id, newRole: role });
+    notify(user._id, { kind: 'system', title: 'Account role updated', body: `Your account role is now ${role}` });
     return res.json({ ok: true, user });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
@@ -153,6 +155,11 @@ router.put('/users/:id/ban', async (req, res) => {
     if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
 
     await auditLog('user_ban', req.user, { targetUserId: req.params.id, banned: !!banned, reason });
+    notify(user._id, {
+      kind: 'system',
+      title: banned ? 'Account banned' : 'Account unbanned',
+      body: banned ? (reason || 'Your account has been banned by an admin') : 'Your account is active again',
+    });
     return res.json({ ok: true, user });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });

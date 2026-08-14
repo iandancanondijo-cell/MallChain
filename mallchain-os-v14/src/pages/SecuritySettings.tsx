@@ -15,6 +15,7 @@ import React, { useState } from 'react';
 import { store } from '../store/store';
 import { useStoreVersion, toast } from '../components/ui';
 import { verifyPin, hashPin, detectBiometricAvailability } from '../services/security';
+import { authService } from '../services/auth';
 import PrivateKeyExport from '../components/PrivateKeyExport';
 import '../styles/security-settings.css';
 
@@ -176,11 +177,12 @@ export function SecuritySettings() {
     toast(`Session timeout set to ${timeout} minutes`, true);
   };
 
-  // Task 11.10: Sign out everywhere
+  // Task 11.10: Sign out everywhere — full logout (token clear + store reset)
+  // so this device's session actually ends, not just a UI toast.
   const handleSignOutEverywhere = () => {
     setState(prev => ({ ...prev, showSignOutModal: false }));
     toast('Signed out from all devices', true);
-    // In production, would call backend to invalidate all sessions
+    authService.logout();
   };
 
   return (

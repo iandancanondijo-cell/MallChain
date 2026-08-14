@@ -12,8 +12,10 @@ import { store } from './store/store';
 import { seedIfDemo } from './demo/seeds';
 import { config, sim } from './services/config';
 import { useStoreVersion } from './components/ui';
-import { authStateSync } from './services/authStateSync';
+import { storeSync } from './services/storeSync';
 import { socketManager } from './services/socket';
+import { api } from './services/api';
+import { authService } from './services/auth';
 import './styles/auth.css';
 import './styles/wallet-data.css';
 import './styles/explorer.css';
@@ -28,10 +30,27 @@ export default function App() {
     // Initialize auth state first, before any routing decisions
     const initializeAuth = async () => {
       try {
-        // Task 4.8: Initialize auth state synchronization with localStorage
-        authStateSync.initialize();
-        // Give authStateSync a moment to restore token from localStorage
+        // Cross-tab store synchronization (auth token + whole app state)
+        storeSync.initialize();
+        // Give storeSync a moment to restore token from localStorage
         await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Refresh frozen/role/kycLevel from the real backend on every boot —
+        // login/register only set these at the moment of auth, so a reload
+        // (or an admin ban/KYC decision since then) would otherwise show stale data.
+        if (authService.getToken()) {
+          const res = await api.get<{ user?: { id: string; banned: boolean; kycLevel: number; role: 'user' | 'admin' | 'superadmin' } }>('/api/auth/me');
+          if (res.ok && res.data?.user) {
+            const u = res.data.user;
+            store.state.user.id = u.id;
+            store.state.user.frozen = !!u.banned;
+            store.state.user.kycLevel = u.kycLevel ?? 1;
+            store.state.user.role = u.role || 'user';
+            store.commit();
+            if (socketManager.isConnected()) socketManager.subscribeUser(u.id);
+          }
+        }
+
         setAuthInitialized(true);
       } catch (error) {
         console.error('Auth initialization error:', error);
@@ -46,40 +65,29 @@ export default function App() {
     const a = map[st.prefs.accent] || '#f3ba2f';
     document.documentElement.style.setProperty('--accent', a);
     document.documentElement.style.setProperty('--accent-2', a === '#22d3ee' ? '#0ea5e9' : a === '#a78bfa' ? '#8b5cf6' : a === '#34d399' ? '#10b981' : '#f59e0b');
-    
+
     // Pause simulations when a real API is configured
     if (config.apiBaseUrl) sim.pause();
-    
+
     // Seed demo data once on boot
     seedIfDemo(st);
-    
+
     // Task 5.12: Initialize Socket.IO connection for real-time updates
     socketManager.connect();
-    
+
     // Cleanup on unmount
     return () => {
-      authStateSync.cleanup();
+      storeSync.cleanup();
       socketManager.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // PHASE 0 FIX: Check auth state and redirect unauthenticated users to landing page
-  useEffect(() => {
-    if (!authInitialized) return;
-
-    const isAuthenticated = st.user.authed;
-    const isOnAuthRoute = path === '/auth' || path === '/landing';
-    const isOnLoginFlow = path.startsWith('/auth');
-
-    // If not authenticated and not on auth/landing routes, redirect to landing
-    if (!isAuthenticated && !isOnAuthRoute && !isOnLoginFlow) {
-      console.log('[Auth Guard] User not authenticated, redirecting to landing page');
-      navigate('/landing');
-    }
-  }, [authInitialized, st.user.authed, path, navigate]);
-
-  // Auth guard: redirect unauthenticated users to landing
+  // Auth guard: redirect unauthenticated users to landing, and authenticated
+  // users away from landing. This is a cosmetic hash-correctness effect only —
+  // matchRoute() (router.tsx) independently recomputes auth and substitutes
+  // Landing for protected content regardless of what the hash says, so it
+  // remains the actual authorization boundary no matter what this effect does.
   useEffect(() => {
     if (!authInitialized) return;
     

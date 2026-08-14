@@ -100,6 +100,25 @@ export interface PriceData {
   changes: Record<string, number>;
 }
 
+/** A live-pushed notification (see backend/src/services/notify.js). */
+export interface NotificationData {
+  _id: string;
+  kind: string;
+  title: string;
+  body: string;
+  read: boolean;
+  createdAt: string;
+}
+
+/** A live-pushed chat message (see backend/src/routes/messaging.js). */
+export interface MessageData {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  text: string;
+  ts: string;
+}
+
 /**
  * SocketManager handles all Socket.IO client operations
  * 
@@ -231,6 +250,62 @@ class SocketManager {
       console.log('[Socket] System message:', data.message);
       this.emit('system', data);
     });
+
+    // Live notification push (see backend services/notify.js)
+    this.socket.on('notification', (data: NotificationData) => {
+      console.log('[Socket] Notification received:', data);
+      this.emit('notification', data);
+    });
+
+    // Live chat message push (see backend routes/messaging.js)
+    this.socket.on('message:new', (data: MessageData) => {
+      console.log('[Socket] Message received:', data);
+      this.emit('message:new', data);
+    });
+  }
+
+  /** Subscribe to live messages for a specific conversation. */
+  subscribeConversation(conversationId: string): void {
+    if (!this.socket?.connected || !conversationId) return;
+    const room = `conversation:${conversationId}`;
+    if (this.subscriptions.has(room)) return;
+    this.socket.emit('subscribe:conversation', conversationId);
+    this.subscriptions.add(room);
+  }
+
+  unsubscribeConversation(conversationId: string): void {
+    if (!this.socket?.connected || !conversationId) return;
+    const room = `conversation:${conversationId}`;
+    if (!this.subscriptions.has(room)) return;
+    this.socket.emit('unsubscribe:conversation', conversationId);
+    this.subscriptions.delete(room);
+  }
+
+  /** Register a live-message listener. */
+  onMessage(callback: (data: MessageData) => void): () => void {
+    return this.on('message:new', callback);
+  }
+
+  /** Subscribe to live notifications for a specific (Mongo) user id. */
+  subscribeUser(userId: string): void {
+    if (!this.socket?.connected || !userId) return;
+    const room = `user:${userId}`;
+    if (this.subscriptions.has(room)) return;
+    this.socket.emit('subscribe:user', userId);
+    this.subscriptions.add(room);
+  }
+
+  unsubscribeUser(userId: string): void {
+    if (!this.socket?.connected || !userId) return;
+    const room = `user:${userId}`;
+    if (!this.subscriptions.has(room)) return;
+    this.socket.emit('unsubscribe:user', userId);
+    this.subscriptions.delete(room);
+  }
+
+  /** Register a live-notification listener. */
+  onNotification(callback: (data: NotificationData) => void): () => void {
+    return this.on('notification', callback);
   }
 
   /**
@@ -359,6 +434,10 @@ class SocketManager {
         const address = room.replace('wallet:', '');
         // Force emit without checking if already subscribed
         this.socket?.emit('subscribe:wallet', address);
+      } else if (room.startsWith('user:')) {
+        this.socket?.emit('subscribe:user', room.replace('user:', ''));
+      } else if (room.startsWith('conversation:')) {
+        this.socket?.emit('subscribe:conversation', room.replace('conversation:', ''));
       } else if (room === 'market:feed') {
         this.socket?.emit('subscribe:market');
       } else if (room === 'price:updates') {

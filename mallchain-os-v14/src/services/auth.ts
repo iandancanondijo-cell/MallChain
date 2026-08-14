@@ -12,6 +12,8 @@
  * - Type-safe token access
  */
 
+import { store } from '../store/store';
+
 const TOKEN_KEY = 'token';
 
 /**
@@ -172,6 +174,24 @@ class AuthService {
       );
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Canonical logout: clears the token, fully resets the app store (balances,
+   * wallet, in-progress flows — everything), and navigates to the landing page.
+   * The single source of truth for both manual "sign out" actions and forced
+   * logout on a 401. Pass `navigate` when called from within a routed
+   * component; otherwise falls back to setting the hash directly (the app's
+   * router is itself just a `hashchange` listener, so this is equivalent).
+   */
+  logout(navigate?: (path: string) => void): void {
+    this.clearToken();
+    store.reset();
+    if (navigate) {
+      navigate('/landing');
+    } else {
+      window.location.hash = '#/landing';
     }
   }
 }

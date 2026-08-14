@@ -262,7 +262,8 @@ describe('Task 4.3: Password Strength & Validation', () => {
 
 describe('Task 4.4: PIN Validation', () => {
   it('should accept valid PINs', () => {
-    const validPINs = ['1234', '12345', '123456', '1234567', '12345678'];
+    // Not '1234'/'12345'/etc — those are rejected below as sequential patterns.
+    const validPINs = ['1357', '13579', '135792', '1357924', '13579246'];
     validPINs.forEach(pin => {
       const result = validatePIN(pin);
       expect(result.valid).toBe(true);
@@ -332,8 +333,10 @@ describe('Task 4.5: Mnemonic Validation', () => {
   });
 
   it('should accept valid 24-word mnemonic', () => {
+    // Official BIP39 test vector (24 words) — the previous fixture here had 26
+    // words (a copy-paste duplication bug), which word-count validation rejects.
     const validMnemonic = 'legal winner thank year wave sausage worth useful legal winner thank year ' +
-                          'wave sausage worth useful legal winner thank year wave sausage worth useful legal winner';
+                          'wave sausage worth useful legal winner thank year wave sausage worth title';
     const result = validateMnemonic(validMnemonic);
     expect(result.valid).toBe(true);
   });
@@ -482,7 +485,7 @@ describe('Task 4.9: Error-Specific Messages', () => {
   it('should provide specific messages for each validator', () => {
     const testCases = [
       { fn: () => validateEmail('invalid'), expectedContent: 'format' },
-      { fn: () => validatePassword('weak'), expectedContent: 'length' },
+      { fn: () => validatePassword('weak'), expectedContent: 'characters long' },
       { fn: () => validatePIN('123'), expectedContent: '4-8' },
       { fn: () => validateMnemonic('one two three'), expectedContent: '12 or 24' },
       { fn: () => validateAddress('invalid'), expectedContent: 'format' },

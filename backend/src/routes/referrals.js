@@ -4,8 +4,10 @@
  */
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const auth = require('../middleware/auth');
 const User = require('../models/user');
+const WalletTransaction = require('../models/WalletTransaction');
 
 /**
  * GET /api/referrals - Get user's referral stats
@@ -58,24 +60,41 @@ router.get('/code', auth, async (req, res) => {
 router.post('/claim', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
-    
+
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     const unclaimed = (user.referralEarnings || 0) - (user.referralClaimed || 0);
-    
+
     if (unclaimed <= 0) {
       return res.status(400).json({ error: 'No unclaimed rewards' });
     }
 
-    user.referralClaimed = user.referralEarnings;
-    await user.save();
+    // Atomically mark claimed AND credit the spendable balance — this used
+    // to only bump referralClaimed, so "claiming" reported success without
+    // ever crediting a spendable MLPTS balance.
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        await User.findByIdAndUpdate(
+          user._id,
+          { $set: { referralClaimed: user.referralEarnings }, $inc: { mlpts_balance: unclaimed } },
+          { session }
+        );
+        await WalletTransaction.create(
+          [{ user_id: user._id, type: 'credit', amount: unclaimed, currency: 'MLPTS', description: 'Referral commission claimed' }],
+          { session }
+        );
+      });
+    } finally {
+      session.endSession();
+    }
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       claimed: unclaimed,
-      message: `Claimed ${unclaimed} MALL` 
+      message: `Claimed ${unclaimed} MLPTS`
     });
   } catch (error) {
     console.error('Error claiming referral rewards:', error);

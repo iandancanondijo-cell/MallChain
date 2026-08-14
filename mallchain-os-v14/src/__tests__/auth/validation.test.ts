@@ -81,7 +81,11 @@ describe('Validation Service', () => {
     });
 
     it('should return score 0 for very weak password', () => {
-      const strength = calculatePasswordStrength('pass');
+      // 'pass' matches the lowercase class (+0.75), which rounds up to a
+      // displayed score of 1 despite being bucketed as 'very-weak' by level.
+      // Use a password matching none of the scored character classes
+      // (ASCII upper/lower/digit/symbol) to get a true raw score of 0.
+      const strength = calculatePasswordStrength('ñáéíó');
       expect(strength.score).toBe(0);
     });
 
@@ -112,9 +116,15 @@ describe('Validation Service', () => {
     });
 
     it('should penalize repeating characters', () => {
-      const normal = calculatePasswordStrength('StrongPass123!');
-      const repeating = calculatePasswordStrength('StrongPaaass123!');
-      expect(repeating.score).toBeLessThan(normal.score);
+      // Same length and character-class mix as `normal` so the only scoring
+      // difference is the repeated "sss". Both fixtures round to the same
+      // integer `.score` here (5 rounds from 5.0, and 4.5 rounds back up to
+      // 5 — a whole-point penalty can't move a value off an X.5 boundary),
+      // so compare `.percentage`, which is computed from the unrounded
+      // score and reflects the repeat penalty precisely (100 vs 90 below).
+      const normal = calculatePasswordStrength('MyPassw0rd!2');
+      const repeating = calculatePasswordStrength('MyPasssw0rd!');
+      expect(repeating.percentage).toBeLessThan(normal.percentage);
     });
 
     it('should penalize sequential patterns', () => {
@@ -180,17 +190,18 @@ describe('Validation Service', () => {
 
   describe('PIN Validation', () => {
     it('should accept 6-digit PIN', () => {
-      const result = validatePIN('123456');
+      // Not '123456' — that's a sequential pattern, rejected below.
+      const result = validatePIN('135792');
       expect(result.valid).toBe(true);
     });
 
     it('should accept 4-digit PIN', () => {
-      const result = validatePIN('1234');
+      const result = validatePIN('1357');
       expect(result.valid).toBe(true);
     });
 
     it('should accept 8-digit PIN', () => {
-      const result = validatePIN('12345678');
+      const result = validatePIN('13579246');
       expect(result.valid).toBe(true);
     });
 
@@ -223,7 +234,11 @@ describe('Validation Service', () => {
     });
 
     it('should warn for common weak PINs', () => {
-      const result = validatePIN('111111');
+      // '111111' hits the repeating-digits rejection (a hard error) before
+      // ever reaching the common-PIN warning list — '1212' is common but
+      // has neither a repeating nor a sequential substring, so it's the one
+      // fixture that actually reaches the warning branch.
+      const result = validatePIN('1212');
       expect(result.severity).toBe('warning');
     });
 
@@ -236,7 +251,7 @@ describe('Validation Service', () => {
 
   describe('Mnemonic Validation', () => {
     it('should accept 12-word mnemonic', () => {
-      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse';
+      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse achieve';
       const result = validateMnemonic(mnemonic);
       expect(result.valid).toBe(true);
     });
@@ -255,7 +270,8 @@ describe('Validation Service', () => {
     });
 
     it('should reject mnemonic with invalid words', () => {
-      const mnemonic = 'invalid notaword fakeword one two three four five six seven eight';
+      // 12 words, so this exercises the dictionary check, not the word-count check.
+      const mnemonic = 'invalid notaword fakeword one two three four five six seven eight nine';
       const result = validateMnemonic(mnemonic);
       expect(result.valid).toBe(false);
       expect(result.message).toMatch(/invalid/i);

@@ -5,8 +5,63 @@ import { useStoreVersion, toast } from '../../components/ui';
 import { api } from '../../services/api';
 import { authService } from '../../services/auth';
 import { handleApiError } from '../../services/errorHandler';
+import { useWizard } from '../../hooks/useWizard';
 import WalletFlow from '../wallet/WalletFlow';
 import { Mail, Lock, Eye, EyeOff, ArrowRight, Check, AlertTriangle, Sparkles, Shield, Zap, Globe, Upload, FileText, User, MapPin, Phone, Calendar, CreditCard, AlertCircle, ChevronRight, ChevronLeft } from 'lucide-react';
+
+/**
+ * KYC wizard steps. 'inactive' means the KYC flow hasn't started — kept as
+ * steps[0] so `kyc.stepIndex` lines up with the legacy 0-5 numbering used
+ * throughout this file's render logic (1=Personal .. 5=Review).
+ */
+const KYC_STEPS = ['inactive', 'personal', 'address', 'identity', 'financial', 'review'] as const;
+type KycStep = typeof KYC_STEPS[number];
+
+type KycData = {
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+  nationality: string;
+  address: string;
+  city: string;
+  country: string;
+  postalCode: string;
+  phoneNumber: string;
+  idType: string;
+  idNumber: string;
+  idExpiry: string;
+  occupation: string;
+  sourceOfFunds: string;
+  annualIncome: string;
+  politicalExposure: boolean;
+  acceptTerms: boolean;
+};
+
+/** Shape of authController.js's toPublicUser(), returned by /api/auth/{register,login,me}. */
+interface AuthResponse {
+  token: string;
+  user?: { id: string; email: string; role: 'user' | 'admin' | 'superadmin'; banned: boolean; kycLevel: number };
+}
+
+const INITIAL_KYC_DATA: KycData = {
+  firstName: '',
+  lastName: '',
+  dateOfBirth: '',
+  nationality: '',
+  address: '',
+  city: '',
+  country: '',
+  postalCode: '',
+  phoneNumber: '',
+  idType: '',
+  idNumber: '',
+  idExpiry: '',
+  occupation: '',
+  sourceOfFunds: '',
+  annualIncome: '',
+  politicalExposure: false,
+  acceptTerms: false,
+};
 
 /** Auth flow — sign in / sign up → wallet create/import → security → dashboard. */
 export default function AuthFlow({ navigate }: { navigate: (p: string) => void }) {
@@ -25,6 +80,10 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
+  const [referralCode, setReferralCode] = useState(() => {
+    const match = /[?&]ref=([^&]+)/.exec(window.location.hash);
+    return match ? decodeURIComponent(match[1]) : '';
+  });
   const [showPass, setShowPass] = useState(false);
   const [showConfirmPass, setShowConfirmPass] = useState(false);
   const [err, setErr] = useState('');
@@ -34,29 +93,20 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
   const [importMnemonic, setImportMnemonic] = useState('');
   const [mnemonic, setMnemonic] = useState('');
   
-  // KYC/AML State
-  const [kycStep, setKycStep] = useState(0);
-  const [kycData, setKycData] = useState({
-    firstName: '',
-    lastName: '',
-    dateOfBirth: '',
-    nationality: '',
-    address: '',
-    city: '',
-    country: '',
-    postalCode: '',
-    phoneNumber: '',
-    idType: '',
-    idNumber: '',
-    idExpiry: '',
-    occupation: '',
-    sourceOfFunds: '',
-    annualIncome: '',
-    politicalExposure: false,
-    acceptTerms: false
+  // KYC/AML state — persisted via the session tier (PII, cleared on tab close,
+  // never synced cross-tab), resumable across a same-tab reload.
+  const kyc = useWizard<KycStep, KycData>({
+    key: 'kyc',
+    tier: 'session',
+    steps: KYC_STEPS,
+    initialData: INITIAL_KYC_DATA,
   });
+  const kycStep = kyc.stepIndex; // 0=inactive .. 5=review, matches the legacy numeric steps below
+  const kycData = kyc.data;
   const [amlRiskLevel, setAmlRiskLevel] = useState<'low' | 'medium' | 'high' | null>(null);
-  const [amlChecks, setAmlChecks] = useState({
+  // Populated by the (removed) AML-check step; always unchecked today since
+  // submitKYC's response — not a separate AML call — is what sets amlRiskLevel.
+  const [amlChecks] = useState({
     sanctions: false,
     pep: false,
     adverseMedia: false,
@@ -140,50 +190,28 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
 
   const submitKYC = async () => {
     setBusy(true);
+    setErr('');
     try {
-      const res = await api.post<{ success: boolean; kycId: string; riskLevel: 'low' | 'medium' | 'high' }>('/api/kyc/submit', kycData);
-      
+      console.log('Submitting KYC data:', kycData);
+      const res = await api.post<{ success: boolean; kycId: string; riskLevel: 'low' | 'medium' | 'high'; status: 'approved' | 'review' }>('/api/kyc/submit', kycData);
+
       if (res.ok && res.data?.success) {
         setAmlRiskLevel(res.data.riskLevel);
+        st.user.kycLevel = res.data.status === 'approved' ? 2 : 1;
+        store.commit();
         toast('KYC submitted successfully!');
         setBusy(false);
-        setKycStep(2); // Go to AML review
+        kyc.next(); // financial → review (AML)
       } else {
+        console.error('KYC submission error:', res);
         setErr(res.error || 'KYC submission failed');
         setBusy(false);
       }
     } catch (err) {
+      console.error('KYC submission exception:', err);
       setErr('Failed to submit KYC');
       handleApiError({ ok: false, error: 'KYC submission failed', code: 500 } as any, 
         { action: 'submitting KYC', endpoint: '/api/kyc/submit' }, 
-        false
-      );
-      setBusy(false);
-    }
-  };
-
-  const runAMLCheck = async () => {
-    setBusy(true);
-    try {
-      const res = await api.post<{ success: boolean; checks: typeof amlChecks; riskLevel: 'low' | 'medium' | 'high' }>('/api/aml/check', { 
-        kycData,
-        walletAddress: st.wallet.address 
-      });
-      
-      if (res.ok && res.data?.success) {
-        setAmlChecks(res.data.checks);
-        setAmlRiskLevel(res.data.riskLevel);
-        toast('AML check completed!');
-        setBusy(false);
-        setKycStep(3); // Go to completion
-      } else {
-        setErr(res.error || 'AML check failed');
-        setBusy(false);
-      }
-    } catch (err) {
-      setErr('Failed to run AML check');
-      handleApiError({ ok: false, error: 'AML check failed', code: 500 } as any, 
-        { action: 'running AML check', endpoint: '/api/aml/check' }, 
         false
       );
       setBusy(false);
@@ -207,24 +235,35 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
     
     if (mode === 'signup') {
       // Signup flow
-      const res = await api.post<{ token: string; user?: unknown }>('/api/auth/register', { email, password: pass });
-      
+      const res = await api.post<AuthResponse>('/api/auth/register', {
+        email,
+        password: pass,
+        referralCode: referralCode.trim() || undefined,
+      });
+
       if (res.ok && res.data?.token) {
         // Store token in localStorage
         authService.storeToken(res.data.token);
-        
-        // Update store auth state
-        st.user = { 
-          ...st.user, 
-          authed: true, 
-          name: email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), 
-          email, 
-          avatarInitial: email[0].toUpperCase() 
+
+        // Update store auth state — id/banned/kycLevel/role come from the
+        // real backend user object (toPublicUser() in authController.js),
+        // not derived client-side.
+        const u = res.data.user;
+        st.user = {
+          ...st.user,
+          id: u?.id || '',
+          authed: true,
+          name: email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          email,
+          avatarInitial: email[0].toUpperCase(),
+          frozen: !!u?.banned,
+          kycLevel: u?.kycLevel ?? 1,
+          role: u?.role || 'user',
         };
         store.commit();
         toast('Account created successfully!');
         setBusy(false);
-        setKycStep(1); // Start KYC process
+        kyc.goTo('personal'); // Start KYC process
       } else {
         const errorMsg = res.error || 'Registration failed';
         console.error('Registration error details:', res);
@@ -244,19 +283,23 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
       }
     } else {
       // Login flow
-      const res = await api.post<{ token: string; user?: unknown }>('/api/auth/login', { email, password: pass });
-      
+      const res = await api.post<AuthResponse>('/api/auth/login', { email, password: pass });
+
       if (res.ok && res.data?.token) {
         // Store token in localStorage
         authService.storeToken(res.data.token);
-        
-        // Update store auth state
-        st.user = { 
-          ...st.user, 
-          authed: true, 
-          name: email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), 
-          email, 
-          avatarInitial: email[0].toUpperCase() 
+
+        const u = res.data.user;
+        st.user = {
+          ...st.user,
+          id: u?.id || '',
+          authed: true,
+          name: email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          email,
+          avatarInitial: email[0].toUpperCase(),
+          frozen: !!u?.banned,
+          kycLevel: u?.kycLevel ?? 1,
+          role: u?.role || 'user',
         };
         store.commit();
         toast('Welcome back to Mallchain!');
@@ -362,6 +405,31 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
           </div>
         </div>
 
+        {/* Error */}
+        <AnimatePresence>
+          {err && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              style={{
+                color: 'var(--red)',
+                fontSize: 13,
+                padding: 12,
+                marginBottom: 20,
+                background: 'var(--red-dim)',
+                borderRadius: 10,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}
+            >
+              <AlertTriangle size={16} />
+              {err}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Step Content */}
         <motion.div
           key={kycStep}
@@ -383,7 +451,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   <input
                     type="text"
                     value={kycData.firstName}
-                    onChange={(e) => setKycData({ ...kycData, firstName: e.target.value })}
+                    onChange={(e) => kyc.setData({ firstName: e.target.value })}
                     placeholder="John"
                     style={{
                       width: '100%',
@@ -403,7 +471,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   <input
                     type="text"
                     value={kycData.lastName}
-                    onChange={(e) => setKycData({ ...kycData, lastName: e.target.value })}
+                    onChange={(e) => kyc.setData({ lastName: e.target.value })}
                     placeholder="Doe"
                     style={{
                       width: '100%',
@@ -433,7 +501,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   <input
                     type="date"
                     value={kycData.dateOfBirth}
-                    onChange={(e) => setKycData({ ...kycData, dateOfBirth: e.target.value })}
+                    onChange={(e) => kyc.setData({ dateOfBirth: e.target.value })}
                     style={{
                       width: '100%',
                       padding: '12px 14px 12px 44px',
@@ -454,7 +522,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 <input
                   type="text"
                   value={kycData.nationality}
-                  onChange={(e) => setKycData({ ...kycData, nationality: e.target.value })}
+                  onChange={(e) => kyc.setData({ nationality: e.target.value })}
                   placeholder="United States"
                   style={{
                     width: '100%',
@@ -483,7 +551,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 <input
                   type="text"
                   value={kycData.address}
-                  onChange={(e) => setKycData({ ...kycData, address: e.target.value })}
+                  onChange={(e) => kyc.setData({ address: e.target.value })}
                   placeholder="123 Main Street"
                   style={{
                     width: '100%',
@@ -505,7 +573,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   <input
                     type="text"
                     value={kycData.city}
-                    onChange={(e) => setKycData({ ...kycData, city: e.target.value })}
+                    onChange={(e) => kyc.setData({ city: e.target.value })}
                     placeholder="New York"
                     style={{
                       width: '100%',
@@ -525,7 +593,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   <input
                     type="text"
                     value={kycData.postalCode}
-                    onChange={(e) => setKycData({ ...kycData, postalCode: e.target.value })}
+                    onChange={(e) => kyc.setData({ postalCode: e.target.value })}
                     placeholder="10001"
                     style={{
                       width: '100%',
@@ -547,7 +615,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 <input
                   type="text"
                   value={kycData.country}
-                  onChange={(e) => setKycData({ ...kycData, country: e.target.value })}
+                  onChange={(e) => kyc.setData({ country: e.target.value })}
                   placeholder="United States"
                   style={{
                     width: '100%',
@@ -576,7 +644,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   <input
                     type="tel"
                     value={kycData.phoneNumber}
-                    onChange={(e) => setKycData({ ...kycData, phoneNumber: e.target.value })}
+                    onChange={(e) => kyc.setData({ phoneNumber: e.target.value })}
                     placeholder="+1 (555) 123-4567"
                     style={{
                       width: '100%',
@@ -605,7 +673,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 </label>
                 <select
                   value={kycData.idType}
-                  onChange={(e) => setKycData({ ...kycData, idType: e.target.value })}
+                  onChange={(e) => kyc.setData({ idType: e.target.value })}
                   style={{
                     width: '100%',
                     padding: '12px 14px',
@@ -630,7 +698,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 <input
                   type="text"
                   value={kycData.idNumber}
-                  onChange={(e) => setKycData({ ...kycData, idNumber: e.target.value })}
+                  onChange={(e) => kyc.setData({ idNumber: e.target.value })}
                   placeholder="A12345678"
                   style={{
                     width: '100%',
@@ -659,7 +727,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   <input
                     type="date"
                     value={kycData.idExpiry}
-                    onChange={(e) => setKycData({ ...kycData, idExpiry: e.target.value })}
+                    onChange={(e) => kyc.setData({ idExpiry: e.target.value })}
                     style={{
                       width: '100%',
                       padding: '12px 14px 12px 44px',
@@ -710,7 +778,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 <input
                   type="text"
                   value={kycData.occupation}
-                  onChange={(e) => setKycData({ ...kycData, occupation: e.target.value })}
+                  onChange={(e) => kyc.setData({ occupation: e.target.value })}
                   placeholder="Software Engineer"
                   style={{
                     width: '100%',
@@ -730,7 +798,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 </label>
                 <select
                   value={kycData.sourceOfFunds}
-                  onChange={(e) => setKycData({ ...kycData, sourceOfFunds: e.target.value })}
+                  onChange={(e) => kyc.setData({ sourceOfFunds: e.target.value })}
                   style={{
                     width: '100%',
                     padding: '12px 14px',
@@ -756,7 +824,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 </label>
                 <select
                   value={kycData.annualIncome}
-                  onChange={(e) => setKycData({ ...kycData, annualIncome: e.target.value })}
+                  onChange={(e) => kyc.setData({ annualIncome: e.target.value })}
                   style={{
                     width: '100%',
                     padding: '12px 14px',
@@ -787,7 +855,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 <input 
                   type="checkbox" 
                   checked={kycData.politicalExposure}
-                  onChange={(e) => setKycData({ ...kycData, politicalExposure: e.target.checked })}
+                  onChange={(e) => kyc.setData({ politicalExposure: e.target.checked })}
                   style={{ marginTop: 2, accentColor: 'var(--gold)' }} 
                 />
                 <span>
@@ -905,7 +973,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         }}>
           {kycStep > 1 && kycStep < 5 && (
             <button
-              onClick={() => setKycStep(kycStep - 1)}
+              onClick={() => kyc.back()}
               style={{
                 padding: '12px 24px',
                 background: 'transparent',
@@ -927,7 +995,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
 
           {kycStep < 4 && (
             <button
-              onClick={() => setKycStep(kycStep + 1)}
+              onClick={() => kyc.next()}
               style={{
                 padding: '12px 24px',
                 background: 'linear-gradient(135deg, var(--gold), #c9781a)',
@@ -975,7 +1043,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
 
           {kycStep === 5 && amlRiskLevel === 'low' && (
             <button
-              onClick={() => { setKycStep(0); setStep(1); }}
+              onClick={() => { kyc.complete(); setStep(1); }}
               style={{
                 padding: '12px 24px',
                 background: 'linear-gradient(135deg, var(--gold), #c9781a)',
@@ -1020,28 +1088,19 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         <h1>You're already signed in</h1>
         <div className="row mt">
           <button className="btn btn-primary" onClick={() => navigate('/')}>Go to Mission Control</button>
-          <button className="btn btn-ghost" onClick={() => { 
-            st.user.authed = false; 
-            store.commit(); 
-            authService.clearToken(); // Task 4.6: Clear token on logout
-            setStep(0); 
-          }}>Sign out</button>
+          <button className="btn btn-ghost" onClick={() => authService.logout(navigate)}>Sign out</button>
         </div>
       </div>
     );
   }
 
   if (step === 4) {
-    // Wallet connection for authenticated users without wallet
+    // Wallet connection for authenticated users without wallet — "back" here
+    // has nowhere to go but out, so it signs the user out.
     return (
-      <WalletFlow 
-        navigate={navigate} 
-        onBack={() => { 
-          st.user.authed = false; 
-          store.commit(); 
-          authService.clearToken(); 
-          setStep(0); 
-        }}
+      <WalletFlow
+        navigate={navigate}
+        onBack={() => authService.logout(navigate)}
       />
     );
   }
@@ -1401,6 +1460,30 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
           </div>
         )}
 
+        {/* Referral code (signup only) */}
+        {mode === 'signup' && (
+          <div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+              Referral code (optional)
+            </label>
+            <input
+              type="text"
+              value={referralCode}
+              onChange={(e) => setReferralCode(e.target.value)}
+              placeholder="MALL-XXXXXXXX"
+              style={{
+                width: '100%',
+                padding: '14px',
+                background: 'var(--bg-2)',
+                border: '1px solid var(--border)',
+                borderRadius: 12,
+                color: 'var(--txt)',
+                fontSize: 14,
+              }}
+            />
+          </div>
+        )}
+
         {/* Error */}
         <AnimatePresence>
           {err && (
@@ -1408,15 +1491,15 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              style={{ 
-                color: 'var(--red)', 
-                fontSize: 13, 
-                padding: 12, 
-                background: 'var(--red-dim)', 
-                borderRadius: 10, 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: 8 
+              style={{
+                color: 'var(--red)',
+                fontSize: 13,
+                padding: 12,
+                background: 'var(--red-dim)',
+                borderRadius: 10,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
               }}
             >
               <AlertTriangle size={16} />
@@ -1581,8 +1664,12 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
     </motion.div>
   );
 
+  // Reached only when step === 0 && kycStep === 'inactive' — every other
+  // step value already returned early above (KYC flow, wallet create/import,
+  // already-signed-in, wallet connection), so this only ever renders the
+  // auth form.
   return (
-    <div style={{ 
+    <div style={{
       minHeight: '100vh',
       background: 'linear-gradient(135deg, var(--bg) 0%, var(--bg-2) 100%)',
       display: 'flex',
@@ -1590,87 +1677,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
       padding: '20px'
     }}>
       <AnimatePresence mode="wait">
-        {step === 0 && renderAuthForm()}
-        {step === 1 || step === 2 ? (
-          <motion.div
-            key="wallet"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.3 }}
-            style={{ width: '100%', maxWidth: 560, margin: '0 auto' }}
-          >
-            <WalletFlow 
-              navigate={navigate} 
-              onBack={() => { setStep(0); setShowWalletFlow(false); }}
-            />
-          </motion.div>
-        ) : null}
-        {step === 3 && (
-          <motion.div
-            key="already-signed-in"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            style={{ textAlign: 'center', maxWidth: 400, margin: '0 auto' }}
-          >
-            <div style={{ 
-              width: 64, 
-              height: 64, 
-              borderRadius: '50%', 
-              background: 'var(--green-dim)', 
-              border: '2px solid var(--green)', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              margin: '0 auto 24px'
-            }}>
-              <Check size={32} style={{ color: 'var(--green)' }} />
-            </div>
-            <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>You're already signed in</h1>
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 24 }}>
-              <button 
-                className="btn btn-primary" 
-                onClick={() => navigate('/')}
-                style={{ padding: '12px 24px' }}
-              >
-                Go to Mission Control
-              </button>
-              <button 
-                className="btn btn-ghost" 
-                onClick={() => { 
-                  st.user.authed = false; 
-                  store.commit(); 
-                  authService.clearToken(); 
-                  setStep(0); 
-                }}
-                style={{ padding: '12px 24px' }}
-              >
-                Sign out
-              </button>
-            </div>
-          </motion.div>
-        )}
-        {step === 4 && (
-          <motion.div
-            key="wallet-connection"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.3 }}
-            style={{ width: '100%' }}
-          >
-            <WalletFlow 
-              navigate={navigate} 
-              onBack={() => { 
-                st.user.authed = false; 
-                store.commit(); 
-                authService.clearToken(); 
-                setStep(0); 
-              }}
-            />
-          </motion.div>
-        )}
+        {renderAuthForm()}
       </AnimatePresence>
     </div>
   );

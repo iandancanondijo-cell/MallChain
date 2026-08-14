@@ -22,7 +22,7 @@ async function requireAdmin(req, res, next) {
   const token = parts[1];
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.id).select('-password');
+    const user = await User.findById(decoded.userId || decoded.id).select('-password');
     if (!user) return res.status(401).json({ error: 'invalid token' });
     if (user.banned) return res.status(403).json({ error: 'account is banned' });
     if (user.role !== 'admin' && user.role !== 'superadmin') {
@@ -51,7 +51,7 @@ async function requireSuperAdmin(req, res, next) {
   const token = parts[1];
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.id).select('-password');
+    const user = await User.findById(decoded.userId || decoded.id).select('-password');
     if (!user) return res.status(401).json({ error: 'invalid token' });
     if (user.banned) return res.status(403).json({ error: 'account is banned' });
     if (user.role !== 'superadmin') {

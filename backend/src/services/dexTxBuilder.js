@@ -74,8 +74,10 @@ async function addLiquidityOnChain({ mnemonic, providerAddress, poolId, tokenA, 
   }
 
   const estimatedGas = await client.simulate(providerAddress, [msg], memo).catch(() => 250000)
-  // Reduce gas buffer from 1.3 to 1.15 to minimize overpayment while maintaining safety margin
-  const gas = Math.min(Math.ceil(estimatedGas * 1.15), 800000)
+  // 1.15x wasn't always enough margin over the simulated estimate — a real
+  // MLCNS transfer failed "out of gas" at ~100% of the simulated value with
+  // this same buffer (see mallcoinTxBuilder.js). Back to 1.3x.
+  const gas = Math.min(Math.ceil(estimatedGas * 1.3), 800000)
   const fee = calculateFee(gas, GasPrice.fromString(config.chain.gasPrice))
 
   const result = await client.signAndBroadcast(providerAddress, [msg], fee, memo)

@@ -29,6 +29,15 @@ vi.mock('socket.io-client', () => {
     public id = 'mock-socket-id-123';
     private listeners: Record<string, Function[]> = {};
 
+    constructor() {
+      super();
+      // Real socket.io-client auto-connects when io(url, opts) is called
+      // (autoConnect: true by default) — socket.ts never calls .connect()
+      // itself, it only registers an 'connect' listener, so the mock has to
+      // fire the handshake on its own to match that behavior.
+      setTimeout(() => this.connect(), 0);
+    }
+
     connect() {
       this.connected = true;
       this.emit('connect');

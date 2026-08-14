@@ -1,81 +1,122 @@
-import { useState } from 'react';
-import { store } from '../../store/store';
+import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, toast, Modal } from '../../components/ui';
+import { contractsApi, type ContractRecord } from '../../services/contractsApi';
 
-/** Smart Contracts — list, deploy, execute, query, events. */
+/**
+ * Smart Contracts — real per-user records (backend/src/routes/contracts.js).
+ * Deploy/execute are simulated (no real wasm upload pipeline in this repo),
+ * but records persist server-side instead of vanishing on refresh.
+ */
 export default function Contracts() {
   useStoreVersion();
-  const st = store.state;
+  const [contracts, setContracts] = useState<ContractRecord[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<null | 'deploy' | 'execute' | 'query'>(null);
+  const [active, setActive] = useState<ContractRecord | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const contracts = [
-    { name: 'Mallcoin (MALL)', addr: '0x1A2b…E9f0', type: 'ERC-20', txs: 41209 },
-    { name: 'Mallpoints (MLPTS)', addr: '0x8C4d…B7a2', type: 'ERC-20', txs: 88112 },
-    { name: 'Escrow', addr: '0x5F6e…D3c1', type: 'Mallchain v2', txs: 12904 },
-    { name: 'Staking', addr: '0x3B9a…F2e8', type: 'Mallchain v2', txs: 5033 },
-    { name: 'Governance', addr: '0x0D7b…A9c4', type: 'Mallchain v2', txs: 211 },
-  ];
+  const [name, setName] = useState('');
+  const [type, setType] = useState('wasm');
+  const [code, setCode] = useState('');
+  const [method, setMethod] = useState('');
+  const [args, setArgs] = useState('{}');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const res = await contractsApi.list();
+    if (res.ok && res.data) setContracts(res.data);
+    else setError(res.error || 'Failed to load contracts');
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const deploy = async () => {
+    if (!name.trim() || !code.trim()) return toast('Name and code are required', false);
+    setBusy(true);
+    const res = await contractsApi.deploy({ name, type, code });
+    setBusy(false);
+    if (res.ok) {
+      toast(`Deployed — ${res.data?.address}`);
+      setOpen(null);
+      setName(''); setCode('');
+      load();
+    } else {
+      toast(res.error || 'Deploy failed', false);
+    }
+  };
+
+  const execute = async () => {
+    if (!active || !method.trim()) return toast('Function is required', false);
+    setBusy(true);
+    let parsedArgs: unknown = {};
+    try { parsedArgs = JSON.parse(args); } catch { /* leave as {} */ }
+    const res = await contractsApi.interact(active._id, method, parsedArgs);
+    setBusy(false);
+    if (res.ok) {
+      toast(`Executed — tx ${res.data?.txHash.slice(0, 10)}…`);
+      setOpen(null);
+      load();
+    } else {
+      toast(res.error || 'Execution failed', false);
+    }
+  };
 
   return (
     <div>
       <div className="view-head">
         <h1>Smart Contracts</h1>
-        <span className="sub">Mallchain mainnet</span>
+        <span className="sub">Your deployed contracts</span>
         <div className="row" style={{ marginLeft: 'auto' }}>
           <button className="btn btn-ghost btn-sm" onClick={() => setOpen('deploy')}>▲ Deploy</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => setOpen('execute')}>⚙ Execute</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => setOpen('query')}>🔍 Query</button>
         </div>
       </div>
 
-      {st.contracts.length === 0 && (
-        <div className="empty-state"><div className="es-ico">📜</div><div className="es-t">No contracts deployed yet</div><div className="es-m">Deploy a WASM contract or browse the verified set.</div><button className="btn btn-primary" onClick={() => setOpen('deploy')}>Deploy contract</button></div>
+      {error && (
+        <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
+          <div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div>
+        </div>
       )}
 
-      {st.contracts.map((c) => (
-        <div key={c.addr} className="card mb">
+      {!loading && contracts?.length === 0 && (
+        <div className="empty-state"><div className="es-ico">📜</div><div className="es-t">No contracts deployed yet</div><button className="btn btn-primary" onClick={() => setOpen('deploy')}>Deploy contract</button></div>
+      )}
+
+      {(contracts || []).map((c) => (
+        <div key={c._id} className="card mb">
           <div className="row">
-            <div className="grow"><b>{c.name}</b> <span className="chip mono" style={{ fontSize: 11 }}>{c.addr}</span></div>
+            <div className="grow"><b>{c.name}</b> <span className="chip mono" style={{ fontSize: 11 }}>{c.address}</span></div>
             <span className="chip">{c.type}</span>
             <span className="chip">{c.txs} txs</span>
           </div>
           <div className="row mt">
-            <button className="btn btn-ghost btn-sm" onClick={() => setOpen('execute')}>Execute</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => setOpen('query')}>Query</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => toast('Events log — recent 50 shown')}>Events</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => toast('Storage viewer opened')}>Storage</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setActive(c); setOpen('execute'); }}>Execute</button>
           </div>
         </div>
       ))}
 
       {open === 'deploy' && (
         <Modal title="Deploy contract" onClose={() => setOpen(null)}>
-          <div className="field"><label>WASM file</label><input className="input" placeholder="contract.wasm" /></div>
-          <div className="field"><label>Name</label><input className="input" placeholder="My Contract" /></div>
+          <div className="field"><label>Name</label><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="My Contract" /></div>
+          <div className="field"><label>Type</label><input className="input" value={type} onChange={(e) => setType(e.target.value)} placeholder="wasm" /></div>
+          <div className="field"><label>Code</label><textarea className="input" rows={3} value={code} onChange={(e) => setCode(e.target.value)} placeholder="(module ...)" /></div>
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setOpen(null)}>Cancel</button>
-            <button className="btn btn-primary" onClick={() => { toast('Deploy tx broadcast — pending confirmation'); setOpen(null); }}>Deploy (sign tx)</button>
+            <button className="btn btn-primary" disabled={busy} onClick={deploy}>{busy && <span className="spin" />} Deploy</button>
           </div>
         </Modal>
       )}
-      {open === 'execute' && (
-        <Modal title="Execute contract" onClose={() => setOpen(null)}>
-          <div className="field"><label>Contract</label><select className="input">{contracts.map((c) => <option key={c.addr}>{c.name} — {c.addr}</option>)}</select></div>
-          <div className="field"><label>Function</label><select className="input"><option>approve(address,uint256)</option><option>transfer(address,uint256)</option><option>stake(uint256)</option></select></div>
-          <div className="field"><label>Args (JSON)</label><textarea className="input" rows={2} defaultValue='{"amount": 100}' /></div>
+      {open === 'execute' && active && (
+        <Modal title={`Execute — ${active.name}`} onClose={() => setOpen(null)}>
+          <div className="field"><label>Function</label><input className="input" value={method} onChange={(e) => setMethod(e.target.value)} placeholder="transfer" /></div>
+          <div className="field"><label>Args (JSON)</label><textarea className="input" rows={2} value={args} onChange={(e) => setArgs(e.target.value)} /></div>
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setOpen(null)}>Cancel</button>
-            <button className="btn btn-primary" onClick={() => { toast('Execution tx broadcast'); setOpen(null); }}>Sign & broadcast</button>
-          </div>
-        </Modal>
-      )}
-      {open === 'query' && (
-        <Modal title="Query contract" onClose={() => setOpen(null)}>
-          <div className="field"><label>Contract</label><select className="input">{contracts.map((c) => <option key={c.addr}>{c.name}</option>)}</select></div>
-          <div className="field"><label>Function</label><select className="input"><option>balanceOf(address)</option><option>totalSupply()</option></select></div>
-          <div className="modal-actions">
-            <button className="btn btn-ghost" onClick={() => setOpen(null)}>Cancel</button>
-            <button className="btn btn-primary" onClick={() => { toast('Result: 84,203.5 MALL'); setOpen(null); }}>Run (read-only)</button>
+            <button className="btn btn-primary" disabled={busy} onClick={execute}>{busy && <span className="spin" />} Sign &amp; execute</button>
           </div>
         </Modal>
       )}

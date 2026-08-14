@@ -2,11 +2,13 @@
  * TopBar — universal search, wallet selector, notifications bell with badge,
  * theme/currency/language switchers, demo-mode chip, user chip.
  */
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { store } from '../store/store';
 import { useStoreVersion, fmtNum, toast } from './ui';
 import { config } from '../services/config';
 import SocketStatus from './SocketStatus';
+import { notificationsApi, type AppNotification } from '../services/notificationsApi';
+import { socketManager } from '../services/socket';
 
 const CURRENCIES = ['USD', 'KES', 'EUR', 'GBP'];
 const LANGS = ['EN', 'FR', 'ES', 'SW'];
@@ -16,20 +18,37 @@ export default function TopBar({ navigate }: { navigate: (p: string) => void }) 
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<'notif' | 'prefs' | null>(null);
   const [nf, setNf] = useState<'all' | 'unread'>('all');
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   useStoreVersion();
   const st = store.state;
 
-  const unread = st.notifications.filter((n) => !n.read).length;
-  const notifs = st.notifications.filter((n) => (nf === 'all' ? true : !n.read));
+  const loadNotifications = useCallback(async () => {
+    if (!st.user.authed) return;
+    const res = await notificationsApi.list();
+    if (res.ok && res.data) setNotifications(res.data.notifications);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [st.user.authed]);
+
+  useEffect(() => {
+    loadNotifications();
+    const unsubscribe = socketManager.onNotification((n) => {
+      setNotifications((prev) => [{ _id: n._id, kind: n.kind, title: n.title, body: n.body, read: n.read, createdAt: n.createdAt }, ...prev]);
+      toastLocal(n.title);
+    });
+    return unsubscribe;
+  }, [loadNotifications]);
+
+  const unread = notifications.filter((n) => !n.read).length;
+  const notifs = notifications.filter((n) => (nf === 'all' ? true : !n.read));
 
   const markAllRead = () => {
-    st.notifications.forEach((n) => (n.read = true));
-    store.commit();
+    notificationsApi.markAllRead();
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     toastLocal('All notifications marked as read');
   };
   const dismiss = (id: string) => {
-    st.notifications = st.notifications.filter((n) => n.id !== id);
-    store.commit();
+    notificationsApi.markRead(id);
+    setNotifications((prev) => prev.filter((n) => n._id !== id));
   };
 
   const applyAccent = (a: string) => {
@@ -133,13 +152,13 @@ export default function TopBar({ navigate }: { navigate: (p: string) => void }) 
           <div style={{ maxHeight: 320, overflowY: 'auto' }}>
             {notifs.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--txt-3)', fontSize: 12.5 }}>No notifications yet</div>}
             {notifs.map((n) => (
-              <div key={n.id} className={'panel-item' + (n.read ? '' : ' unread')}>
+              <div key={n._id} className={'panel-item' + (n.read ? '' : ' unread')}>
                 <div className="grow">
                   <div className="pt">{n.title}</div>
                   {n.body && <div className="pm">{n.body}</div>}
                 </div>
-                <span className="pts">{new Date(n.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                <span style={{ cursor: 'pointer', color: 'var(--txt-3)' }} onClick={() => dismiss(n.id)}>✕</span>
+                <span className="pts">{new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span style={{ cursor: 'pointer', color: 'var(--txt-3)' }} onClick={() => dismiss(n._id)}>✕</span>
               </div>
             ))}
           </div>

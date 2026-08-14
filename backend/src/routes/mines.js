@@ -10,6 +10,7 @@ const User = require('../models/user');
 const TaskSubmission = require('../models/TaskSubmission');
 const Campaign = require('../models/Campaign');
 const WalletTransaction = require('../models/WalletTransaction');
+const { autoAssignReviewers } = require('../services/minesReviewService');
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -22,7 +23,7 @@ function verifyToken(req, res, next) {
   if (!auth.startsWith('Bearer ')) return res.status(401).json({ ok: false, error: 'missing token' });
   try {
     const payload = jwt.verify(auth.slice(7), getJwtSecret());
-    req.userId = payload.id;
+    req.userId = payload.userId || payload.id;
     next();
   } catch (e) {
     return res.status(401).json({ ok: false, error: 'invalid token' });
@@ -55,6 +56,27 @@ router.get('/campaigns/creator/:creatorId', async (req, res) => {
     const rows = await Campaign.find({ creator_id: creatorId }).sort({ created_at: -1 }).limit(100).lean();
     res.json(ok(rows));
   } catch (e) { res.status(500).json(fail(e)); }
+});
+
+// Public: top Campaign Participants by lifetime Mallpoints / tasks completed
+router.get('/leaderboard', async (_req, res) => {
+  try {
+    const rows = await User.find({ banned: false })
+      .sort({ mlpts_balance: -1 })
+      .limit(50)
+      .select('username email mlpts_balance tasks_completed rank_points')
+      .lean();
+    const leaderboard = rows.map((u) => ({
+      id: u._id.toString(),
+      name: u.username || u.email.split('@')[0],
+      earned: u.mlpts_balance || 0,
+      tasks: u.tasks_completed || 0,
+      rankPoints: u.rank_points || 0,
+    }));
+    res.json(ok(leaderboard));
+  } catch (e) {
+    res.json(ok([]));
+  }
 });
 
 // Authenticated endpoints
@@ -134,6 +156,9 @@ router.post('/submissions', verifyToken, async (req, res) => {
   try {
     const body = { ...req.body, miner_id: req.userId };
     const row = await TaskSubmission.create(body);
+    // Randomly assign up to 6 staked reviewers; if none are eligible yet the
+    // submission is untouched and falls back to the admin manual-review queue.
+    await autoAssignReviewers(row);
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }
 });

@@ -11,6 +11,7 @@ import "marketplace/mlcoin/v1/params.proto";
 import "marketplace/mlcoin/v1/wallet_balance.proto";
 import "marketplace/mlcoin/v1/transaction.proto";
 import "marketplace/mlcoin/v1/market.proto";
+import "marketplace/mlcoin/v1/activity_metrics.proto";
 
 option go_package = "github.com/tmp/marketplace/x/mlcoin/types";
 
@@ -64,6 +65,11 @@ service Query {
   // Queries trade history.
   rpc GetTradeHistory(QueryGetTradeHistoryRequest) returns (QueryGetTradeHistoryResponse) {
     option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/market/trades";
+  }
+
+  // Queries staking records for an address (active and historical).
+  rpc GetStakingRecords(QueryGetStakingRecordsRequest) returns (QueryGetStakingRecordsResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/staking/{address}";
   }
 }
 
@@ -176,4 +182,21 @@ message QueryGetTradeHistoryRequest {
 message QueryGetTradeHistoryResponse {
   repeated Trade trades = 1 [(gogoproto.nullable) = false];
   cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryGetStakingRecordsRequest defines the request to get an address's staking records.
+message QueryGetStakingRecordsRequest {
+  string address = 1;
+}
+
+// StakingRecordEntry pairs a staking record with the stake_id key it's
+// stored under (needed to submit MsgUnstake later).
+message StakingRecordEntry {
+  string stake_id = 1;
+  StakingInfo info = 2 [(gogoproto.nullable) = false];
+}
+
+// QueryGetStakingRecordsResponse defines the response with an address's staking records.
+message QueryGetStakingRecordsResponse {
+  repeated StakingRecordEntry staking_records = 1 [(gogoproto.nullable) = false];
 }

@@ -16,8 +16,8 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
-    "@cosmjs/proto-signing": "^0.28.8",
-    "@cosmjs/stargate": "^0.28.8",
+    "@cosmjs/proto-signing": "^0.39.0",
+    "@cosmjs/stargate": "^0.39.0",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
     "@scure/bip32": "^2.2.0",

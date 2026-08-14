@@ -39,8 +39,10 @@ vi.mock('../config', () => ({
 }));
 
 vi.mock('../../store/store', () => ({
+  OS_KEY: 'mallchain_os_v1_v14',
   store: {
     state: {
+      user: { authed: true },
       balances: {},
       txs: [],
       notifications: [],
@@ -50,6 +52,8 @@ vi.mock('../../store/store', () => ({
       explorer: { blocks: [] },
     },
     applyTx: vi.fn(),
+    // authService.logout() (called by handle401Error) does a full store.reset()
+    reset: vi.fn(),
   },
 }));
 
@@ -96,7 +100,7 @@ describe('Task 4.7: Token Expiration Handling', () => {
     // Setup window.location mock
     originalLocation = window.location;
     delete (window as any).location;
-    (window as any).location = { href: '' };
+    (window as any).location = { href: '', hash: '' };
   });
 
   afterEach(() => {
@@ -233,7 +237,7 @@ describe('Task 4.7: Token Expiration Handling', () => {
 
       // VERIFICATION 4: User was redirected to login page (wait for async redirect)
       await new Promise(resolve => setTimeout(resolve, 1500));
-      expect(window.location.href).toBe('/login');
+      expect(window.location.hash).toBe('#/landing');
     });
 
     it('should properly clear token even if localStorage is in a problematic state', async () => {
@@ -254,10 +258,11 @@ describe('Task 4.7: Token Expiration Handling', () => {
 
       // VERIFICATION: Redirect happened (wait for async redirect)
       await new Promise(resolve => setTimeout(resolve, 1500));
-      expect(window.location.href).toBe('/login');
+      expect(window.location.hash).toBe('#/landing');
     });
 
     it('should handle 401 response with various error messages', async () => {
+      // 4 iterations x 1.5s redirect wait = 6s+, over the 5s default test timeout.
       const expiredToken = createJwtToken(-3600);
 
       // Test different error responses from backend
@@ -270,7 +275,7 @@ describe('Task 4.7: Token Expiration Handling', () => {
 
       for (const errorResponse of errorResponses) {
         localStorage.setItem('token', expiredToken);
-        (window as any).location.href = '';
+        (window as any).location.hash = '';
         mockFetch.mockResolvedValueOnce({
           ok: false,
           status: 401,
@@ -284,9 +289,9 @@ describe('Task 4.7: Token Expiration Handling', () => {
         expect(localStorage.getItem('token')).toBeNull();
         // Redirect happens asynchronously, wait for it
         await new Promise(resolve => setTimeout(resolve, 1500));
-        expect(window.location.href).toBe('/login');
+        expect(window.location.hash).toBe('#/landing');
       }
-    });
+    }, 10000);
   });
 
   describe('Scenario 3: Multiple Concurrent Requests with Expired Token', () => {
@@ -323,7 +328,7 @@ describe('Task 4.7: Token Expiration Handling', () => {
       // VERIFICATION 3: Redirect happened (redirect is called multiple times but location.href ends up at /login)
       // Wait for the async redirect to complete
       await new Promise(resolve => setTimeout(resolve, 1500));
-      expect(window.location.href).toBe('/login');
+      expect(window.location.hash).toBe('#/landing');
 
       // VERIFICATION 4: All requests were attempted with the expired token
       expect(mockFetch).toHaveBeenCalledTimes(5);
@@ -377,7 +382,7 @@ describe('Task 4.7: Token Expiration Handling', () => {
 
       // VERIFICATION 3: Final state shows redirect (wait for async redirect)
       await new Promise(resolve => setTimeout(resolve, 1500));
-      expect(window.location.href).toBe('/login');
+      expect(window.location.hash).toBe('#/landing');
     });
 
     it('should handle mixed scenario: some requests get 401, others get different errors', async () => {
@@ -421,7 +426,7 @@ describe('Task 4.7: Token Expiration Handling', () => {
 
       // VERIFICATION 4: Redirect happened (wait for async redirect)
       await new Promise(resolve => setTimeout(resolve, 1500));
-      expect(window.location.href).toBe('/login');
+      expect(window.location.hash).toBe('#/landing');
     });
   });
 

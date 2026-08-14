@@ -61,9 +61,11 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
   ];
 
   const actions = [
-    { label: 'Send', icon: '➤', p: '/wallet/send' },
-    { label: 'Receive', icon: '⬇', p: '/wallet/receive' },
-    { label: 'Swap', icon: '⇄', p: '/wallet/swap' },
+    { label: 'Send MALL', icon: '➤', p: '/wallet/send' },
+    { label: 'Receive MALL', icon: '⬇', p: '/wallet/receive' },
+    { label: 'Buy MALL', icon: '💳', p: '/wallet/buy' },
+    { label: 'Mallpoints', icon: '✦', p: '/wallet/points' },
+    { label: 'Swap MALL', icon: '⇄', p: '/wallet/swap' },
     { label: 'History', icon: '▤', p: '/wallet/history' },
   ];
 
@@ -183,7 +185,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
             <>
               {actions.map((a) => (
                 <button key={a.label} className="btn btn-ghost" onClick={() => navigate(a.p)}>
-                  <span style={{ fontSize: 15 }}>{a.icon}</span> {a.label} MALL
+                  <span style={{ fontSize: 15 }}>{a.icon}</span> {a.label}
                 </button>
               ))}
               <button className="btn btn-ghost gold" onClick={() => navigate('/marketplace')}>🛍 Marketplace</button>

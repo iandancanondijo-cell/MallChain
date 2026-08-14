@@ -1,11 +1,19 @@
 /**
  * Wallet Service
  * Handles wallet creation, import, mnemonic generation, and address derivation
- * Uses BIP39 for mnemonic handling and BIP44 for derivation
+ * Uses BIP39 for mnemonic handling and the Cosmos SDK HD path (coin type 118)
+ * for derivation, matching the backend/chain's address scheme (bech32 "mall1..."
+ * addresses — see backend/src/config, which derives with the same
+ * DirectSecp256k1HdWallet + "mall" prefix).
  */
 
-import { generateMnemonic, validateMnemonic, mnemonicToSeedSync } from 'bip39';
-import { derivePath } from 'ed25519-hd-key';
+import { generateMnemonic, validateMnemonic, wordlists } from 'bip39';
+import { DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
+import { stringToPath } from '@cosmjs/crypto';
+import { fromBech32, toHex } from '@cosmjs/encoding';
+
+const ADDRESS_PREFIX = 'mall';
+const COIN_TYPE = 118; // Cosmos SDK standard coin type
 
 /**
  * Type definitions for wallet operations
@@ -42,32 +50,6 @@ export interface MnemonicValidationResult {
 }
 
 /**
- * Simple base58 encoding for wallet addresses
- */
-const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-
-function encodeBase58(buf: Buffer): string {
-  let carry;
-  let digits = [0];
-  for (let i = 0; i < buf.length; ++i) {
-    carry = buf[i];
-    for (let j = 0; j < digits.length; ++j) {
-      carry += digits[j] << 8;
-      digits[j] = carry % 58;
-      carry = (carry / 58) | 0;
-    }
-    while (carry > 0) {
-      digits.push(carry % 58);
-      carry = (carry / 58) | 0;
-    }
-  }
-  let result = '';
-  for (let k = buf.length - 1; k >= 0 && buf[k] === 0; --k) result += '1';
-  for (let q = digits.length - 1; q >= 0; --q) result += BASE58_ALPHABET[digits[q]];
-  return result;
-}
-
-/**
  * Generate a new 12-word BIP39 mnemonic
  * @returns 12-word mnemonic string
  */
@@ -94,8 +76,12 @@ export function validateMnemonicPhrase(mnemonic: string): MnemonicValidationResu
     };
   }
 
-  const words = mnemonic.trim().split(/\s+/);
+  // Normalize case and collapse whitespace before checksum validation — the
+  // underlying bip39 library's validateMnemonic() is case-sensitive and does
+  // not tolerate irregular whitespace between words on its own.
+  const words = mnemonic.trim().toLowerCase().split(/\s+/);
   const wordCount = words.length;
+  const normalized = words.join(' ');
 
   // BIP39 standard supports 12, 15, 18, 21, or 24 words
   if (![12, 15, 18, 21, 24].includes(wordCount)) {
@@ -107,7 +93,7 @@ export function validateMnemonicPhrase(mnemonic: string): MnemonicValidationResu
   }
 
   try {
-    const isValid = validateMnemonic(mnemonic);
+    const isValid = validateMnemonic(normalized);
     if (!isValid) {
       return {
         valid: false,
@@ -132,16 +118,17 @@ export function validateMnemonicPhrase(mnemonic: string): MnemonicValidationResu
 }
 
 /**
- * Derive a wallet address from mnemonic using BIP44 standard
- * Solana derivation path: m/44'/501'/0'/0'/0'
+ * Derive a wallet address from mnemonic using the Cosmos SDK HD path
+ * (m/44'/118'/0'/0/{index}), matching the backend's derivation so the
+ * same mnemonic yields the same "mall1..." address on both sides.
  * @param mnemonic - The BIP39 mnemonic
  * @param index - Account index (default 0)
  * @returns Wallet info with address and public key
  */
-export function deriveAddressFromMnemonic(
+export async function deriveAddressFromMnemonic(
   mnemonic: string,
   index: number = 0
-): WalletInfo {
+): Promise<WalletInfo> {
   try {
     // Validate mnemonic first
     const validation = validateMnemonicPhrase(mnemonic);
@@ -149,21 +136,18 @@ export function deriveAddressFromMnemonic(
       throw new Error(validation.message);
     }
 
-    // Get seed from mnemonic
-    const seed = mnemonicToSeedSync(mnemonic);
+    const normalizedMnemonic = mnemonic.trim().toLowerCase().split(/\s+/).join(' ');
+    const path = `m/44'/${COIN_TYPE}'/0'/0/${index}`;
+    const hdWallet = await DirectSecp256k1HdWallet.fromMnemonic(normalizedMnemonic, {
+      prefix: ADDRESS_PREFIX,
+      hdPaths: [stringToPath(path)],
+    });
 
-    // Solana BIP44 path
-    const path = `m/44'/501'/0'/0'/${index}'`;
-
-    // Derive key pair
-    const derivedSeed = derivePath(path, seed.toString('hex')).key;
-    
-    // Encode as base58 for address
-    const publicKey = encodeBase58(Buffer.from(derivedSeed));
+    const [account] = await hdWallet.getAccounts();
 
     return {
-      address: publicKey,
-      publicKey: publicKey,
+      address: account.address,
+      publicKey: toHex(account.pubkey),
       derivationPath: path,
       index,
     };
@@ -179,10 +163,10 @@ export function deriveAddressFromMnemonic(
  * @param walletName - User-provided wallet name
  * @returns Import result with wallet data or error
  */
-export function importWalletFromMnemonic(
+export async function importWalletFromMnemonic(
   mnemonic: string,
   walletName: string = 'Imported Wallet'
-): ImportWalletResult {
+): Promise<ImportWalletResult> {
   try {
     // Validate mnemonic
     const validation = validateMnemonicPhrase(mnemonic);
@@ -209,7 +193,7 @@ export function importWalletFromMnemonic(
     }
 
     // Derive address from mnemonic
-    const walletInfo = deriveAddressFromMnemonic(mnemonic, 0);
+    const walletInfo = await deriveAddressFromMnemonic(mnemonic, 0);
 
     // Create wallet data (mnemonic will be encrypted separately)
     const wallet: WalletData = {
@@ -252,7 +236,7 @@ export function getWalletInfo(address: string): WalletInfo | null {
     return {
       address,
       publicKey: address,
-      derivationPath: "m/44'/501'/0'/0'/0'",
+      derivationPath: `m/44'/${COIN_TYPE}'/0'/0/0`,
       index: 0,
     };
   } catch (error) {
@@ -272,40 +256,29 @@ function generateWalletId(): string {
 /**
  * Format address for display (show first and last 6 characters)
  * @param address - Full address string
- * @returns Formatted address (e.g., "abc123...xyz789")
+ * @returns Formatted address (e.g., "mall1ab...xyz789")
  */
 export function formatAddressForDisplay(address: string): string {
-  if (!address || address.length < 12) {
+  if (!address || address.length <= 12) {
     return address;
   }
   return `${address.substring(0, 6)}...${address.substring(address.length - 6)}`;
 }
 
 /**
- * Check if address is valid Solana format
+ * Check if address is a valid "mall1..." bech32 address for this chain
  * @param address - Address to validate
  * @returns Boolean validity
  */
-export function isValidSolanaAddress(address: string): boolean {
+export function isValidMallAddress(address: string): boolean {
+  if (!address || typeof address !== 'string') {
+    return false;
+  }
+
   try {
-    if (!address || typeof address !== 'string') {
-      return false;
-    }
-
-    // Solana addresses are base58 encoded, typically 44 characters long
-    if (address.length < 32 || address.length > 44) {
-      return false;
-    }
-
-    // Check if all characters are valid base58
-    for (const char of address) {
-      if (!BASE58_ALPHABET.includes(char)) {
-        return false;
-      }
-    }
-
-    return true;
-  } catch (error) {
+    const { prefix } = fromBech32(address);
+    return prefix === ADDRESS_PREFIX;
+  } catch {
     return false;
   }
 }
@@ -316,9 +289,7 @@ export function isValidSolanaAddress(address: string): boolean {
  * @returns Array of valid BIP39 words
  */
 export function getBip39WordList(): string[] {
-  // This would typically be imported from bip39 library
-  // For now, we return empty array as bip39 provides this internally
-  return [];
+  return wordlists.english;
 }
 
 /**
@@ -327,6 +298,7 @@ export function getBip39WordList(): string[] {
  * @returns Word count
  */
 export function countMnemonicWords(mnemonic: string): number {
-  if (!mnemonic) return 0;
-  return mnemonic.trim().split(/\s+/).length;
+  const trimmed = mnemonic ? mnemonic.trim() : '';
+  if (!trimmed) return 0;
+  return trimmed.split(/\s+/).length;
 }

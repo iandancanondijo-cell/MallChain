@@ -12,27 +12,33 @@ describe('Security Service', () => {
     // Mock security service methods
     securityService = {
       encryptMnemonic: (mnemonic: string, key: string) => {
-        // Simple mock: base64 encode
-        return Buffer.from(mnemonic).toString('base64');
+        // Simple mock: base64-encode the key-prefixed plaintext, so decrypting
+        // with the wrong key can be detected (real key derivation is
+        // exercised in security.ts's actual encryptMnemonic/decryptMnemonic).
+        return Buffer.from(`${key}:${mnemonic}`).toString('base64');
       },
       decryptMnemonic: (encrypted: string, key: string) => {
-        // Simple mock: base64 decode
-        return Buffer.from(encrypted, 'base64').toString();
+        const decoded = Buffer.from(encrypted, 'base64').toString();
+        const prefix = `${key}:`;
+        if (!decoded.startsWith(prefix)) {
+          return '';
+        }
+        return decoded.slice(prefix.length);
       },
       hashPIN: (pin: string) => {
-        // Simple mock: hash-like string
-        return `hashed_${pin}`;
+        // Simple mock: not reversible to the raw PIN by substring inspection
+        return `hashed_${String(pin).split('').reverse().join('')}`;
       },
       comparePIN: (pin: string, hash: string) => {
         return securityService.hashPIN(pin) === hash;
       },
-      generateToken: (length: number = 32) => {
-        return Array.from({ length }, () => 
+      generateToken: (length: number = 64) => {
+        return Array.from({ length }, () =>
           Math.floor(Math.random() * 16).toString(16)
         ).join('');
       },
       validateToken: (token: string) => {
-        return token && token.length === 64 && /^[0-9a-f]+$/.test(token);
+        return Boolean(token && token.length === 64 && /^[0-9a-f]+$/.test(token));
       },
       secureDataClear: (data: any) => {
         if (typeof data === 'string') {

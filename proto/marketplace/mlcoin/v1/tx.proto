@@ -29,6 +29,12 @@ service Msg {
 
   // MintMallcoin allows an authority to mint MLCN to a recipient address.
   rpc MintMallcoin(MsgMintMallcoin) returns (MsgMintMallcoinResponse);
+
+  // Stake locks MLCN from the caller's wallet into the module's reward pool.
+  rpc Stake(MsgStake) returns (MsgStakeResponse);
+
+  // Unstake claims a completed stake (principal + rewards) back to the caller's wallet.
+  rpc Unstake(MsgUnstake) returns (MsgUnstakeResponse);
 }
 
 // Admin: set currency rate (rate is scaled by 100, e.g., 13745 = 137.45 KES)
@@ -114,4 +120,29 @@ message MsgMintMallcoin {
 
 message MsgMintMallcoinResponse {
   string tx_id = 1; // Tx id for the mint operation
+}
+
+// MsgStake locks MLCN from the caller's wallet into the module's reward pool
+// for a configurable lock period (see Params.staking_lock_blocks).
+message MsgStake {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  uint64 amount = 2;
+}
+
+message MsgStakeResponse {
+  string stake_id = 1;
+}
+
+// MsgUnstake claims a completed stake (principal + rewards) back to the
+// caller's wallet. Fails if the stake is still within its lock period or
+// does not belong to the caller.
+message MsgUnstake {
+  option (cosmos.msg.v1.signer) = "creator";
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string stake_id = 2;
+}
+
+message MsgUnstakeResponse {
+  uint64 rewards_earned = 1;
 }

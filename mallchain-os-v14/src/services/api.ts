@@ -179,25 +179,14 @@ class Api {
       // Use .catch(() => null) to handle non-JSON responses gracefully
       const json = (await res.json().catch(() => null)) as T | null;
 
-      // Task 2.3: Handle 401 by clearing token and redirecting
-      // 401 means token invalid/expired - user must log in again
-      // Clear localStorage token so we don't keep sending invalid token
-      // Task 6.1: Use error handler to display message and redirect
+      // Task 2.3: Handle 401 — handle401Error() clears the token, fully resets
+      // the store, and navigates via the app's hash router (see errorHandler.ts).
       if (res.status === 401) {
-        try {
-          localStorage.removeItem('token');
-        } catch (e) {
-          console.warn('Failed to clear token from localStorage:', (e as Error).message);
-        }
-        
-        // Use error handler to display message and redirect
-        handle401Error({ 
-          action: `accessing ${path}`, 
+        handle401Error({
+          action: `accessing ${path}`,
           endpoint: path,
-        }, () => {
-          window.location.href = '/login';
         });
-        
+
         return { ok: false, code: 401, error: 'Session expired. Please log in again.' };
       }
 
@@ -267,6 +256,22 @@ class Api {
       return this.request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) });
     }
     return delay(sim.enabled ? 140 : 8).then(() => this.localResolve<T>(path, undefined, body));
+  }
+
+  /** PUT request helper — same contract as post(), for REST endpoints that expect PUT (e.g. admin user/role updates). */
+  put<T = unknown>(path: string, body?: unknown): Promise<ApiResult<T>> {
+    if (config.apiBaseUrl) {
+      return this.request<T>(path, { method: 'PUT', body: JSON.stringify(body ?? {}) });
+    }
+    return delay(sim.enabled ? 140 : 8).then(() => this.localResolve<T>(path, undefined, body));
+  }
+
+  /** DELETE request helper — same contract as post(), for REST endpoints that expect DELETE. */
+  del<T = unknown>(path: string): Promise<ApiResult<T>> {
+    if (config.apiBaseUrl) {
+      return this.request<T>(path, { method: 'DELETE' });
+    }
+    return delay(sim.enabled ? 140 : 8).then(() => this.localResolve<T>(path));
   }
 
   /**

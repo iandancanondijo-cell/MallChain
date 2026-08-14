@@ -10,6 +10,7 @@
 
 import { toast } from '../components/ui';
 import type { ApiResult } from './api';
+import { authService } from './auth';
 
 /**
  * Error context describing what operation failed
@@ -153,21 +154,22 @@ export function handle401Error(context: ErrorContext, onRedirect?: () => void): 
 
   console.warn(`[Unauthorized] ${action}`, { endpoint });
 
+  // Clear the token immediately, synchronously — a 401 means it's already
+  // invalid, so any other in-flight/concurrent request must not keep
+  // sending it while we wait for the toast to display.
+  authService.clearToken();
+
   toast('Your session has expired. Redirecting to login...', false);
 
-  // Give time for toast to display, then redirect
+  // Give time for the toast to display, then finish logging out: reset the
+  // store (so no stale balances/wallet/etc. linger past the forced logout)
+  // and navigate via the app's own hash router rather than a hard page
+  // reload. authService.logout() clears the token again — a harmless no-op
+  // at this point. `onRedirect` is an optional extra hook for callers that
+  // need to react to the logout (e.g. tests).
   setTimeout(() => {
-    try {
-      localStorage.removeItem('token');
-    } catch (e) {
-      console.warn('Failed to clear token:', (e as Error).message);
-    }
-
-    if (onRedirect) {
-      onRedirect();
-    } else {
-      window.location.href = '/login';
-    }
+    authService.logout();
+    onRedirect?.();
   }, 1000);
 }
 

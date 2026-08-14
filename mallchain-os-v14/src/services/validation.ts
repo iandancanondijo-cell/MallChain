@@ -14,6 +14,7 @@
  * - Task 4.10: Edge case handling
  */
 
+import { wordlists } from 'bip39';
 import { toast } from '../components/ui';
 import { handleNetworkError } from './errorHandler';
 import type { ErrorContext } from './errorHandler';
@@ -41,7 +42,11 @@ export interface AddressValidation extends ValidationResult {
 /* ============== COMMON PATTERNS ============== */
 
 // Task 4.1: Email pattern - RFC 5322 simplified
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// ASCII-only local part and domain (matches the rest of this validator's
+// checks below, e.g. dot/length rules) — rejects unicode/IDN addresses like
+// "tëst@example.com" or "user@例え.jp" rather than silently accepting input
+// this app's other layers don't handle.
+const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z0-9-]+$/;
 
 // Task 4.1: Strong password pattern components
 const PASSWORD_UPPERCASE = /[A-Z]/;
@@ -58,36 +63,12 @@ const MALL_ADDRESS_PATTERN = /^mall1[a-z0-9]{38,58}$/;
 
 /* ============== SIMPLE WORD DICTIONARY (Task 4.5) ============== */
 
-// BIP39 standard English word list (minimal subset for validation)
-// In production, use full list: https://github.com/trezor/python-mnemonic/blob/master/vectors.txt
-const COMMON_ENGLISH_WORDS = new Set([
-  'abandon', 'ability', 'about', 'above', 'absent', 'absorb', 'abstract', 'abuse',
-  'access', 'accident', 'account', 'accuse', 'achieve', 'acid', 'acoustic', 'acquire',
-  'across', 'act', 'action', 'actor', 'actual', 'acute', 'address', 'adjust',
-  'admit', 'adobe', 'adopt', 'adore', 'adorn', 'adult', 'advance', 'adverse',
-  'advice', 'advocate', 'affair', 'afford', 'afraid', 'after', 'again', 'against',
-  'agency', 'agent', 'agree', 'agreement', 'ahead', 'aid', 'aide', 'ail',
-  'aim', 'air', 'aisle', 'alarm', 'album', 'alcohol', 'alert', 'alert',
-  'alien', 'align', 'alike', 'alive', 'all', 'alley', 'allow', 'alloy',
-  'ally', 'almost', 'alone', 'along', 'aloud', 'already', 'also', 'alter',
-  'always', 'amateur', 'amaze', 'amazing', 'ambiguous', 'ambition', 'ambitious', 'amble',
-  'ambulance', 'amend', 'amendment', 'amends', 'amenity', 'amicable', 'amicably', 'amid',
-  'amigo', 'amiss', 'ammonia', 'amnesia', 'among', 'amongst', 'amount', 'amour',
-  'ample', 'amused', 'amusement', 'amusing', 'an', 'ana', 'anaerobic', 'anagram',
-  'anus', 'anatomic', 'anatomical', 'anatomy', 'ancestor', 'ancestry', 'anchor', 'ancient',
-  'ancillary', 'and', 'andante', 'andante', 'andiron', 'anecdotal', 'anecdote', 'anemia',
-  'anemone', 'anent', 'anew', 'angel', 'angelfish', 'angelic', 'angelica', 'angels',
-  'anger', 'angered', 'angering', 'angers', 'angina', 'angle', 'angled', 'angler',
-  'angles', 'angles', 'anglesite', 'angleworm', 'angling', 'anglo', 'angora', 'angry',
-  'angst', 'angstrom', 'anguine', 'anguish', 'anguished', 'angular', 'angulation', 'anhydride',
-  'anhydrite', 'aniline', 'animal', 'animals', 'animate', 'animated', 'animatedly', 'animates',
-  'animating', 'animation', 'animator', 'animato', 'animators', 'anime', 'animism', 'animist',
-  'animosity', 'animus', 'anion', 'anise', 'aniseed', 'anisette', 'anisotropic', 'anisotropy',
-  'anita', 'anither', 'anitra', 'anitra', 'anitra', 'anitra', 'anitra', 'anitres',
-  'anitra', 'anitres', 'ankle', 'ankled', 'ankles', 'anklet', 'anklets', 'ankus',
-  'ankuses', 'ankylose', 'ankylosis', 'ankylotic', 'ann', 'anna', 'annal', 'annals',
-  'annamese', 'annapolis', 'annapolis', 'annapolis', 'annapolis', 'annapolis', 'annapolis',
-]);
+// The real BIP39 English word list (2048 words), from the same `bip39` package
+// wallet.ts uses for mnemonic generation/derivation. This used to be a hand-rolled
+// ~200-word subset that cut off alphabetically around "ann-" and was full of
+// corrupted repeated entries — it rejected the vast majority of valid, real
+// BIP39 recovery phrases (e.g. official BIP39 test vectors). See validation.test.ts.
+const COMMON_ENGLISH_WORDS = new Set(wordlists.english);
 
 /* ============== EMAIL VALIDATION (Task 4.2) ============== */
 

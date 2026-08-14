@@ -79,6 +79,34 @@
             "burner",
             "staker"
           ]
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall1ednl2qk0a35c4zl493sq6rt96glugzvlf56qvy",
+          "pub_key": null,
+          "account_number": "5",
+          "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd",
+          "pub_key": null,
+          "account_number": "6",
+          "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
+          "pub_key": null,
+          "account_number": "7",
+          "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
+          "pub_key": null,
+          "account_number": "8",
+          "sequence": "0"
         }
       ]
     },
@@ -164,16 +192,68 @@
               "amount": "1000000000"
             }
           ]
+        },
+        {
+          "address": "mall1ednl2qk0a35c4zl493sq6rt96glugzvlf56qvy",
+          "coins": [
+            {
+              "denom": "mlc",
+              "amount": "1000000"
+            },
+            {
+              "denom": "stake",
+              "amount": "10000000"
+            }
+          ]
+        },
+        {
+          "address": "mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd",
+          "coins": [
+            {
+              "denom": "mlc",
+              "amount": "0"
+            },
+            {
+              "denom": "stake",
+              "amount": "10000000"
+            }
+          ]
+        },
+        {
+          "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
+          "coins": [
+            {
+              "denom": "mlc",
+              "amount": "10000000000"
+            },
+            {
+              "denom": "stake",
+              "amount": "10000000"
+            }
+          ]
+        },
+        {
+          "address": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
+          "coins": [
+            {
+              "denom": "mlc",
+              "amount": "10000000000"
+            },
+            {
+              "denom": "stake",
+              "amount": "10000000"
+            }
+          ]
         }
       ],
       "supply": [
         {
           "denom": "mlc",
-          "amount": "254500000000000"
+          "amount": "254520001000000"
         },
         {
           "denom": "stake",
-          "amount": "2400000000"
+          "amount": "2440000000"
         }
       ],
       "denom_metadata": [],
@@ -421,6 +501,34 @@
           "index": "mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5",
           "address": "mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5",
           "balance": "90000000000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "mall1ednl2qk0a35c4zl493sq6rt96glugzvlf56qvy",
+          "address": "mall1ednl2qk0a35c4zl493sq6rt96glugzvlf56qvy",
+          "balance": "1000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd",
+          "address": "mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd",
+          "balance": "0",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
+          "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
+          "balance": "10000000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
+          "address": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
+          "balance": "10000000000",
           "locked": "0",
           "unlock_time": "0"
         }

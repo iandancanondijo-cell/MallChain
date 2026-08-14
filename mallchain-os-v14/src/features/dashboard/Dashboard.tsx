@@ -1,6 +1,13 @@
+import { useCallback, useEffect, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, fmtMoney, BarChart, StatusChip } from '../../components/ui';
 import { config } from '../../services/config';
+import { minesApi, type MinesSubmission, type MinesCampaign, type ReviewerProfile, type WalletTx } from '../../services/minesApi';
+import { stakingApi, type StakingSummary } from '../../services/stakingApi';
+
+function dayKey(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { weekday: 'short' });
+}
 
 /**
  * SECTION 15: Remove Mock Data & Migration
@@ -8,13 +15,17 @@ import { config } from '../../services/config';
  * - Shows empty states when no data is available
  * - Fallback UI when API fails
  * - Real wallet data when connected
+ *
+ * Mines/Reviewer snapshot cards pull from the real backend (see
+ * services/minesApi.ts) — they used to read the local fictional
+ * `store.state.mines`/`store.state.validators` slices, which nothing
+ * populates anymore now that those feature pages call real APIs.
  */
 export default function Dashboard({ navigate }: { navigate: (p: string) => void }) {
   useStoreVersion();
   const st = store.state;
   const cur = st.prefs.currency;
 
-  // SECTION 15.9: Check if wallet is connected
   const isWalletConnected = st.wallet.address && st.wallet.address.length > 0;
 
   const totalValue =
@@ -23,9 +34,39 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
     st.balances.USD_M +
     (cur === 'KES' ? st.balances.USD_M * 129 : cur === 'EUR' ? st.balances.USD_M * 0.92 : cur === 'GBP' ? st.balances.USD_M * 0.79 : 0);
 
-  const activeMines = st.mines.participations.filter((p) => p.status === 'inprogress' || p.status === 'pending').length;
-  const pendingValidation = st.mines.submissions.filter((s) => s.status === 'voting').length;
-  const spark = st.mines.earnings.map((e) => e.v);
+  const [submissions, setSubmissions] = useState<MinesSubmission[]>([]);
+  const [campaigns, setCampaigns] = useState<MinesCampaign[]>([]);
+  const [reviewer, setReviewer] = useState<ReviewerProfile | null>(null);
+  const [earnings, setEarnings] = useState<WalletTx[]>([]);
+  const [staking, setStaking] = useState<StakingSummary | null>(null);
+
+  const loadMinesSnapshot = useCallback(async () => {
+    const [subResult, campResult, reviewerResult, txResult, stakingResult] = await Promise.all([
+      minesApi.mySubmissions(),
+      minesApi.listActiveCampaigns(),
+      minesApi.getReviewerProfile(),
+      minesApi.getTransactions(30),
+      st.wallet.address ? stakingApi.getSummary(st.wallet.address) : Promise.resolve({ ok: false as const }),
+    ]);
+    if (subResult.ok && subResult.data) setSubmissions(subResult.data);
+    if (campResult.ok && campResult.data) setCampaigns(campResult.data);
+    if (reviewerResult.ok && reviewerResult.data) setReviewer(reviewerResult.data);
+    if (txResult.ok && txResult.data) setEarnings(txResult.data);
+    if (stakingResult.ok && 'data' in stakingResult && stakingResult.data) setStaking(stakingResult.data.summary);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [st.wallet.address]);
+
+  useEffect(() => {
+    loadMinesSnapshot();
+  }, [loadMinesSnapshot]);
+
+  const activeMines = submissions.filter((s) => !['auto_approved', 'rejected'].includes(s.status)).length;
+  const pendingValidation = submissions.filter((s) => ['assigned', 'voting'].includes(s.assignment_status)).length;
+  const credits = earnings.filter((t) => t.type === 'credit');
+  const byDay: Record<string, number> = {};
+  for (const t of credits) byDay[dayKey(t.created_at)] = (byDay[dayKey(t.created_at)] || 0) + t.amount;
+  const sparkLabels = Object.keys(byDay);
+  const spark = sparkLabels.map((k) => byDay[k]);
 
   return (
     <div>
@@ -70,16 +111,16 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
           <div className="card-sub">from campaign participation</div>
         </div>
         <div className="card">
-          <div className="card-label">Validator rewards (30d)</div>
-          <div className="card-value up">+{fmtNum(st.validators.weekly.reduce((a, w) => a + w.reward, 0) || 0)} <span className="unit">MALL</span></div>
-          <div className="card-sub">accuracy {st.validators.reputation.accuracy || '—'}%</div>
+          <div className="card-label">Proof Reviewer earnings</div>
+          <div className="card-value up">+{fmtNum(reviewer?.total_earnings || 0)} <span className="unit">MLPTS</span></div>
+          <div className="card-sub">reputation {reviewer?.mining_reputation ?? '—'}</div>
         </div>
       </div>
 
       <div className="grid-2">
         <div className="card">
           <div className="sec-title"><h2>Portfolio 7-day trend</h2><span className="sub">earnings in MLPTS</span></div>
-          {spark.length ? <BarChart data={spark} labels={st.mines.earnings.map((e) => e.day)} height={140} /> : <div className="empty" style={{ color: 'var(--txt-3)', padding: 30, textAlign: 'center' }}>📊<br/>No earnings yet — join a campaign.</div>}
+          {spark.length ? <BarChart data={spark} labels={sparkLabels} height={140} /> : <div className="empty" style={{ color: 'var(--txt-3)', padding: 30, textAlign: 'center' }}>📊<br/>No earnings yet — join a campaign.</div>}
         </div>
         <div className="card">
           <div className="sec-title"><h2>Recent transactions</h2><span className="sec-link" onClick={() => navigate('/wallet/history')}>View all ›</span></div>
@@ -105,18 +146,18 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
       <div className="grid-3" style={{ marginTop: 14 }}>
         <div className="card card-hover" style={{ cursor: 'pointer' }} onClick={() => navigate('/mines')}>
           <div className="card-label">Mines snapshot</div>
-          <div className="card-value" style={{ fontSize: 18 }}>{activeMines} active · {pendingValidation} pending validation</div>
-          <div className="card-sub">Campaigns available: {st.mines.campaigns.length}</div>
+          <div className="card-value" style={{ fontSize: 18 }}>{activeMines} active · {pendingValidation} pending review</div>
+          <div className="card-sub">Campaigns available: {campaigns.length}</div>
         </div>
         <div className="card card-hover" style={{ cursor: 'pointer' }} onClick={() => navigate('/validators')}>
           <div className="card-label">Validators snapshot</div>
-          <div className="card-value" style={{ fontSize: 18 }}>Stake {fmtNum(st.validators.stakeLocked || 0)} MALL</div>
-          <div className="card-sub">rank {st.validators.reputation.rank || 'Unranked'} · {st.validators.reputation.accuracy || '—'}% accuracy</div>
+          <div className="card-value" style={{ fontSize: 18 }}>Real Cosmos x/staking</div>
+          <div className="card-sub">view chain validators &amp; your application status</div>
         </div>
         <div className="card card-hover" style={{ cursor: 'pointer' }} onClick={() => navigate('/staking')}>
           <div className="card-label">Staking</div>
-          <div className="card-value" style={{ fontSize: 18 }}>{fmtNum(st.staking.delegated || 0)} MALL delegated</div>
-          <div className="card-sub">APY {st.staking.apy || 0}%</div>
+          <div className="card-value" style={{ fontSize: 18 }}>{fmtNum(staking?.totalStaked ?? 0)} MLCNS staked</div>
+          <div className="card-sub">{staking?.active.length ?? 0} active stake{staking?.active.length === 1 ? '' : 's'}</div>
         </div>
       </div>
 
@@ -126,7 +167,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
           <button className="btn btn-primary" onClick={() => navigate('/wallet/send')}>➤ Send MALL</button>
           <button className="btn btn-ghost" onClick={() => navigate('/wallet/receive')}>⬇ Receive</button>
           <button className="btn btn-ghost" onClick={() => navigate('/mines/discover')}>🧭 Discover campaigns</button>
-          <button className="btn btn-ghost" onClick={() => navigate('/validators/calculator')}>🧮 Rewards calculator</button>
+          <button className="btn btn-ghost" onClick={() => navigate('/mines/validator-queue')}>🛂 Proof Reviewer queue</button>
           <button className="btn btn-ghost" onClick={() => navigate('/governance')}>🗳 Vote</button>
         </div>
       </div>

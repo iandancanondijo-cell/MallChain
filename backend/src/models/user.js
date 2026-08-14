@@ -30,6 +30,16 @@ const UserSchema = new Schema({
   fraud_strikes: { type: Number, default: 0 },
   fraud_status: { type: String, enum: ['clear', 'warned', 'suspended', 'banned'], default: 'clear' },
 
+  // KYC: 1 = unverified/pending, 2 = approved. Set by kycController on a low-risk KYC decision.
+  kycLevel: { type: Number, default: 1 },
+
+  // Referrals
+  referralCode: { type: String, unique: true, sparse: true },
+  referredBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  referralEarnings: { type: Number, default: 0 },
+  referralCount: { type: Number, default: 0 },
+  referralClaimed: { type: Number, default: 0 },
+
   // Timestamps
   lastLoginAt: { type: Date },
   createdAt: { type: Date, default: Date.now },

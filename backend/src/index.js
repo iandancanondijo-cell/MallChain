@@ -337,6 +337,12 @@ app.use('/api/governance', governanceRoutes);
 app.use('/api/liquidity', liquidityRoutes);
 app.use('/api/mallpoints', mallpointsRoutes);
 app.use('/api/notifications', notificationsRoutes);
+const referralsRoutes = require('./routes/referrals');
+app.use('/api/referrals', referralsRoutes);
+const marketplaceEscrowRoutes = require('./routes/marketplace');
+app.use('/api/marketplace', marketplaceEscrowRoutes);
+const messagingRoutes = require('./routes/messaging');
+app.use('/api/messaging', messagingRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/buy', buyRoutes);
 const withdrawRoutes = require('./routes/withdraw');
@@ -572,6 +578,39 @@ io.on('connection', socket => {
   socket.on('subscribe:blocks', () => {
     socket.join('blocks:live')
     logger.info('Socket subscribed to block updates', { socketId: socket.id })
+  })
+
+  // Per-user notification subscription — mirrors the wallet room pattern.
+  // Clients emit 'subscribe:user' with their Mongo user id to receive
+  // live 'notification' events (see services/notify.js).
+  socket.on('subscribe:user', (userId) => {
+    if (!userId || typeof userId !== 'string' || !/^[0-9a-fA-F]{24}$/.test(userId)) {
+      logger.warn('Invalid user subscription attempt', { socketId: socket.id, userId })
+      return
+    }
+    socket.join(`user:${userId}`)
+    logger.info('Socket subscribed to user notifications', { socketId: socket.id, userId })
+  })
+
+  socket.on('unsubscribe:user', (userId) => {
+    if (!userId || typeof userId !== 'string' || !/^[0-9a-fA-F]{24}$/.test(userId)) return
+    socket.leave(`user:${userId}`)
+  })
+
+  // Per-conversation messaging subscription — joined while a chat thread is
+  // open so both participants receive 'message:new' pushes in real time.
+  socket.on('subscribe:conversation', (conversationId) => {
+    if (!conversationId || typeof conversationId !== 'string' || !/^[0-9a-fA-F]{24}$/.test(conversationId)) {
+      logger.warn('Invalid conversation subscription attempt', { socketId: socket.id, conversationId })
+      return
+    }
+    socket.join(`conversation:${conversationId}`)
+    logger.info('Socket subscribed to conversation', { socketId: socket.id, conversationId })
+  })
+
+  socket.on('unsubscribe:conversation', (conversationId) => {
+    if (!conversationId || typeof conversationId !== 'string' || !/^[0-9a-fA-F]{24}$/.test(conversationId)) return
+    socket.leave(`conversation:${conversationId}`)
   })
 
   // Task 5.1: Handle socket disconnection

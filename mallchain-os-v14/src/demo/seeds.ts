@@ -18,7 +18,9 @@ export function seedIfDemo(st: AppState): boolean {
 function applySeeds(st: AppState) {
   // ---- identity ----
   st.user = {
+    id: 'demo-user',
     authed: true,
+    role: 'user',
     name: 'Kevin Otieno',
     email: 'kevin@mallchain.ke',
     phone: '+254 712 345 678',

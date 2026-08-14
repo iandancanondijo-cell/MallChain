@@ -10,9 +10,15 @@ import {
   deriveAddressFromMnemonic,
   importWalletFromMnemonic,
   formatAddressForDisplay,
-  isValidSolanaAddress,
+  isValidMallAddress,
   countMnemonicWords,
 } from '../../services/wallet';
+
+// Deterministic fixture: 'mall1...' address derived from this exact mnemonic at
+// index 0 via the Cosmos SDK path m/44'/118'/0'/0/0 (same path the backend uses).
+const FIXTURE_MNEMONIC =
+  'abandon about above absent absorb abstract abuse access accident account accuse achieve';
+const FIXTURE_ADDRESS = 'mall1nruy4hgm6d8mjx3npnj0eq60kztpmqez9vkf7y';
 
 describe('Wallet Service', () => {
   describe('Mnemonic Generation', () => {
@@ -49,8 +55,7 @@ describe('Wallet Service', () => {
 
   describe('Mnemonic Validation', () => {
     it('should validate correct 12-word mnemonic', () => {
-      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse achieve';
-      const result = validateMnemonicPhrase(mnemonic);
+      const result = validateMnemonicPhrase(FIXTURE_MNEMONIC);
 
       expect(result.valid).toBe(true);
       expect(result.wordCount).toBe(12);
@@ -87,8 +92,7 @@ describe('Wallet Service', () => {
     });
 
     it('should normalize to lowercase', () => {
-      const mnemonic = 'ABANDON ABOUT ABOVE ABSENT ABSORB ABSTRACT ABUSE ACCESS ACCIDENT ACCOUNT ACCUSE ACHIEVE';
-      const result = validateMnemonicPhrase(mnemonic);
+      const result = validateMnemonicPhrase(FIXTURE_MNEMONIC.toUpperCase());
 
       expect(result.valid).toBe(true);
     });
@@ -102,9 +106,8 @@ describe('Wallet Service', () => {
   });
 
   describe('Address Derivation', () => {
-    it('should derive address from 12-word mnemonic', () => {
-      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse achieve';
-      const result = deriveAddressFromMnemonic(mnemonic, 0);
+    it('should derive address from 12-word mnemonic', async () => {
+      const result = await deriveAddressFromMnemonic(FIXTURE_MNEMONIC, 0);
 
       expect(result.address).toBeTruthy();
       expect(result.publicKey).toBeTruthy();
@@ -112,53 +115,52 @@ describe('Wallet Service', () => {
       expect(result.index).toBe(0);
     });
 
-    it('should use Solana BIP44 derivation path', () => {
-      const mnemonic = generateNewMnemonic();
-      const result = deriveAddressFromMnemonic(mnemonic, 0);
+    it('should derive the same mall1... address the backend would derive for this mnemonic', async () => {
+      const result = await deriveAddressFromMnemonic(FIXTURE_MNEMONIC, 0);
 
-      expect(result.derivationPath).toBe("m/44'/501'/0'/0'/0'");
+      expect(result.address).toBe(FIXTURE_ADDRESS);
+      expect(isValidMallAddress(result.address)).toBe(true);
     });
 
-    it('should derive different addresses with different indices', () => {
-      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse achieve';
+    it('should use the Cosmos SDK BIP44 derivation path (coin type 118)', async () => {
+      const mnemonic = generateNewMnemonic();
+      const result = await deriveAddressFromMnemonic(mnemonic, 0);
 
-      const address0 = deriveAddressFromMnemonic(mnemonic, 0);
-      const address1 = deriveAddressFromMnemonic(mnemonic, 1);
+      expect(result.derivationPath).toBe("m/44'/118'/0'/0/0");
+    });
+
+    it('should derive different addresses with different indices', async () => {
+      const address0 = await deriveAddressFromMnemonic(FIXTURE_MNEMONIC, 0);
+      const address1 = await deriveAddressFromMnemonic(FIXTURE_MNEMONIC, 1);
 
       expect(address0.address).not.toBe(address1.address);
       expect(address0.index).toBe(0);
       expect(address1.index).toBe(1);
     });
 
-    it('should derive same address for same mnemonic and index', () => {
-      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse achieve';
-
-      const address1 = deriveAddressFromMnemonic(mnemonic, 0);
-      const address2 = deriveAddressFromMnemonic(mnemonic, 0);
+    it('should derive same address for same mnemonic and index', async () => {
+      const address1 = await deriveAddressFromMnemonic(FIXTURE_MNEMONIC, 0);
+      const address2 = await deriveAddressFromMnemonic(FIXTURE_MNEMONIC, 0);
 
       expect(address1.address).toBe(address2.address);
     });
 
-    it('should throw error for invalid mnemonic', () => {
+    it('should throw error for invalid mnemonic', async () => {
       const invalidMnemonic = 'invalid words here that are not valid bip39 words at all';
 
-      expect(() => {
-        deriveAddressFromMnemonic(invalidMnemonic, 0);
-      }).toThrow();
+      await expect(deriveAddressFromMnemonic(invalidMnemonic, 0)).rejects.toThrow();
     });
 
-    it('should validate mnemonic before deriving address', () => {
+    it('should validate mnemonic before deriving address', async () => {
       const invalidMnemonic = 'test test test';
-      const result = deriveAddressFromMnemonic.bind(null, invalidMnemonic, 0);
 
-      expect(result).toThrow();
+      await expect(deriveAddressFromMnemonic(invalidMnemonic, 0)).rejects.toThrow();
     });
   });
 
   describe('Wallet Import', () => {
-    it('should import wallet from valid mnemonic', () => {
-      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse achieve';
-      const result = importWalletFromMnemonic(mnemonic, 'My Wallet');
+    it('should import wallet from valid mnemonic', async () => {
+      const result = await importWalletFromMnemonic(FIXTURE_MNEMONIC, 'My Wallet');
 
       expect(result.success).toBe(true);
       expect(result.wallet).toBeTruthy();
@@ -167,61 +169,54 @@ describe('Wallet Service', () => {
       expect(result.wallet?.id).toBeTruthy();
     });
 
-    it('should validate wallet name (1-50 characters)', () => {
-      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse achieve';
-
+    it('should validate wallet name (1-50 characters)', async () => {
       // Valid name
-      const result1 = importWalletFromMnemonic(mnemonic, 'Valid Name');
+      const result1 = await importWalletFromMnemonic(FIXTURE_MNEMONIC, 'Valid Name');
       expect(result1.success).toBe(true);
 
       // Too long name
-      const result2 = importWalletFromMnemonic(mnemonic, 'a'.repeat(51));
+      const result2 = await importWalletFromMnemonic(FIXTURE_MNEMONIC, 'a'.repeat(51));
       expect(result2.success).toBe(false);
       expect(result2.error).toMatch(/50 characters/i);
 
       // Empty name
-      const result3 = importWalletFromMnemonic(mnemonic, '');
+      const result3 = await importWalletFromMnemonic(FIXTURE_MNEMONIC, '');
       expect(result3.success).toBe(false);
       expect(result3.error).toMatch(/cannot be empty/i);
     });
 
-    it('should generate unique wallet ID', () => {
-      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse achieve';
-
-      const wallet1 = importWalletFromMnemonic(mnemonic, 'Wallet 1');
-      const wallet2 = importWalletFromMnemonic(mnemonic, 'Wallet 2');
+    it('should generate unique wallet ID', async () => {
+      const wallet1 = await importWalletFromMnemonic(FIXTURE_MNEMONIC, 'Wallet 1');
+      const wallet2 = await importWalletFromMnemonic(FIXTURE_MNEMONIC, 'Wallet 2');
 
       expect(wallet1.wallet?.id).not.toBe(wallet2.wallet?.id);
     });
 
-    it('should reject invalid mnemonic', () => {
+    it('should reject invalid mnemonic', async () => {
       const invalidMnemonic = 'invalid words here';
-      const result = importWalletFromMnemonic(invalidMnemonic, 'Wallet');
+      const result = await importWalletFromMnemonic(invalidMnemonic, 'Wallet');
 
       expect(result.success).toBe(false);
       expect(result.error).toBeTruthy();
     });
 
-    it('should set isActive to true for new wallets', () => {
-      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse achieve';
-      const result = importWalletFromMnemonic(mnemonic, 'My Wallet');
+    it('should set isActive to true for new wallets', async () => {
+      const result = await importWalletFromMnemonic(FIXTURE_MNEMONIC, 'My Wallet');
 
       expect(result.wallet?.isActive).toBe(true);
     });
 
-    it('should store creation timestamp', () => {
-      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse achieve';
+    it('should store creation timestamp', async () => {
       const before = Date.now();
-      const result = importWalletFromMnemonic(mnemonic, 'My Wallet');
+      const result = await importWalletFromMnemonic(FIXTURE_MNEMONIC, 'My Wallet');
       const after = Date.now();
 
       expect(result.wallet?.createdAt).toBeGreaterThanOrEqual(before);
       expect(result.wallet?.createdAt).toBeLessThanOrEqual(after);
     });
 
-    it('should include derivation path in wallet', () => {
-      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse achieve';
-      const result = importWalletFromMnemonic(mnemonic, 'My Wallet');
+    it('should include derivation path in wallet', async () => {
+      const result = await importWalletFromMnemonic(FIXTURE_MNEMONIC, 'My Wallet');
 
       expect(result.wallet?.derivationPath).toMatch(/m\/44'/);
     });
@@ -233,7 +228,7 @@ describe('Wallet Service', () => {
       const formatted = formatAddressForDisplay(address);
 
       expect(formatted).toMatch(/^.{6}\.\.\..{6}$/);
-      expect(formatted).toBe('SomeVe...67345');
+      expect(formatted).toBe('SomeVe...s12345');
     });
 
     it('should not truncate short addresses', () => {
@@ -259,61 +254,43 @@ describe('Wallet Service', () => {
     });
   });
 
-  describe('Solana Address Validation', () => {
-    it('should validate correct Solana address format', () => {
-      const validAddress = 'So1111111111111111111111111111111111111111111';
-      const result = isValidSolanaAddress(validAddress);
-
-      expect(result).toBe(true);
+  describe('mall1... Address Validation', () => {
+    it('should validate a correctly derived mall1... address', () => {
+      expect(isValidMallAddress(FIXTURE_ADDRESS)).toBe(true);
     });
 
-    it('should reject address with invalid characters', () => {
-      const invalidAddress = 'So111111111111111111111111111111111111111110'; // '0' is invalid in base58
-      const result = isValidSolanaAddress(invalidAddress);
-
-      expect(result).toBe(false);
+    it('should reject an address with a bad checksum', () => {
+      const corrupted = FIXTURE_ADDRESS.slice(0, -1) + (FIXTURE_ADDRESS.endsWith('y') ? 'x' : 'y');
+      expect(isValidMallAddress(corrupted)).toBe(false);
     });
 
-    it('should reject address that is too short', () => {
-      const shortAddress = 'So11111111';
-      const result = isValidSolanaAddress(shortAddress);
-
-      expect(result).toBe(false);
+    it('should reject an address with the wrong prefix', () => {
+      // A validly-encoded (checksum-correct) bech32 address, but for a
+      // different chain prefix — must fail on the prefix check, not decoding.
+      expect(isValidMallAddress('cosmos1nruy4hgm6d8mjx3npnj0eq60kztpmqezwlrjuv')).toBe(false);
     });
 
-    it('should reject address that is too long', () => {
-      const longAddress = 'So' + '1'.repeat(50);
-      const result = isValidSolanaAddress(longAddress);
-
-      expect(result).toBe(false);
+    it('should reject a truncated address', () => {
+      expect(isValidMallAddress(FIXTURE_ADDRESS.slice(0, 10))).toBe(false);
     });
 
     it('should reject empty address', () => {
-      const result = isValidSolanaAddress('');
-      expect(result).toBe(false);
+      expect(isValidMallAddress('')).toBe(false);
     });
 
     it('should reject null/undefined', () => {
-      const result1 = isValidSolanaAddress(null as any);
-      const result2 = isValidSolanaAddress(undefined as any);
-
-      expect(result1).toBe(false);
-      expect(result2).toBe(false);
+      expect(isValidMallAddress(null as any)).toBe(false);
+      expect(isValidMallAddress(undefined as any)).toBe(false);
     });
 
-    it('should validate base58 characters only', () => {
-      // Invalid: contains 0, O, I, l
-      const invalid1 = 'So1111110111111111111111111111111111111111111'; // Contains '0'
-      const result1 = isValidSolanaAddress(invalid1);
-
-      expect(result1).toBe(false);
+    it('should reject a plausible-looking but non-bech32 string', () => {
+      expect(isValidMallAddress('mall1_not_a_real_bech32_address')).toBe(false);
     });
   });
 
   describe('Mnemonic Word Counting', () => {
     it('should count 12 words', () => {
-      const mnemonic = 'abandon about above absent absorb abstract abuse access accident account accuse achieve';
-      const count = countMnemonicWords(mnemonic);
+      const count = countMnemonicWords(FIXTURE_MNEMONIC);
 
       expect(count).toBe(12);
     });
@@ -344,17 +321,17 @@ describe('Wallet Service', () => {
   });
 
   describe('Error Handling', () => {
-    it('should provide error message for invalid mnemonic', () => {
-      const result = importWalletFromMnemonic('invalid', 'Test');
+    it('should provide error message for invalid mnemonic', async () => {
+      const result = await importWalletFromMnemonic('invalid', 'Test');
 
       expect(result.success).toBe(false);
       expect(result.error).toBeTruthy();
       expect(typeof result.error).toBe('string');
     });
 
-    it('should not expose sensitive data in error messages', () => {
+    it('should not expose sensitive data in error messages', async () => {
       const mnemonic = 'some sensitive secret phrase here';
-      const result = importWalletFromMnemonic(mnemonic, 'Test');
+      const result = await importWalletFromMnemonic(mnemonic, 'Test');
 
       expect(result.error).not.toContain(mnemonic);
     });

@@ -209,13 +209,13 @@ describe('Keyboard Navigation', () => {
         }
       };
 
-      trapFocus({ key: 'Tab' });
+      trapFocus({ key: 'Tab', preventDefault: () => {} });
       expect(focusOrder[currentFocus]).toBe('input-field');
 
-      trapFocus({ key: 'Tab' });
+      trapFocus({ key: 'Tab', preventDefault: () => {} });
       expect(focusOrder[currentFocus]).toBe('save-btn');
 
-      trapFocus({ key: 'Tab' });
+      trapFocus({ key: 'Tab', preventDefault: () => {} });
       expect(focusOrder[currentFocus]).toBe('close-btn'); // Wraps
     });
 

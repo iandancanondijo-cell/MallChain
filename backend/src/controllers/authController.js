@@ -38,6 +38,8 @@ function toPublicUser(user) {
     rank_points: Number(user.rank_points || 0),
     fraud_strikes: Number(user.fraud_strikes || 0),
     fraud_status: user.fraud_status || 'clear',
+    banned: Boolean(user.banned),
+    kycLevel: Number(user.kycLevel || 1),
     created_at: user.createdAt || new Date().toISOString(),
     updated_at: user.updatedAt || user.createdAt || new Date().toISOString(),
   };
@@ -51,15 +53,33 @@ function makeSyntheticEmail(username) {
   return `${username}@mines.mallchain.local`;
 }
 
+// Flat MLPTS bonus credited to a referrer when someone signs up with their code.
+const REFERRAL_SIGNUP_BONUS = 10;
+
 exports.register = async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, referralCode } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
   const existing = await User.findOne({ email });
   if (existing) return res.status(400).json({ error: 'email exists' });
   const hash = await bcrypt.hash(password, 10);
-  const u = await User.create({ email, password: hash });
+
+  let referrer = null;
+  if (referralCode) {
+    referrer = await User.findOne({ referralCode: String(referralCode).trim().toUpperCase() });
+  }
+
+  const u = await User.create({ email, password: hash, referredBy: referrer ? referrer._id : undefined });
+  u.referralCode = `MALL-${u._id.toString().slice(-8)}`.toUpperCase();
+  await u.save();
+
+  if (referrer) {
+    await User.findByIdAndUpdate(referrer._id, {
+      $inc: { referralCount: 1, referralEarnings: REFERRAL_SIGNUP_BONUS },
+    });
+  }
+
   const token = signToken(u);
-  res.json({ token });
+  res.json({ token, user: toPublicUser(u) });
 };
 
 exports.login = async (req, res) => {
@@ -70,8 +90,10 @@ exports.login = async (req, res) => {
   if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
   const ok = await bcrypt.compare(password, u.password);
   if (!ok) return res.status(400).json({ error: 'invalid credentials' });
+  u.lastLoginAt = new Date();
+  await u.save();
   const token = signToken(u);
-  res.json({ token });
+  res.json({ token, user: toPublicUser(u) });
 };
 
 exports.registerUsername = async (req, res) => {

@@ -1,25 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
-
-function getJwtSecret() {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error('JWT_SECRET not configured');
-  return secret;
-}
-
-function verifyToken(req, res, next) {
-  const auth = req.headers.authorization || '';
-  if (!auth.startsWith('Bearer ')) return res.status(401).json({ ok: false, error: 'missing token' });
-  try {
-    const payload = jwt.verify(auth.slice(7), getJwtSecret());
-    req.userId = payload.id;
-    next();
-  } catch (e) {
-    return res.status(401).json({ ok: false, error: 'invalid token' });
-  }
-}
+const auth = require('../middleware/auth');
+const UserSettings = require('../models/UserSettings');
 
 function ok(data) { return { ok: true, data }; }
 function fail(err) {
@@ -27,76 +10,16 @@ function fail(err) {
   return { ok: false, error: typeof err === 'string' ? err : 'Invalid request' };
 }
 
-// In-memory storage for settings (replace with database in production)
-const userSettings = new Map();
-
-// Default settings template
-function getDefaultSettings() {
-  return {
-    // Preferences
-    prefs: {
-      accent: 'gold',
-      currency: 'USD',
-      lang: 'EN',
-      theme: 'dark'
-    },
-    // Notification settings
-    notifications: {
-      email: {
-        transactions: true,
-        campaigns: true,
-        governance: true,
-        marketing: false,
-        security: true
-      },
-      push: {
-        transactions: true,
-        campaigns: true,
-        governance: false,
-        marketing: false,
-        security: true
-      },
-      frequency: 'realtime' // realtime, daily, weekly
-    },
-    // Security settings
-    security: {
-      twoFactorEnabled: false,
-      sessionTimeout: 120, // minutes
-      loginNotifications: true,
-      deviceManagement: true,
-      trustedDevices: []
-    },
-    // Privacy settings
-    privacy: {
-      profileVisibility: 'public', // public, friends, private
-      showActivity: true,
-      showBalance: false,
-      allowMessages: true,
-      dataSharing: false
-    },
-    // Display settings
-    display: {
-      compactMode: false,
-      showBalances: true,
-      defaultView: 'dashboard', // dashboard, wallet, mines
-      itemsPerPage: 20
-    },
-    updatedAt: new Date().toISOString()
-  };
-}
-
-// Get or create settings for user
-function getOrCreateSettings(userId) {
-  if (!userSettings.has(userId)) {
-    userSettings.set(userId, getDefaultSettings());
-  }
-  return userSettings.get(userId);
+async function getOrCreateSettings(userId) {
+  let settings = await UserSettings.findOne({ userId });
+  if (!settings) settings = await UserSettings.create({ userId });
+  return settings;
 }
 
 // GET /api/settings - Get user settings
-router.get('/', verifyToken, async (req, res) => {
+router.get('/', auth, async (req, res) => {
   try {
-    const settings = getOrCreateSettings(req.userId);
+    const settings = await getOrCreateSettings(req.user._id);
     res.json(ok(settings));
   } catch (e) {
     res.status(500).json(fail(e));
@@ -104,37 +27,21 @@ router.get('/', verifyToken, async (req, res) => {
 });
 
 // PUT /api/settings - Update settings
-router.put('/', verifyToken, async (req, res) => {
+router.put('/', auth, async (req, res) => {
   try {
-    const settings = getOrCreateSettings(req.userId);
-    
-    // Deep merge the updates
-    if (req.body.prefs) {
-      settings.prefs = { ...settings.prefs, ...req.body.prefs };
-    }
+    const settings = await getOrCreateSettings(req.user._id);
+
+    if (req.body.prefs) Object.assign(settings.prefs, req.body.prefs);
     if (req.body.notifications) {
-      if (req.body.notifications.email) {
-        settings.notifications.email = { ...settings.notifications.email, ...req.body.notifications.email };
-      }
-      if (req.body.notifications.push) {
-        settings.notifications.push = { ...settings.notifications.push, ...req.body.notifications.push };
-      }
-      if (req.body.notifications.frequency) {
-        settings.notifications.frequency = req.body.notifications.frequency;
-      }
+      if (req.body.notifications.email) Object.assign(settings.notifications.email, req.body.notifications.email);
+      if (req.body.notifications.push) Object.assign(settings.notifications.push, req.body.notifications.push);
+      if (req.body.notifications.frequency) settings.notifications.frequency = req.body.notifications.frequency;
     }
-    if (req.body.security) {
-      settings.security = { ...settings.security, ...req.body.security };
-    }
-    if (req.body.privacy) {
-      settings.privacy = { ...settings.privacy, ...req.body.privacy };
-    }
-    if (req.body.display) {
-      settings.display = { ...settings.display, ...req.body.display };
-    }
-    
-    settings.updatedAt = new Date().toISOString();
-    
+    if (req.body.security) Object.assign(settings.security, req.body.security);
+    if (req.body.privacy) Object.assign(settings.privacy, req.body.privacy);
+    if (req.body.display) Object.assign(settings.display, req.body.display);
+
+    await settings.save();
     res.json(ok(settings));
   } catch (e) {
     res.status(500).json(fail(e));
@@ -142,22 +49,15 @@ router.put('/', verifyToken, async (req, res) => {
 });
 
 // PUT /api/settings/notifications - Notification preferences
-router.put('/notifications', verifyToken, async (req, res) => {
+router.put('/notifications', auth, async (req, res) => {
   try {
-    const settings = getOrCreateSettings(req.userId);
-    
-    if (req.body.email) {
-      settings.notifications.email = { ...settings.notifications.email, ...req.body.email };
-    }
-    if (req.body.push) {
-      settings.notifications.push = { ...settings.notifications.push, ...req.body.push };
-    }
-    if (req.body.frequency) {
-      settings.notifications.frequency = req.body.frequency;
-    }
-    
-    settings.updatedAt = new Date().toISOString();
-    
+    const settings = await getOrCreateSettings(req.user._id);
+
+    if (req.body.email) Object.assign(settings.notifications.email, req.body.email);
+    if (req.body.push) Object.assign(settings.notifications.push, req.body.push);
+    if (req.body.frequency) settings.notifications.frequency = req.body.frequency;
+
+    await settings.save();
     res.json(ok(settings.notifications));
   } catch (e) {
     res.status(500).json(fail(e));
@@ -165,19 +65,16 @@ router.put('/notifications', verifyToken, async (req, res) => {
 });
 
 // PUT /api/settings/security - Security settings
-router.put('/security', verifyToken, async (req, res) => {
+router.put('/security', auth, async (req, res) => {
   try {
-    const settings = getOrCreateSettings(req.userId);
-    
+    const settings = await getOrCreateSettings(req.user._id);
+
     const allowedFields = ['twoFactorEnabled', 'sessionTimeout', 'loginNotifications', 'deviceManagement'];
-    allowedFields.forEach(field => {
-      if (req.body[field] !== undefined) {
-        settings.security[field] = req.body[field];
-      }
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) settings.security[field] = req.body[field];
     });
-    
-    settings.updatedAt = new Date().toISOString();
-    
+
+    await settings.save();
     res.json(ok(settings.security));
   } catch (e) {
     res.status(500).json(fail(e));
@@ -185,19 +82,16 @@ router.put('/security', verifyToken, async (req, res) => {
 });
 
 // PUT /api/settings/privacy - Privacy settings
-router.put('/privacy', verifyToken, async (req, res) => {
+router.put('/privacy', auth, async (req, res) => {
   try {
-    const settings = getOrCreateSettings(req.userId);
-    
+    const settings = await getOrCreateSettings(req.user._id);
+
     const allowedFields = ['profileVisibility', 'showActivity', 'showBalance', 'allowMessages', 'dataSharing'];
-    allowedFields.forEach(field => {
-      if (req.body[field] !== undefined) {
-        settings.privacy[field] = req.body[field];
-      }
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) settings.privacy[field] = req.body[field];
     });
-    
-    settings.updatedAt = new Date().toISOString();
-    
+
+    await settings.save();
     res.json(ok(settings.privacy));
   } catch (e) {
     res.status(500).json(fail(e));
@@ -205,10 +99,10 @@ router.put('/privacy', verifyToken, async (req, res) => {
 });
 
 // POST /api/settings/reset - Reset to defaults
-router.post('/reset', verifyToken, async (req, res) => {
+router.post('/reset', auth, async (req, res) => {
   try {
-    const settings = getDefaultSettings();
-    userSettings.set(req.userId, settings);
+    await UserSettings.deleteOne({ userId: req.user._id });
+    const settings = await getOrCreateSettings(req.user._id);
     res.json(ok(settings));
   } catch (e) {
     res.status(500).json(fail(e));
@@ -216,14 +110,14 @@ router.post('/reset', verifyToken, async (req, res) => {
 });
 
 // GET /api/settings/export - Export settings (for backup)
-router.get('/export', verifyToken, async (req, res) => {
+router.get('/export', auth, async (req, res) => {
   try {
-    const settings = getOrCreateSettings(req.userId);
+    const settings = await getOrCreateSettings(req.user._id);
     const exportData = {
       version: 1,
       exportedAt: new Date().toISOString(),
-      userId: req.userId,
-      settings: settings
+      userId: req.user._id,
+      settings,
     };
     res.json(ok(exportData));
   } catch (e) {
@@ -232,24 +126,25 @@ router.get('/export', verifyToken, async (req, res) => {
 });
 
 // POST /api/settings/import - Import settings (from backup)
-router.post('/import', verifyToken, async (req, res) => {
+router.post('/import', auth, async (req, res) => {
   try {
-    const { settings } = req.body;
-    if (!settings) {
+    const { settings: incoming } = req.body;
+    if (!incoming) {
       return res.status(400).json(fail('settings data is required'));
     }
 
-    // Validate the structure
     const requiredKeys = ['prefs', 'notifications', 'security', 'privacy', 'display'];
-    const hasAllKeys = requiredKeys.every(key => settings[key]);
-    
+    const hasAllKeys = requiredKeys.every((key) => incoming[key]);
     if (!hasAllKeys) {
       return res.status(400).json(fail('Invalid settings format'));
     }
 
-    settings.updatedAt = new Date().toISOString();
-    userSettings.set(req.userId, settings);
-    
+    const settings = await UserSettings.findOneAndUpdate(
+      { userId: req.user._id },
+      { $set: { prefs: incoming.prefs, notifications: incoming.notifications, security: incoming.security, privacy: incoming.privacy, display: incoming.display } },
+      { new: true, upsert: true }
+    );
+
     res.json(ok(settings));
   } catch (e) {
     res.status(500).json(fail(e));
@@ -257,10 +152,10 @@ router.post('/import', verifyToken, async (req, res) => {
 });
 
 // POST /api/settings/security/2fa/enable - Enable 2FA
-router.post('/security/2fa/enable', verifyToken, async (req, res) => {
+router.post('/security/2fa/enable', auth, async (req, res) => {
   try {
-    const settings = getOrCreateSettings(req.userId);
-    
+    const settings = await getOrCreateSettings(req.user._id);
+
     // In production, verify the 2FA code before enabling
     const { code } = req.body;
     if (!code) {
@@ -268,9 +163,9 @@ router.post('/security/2fa/enable', verifyToken, async (req, res) => {
     }
 
     settings.security.twoFactorEnabled = true;
-    settings.security.twoFactorEnabledAt = new Date().toISOString();
-    settings.updatedAt = new Date().toISOString();
-    
+    settings.security.twoFactorEnabledAt = new Date();
+    await settings.save();
+
     res.json(ok({ enabled: true, backupCodes: ['BACKUP1', 'BACKUP2', 'BACKUP3'] }));
   } catch (e) {
     res.status(500).json(fail(e));
@@ -278,14 +173,14 @@ router.post('/security/2fa/enable', verifyToken, async (req, res) => {
 });
 
 // POST /api/settings/security/2fa/disable - Disable 2FA
-router.post('/security/2fa/disable', verifyToken, async (req, res) => {
+router.post('/security/2fa/disable', auth, async (req, res) => {
   try {
-    const settings = getOrCreateSettings(req.userId);
-    
+    const settings = await getOrCreateSettings(req.user._id);
+
     settings.security.twoFactorEnabled = false;
-    settings.security.twoFactorDisabledAt = new Date().toISOString();
-    settings.updatedAt = new Date().toISOString();
-    
+    settings.security.twoFactorDisabledAt = new Date();
+    await settings.save();
+
     res.json(ok({ enabled: false }));
   } catch (e) {
     res.status(500).json(fail(e));

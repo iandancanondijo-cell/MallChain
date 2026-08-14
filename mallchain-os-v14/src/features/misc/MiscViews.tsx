@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
+import { notificationsApi, type AppNotification } from '../../services/notificationsApi';
 
 /** Small utility views — Careers, Learning, Social Tasks, Notifications,
  *  Analytics, Help — mirroring v14's ecosystem group. */
@@ -89,27 +90,47 @@ export const SocialTasks = () => {
   );
 };
 
+const KIND_ICONS: Record<string, string> = { mines: '⛏', validators: '🛡', system: '⚙', wallet: '💰', governance: '⚖' };
+
 export const NotificationsView = () => {
   useStoreVersion();
-  const st = store.state;
   const [filter, setFilter] = useState('all');
-  const list = st.notifs.filter((n) => filter === 'all' || n.kind === filter);
-  const markAll = () => { st.notifs.forEach((n) => (n.read = true)); store.commit(); toast('All notifications marked read'); };
-  const dismiss = (i: number) => { st.notifs.splice(i, 1); store.commit(); };
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+
+  const load = useCallback(async () => {
+    const res = await notificationsApi.list();
+    if (res.ok && res.data) setNotifications(res.data.notifications);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const list = notifications.filter((n) => filter === 'all' || n.kind === filter);
+  const markAll = async () => {
+    await notificationsApi.markAllRead();
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    toast('All notifications marked read');
+  };
+  const dismiss = async (id: string) => {
+    await notificationsApi.markRead(id);
+    setNotifications((prev) => prev.filter((n) => n._id !== id));
+  };
+
   return (
     <div>
-      <div className="view-head"><h1>Notifications</h1><span className="sub">{st.notifs.filter((n) => !n.read).length} unread</span><button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={markAll}>Mark all read</button></div>
+      <div className="view-head"><h1>Notifications</h1><span className="sub">{notifications.filter((n) => !n.read).length} unread</span><button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={markAll}>Mark all read</button></div>
       <div className="mc-subnav" style={{ marginBottom: 16 }}>
-        {['all', 'wallet', 'mines', 'validators', 'governance', 'social'].map((f) => (
+        {['all', 'wallet', 'mines', 'validators', 'governance', 'system'].map((f) => (
           <button key={f} className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f}</button>
         ))}
       </div>
       {list.length === 0 && <div className="empty-state"><div className="es-ico">🔔</div><div className="es-t">No notifications</div><div className="es-m">Notifications from wallet, mines and validators appear here.</div></div>}
-      {list.map((n, i) => (
-        <div key={n.id} className={'card mb list-row' + (!n.read ? ' unread' : '')}>
-          <span style={{ fontSize: 16 }}>{n.ico}</span>
-          <div className="grow"><div className="t">{n.text}</div><div className="m">{n.time}</div></div>
-          <button className="btn btn-ghost btn-sm" onClick={() => dismiss(i)}>✕</button>
+      {list.map((n) => (
+        <div key={n._id} className={'card mb list-row' + (!n.read ? ' unread' : '')}>
+          <span style={{ fontSize: 16 }}>{KIND_ICONS[n.kind] || '🔔'}</span>
+          <div className="grow"><div className="t">{n.title}</div><div className="m">{n.body || new Date(n.createdAt).toLocaleString()}</div></div>
+          <button className="btn btn-ghost btn-sm" onClick={() => dismiss(n._id)}>✕</button>
         </div>
       ))}
     </div>

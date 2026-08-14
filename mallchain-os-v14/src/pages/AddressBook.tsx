@@ -13,7 +13,7 @@
 import React, { useState, useEffect } from 'react';
 import { store } from '../store/store';
 import { useStoreVersion, toast } from '../components/ui';
-import { formatAddressForDisplay, isValidSolanaAddress } from '../services/wallet';
+import { formatAddressForDisplay, isValidMallAddress } from '../services/wallet';
 import '../styles/address-book.css';
 
 interface AddressEntry {
@@ -111,8 +111,8 @@ export function AddressBook() {
     }
 
     // Task 9.2: Validate address format
-    if (!isValidSolanaAddress(formAddress)) {
-      toast('Invalid Solana address format', false);
+    if (!isValidMallAddress(formAddress)) {
+      toast('Invalid address format', false);
       return;
     }
 
@@ -155,7 +155,7 @@ export function AddressBook() {
       return;
     }
 
-    if (!isValidSolanaAddress(formAddress)) {
+    if (!isValidMallAddress(formAddress)) {
       toast('Invalid address format', false);
       return;
     }

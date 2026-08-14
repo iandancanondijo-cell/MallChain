@@ -3,19 +3,47 @@ import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { config } from '../../services/config';
 import { sendMallcoinTransfer, MallcoinTxError } from '../../services/mallcoinTx';
+import { useWizard } from '../../hooks/useWizard';
 
 const MALL_ADDRESS_PATTERN = /^mall1[a-z0-9]{38,58}$/;
 // Fallback word list only used in demo mode, where there's no real mnemonic to check against.
 const DEMO_WORDS = ['ocean', 'vault', 'golden', 'raptor', 'silver', 'matrix', 'cobalt', 'falcon', 'summit', 'helix', 'ember', 'quest'];
 
+const SEND_STEPS = ['recipient', 'review', 'authorize', 'broadcast'] as const;
+type SendStep = typeof SEND_STEPS[number];
+
+/** Recipient/amount/fee draft — non-sensitive, worth resuming even across a full browser restart. */
+type SendData = {
+  addr: string;
+  amount: string;
+  fee: number;
+};
+const INITIAL_SEND_DATA: SendData = { addr: '', amount: '', fee: 0.05 };
+
 /** Send MALL — full flow: address validation → amount + fee → review → sign → broadcast. */
 export default function WalletSend() {
   useStoreVersion();
   const st = store.state;
-  const [addr, setAddr] = useState('');
-  const [amount, setAmount] = useState('');
-  const [fee, setFee] = useState(0.05);
-  const [step, setStep] = useState<0 | 1 | 2 | 3>(0);
+
+  // Draft (recipient/amount/fee) persists via the durable tier — losing a
+  // partially-filled send to an accidental reload is bad UX and there's no
+  // secret in it. The mnemonic-word authorize answer below is never put in
+  // this wizard's data — it's read straight from the DOM at submit time and
+  // must never be persisted.
+  const wizard = useWizard<SendStep, SendData>({
+    key: 'walletSend',
+    tier: 'durable',
+    steps: SEND_STEPS,
+    initialData: INITIAL_SEND_DATA,
+  });
+  const step = wizard.step;
+  const addr = wizard.data.addr;
+  const setAddr = (a: string) => wizard.setData({ addr: a });
+  const amount = wizard.data.amount;
+  const setAmount = (a: string) => wizard.setData({ amount: a });
+  const fee = wizard.data.fee;
+  const setFee = (f: number) => wizard.setData({ fee: f });
+
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [txHash, setTxHash] = useState('');
@@ -36,14 +64,14 @@ export default function WalletSend() {
     if (!validAddr) { setErr('Invalid address — must start with "mall1" followed by 38-58 lowercase letters/digits.'); return; }
     if (!amt || amt <= 0) { setErr('Enter a valid amount.'); return; }
     if (amt + fee > max) { setErr(`Insufficient balance — you have ${max.toFixed(2)} MALL.`); return; }
-    setStep(1);
+    wizard.next();
   };
 
   const sign = () => {
     setBusy(true);
     setErr('');
     setTimeout(() => {
-      setStep(2);
+      wizard.next();
       setBusy(false);
     }, 600);
   };
@@ -81,7 +109,7 @@ export default function WalletSend() {
         setTxHash(result.txHash);
         setBusy(false);
         toast('Transaction broadcast — pending confirmation');
-        setStep(3);
+        wizard.next();
       } catch (e) {
         setBusy(false);
         const message = e instanceof MallcoinTxError || e instanceof Error ? e.message : 'Failed to send';
@@ -103,12 +131,12 @@ export default function WalletSend() {
       if (res.ok) {
         setTxHash(`0x${Date.now().toString(16)}…${Math.floor(Math.random() * 0xffff).toString(16)}`);
         toast('Transaction broadcast — pending confirmation');
-        setStep(3);
+        wizard.next();
       } else toast(res.error || 'Failed', false);
     }, 900);
   };
 
-  if (step === 3) {
+  if (step === 'broadcast') {
     const amt = parseFloat(amount);
     return (
       <div className="view-head">
@@ -119,8 +147,8 @@ export default function WalletSend() {
             <h2 style={{ margin: '8px 0' }}>Sent {amt} MALL</h2>
             <div className="muted mono" style={{ fontSize: 12 }}>tx {txHash}</div>
             <div className="row" style={{ justifyContent: 'center', marginTop: 16 }}>
-              <button className="btn btn-ghost" onClick={() => navigate('/explorer')}>View in Explorer</button>
-              <button className="btn btn-primary" onClick={() => navigate('/wallet')}>Back to Wallet</button>
+              <button className="btn btn-ghost" onClick={() => { wizard.reset(); navigate('/explorer'); }}>View in Explorer</button>
+              <button className="btn btn-primary" onClick={() => { wizard.reset(); navigate('/wallet'); }}>Back to Wallet</button>
             </div>
           </div>
         </div>
@@ -132,7 +160,7 @@ export default function WalletSend() {
     <div>
       <div className="view-head"><h1>Send MALL</h1><span className="sub">Transfer Mallcoins to any address</span></div>
       <div className="card" style={{ maxWidth: 560 }}>
-        {step === 0 && (
+        {step === 'recipient' && (
           <>
             <div className="field">
               <label>Recipient address</label>
@@ -154,7 +182,7 @@ export default function WalletSend() {
             </div>
           </>
         )}
-        {step === 1 && (
+        {step === 'review' && (
           <>
             <div className="sec-title"><h2>Review</h2></div>
             <table className="tbl">
@@ -166,12 +194,12 @@ export default function WalletSend() {
               </tbody>
             </table>
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setStep(0)}>← Back</button>
+              <button className="btn btn-ghost" onClick={() => wizard.back()}>← Back</button>
               <button className="btn btn-primary" onClick={sign} disabled={busy}>{busy && <span className="spin" />} Sign transaction</button>
             </div>
           </>
         )}
-        {step === 2 && (
+        {step === 'authorize' && (
           <>
             <div className="sec-title"><h2>Authorize transaction</h2><span className="sub">sign with your recovery phrase</span></div>
             <div className="card" style={{ background: 'var(--bg-2)', textAlign: 'center', padding: 16 }}>
@@ -181,7 +209,7 @@ export default function WalletSend() {
             </div>
             {err && <div style={{ color: 'var(--red-2)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setStep(1)}>← Back</button>
+              <button className="btn btn-ghost" onClick={() => wizard.back()}>← Back</button>
               <button className="btn btn-primary" disabled={busy} onClick={() => authorize((document.querySelector('.input[placeholder="your recovery word"]') as HTMLInputElement)?.value || '')}>
                 {busy && <span className="spin" />} Authorize & broadcast
               </button>

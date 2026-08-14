@@ -490,7 +490,7 @@ async function handleReservedCredit({ quoteId, walletAddress, creditMlcns }) {
 }
 
 // Reserve a quote for Mallcoin purchase
-router.post('/reserve', validate(schemas.payment), async (req, res) => {
+router.post('/reserve', validate(schemas.buyReserve), async (req, res) => {
   try {
     const { amount, fiat, currency, walletAddress, phone } = req.validatedBody;
 
@@ -529,7 +529,7 @@ router.post('/reserve', validate(schemas.payment), async (req, res) => {
 });
 
 // Initiate M-Pesa STK push
-router.post('/mpesa', validate(schemas.payment), async (req, res) => {
+router.post('/mpesa', validate(schemas.buyMpesaInitiate), async (req, res) => {
   try {
     const { quoteId, phone, amount, description } = req.validatedBody;
 
@@ -588,7 +588,7 @@ router.post('/mpesa/callback', validate(schemas.mpesaCallback), async (req, res)
 // Buying Mallcoins increases supply by transferring MLCNS from the faucet/operator account.
 // When the purchase includes fiat, the same workflow can also inject the corresponding KES/MLCN pair into the liquidity pool.
 // A future sell implementation should likewise adjust supply and liquidity when Mallcoins are redeemed.
-router.post('/credit', validate(schemas.payment), async (req, res) => {
+router.post('/credit', validate(schemas.buyCredit), async (req, res) => {
   try {
     const { quoteId, walletAddress, amount, idempotencyKey } = req.validatedBody;
     const { creditMlcns } = require('../services/faucetService');

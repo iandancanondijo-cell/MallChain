@@ -8,6 +8,7 @@ const { config } = require('../config');
 const { toBaseUnits } = require('./mallcoinService');
 const { MSG_TRANSFER_MALLCOIN, createMlcoinRegistry } = require('./mlcoinProto');
 const CHAIN_REST = config.chain.rest.replace(/\/$/, '');
+const CHAIN_RPC = config.chain.rpc.replace(/\/$/, '');
 
 async function walletFromPrivateKey(privateKeyHex, prefix) {
   const key = Uint8Array.from(Buffer.from(privateKeyHex.replace(/^0x/, ''), 'hex'));
@@ -21,6 +22,44 @@ async function connectClientWithSigner(wallet) {
   });
 }
 
+/**
+ * Poll CometBFT's /tx?hash= until the transaction has actually been included
+ * in a block, returning its real execution (DeliverTx) result.
+ *
+ * Note: this chain's REST GetTx (/cosmos/tx/v1beta1/txs/{hash}) panics with
+ * a nil-pointer error for these custom message types, so we go through the
+ * CometBFT RPC directly instead, which decodes fine.
+ */
+async function pollTxConfirmation(txHash, { timeoutMs = 15000, intervalMs = 1000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${CHAIN_RPC}/tx?hash=0x${txHash}`);
+      const data = await response.json();
+      if (data.result?.tx_result) {
+        return { height: Number(data.result.height || 0), ...data.result.tx_result };
+      }
+      lastError = data.error?.data || data.error?.message;
+    } catch (e) {
+      lastError = e.message;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(`Timed out waiting for tx ${txHash} to be confirmed on-chain${lastError ? `: ${lastError}` : ''}`);
+}
+
+/**
+ * Broadcast a signed tx and wait for its real on-chain result before
+ * resolving. BROADCAST_MODE_SYNC only guarantees the tx passed CheckTx (i.e.
+ * it was accepted into the mempool) — a tx can still fail once actually
+ * executed (e.g. a balance check that only runs at DeliverTx time), so
+ * treating a clean broadcast response as success is not reliable. We
+ * broadcast, then poll for the confirmed result and only then decide
+ * success/failure.
+ */
 async function broadcastSignedTx(txRaw) {
   const txBytes = TxRaw.encode(txRaw).finish();
   const response = await fetch(`${CHAIN_REST}/cosmos/tx/v1beta1/txs`, {
@@ -35,17 +74,27 @@ async function broadcastSignedTx(txRaw) {
   if (!response.ok) {
     throw new Error(data?.message || data?.error || 'Broadcast failed');
   }
-  const txResponse = data.tx_response || {};
-  if (txResponse.code && Number(txResponse.code) !== 0) {
-    const err = new Error(txResponse.raw_log || `Transaction failed with code ${txResponse.code}`);
-    err.code = txResponse.code;
-    err.rawLog = txResponse.raw_log;
+  const syncResponse = data.tx_response || {};
+  if (syncResponse.code && Number(syncResponse.code) !== 0) {
+    // Rejected before even entering the mempool — fail fast, nothing to poll for.
+    const err = new Error(syncResponse.raw_log || `Transaction failed with code ${syncResponse.code}`);
+    err.code = syncResponse.code;
+    err.rawLog = syncResponse.raw_log;
     throw err;
   }
+
+  const confirmed = await pollTxConfirmation(syncResponse.txhash);
+  if (confirmed.code && Number(confirmed.code) !== 0) {
+    const err = new Error(confirmed.log || `Transaction failed with code ${confirmed.code}`);
+    err.code = confirmed.code;
+    err.rawLog = confirmed.log;
+    throw err;
+  }
+
   return {
-    txHash: txResponse.txhash,
-    height: Number(txResponse.height || 0),
-    raw: txResponse,
+    txHash: syncResponse.txhash,
+    height: confirmed.height,
+    raw: confirmed,
   };
 }
 
@@ -80,8 +129,12 @@ async function signAndBroadcastTransfer({
   };
 
   const gasEst = await client.simulate(account.address, [msg], memo).catch(() => 250000);
-  // Reduce gas buffer from 1.3 to 1.15 to minimize overpayment while maintaining safety margin
-  const gas = Math.min(Math.ceil(gasEst * 1.15), 500000);
+  // 1.15x wasn't always enough margin over the simulated estimate — a real
+  // transfer failed with "out of gas" at ~100% of the simulated value
+  // (88849 used vs 88509 wanted). Back to 1.3x, matching the gas-funding
+  // transfers below, since an underpriced tx here means a real payment
+  // doesn't land, not just a slightly-too-generous fee.
+  const gas = Math.min(Math.ceil(gasEst * 1.3), 500000);
   const fee = calculateFee(gas, GasPrice.fromString(config.chain.gasPrice));
 
   const signed = await client.sign(account.address, [msg], fee, memo);
@@ -122,8 +175,12 @@ async function buildUnsignedTransferBase64({
   };
 
   const gasEst = await client.simulate(account.address, [msg], memo).catch(() => 250000);
-  // Reduce gas buffer from 1.3 to 1.15 to minimize overpayment while maintaining safety margin
-  const gas = Math.min(Math.ceil(gasEst * 1.15), 500000);
+  // 1.15x wasn't always enough margin over the simulated estimate — a real
+  // transfer failed with "out of gas" at ~100% of the simulated value
+  // (88849 used vs 88509 wanted). Back to 1.3x, matching the gas-funding
+  // transfers below, since an underpriced tx here means a real payment
+  // doesn't land, not just a slightly-too-generous fee.
+  const gas = Math.min(Math.ceil(gasEst * 1.3), 500000);
   const fee = calculateFee(gas, GasPrice.fromString(config.chain.gasPrice));
 
   const signed = await client.sign(account.address, [msg], fee, memo);
@@ -158,8 +215,12 @@ async function transferFromMnemonic({ mnemonic, toAddress, amountMlcns, memo = '
   };
 
   const gasEst = await client.simulate(account.address, [msg], memo).catch(() => 250000);
-  // Reduce gas buffer from 1.3 to 1.15 to minimize overpayment while maintaining safety margin
-  const gas = Math.min(Math.ceil(gasEst * 1.15), 500000);
+  // 1.15x wasn't always enough margin over the simulated estimate — a real
+  // transfer failed with "out of gas" at ~100% of the simulated value
+  // (88849 used vs 88509 wanted). Back to 1.3x, matching the gas-funding
+  // transfers below, since an underpriced tx here means a real payment
+  // doesn't land, not just a slightly-too-generous fee.
+  const gas = Math.min(Math.ceil(gasEst * 1.3), 500000);
   const fee = calculateFee(gas, GasPrice.fromString(config.chain.gasPrice));
 
   const signed = await client.sign(account.address, [msg], fee, memo);
@@ -222,8 +283,12 @@ async function transferFromPrivateKey({ privateKeyHex, toAddress, amountMlcns, m
   };
 
   const gasEst = await client.simulate(account.address, [msg], memo).catch(() => 250000);
-  // Reduce gas buffer from 1.3 to 1.15 to minimize overpayment while maintaining safety margin
-  const gas = Math.min(Math.ceil(gasEst * 1.15), 500000);
+  // 1.15x wasn't always enough margin over the simulated estimate — a real
+  // transfer failed with "out of gas" at ~100% of the simulated value
+  // (88849 used vs 88509 wanted). Back to 1.3x, matching the gas-funding
+  // transfers below, since an underpriced tx here means a real payment
+  // doesn't land, not just a slightly-too-generous fee.
+  const gas = Math.min(Math.ceil(gasEst * 1.3), 500000);
   const fee = calculateFee(gas, GasPrice.fromString(config.chain.gasPrice));
   const signed = await client.sign(account.address, [msg], fee, memo);
   const result = await broadcastSignedTx(signed);
@@ -263,6 +328,104 @@ async function fundStakeFromPrivateKey({ privateKeyHex, toAddress, amountStake =
   return { txHash: result.txHash, amount: amountStake, denom };
 }
 
+/**
+ * Transfer MLCNS and (optionally) fund native stake for gas in one call,
+ * using a single wallet/client and a locally-tracked sequence number for
+ * both signatures instead of two independent clients.
+ *
+ * Why: transferFromMnemonic/fundStakeFromMnemonic (etc.) each open their own
+ * SigningStargateClient and fetch "current sequence" from chain state at
+ * sign time. Called back-to-back from the same signer, the second call can
+ * fetch the sequence before the first tx has been included in a block, sign
+ * with the same (now-stale) sequence, and get rejected with "account
+ * sequence mismatch" once both land — even though the first transfer
+ * succeeded. Signing both messages up front against a sequence number we
+ * increment ourselves avoids the race: neither signature depends on the
+ * other tx having been committed yet.
+ *
+ * The two messages are still broadcast as separate transactions (not
+ * bundled into one), so a gas-funding failure still cannot roll back an
+ * already-successful MLCNS transfer.
+ */
+async function transferAndFundGas({
+  mnemonic,
+  privateKeyHex,
+  toAddress,
+  amountMlcns,
+  amountStake = '10',
+  memo = '',
+  fundGas = true,
+}) {
+  const wallet = privateKeyHex
+    ? await walletFromPrivateKey(privateKeyHex)
+    : await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, { prefix: config.chain.prefix });
+  const [account] = await wallet.getAccounts();
+
+  const client = await connectClientWithSigner(wallet);
+  const chainId = await client.getChainId();
+  const { accountNumber, sequence: startSequence } = await client.getSequence(account.address);
+  let sequence = startSequence;
+
+  const amountUnits = toBaseUnits(amountMlcns);
+  const transferMsg = {
+    typeUrl: MSG_TRANSFER_MALLCOIN,
+    value: { creator: account.address, to: toAddress, amount: amountUnits },
+  };
+
+  const transferGasEst = await client.simulate(account.address, [transferMsg], memo).catch(() => 250000);
+  const transferGas = Math.min(Math.ceil(transferGasEst * 1.3), 500000);
+  const transferFee = calculateFee(transferGas, GasPrice.fromString(config.chain.gasPrice));
+
+  const transferSigned = await client.sign(
+    account.address,
+    [transferMsg],
+    transferFee,
+    memo,
+    { accountNumber, sequence, chainId }
+  );
+  const transferResult = await broadcastSignedTx(transferSigned);
+  sequence += 1;
+
+  const transfer = {
+    txHash: transferResult.txHash,
+    height: transferResult.height,
+    from: account.address,
+    to: toAddress,
+    amountMlcns: Number(amountMlcns),
+  };
+
+  if (!fundGas) {
+    return { transfer, gasFunding: null };
+  }
+
+  let gasFunding;
+  try {
+    const denom = config.chain.baseDenom || 'stake';
+    const amountBase = Math.floor(Number(amountStake) * 1e6).toString();
+    const stakeMsg = {
+      typeUrl: '/cosmos.bank.v1beta1.MsgSend',
+      value: { fromAddress: account.address, toAddress, amount: [{ denom, amount: amountBase }] },
+    };
+
+    const stakeGasEst = await client.simulate(account.address, [stakeMsg], '').catch(() => 120000);
+    const stakeFee = calculateFee(Math.ceil(stakeGasEst * 1.3), GasPrice.fromString(config.chain.gasPrice));
+
+    const stakeSigned = await client.sign(
+      account.address,
+      [stakeMsg],
+      stakeFee,
+      'faucet gas',
+      { accountNumber, sequence, chainId }
+    );
+    const stakeResult = await broadcastSignedTx(stakeSigned);
+    gasFunding = { txHash: stakeResult.txHash, amount: amountStake, denom };
+  } catch (e) {
+    gasFunding = { error: e.message, note: 'MLCNS sent; fund stake manually if sends fail' };
+  }
+
+  return { transfer, gasFunding };
+}
+
 module.exports = {
   MSG_TRANSFER_MALLCOIN,
   signAndBroadcastTransfer,
@@ -271,4 +434,5 @@ module.exports = {
   transferFromPrivateKey,
   fundStakeFromMnemonic,
   fundStakeFromPrivateKey,
+  transferAndFundGas,
 };

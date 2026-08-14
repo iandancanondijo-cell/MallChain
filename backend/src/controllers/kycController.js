@@ -40,20 +40,28 @@ exports.submitKYC = async (req, res) => {
     // Perform AML check
     const { checks, riskLevel } = await performAMLCheck(kycData);
 
+    const status = riskLevel === 'low' ? 'approved' : 'review';
+
     // Create KYC record
     const kyc = await KYC.create({
       userId,
       ...kycData,
       riskLevel,
       amlChecks: checks,
-      status: riskLevel === 'low' ? 'approved' : 'review'
+      status
     });
 
-    res.json({ 
-      success: true, 
-      kycId: kyc._id, 
+    // kycLevel 2 = approved; stays at the default 1 (unverified/pending) otherwise.
+    if (status === 'approved') {
+      await User.findByIdAndUpdate(userId, { kycLevel: 2 });
+    }
+
+    res.json({
+      success: true,
+      kycId: kyc._id,
       riskLevel,
-      checks 
+      status,
+      checks
     });
   } catch (err) {
     console.error('KYC submission error:', err);

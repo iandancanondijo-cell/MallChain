@@ -1,10 +1,9 @@
 const { config } = require('../config');
 const { isValidAddress, getWalletBalance } = require('./mallcoinService');
 const {
-  transferFromMnemonic,
-  transferFromPrivateKey,
   fundStakeFromMnemonic,
   fundStakeFromPrivateKey,
+  transferAndFundGas,
 } = require('./mallcoinTxBuilder');
 const { DirectSecp256k1Wallet, DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
 const Redis = require('ioredis');
@@ -208,40 +207,20 @@ async function creditMlcns(address, amountMlcns = DEFAULT_MLCNS) {
 
   await checkAddressCooldown(address);
 
-  const transfer =
-    fundingAccount.source === 'private_key'
-      ? await transferFromPrivateKey({
-          privateKeyHex: fundingAccount.privateKeyHex,
-          toAddress: address,
-          amountMlcns: amount,
-          memo: 'dev faucet MLCNS',
-        })
-      : await transferFromMnemonic({
-          mnemonic: fundingAccount.mnemonic,
-          toAddress: address,
-          amountMlcns: amount,
-          memo: 'dev faucet MLCNS',
-        });
-
-  let gasFunding = null;
-  if (process.env.FAUCET_FUND_GAS !== 'false') {
-    try {
-      gasFunding =
-        fundingAccount.source === 'private_key'
-          ? await fundStakeFromPrivateKey({
-              privateKeyHex: fundingAccount.privateKeyHex,
-              toAddress: address,
-              amountStake: DEFAULT_STAKE,
-            })
-          : await fundStakeFromMnemonic({
-              mnemonic: fundingAccount.mnemonic,
-              toAddress: address,
-              amountStake: DEFAULT_STAKE,
-            });
-    } catch (e) {
-      gasFunding = { error: e.message, note: 'MLCNS sent; fund stake manually if sends fail' };
-    }
-  }
+  // transferAndFundGas signs both the MLCNS transfer and the stake-gas top-up
+  // against one locally-tracked sequence number (see its doc comment) so the
+  // second tx can't be rejected for racing the first tx's on-chain sequence
+  // bump. Still two separate broadcasts, so a gas-funding failure can't roll
+  // back an already-successful MLCNS transfer.
+  const { transfer, gasFunding } = await transferAndFundGas({
+    mnemonic: fundingAccount.source === 'private_key' ? undefined : fundingAccount.mnemonic,
+    privateKeyHex: fundingAccount.source === 'private_key' ? fundingAccount.privateKeyHex : undefined,
+    toAddress: address,
+    amountMlcns: amount,
+    amountStake: DEFAULT_STAKE,
+    memo: 'dev faucet MLCNS',
+    fundGas: process.env.FAUCET_FUND_GAS !== 'false',
+  });
 
   await setCooldown(address);
 

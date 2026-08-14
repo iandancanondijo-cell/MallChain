@@ -1,9 +1,20 @@
 const faucetService = require('../services/faucetService');
 
 // Mock dependencies
+// Factory mocks (not auto-mock) so Jest never has to load the real
+// @cosmjs/proto-signing module tree — @cosmjs/crypto@0.39's argon2 support
+// pulls in an ESM-only transitive dependency that Jest's default CJS
+// resolution can't parse, which auto-mocking would otherwise trigger.
 jest.mock('../services/blockchainListener');
-jest.mock('@cosmjs/proto-signing');
-jest.mock('@cosmjs/stargate');
+jest.mock('@cosmjs/proto-signing', () => ({
+  DirectSecp256k1Wallet: { fromKey: jest.fn() },
+  DirectSecp256k1HdWallet: { fromMnemonic: jest.fn() },
+}));
+jest.mock('@cosmjs/stargate', () => ({
+  SigningStargateClient: { connectWithSigner: jest.fn() },
+  GasPrice: { fromString: jest.fn(() => ({})) },
+  calculateFee: jest.fn(() => ({ amount: [{ denom: 'stake', amount: '1000' }], gas: '250000' })),
+}));
 
 describe('Faucet Service Tests', () => {
   beforeEach(() => {

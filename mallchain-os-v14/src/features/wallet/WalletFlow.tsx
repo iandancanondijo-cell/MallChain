@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { api } from '../../services/api';
-import { authService } from '../../services/auth';
 import { handleApiError } from '../../services/errorHandler';
+import { useWizard } from '../../hooks/useWizard';
 import { Shield, Lock, Download, Copy, Eye, EyeOff, RefreshCw, ChevronRight, Check, AlertTriangle, Key, Wallet, ArrowLeft } from 'lucide-react';
 
 /**
@@ -27,56 +27,88 @@ interface VaultEntry {
   savedAt: number;
 }
 
-type FlowStep = 
-  | 'landing' 
-  | 'create-password' 
-  | 'create-seed' 
-  | 'create-confirm' 
-  | 'create-secure'
-  | 'connect-method'
-  | 'connect-retrieve'
-  | 'connect-import'
-  | 'success';
+const FLOW_STEPS = [
+  'landing',
+  'create-password',
+  'create-seed',
+  'create-confirm',
+  'create-secure',
+  'connect-method',
+  'connect-retrieve',
+  'connect-import',
+  'success',
+] as const;
+type FlowStep = typeof FLOW_STEPS[number];
 
 type WalletMode = 'create' | 'import';
+
+/** The sensitive fields worth resuming across a same-tab reload (session tier). */
+type WalletFlowData = {
+  mode: WalletMode;
+  password: string;
+  seedWords: string[];
+  seedSaved: boolean;
+  walletAddress: string;
+};
+
+const INITIAL_WALLET_FLOW_DATA: WalletFlowData = {
+  mode: 'create',
+  password: '',
+  seedWords: [],
+  seedSaved: false,
+  walletAddress: '',
+};
 
 export default function WalletFlow({ navigate, onBack }: { navigate: (p: string) => void; onBack?: () => void }) {
   useStoreVersion();
   const st = store.state;
-  
-  const [step, setStep] = useState<FlowStep>('landing');
-  const [mode, setMode] = useState<WalletMode>('create');
-  
-  // Password state
-  const [password, setPassword] = useState('');
+
+  // Holds mnemonic + password, so it uses the session tier: resumable across
+  // a same-tab reload, cleared on tab close, never synced to other tabs.
+  const wizard = useWizard<FlowStep, WalletFlowData>({
+    key: 'walletCreate',
+    tier: 'session',
+    steps: FLOW_STEPS,
+    initialData: INITIAL_WALLET_FLOW_DATA,
+  });
+  const step = wizard.step;
+  const mode = wizard.data.mode;
+  const setMode = (m: WalletMode) => wizard.setData({ mode: m });
+  const password = wizard.data.password;
+  const setPassword = (p: string) => wizard.setData({ password: p });
+  const seedWords = wizard.data.seedWords;
+  const setSeedWords = (w: string[]) => wizard.setData({ seedWords: w });
+  const seedSaved = wizard.data.seedSaved;
+  const setSeedSaved = (v: boolean) => wizard.setData({ seedSaved: v });
+  const walletAddress = wizard.data.walletAddress;
+  const setWalletAddress = (a: string) => wizard.setData({ walletAddress: a });
+
+  // Confirmation-only password copy, and every other piece below, is
+  // transient UI state — not worth persisting (regenerating/re-entering it
+  // on reload is fine, and for typed secrets, preferable).
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  
-  // Seed state
-  const [seedWords, setSeedWords] = useState<string[]>([]);
+
   const [seedRevealed, setSeedRevealed] = useState(false);
-  const [seedSaved, setSeedSaved] = useState(false);
-  
+
   // Confirmation state
   const [confirmPicked, setConfirmPicked] = useState<string[]>([]);
   const [confirmError, setConfirmError] = useState(false);
-  
+
   // Security state
   const [securedMethod, setSecuredMethod] = useState({ stored: false, downloaded: false, cold: false });
-  
+
   // Import state
   const [importPhrase, setImportPhrase] = useState('');
   const [importPassword, setImportPassword] = useState('');
   const [retrievePassword, setRetrievePassword] = useState('');
   const [selectedVaultIndex, setSelectedVaultIndex] = useState(0);
   const [retrievedSeed, setRetrievedSeed] = useState<string[] | null>(null);
-  
-  // Wallet state
-  const [walletAddress, setWalletAddress] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  
+
   // Vault state
   const [vault, setVault] = useState<VaultEntry[]>([]);
 
@@ -107,7 +139,14 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
         const words = res.data.mnemonic.split(' ');
         setSeedWords(words);
         const address = await deriveAddress(words);
-        setWalletAddress(address);
+        if (address) {
+          setWalletAddress(address);
+        } else {
+          // Don't fabricate an address — the real one is assigned when the
+          // wallet is actually created (handleCreateWallet), which makes its
+          // own backend call and surfaces its own error if that fails too.
+          setWalletAddress('');
+        }
       }
     } catch (err) {
       setError('Failed to generate mnemonic');
@@ -115,8 +154,10 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     setLoading(false);
   };
 
-  const deriveAddress = async (words: string[]): Promise<string> => {
-    // Use backend to derive address from mnemonic
+  const deriveAddress = async (words: string[]): Promise<string | null> => {
+    // Use backend to derive address from mnemonic. No client-side fallback —
+    // a fabricated address must never be shown as if it were real, since the
+    // backend never actually derived or validated it.
     try {
       const res = await api.post<{ success: boolean; address: string }>('/api/wallet/validate', { mnemonic: words.join(' ') });
       if (res.ok && res.data?.address) {
@@ -125,8 +166,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     } catch (err) {
       console.error('Failed to derive address:', err);
     }
-    // Fallback: generate mock address
-    return 'mall1' + Math.random().toString(16).slice(2, 32);
+    return null;
   };
 
   const getPasswordStrength = (pwd: string): number => {
@@ -140,7 +180,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   };
 
   const goTo = (newStep: FlowStep) => {
-    setStep(newStep);
+    wizard.goTo(newStep);
     setError('');
     if (newStep === 'create-seed' && seedWords.length === 0) {
       generateMnemonic();
@@ -1656,7 +1696,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       </div>
 
       <button
-        onClick={() => navigate('/')}
+        onClick={() => { wizard.reset(); navigate('/'); }}
         style={{
           width: '100%',
           padding: 14,

@@ -1,145 +1,143 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { store } from '../../store/store';
-import { useStoreVersion, StatusChip, Modal, BarChart, toast } from '../../components/ui';
+import { useStoreVersion, StatusChip, Modal, toast } from '../../components/ui';
+import { governanceApi, type Proposal } from '../../services/governanceApi';
+import { castVote, GovernanceTxError } from '../../services/governanceTx';
+import { type VoteOption } from '../../services/governanceProto';
 
-/** Governance — proposal list + detail (comments, MALL-weighted vote) + create proposal. */
+const VOTE_OPTIONS: { label: string; value: VoteOption }[] = [
+  { label: 'Yes', value: 'VOTE_OPTION_YES' },
+  { label: 'No', value: 'VOTE_OPTION_NO' },
+  { label: 'Abstain', value: 'VOTE_OPTION_ABSTAIN' },
+  { label: 'No with veto', value: 'VOTE_OPTION_NO_WITH_VETO' },
+];
+
+/** Governance — real on-chain proposals + MsgVote (backend/src/routes/governance.js, x/governance). */
 export default function Governance() {
   useStoreVersion();
   const st = store.state;
-  const [sel, setSel] = useState<string | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [title, setTitle] = useState('');
-  const [body, setBody] = useState('');
-  const [opt1, setOpt1] = useState('For');
-  const [opt2, setOpt2] = useState('Against');
-  const [quorum, setQuorum] = useState(800);
-  const [comment, setComment] = useState('');
-  const [voted, setVoted] = useState<Record<string, string>>({});
+  const address = st.wallet.address;
 
-  const votingPower = Math.floor(st.balances.MALL / 100); // 1 vote per 100 MALL
+  const [proposals, setProposals] = useState<Proposal[] | null>(null);
+  const [stats, setStats] = useState<{ total: number; active: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sel, setSel] = useState<Proposal | null>(null);
+  const [voting, setVoting] = useState<VoteOption | null>(null);
 
-  const create = () => {
-    if (!title.trim() || !body.trim()) { toast('Title and body are required', false); return; }
-    st.governance.proposals.unshift({
-      id: String(Date.now()).slice(-5),
-      title, body,
-      options: [opt1.trim(), opt2.trim(), 'Abstain'],
-      votes: [0, 0, 0],
-      quorum,
-      status: 'active',
-      comments: [],
-      createdByMe: true,
-      ts: Date.now(),
-    });
-    store.commit();
-    setCreateOpen(false);
-    setTitle(''); setBody('');
-    toast('Proposal submitted — now live for voting');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const res = await governanceApi.listProposals();
+    if (res.ok && res.data) {
+      setProposals(res.data.proposals);
+      setStats(res.data.stats);
+    } else {
+      setError(res.error || 'Failed to load proposals');
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const openProposal = async (p: Proposal) => {
+    setSel(p);
+    if (!address) return;
+    const res = await governanceApi.getUserVote(p.id, address);
+    if (res.ok && res.data) {
+      setSel((cur) => (cur && cur.id === p.id ? { ...cur, userVote: res.data!.userVote } : cur));
+    }
   };
 
-  const vote = (pid: string, optIdx: number) => {
-    const p = st.governance.proposals.find((x) => x.id === pid);
-    if (!p) return;
-    if (voted[pid]) { toast('You already voted on this proposal', false); return; }
-    p.votes[optIdx] += votingPower;
-    setVoted((v) => ({ ...v, [pid]: p.options[optIdx] }));
-    store.commit();
-    toast(`Voted "${p.options[optIdx]}" — ${votingPower} votes (1 per 100 MALL)`);
+  const vote = async (option: VoteOption) => {
+    if (!sel) return;
+    if (!st.wallet.mnemonic || !address) return toast('Wallet not connected', false);
+    setVoting(option);
+    try {
+      const result = await castVote({ mnemonic: st.wallet.mnemonic, fromAddress: address, proposalId: sel.id, option });
+      toast(`Vote cast — tx ${result.txHash.slice(0, 10)}…`);
+      setSel((cur) => (cur ? { ...cur, userVote: { voted: true, option } } : cur));
+      load();
+    } catch (e) {
+      toast(e instanceof GovernanceTxError || e instanceof Error ? e.message : 'Vote failed', false);
+    } finally {
+      setVoting(null);
+    }
   };
-
-  const addComment = (pid: string) => {
-    if (!comment.trim()) return;
-    const p = st.governance.proposals.find((x) => x.id === pid);
-    p?.comments.push({ author: st.user.name, text: comment.trim(), ts: Date.now() });
-    store.commit();
-    setComment('');
-    toast('Comment posted');
-  };
-
-  const prop = sel ? st.governance.proposals.find((p) => p.id === sel) : null;
-  const totalVotes = (p: typeof prop) => (p ? p.votes.reduce((a, b) => a + b, 0) : 0);
 
   return (
     <div>
       <div className="view-head">
         <h1>Governance</h1>
-        <span className="sub">DAO proposals & treasury</span>
-        <span className="chip gold">{votingPower} votes available</span>
+        <span className="sub">On-chain proposals</span>
       </div>
+
+      {error && (
+        <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
+          <div style={{ color: 'var(--red)', fontSize: 13 }}>
+            ⚠ {error}{' '}
+            <button onClick={load} style={{ cursor: 'pointer', color: 'var(--cyan)', textDecoration: 'underline', background: 'none', border: 'none', padding: 0 }}>[Retry]</button>
+          </div>
+        </div>
+      )}
 
       <div className="stat-grid">
-        <div className="card"><div className="card-label">Open proposals</div><div className="card-value">{st.governance.proposals.filter((p) => p.status === 'active').length}</div><div className="card-sub">active now</div></div>
-        <div className="card"><div className="card-label">Voting power</div><div className="card-value">{votingPower} <span className="unit">votes</span></div><div className="card-sub">From {Math.floor(st.balances.MALL)} MALL held</div></div>
-        <div className="card"><div className="card-label">Quorum</div><div className="card-value">800 <span className="unit">votes</span></div><div className="card-sub">required to pass</div></div>
-        <div className="card"><div className="card-label">Participation</div><div className="card-value up">68.4%</div><div className="card-sub">This quarter</div></div>
+        <div className="card"><div className="card-label">Open proposals</div><div className="card-value">{loading ? '—' : stats?.active ?? 0}</div><div className="card-sub">active now</div></div>
+        <div className="card"><div className="card-label">Total proposals</div><div className="card-value">{loading ? '—' : stats?.total ?? 0}</div></div>
       </div>
 
-      <div className="sec-title">
-        <h2>Proposals</h2>
-        <button className="btn btn-ghost gold" style={{ marginLeft: 'auto' }} onClick={() => setCreateOpen(true)}>＋ New proposal</button>
-      </div>
+      <div className="sec-title"><h2>Proposals</h2></div>
 
-      {st.governance.proposals.length === 0 && (
-        <div className="empty-state"><div className="es-ico">⚖️</div><div className="es-t">No proposals yet</div><div className="es-m">Be the first — create a proposal to put on-chain.</div><button className="btn btn-primary" onClick={() => setCreateOpen(true)}>Create proposal</button></div>
+      {!loading && (proposals?.length ?? 0) === 0 && (
+        <div className="empty-state"><div className="es-ico">⚖️</div><div className="es-t">No proposals yet</div></div>
       )}
 
       <div className="vgrid" style={{ display: 'grid', gap: 12 }}>
-        {st.governance.proposals.map((p) => {
-          const total = totalVotes(p);
-          return (
-            <div key={p.id} className="card card-hover" style={{ cursor: 'pointer' }} onClick={() => setSel(p.id)}>
-              <div className="row">
-                <span className="chip gold">#{p.id}</span>
-                <div className="grow"><b>{p.title}</b></div>
-                <StatusChip status={p.status} />
-              </div>
-              <div className="muted" style={{ fontSize: 12, margin: '6px 0' }}>{p.options[0]}: {total ? Math.round((p.votes[0] / total) * 100) : 0}% · {p.options[1]}: {total ? Math.round((p.votes[1] / total) * 100) : 0}% · quorum {Math.min(100, Math.round((total / p.quorum) * 100))}%</div>
-              <div className="bar"><i style={{ width: `${Math.min(100, (total / p.quorum) * 100)}%` }} /></div>
-              {p.createdByMe && <span className="chip" style={{ marginTop: 6 }}>Created by you</span>}
+        {(proposals || []).map((p) => (
+          <div key={p.id} className="card card-hover" style={{ cursor: 'pointer' }} onClick={() => openProposal(p)}>
+            <div className="row">
+              <span className="chip gold">#{p.id}</span>
+              <div className="grow"><b>{p.title}</b></div>
+              <StatusChip status={p.status} />
             </div>
-          );
-        })}
+            <div className="muted" style={{ fontSize: 12, margin: '6px 0' }}>
+              Yes: {p.tally.yesPct.toFixed(1)}% · No: {p.tally.noPct.toFixed(1)}% · Abstain: {p.tally.abstainPct.toFixed(1)}%
+            </div>
+            <div className="bar"><i style={{ width: `${p.tally.yesPct}%` }} /></div>
+          </div>
+        ))}
       </div>
 
-      {createOpen && (
-        <Modal title="Create proposal" onClose={() => setCreateOpen(false)}>
-          <div className="field"><label>Title</label><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Proposal title" /></div>
-          <div className="field"><label>Body</label><textarea className="input" rows={4} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Describe the proposal and its motivation…" /></div>
-          <div className="grid-2">
-            <div className="field"><label>Option 1</label><input className="input" value={opt1} onChange={(e) => setOpt1(e.target.value)} /></div>
-            <div className="field"><label>Option 2</label><input className="input" value={opt2} onChange={(e) => setOpt2(e.target.value)} /></div>
-          </div>
-          <div className="field"><label>Quorum: {quorum} votes</label><input type="range" min={100} max={2000} step={100} value={quorum} onChange={(e) => setQuorum(+e.target.value)} style={{ width: '100%', accentColor: 'var(--gold)' }} /></div>
-          <div className="modal-actions"><button className="btn btn-ghost" onClick={() => setCreateOpen(false)}>Cancel</button><button className="btn btn-primary" onClick={create}>Submit proposal</button></div>
-        </Modal>
-      )}
+      {sel && (
+        <Modal title={`Proposal #${sel.id}`} onClose={() => setSel(null)} wide>
+          <h2 style={{ marginBottom: 4 }}>{sel.title}</h2>
+          <div className="muted mb" style={{ fontSize: 13 }}>{sel.summary}</div>
+          <StatusChip status={sel.status} />
 
-      {prop && (
-        <Modal title={`Proposal #${prop.id}`} onClose={() => setSel(null)} wide>
-          <h2 style={{ marginBottom: 4 }}>{prop.title}</h2>
-          <div className="muted mb" style={{ fontSize: 13 }}>{prop.body}</div>
-          <StatusChip status={prop.status} />
-          <div className="sec-title mt"><h3>Vote ({votingPower} votes — 1 per 100 MALL)</h3></div>
-          <div className="row mb">
-            {prop.options.map((o, i) => (
-              <button key={o} className={'btn ' + (voted[prop.id] === o ? 'btn-primary' : 'btn-ghost')} onClick={() => vote(prop.id, i)} disabled={!!voted[prop.id]}>
-                {voted[prop.id] === o ? '✓ ' : ''}{o}
-              </button>
-            ))}
-          </div>
-          {voted[prop.id] && <span className="chip green mb">You voted: {voted[prop.id]}</span>}
-          <div className="sec-title mt"><h3>Discussion</h3></div>
-          {prop.comments.length === 0 && <div className="muted mb" style={{ fontSize: 12.5 }}>No comments yet — start the discussion.</div>}
-          {prop.comments.map((c, i) => (
-            <div key={i} className="card mb" style={{ background: 'var(--bg-2)', padding: 10 }}>
-              <b style={{ fontSize: 12.5 }}>{c.author}</b> <span className="tiny">· {new Date(c.ts).toLocaleString()}</span>
-              <div style={{ fontSize: 13, marginTop: 4 }}>{c.text}</div>
+          <div className="sec-title mt"><h3>Tally</h3></div>
+          <table className="tbl mb">
+            <tbody>
+              <tr><td className="muted">Yes</td><td className="num">{sel.tally.yes} ({sel.tally.yesPct.toFixed(1)}%)</td></tr>
+              <tr><td className="muted">No</td><td className="num">{sel.tally.no} ({sel.tally.noPct.toFixed(1)}%)</td></tr>
+              <tr><td className="muted">Abstain</td><td className="num">{sel.tally.abstain} ({sel.tally.abstainPct.toFixed(1)}%)</td></tr>
+            </tbody>
+          </table>
+
+          <div className="sec-title mt"><h3>Vote</h3></div>
+          {!address && <div className="tiny red mb">Connect a wallet to vote.</div>}
+          {sel.userVote?.voted ? (
+            <span className="chip green mb">You voted: {sel.userVote.option}</span>
+          ) : (
+            <div className="row mb">
+              {VOTE_OPTIONS.map((o) => (
+                <button key={o.value} className="btn btn-ghost" disabled={!address || voting !== null} onClick={() => vote(o.value)}>
+                  {voting === o.value && <span className="spin" />} {o.label}
+                </button>
+              ))}
             </div>
-          ))}
-          <div className="row">
-            <input className="input" style={{ flex: 1 }} placeholder="Add a comment…" value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addComment(prop.id)} />
-            <button className="btn btn-ghost" onClick={() => addComment(prop.id)}>Post</button>
-          </div>
+          )}
         </Modal>
       )}
     </div>

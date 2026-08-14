@@ -26,8 +26,10 @@ vi.mock('./config', () => ({
 }));
 
 vi.mock('../store/store', () => ({
+  OS_KEY: 'mallchain_os_v1_v14',
   store: {
     state: {
+      user: { authed: true },
       balances: {},
       txs: [],
       notifications: [],
@@ -37,6 +39,8 @@ vi.mock('../store/store', () => ({
       explorer: { blocks: [] },
     },
     applyTx: vi.fn(),
+    // authService.logout() (called by handle401Error) does a full store.reset()
+    reset: vi.fn(),
   },
 }));
 
@@ -52,9 +56,9 @@ describe('401 Authentication Flow Integration Test', () => {
     global.fetch = mockFetch;
     
     localStorage.clear();
-    
+
     delete (window as any).location;
-    (window as any).location = { href: '' };
+    (window as any).location = { href: '', hash: '' };
   });
 
   afterEach(() => {
@@ -93,7 +97,10 @@ describe('401 Authentication Flow Integration Test', () => {
     expect(localStorage.getItem('token')).toBeNull();
 
     // VERIFICATION 3: User was redirected to login
-    expect(window.location.href).toBe('/login');
+    // handle401Error() delays the redirect by 1s (to let the toast show),
+    // so wait for it rather than asserting immediately.
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    expect(window.location.hash).toBe('#/landing');
 
     // VERIFICATION 4: Error response was returned
     expect(result).toEqual({
@@ -126,10 +133,11 @@ describe('401 Authentication Flow Integration Test', () => {
 
     // VERIFICATION: Token cleared and redirect happened
     expect(localStorage.getItem('token')).toBeNull();
-    expect(window.location.href).toBe('/login');
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    expect(window.location.hash).toBe('#/landing');
     expect(result.ok).toBe(false);
     expect(result.code).toBe(401);
-  });
+  }, 10000);
 
   it('should handle 401 on any HTTP method (GET, POST, etc.)', async () => {
     localStorage.setItem('token', 'expired');
@@ -142,13 +150,14 @@ describe('401 Authentication Flow Integration Test', () => {
     });
 
     await api.post('/api/auth/logout', {});
-    
+
     expect(localStorage.getItem('token')).toBeNull();
-    expect(window.location.href).toBe('/login');
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    expect(window.location.hash).toBe('#/landing');
 
     // Reset for next test
     localStorage.setItem('token', 'expired');
-    (window as any).location.href = '';
+    (window as any).location.hash = '';
 
     // Test GET request
     mockFetch.mockResolvedValueOnce({
@@ -158,10 +167,11 @@ describe('401 Authentication Flow Integration Test', () => {
     });
 
     await api.get('/api/notifications');
-    
+
     expect(localStorage.getItem('token')).toBeNull();
-    expect(window.location.href).toBe('/login');
-  });
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    expect(window.location.hash).toBe('#/landing');
+  }, 10000);
 
   it('should allow subsequent login after 401 redirect', async () => {
     // SCENARIO: Complete flow from 401 to re-login
@@ -243,8 +253,9 @@ describe('401 Authentication Flow Integration Test', () => {
 
     // Token should be cleared (only once, but multiple attempts are safe)
     expect(localStorage.getItem('token')).toBeNull();
-    
+
     // Redirect happened
-    expect(window.location.href).toBe('/login');
-  });
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    expect(window.location.hash).toBe('#/landing');
+  }, 10000);
 });

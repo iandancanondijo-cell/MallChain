@@ -1,11 +1,14 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const TaskSubmission = require('../models/TaskSubmission');
-const ValidatorActivity = require('../models/ValidatorActivity');
+const MinesReviewer = require('../models/MinesReviewer');
 const User = require('../models/user');
 const AuditLog = require('../models/AuditLog');
 const { requireAdmin } = require('../middleware/adminAuth');
 const jwt = require('jsonwebtoken');
+const minesReviewService = require('../services/minesReviewService');
+const { notify } = require('../services/notify');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -15,7 +18,7 @@ function verifyToken(req, res, next) {
   if (!auth.startsWith('Bearer ')) return res.status(401).json({ ok: false, error: 'missing token' });
   try {
     const payload = jwt.verify(auth.slice(7), JWT_SECRET);
-    req.userId = payload.id;
+    req.userId = payload.userId || payload.id;
     next();
   } catch (e) {
     return res.status(401).json({ ok: false, error: 'invalid token' });
@@ -106,7 +109,7 @@ router.get('/validators/active', requireAdmin, async (_req, res) => {
 
     // Get activity stats for each validator
     const validatorIds = [...validatorMap.keys()];
-    const activities = await ValidatorActivity.find({ validator_id: { $in: validatorIds } }).lean();
+    const activities = await MinesReviewer.find({ validator_id: { $in: validatorIds } }).lean();
     const activityMap = new Map();
     for (const a of activities) {
       activityMap.set(a.validator_id, a);
@@ -166,7 +169,7 @@ router.post('/tasks/:id/assign', requireAdmin, async (req, res) => {
 
     // Update validator activity - increment assigned count
     for (const vid of validator_ids) {
-      await ValidatorActivity.findOneAndUpdate(
+      await MinesReviewer.findOneAndUpdate(
         { validator_id: vid },
         {
           $inc: { tasks_assigned: 1 },
@@ -195,7 +198,7 @@ router.get('/tasks/:id/details', requireAdmin, async (req, res) => {
 
     // Get activity stats for assigned validators
     const assignedIds = task.assigned_validators || [];
-    const activities = await ValidatorActivity.find({ validator_id: { $in: assignedIds } }).lean();
+    const activities = await MinesReviewer.find({ validator_id: { $in: assignedIds } }).lean();
     const activityMap = new Map();
     for (const a of activities) activityMap.set(a.validator_id, a);
 
@@ -221,13 +224,20 @@ router.get('/tasks/:id/details', requireAdmin, async (req, res) => {
 router.get('/my-assigned', verifyToken, async (req, res) => {
   try {
     const userId = req.userId;
-    const user = await User.findById(userId);
     const validatorId = userId; // Use user ID as validator ID
 
-    const tasks = await TaskSubmission.find({
+    const candidates = await TaskSubmission.find({
       assigned_validators: validatorId,
       assignment_status: { $in: ['assigned', 'voting'] },
-    }).sort({ assigned_at: -1 }).limit(50).lean();
+    }).sort({ assigned_at: -1 }).limit(50);
+
+    // Lazily resolve any that are past their voting deadline (there is no
+    // scheduler in this codebase; reads double as the sweep for expired votes).
+    const tasks = [];
+    for (const t of candidates) {
+      const resolved = await minesReviewService.checkAndResolve(t);
+      if (!resolved) tasks.push(t.toObject());
+    }
 
     // Mark which ones have already been voted on
     const tasksWithVoteStatus = tasks.map(t => ({
@@ -270,12 +280,38 @@ router.post('/tasks/:id/vote', verifyToken, async (req, res) => {
       return res.status(400).json(fail('voting deadline has passed'));
     }
 
+    // Update reviewer activity first so we can weight this vote by their
+    // current reputation (before this vote's own stats are folded in).
+    const responseTime = task.assigned_at
+      ? Date.now() - new Date(task.assigned_at).getTime()
+      : 0;
+    const reviewer = await MinesReviewer.findOneAndUpdate(
+      { validator_id: validatorId },
+      {
+        $inc: {
+          tasks_voted: 1,
+          ...(vote === 'yes' ? { tasks_approved: 1 } : { tasks_rejected: 1 }),
+        },
+        $set: {
+          last_vote_at: new Date(),
+          avg_response_time_ms: responseTime,
+        },
+      },
+      { upsert: true, new: true }
+    );
+    const weight = minesReviewService.computeWeight(reviewer);
+
     // Record vote
     if (!task.validator_votes) task.validator_votes = {};
     task.validator_votes[validatorId] = vote;
 
-    if (vote === 'yes') task.votes_yes = (task.votes_yes || 0) + 1;
-    else task.votes_no = (task.votes_no || 0) + 1;
+    if (vote === 'yes') {
+      task.votes_yes = (task.votes_yes || 0) + 1;
+      task.votes_yes_weight = (task.votes_yes_weight || 0) + weight;
+    } else {
+      task.votes_no = (task.votes_no || 0) + 1;
+      task.votes_no_weight = (task.votes_no_weight || 0) + weight;
+    }
 
     task.assignment_status = 'voting';
 
@@ -287,38 +323,23 @@ router.post('/tasks/:id/vote', verifyToken, async (req, res) => {
 
     await task.save();
 
-    // Update validator activity
-    const responseTime = task.assigned_at
-      ? Date.now() - new Date(task.assigned_at).getTime()
-      : 0;
-
-    await ValidatorActivity.findOneAndUpdate(
-      { validator_id: validatorId },
-      {
-        $inc: {
-          tasks_voted: 1,
-          ...(vote === 'yes' ? { tasks_approved: 1 } : { tasks_rejected: 1 }),
-        },
-        $set: {
-          last_vote_at: new Date(),
-          // Update average response time (running average)
-          avg_response_time_ms: responseTime,
-        },
-      },
-      { upsert: true, new: true }
-    );
-
     await AuditLog.create({
       action: 'validator_vote',
       actor: req.user?.email || validatorId,
-      details: { taskId: req.params.id, vote },
+      details: { taskId: req.params.id, vote, weight },
       outcome: 'success'
     });
+
+    // Resolve automatically once every assigned reviewer has voted (or the
+    // deadline has passed with quorum) — the weighted-threshold decision and
+    // reward/penalty payout live in minesReviewService.checkAndResolve.
+    const resolved = await minesReviewService.checkAndResolve(task);
 
     return res.json(ok({
       vote_recorded: true,
       current_votes: { yes: task.votes_yes, no: task.votes_no },
-      status: task.assignment_status,
+      weighted_votes: { yes: task.votes_yes_weight, no: task.votes_no_weight },
+      status: resolved ? resolved.assignment_status : task.assignment_status,
     }));
   } catch (e) { return res.status(500).json(fail(e)); }
 });
@@ -393,7 +414,7 @@ router.post('/tasks/:id/final-approve', requireAdmin, async (req, res) => {
     // Update validator earnings for those who voted YES
     for (const [vid, v] of Object.entries(task.validator_votes || {})) {
       if (v === 'yes') {
-        await ValidatorActivity.findOneAndUpdate(
+        await MinesReviewer.findOneAndUpdate(
           { validator_id: vid },
           { $inc: { total_earnings: Math.ceil(finalReward * 0.05) } }, // 5% bonus per validator
           { upsert: true }
@@ -406,6 +427,12 @@ router.post('/tasks/:id/final-approve', requireAdmin, async (req, res) => {
       actor: req.user?.email || 'admin',
       details: { taskId: req.params.id, yesVotes, noVotes, reward: finalReward },
       outcome: 'success'
+    });
+
+    notify(task.miner_id, {
+      kind: 'mines',
+      title: 'Submission approved',
+      body: `Your Mines submission was approved by admin review — +${finalReward} ${task.reward_currency || 'MLPTS'}`,
     });
 
     return res.json(ok(task));
@@ -431,7 +458,123 @@ router.post('/tasks/:id/final-reject', requireAdmin, async (req, res) => {
       outcome: 'success'
     });
 
+    notify(task.miner_id, {
+      kind: 'mines',
+      title: 'Submission rejected',
+      body: task.rejection_note,
+    });
+
     return res.json(ok(task));
+  } catch (e) { return res.status(500).json(fail(e)); }
+});
+
+// ============ REVIEWER: STAKE / PROFILE / LEADERBOARD ============
+// A reviewer-specific off-chain MLPTS deposit, separate from x/mlcoin
+// StakingRecords and from real Cosmos x/staking validator bonding — see
+// models/MinesReviewer.js and services/minesReviewService.js.
+
+// Reviewer: stake MLPTS to become (or stay) eligible for random assignment
+router.post('/reviewer/stake', verifyToken, async (req, res) => {
+  try {
+    const amount = Number(req.body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json(fail('amount must be a positive number'));
+    }
+
+    const session = await mongoose.startSession();
+    let reviewer;
+    try {
+      await session.withTransaction(async () => {
+        const user = await User.findOneAndUpdate(
+          { _id: req.userId, mlpts_balance: { $gte: amount } },
+          { $inc: { mlpts_balance: -amount } },
+          { session, new: true }
+        );
+        if (!user) throw new Error('insufficient MLPTS balance');
+
+        reviewer = await MinesReviewer.findOneAndUpdate(
+          { validator_id: req.userId },
+          {
+            $inc: { stakedAmount: amount },
+            $setOnInsert: { moniker: user.username || user.email.split('@')[0], email: user.email },
+          },
+          { session, new: true, upsert: true }
+        );
+        reviewer.stakeStatus = reviewer.stakedAmount >= reviewer.minRequiredStake ? 'active' : 'unstaked';
+        await reviewer.save({ session });
+      });
+    } finally {
+      session.endSession();
+    }
+
+    return res.json(ok(reviewer));
+  } catch (e) { return res.status(400).json(fail(e)); }
+});
+
+// Reviewer: withdraw stake (blocked while an assigned vote is still open)
+router.post('/reviewer/unstake', verifyToken, async (req, res) => {
+  try {
+    const reviewer = await MinesReviewer.findOne({ validator_id: req.userId });
+    if (!reviewer || reviewer.stakedAmount <= 0) {
+      return res.status(400).json(fail('no stake to withdraw'));
+    }
+
+    const pendingVote = await TaskSubmission.findOne({
+      assigned_validators: req.userId,
+      assignment_status: { $in: ['assigned', 'voting'] },
+      voting_deadline: { $gt: new Date() },
+      [`validator_votes.${req.userId}`]: { $exists: false },
+    }).lean();
+    if (pendingVote) {
+      return res.status(400).json(fail('cannot unstake while you have an open assigned vote'));
+    }
+
+    const amount = Number(req.body?.amount) || reviewer.stakedAmount;
+    if (amount <= 0 || amount > reviewer.stakedAmount) {
+      return res.status(400).json(fail('invalid unstake amount'));
+    }
+
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        reviewer.stakedAmount -= amount;
+        reviewer.stakeStatus = reviewer.stakedAmount >= reviewer.minRequiredStake ? 'active' : 'unstaked';
+        await reviewer.save({ session });
+        await User.findByIdAndUpdate(req.userId, { $inc: { mlpts_balance: amount } }).session(session);
+      });
+    } finally {
+      session.endSession();
+    }
+
+    return res.json(ok(reviewer));
+  } catch (e) { return res.status(400).json(fail(e)); }
+});
+
+// Reviewer: my stake/reputation/earnings profile
+router.get('/reviewer/profile', verifyToken, async (req, res) => {
+  try {
+    const reviewer = await MinesReviewer.findOne({ validator_id: req.userId }).lean();
+    return res.json(ok(reviewer || {
+      validator_id: req.userId,
+      stakedAmount: 0,
+      minRequiredStake: minesReviewService.MIN_REVIEWER_STAKE,
+      stakeStatus: 'unstaked',
+      mining_reputation: 50,
+      tasks_assigned: 0,
+      tasks_voted: 0,
+      total_earnings: 0,
+    }));
+  } catch (e) { return res.status(500).json(fail(e)); }
+});
+
+// Public: top reviewers by reputation
+router.get('/reviewer/leaderboard', async (_req, res) => {
+  try {
+    const reviewers = await MinesReviewer.find({ stakeStatus: { $ne: 'unstaked' } })
+      .sort({ mining_reputation: -1, total_earnings: -1 })
+      .limit(50)
+      .lean();
+    return res.json(ok(reviewers));
   } catch (e) { return res.status(500).json(fail(e)); }
 });
 

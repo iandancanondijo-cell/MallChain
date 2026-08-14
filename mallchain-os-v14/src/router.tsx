@@ -23,6 +23,8 @@ import WalletSend from './features/wallet/WalletSend';
 import WalletReceive from './features/wallet/WalletReceive';
 import WalletSwap from './features/wallet/WalletSwap';
 import WalletHistory from './features/wallet/WalletHistory';
+import WalletBuy from './features/wallet/WalletBuy';
+import WalletPoints from './features/wallet/WalletPoints';
 import Marketplace from './features/marketplace/Marketplace';
 import Staking from './features/staking/Staking';
 import Governance from './features/governance/Governance';
@@ -35,13 +37,9 @@ import MinesLeaderboard from './features/mines/MinesLeaderboard';
 import MinesAnalytics from './features/mines/MinesAnalytics';
 import MinesHistory from './features/mines/MinesHistory';
 import MinesValidatorQueue from './features/mines/MinesValidatorQueue';
+import MinesReviewerStake from './features/mines/MinesReviewerStake';
 import ValidatorsHome from './features/validators/ValidatorsHome';
 import ValidatorsApply from './features/validators/ValidatorsApply';
-import ValidatorsStake from './features/validators/ValidatorsStake';
-import ValidatorsTraining from './features/validators/ValidatorsTraining';
-import ValidatorsApproval from './features/validators/ValidatorsApproval';
-import ValidatorsDashboard from './features/validators/ValidatorsDashboard';
-import ValidatorsCalculator from './features/validators/ValidatorsCalculator';
 import ValidatorsLeaderboard from './features/validators/ValidatorsLeaderboard';
 import ValidatorsProfile from './features/validators/ValidatorsProfile';
 import Explorer from './features/explorer/Explorer';
@@ -74,6 +72,8 @@ export const ROUTES: RouteDef[] = [
   { path: '/wallet/receive', render: () => <WalletReceive /> },
   { path: '/wallet/swap', render: () => <WalletSwap /> },
   { path: '/wallet/history', render: () => <WalletHistory /> },
+  { path: '/wallet/buy', render: () => <WalletBuy /> },
+  { path: '/wallet/points', render: () => <WalletPoints /> },
   { path: '/wallet', render: (n) => <WalletHub navigate={n} /> },
   /* marketplace / staking / governance */
   { path: '/marketplace', render: (n) => <Marketplace navigate={n} /> },
@@ -83,22 +83,17 @@ export const ROUTES: RouteDef[] = [
   /* mines */
   { path: '/mines/discover', render: (n) => <MinesDiscover navigate={n} /> },
   { path: '/mines/my-campaigns', render: () => <MinesMyCampaigns /> },
-  { path: '/mines/participation', render: () => <MinesParticipation /> },
+  { path: '/mines/participation', render: (n) => <MinesParticipation navigate={n} /> },
   { path: '/mines/earnings', render: () => <MinesEarnings /> },
   { path: '/mines/leaderboard', render: () => <MinesLeaderboard /> },
   { path: '/mines/analytics', render: () => <MinesAnalytics /> },
   { path: '/mines/history', render: () => <MinesHistory /> },
   { path: '/mines/validator-queue', render: () => <MinesValidatorQueue /> },
+  { path: '/mines/reviewer/stake', render: () => <MinesReviewerStake /> },
   { path: '/mines', render: (n) => <MinesHome navigate={n} /> },
-  /* validators */
-  { path: '/validators/calculator', render: (n) => <ValidatorsCalculator navigate={n} /> },
-  { path: '/validators/rewards-leaderboard', render: (n) => <ValidatorsLeaderboard tab="rewards" navigate={n} /> },
-  { path: '/validators/leaderboard', render: (n) => <ValidatorsLeaderboard tab="reputation" navigate={n} /> },
+  /* validators — real Cosmos x/staking validators (see /mines/validator-queue for Proof Reviewers) */
+  { path: '/validators/leaderboard', render: () => <ValidatorsLeaderboard /> },
   { path: '/validators/apply', render: (n) => <ValidatorsApply navigate={n} /> },
-  { path: '/validators/stake', render: (n) => <ValidatorsStake navigate={n} /> },
-  { path: '/validators/training', render: (n) => <ValidatorsTraining navigate={n} /> },
-  { path: '/validators/approval', render: (n) => <ValidatorsApproval navigate={n} /> },
-  { path: '/validators/dashboard', render: (n) => <ValidatorsDashboard navigate={n} /> },
   { path: '/validators/profile', render: () => <ValidatorsProfile /> },
   { path: '/validators', render: (n) => <ValidatorsHome navigate={n} /> },
   /* explorer / messaging / referrals / admin / settings / profile / misc */
@@ -116,7 +111,6 @@ export const ROUTES: RouteDef[] = [
   { path: '/notifications', render: () => <NotificationsView /> },
   { path: '/analytics', render: () => <AnalyticsView /> },
   { path: '/help', render: () => <Help /> },
-  { path: '/security', render: () => <Help /> },
   { path: '/search', render: (n) => <Dashboard navigate={n} /> },
   { path: '/activity', render: (n) => <Dashboard navigate={n} /> },
 ];
@@ -151,16 +145,6 @@ export function matchRoute(path: string, isAuthenticated: boolean = true): Route
     return { path: '/landing', render: (n) => <Landing navigate={n} /> };
   }
   return { path: '/', render: (n) => <Dashboard navigate={n} /> };
-}
-
-/**
- * Check if a route requires authentication
- * Returns true for all routes except landing, auth, and login
- */
-export function requiresAuth(path: string): boolean {
-  const publicRoutes = ['/landing', '/auth', '/login'];
-  const clean = path.split('?')[0];
-  return !publicRoutes.includes(clean) && !clean.startsWith('/auth');
 }
 
 export function useHashRoute(): { path: string; navigate: (p: string) => void } {
