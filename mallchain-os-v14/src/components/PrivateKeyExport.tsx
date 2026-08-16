@@ -12,8 +12,10 @@
  * - QR code display (optional)
  */
 
-import React, { useState } from 'react';
-import { verifyPin, decryptMnemonic } from '../services/security';
+import React, { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
+import { decryptMnemonic, encryptMnemonic } from '../services/security';
+import { derivePrivateKeyFromMnemonic } from '../services/wallet';
 import { toast } from './ui';
 import { getSessionDraft, setSessionDraft } from '../services/sessionDraft';
 import '../styles/private-key-export.css';
@@ -43,6 +45,7 @@ export function PrivateKeyExport({
   const [showPrivateKey, setShowPrivateKey] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   // Failed-attempt count DOES persist (session tier), so closing and
   // reopening this modal can no longer reset the lockout — previously
@@ -99,9 +102,10 @@ export function PrivateKeyExport({
       // Successful verification clears the persisted failed-attempt count.
       setPinAttempts(0);
 
-      // In production, derive private key from mnemonic
-      // For now, use mnemonic as placeholder
-      setPrivateKey(result.decrypted!);
+      // Derive the actual secp256k1 private key from the decrypted mnemonic
+      // — never show the mnemonic itself as if it were the private key.
+      const derivedKey = await derivePrivateKeyFromMnemonic(result.decrypted!);
+      setPrivateKey(derivedKey);
       setStep('display');
     } catch (error) {
       setPinError(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -109,6 +113,19 @@ export function PrivateKeyExport({
       setLoading(false);
     }
   };
+
+  // Real QR code for the private key — regenerated whenever the key changes.
+  useEffect(() => {
+    if (!privateKey) {
+      setQrDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    QRCode.toDataURL(privateKey, { width: 220, margin: 1 })
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch((err) => console.error('[PrivateKeyExport] Failed to generate QR code:', err));
+    return () => { cancelled = true; };
+  }, [privateKey]);
 
   // Task 12.6: Copy-to-clipboard with warning toast
   const handleCopyPrivateKey = () => {
@@ -122,40 +139,47 @@ export function PrivateKeyExport({
     setShowPrivateKey(!showPrivateKey);
   };
 
-  // Task 12.7: Download encrypted file
-  const handleDownloadEncrypted = () => {
+  // Task 12.7: Download encrypted file — actually encrypted with the same
+  // PIN just used to unlock this modal (AES-256, PBKDF2-derived key, via
+  // services/security.ts — the same primitive that decrypted the mnemonic
+  // above), not the plaintext key wrapped in a warning label.
+  const handleDownloadEncrypted = async () => {
     if (!privateKey) return;
 
     const timestamp = new Date().toISOString().split('T')[0];
-    const filename = `private_key_${timestamp}.txt`;
+    const filename = `private_key_${timestamp}.txt.enc`;
 
-    // Create encrypted content
     const content = `MALLCHAIN PRIVATE KEY BACKUP
 Generated: ${new Date().toLocaleString()}
 Wallet: ${walletAddress}
 
-⚠️  WARNING: This file contains your private key!
-NEVER share this file with anyone.
-Store it in a secure, encrypted location.
+⚠️  WARNING: This file's contents are encrypted with your account PIN.
+NEVER share this file or your PIN with anyone.
 
 Private Key:
 ${privateKey}
 
 Security Notes:
 - This key provides full access to your wallet
-- Anyone with this key can steal all your funds
-- Keep this file encrypted and password-protected
+- Anyone with this key AND your PIN can steal all your funds
+- Keep this file in a secure location
 - Consider storing on an airgapped device`;
 
+    const result = await encryptMnemonic(content, pin);
+    if (!result.success || !result.encrypted) {
+      toast(result.error || 'Failed to encrypt backup file', false);
+      return;
+    }
+
     const element = document.createElement('a');
-    element.setAttribute('href', `data:text/plain;charset=utf-8,${encodeURIComponent(content)}`);
+    element.setAttribute('href', `data:text/plain;charset=utf-8,${encodeURIComponent(result.encrypted)}`);
     element.setAttribute('download', filename);
     element.style.display = 'none';
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
 
-    toast('Private key file downloaded. Keep it secure!', true);
+    toast('Encrypted backup downloaded — you\'ll need your PIN to decrypt it. Keep it secure!', true);
   };
 
   return (
@@ -328,15 +352,20 @@ Security Notes:
               </p>
             </div>
 
-            {/* Task 12.8: QR code display (optional) */}
+            {/* Task 12.8: QR code display */}
             <div className="qr-section">
-              <h4>QR Code (Optional)</h4>
-              <div className="qr-placeholder">
-                <p>QR Code would be displayed here for scanning</p>
-                <p style={{ fontSize: '0.8rem', color: '#666' }}>
-                  (QR code generation available with qrcode.react library)
-                </p>
-              </div>
+              <h4>QR Code</h4>
+              {qrDataUrl ? (
+                showPrivateKey ? (
+                  <img src={qrDataUrl} alt="Private key QR code" width={220} height={220} />
+                ) : (
+                  <p style={{ fontSize: '0.85rem', color: 'var(--txt-3, #666)' }}>
+                    Click "Show" above to reveal the QR code along with the key.
+                  </p>
+                )
+              ) : (
+                <p style={{ fontSize: '0.85rem', color: 'var(--txt-3, #666)' }}>Generating QR code…</p>
+              )}
             </div>
 
             <div className="modal-buttons">

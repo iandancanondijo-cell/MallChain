@@ -12,85 +12,73 @@
  */
 
 import React, { useState } from 'react';
-import { store } from '../store/store';
+import { store, type Activity } from '../store/store';
 import { useStoreVersion, toast } from '../components/ui';
-import { verifyPin, hashPin, detectBiometricAvailability } from '../services/security';
+import { verifyPin, hashPin, encryptMnemonic } from '../services/security';
 import { authService } from '../services/auth';
+import { settingsApi, type UserSettingsData } from '../services/settingsApi';
 import PrivateKeyExport from '../components/PrivateKeyExport';
 import '../styles/security-settings.css';
 
 interface SecuritySettingsState {
   showChangePinModal: boolean;
-  showBiometricModal: boolean;
   showActivityLog: boolean;
   showSignOutModal: boolean;
   showPrivateKeyExport: boolean;
-  
+
   oldPin: string;
   newPin: string;
   confirmPin: string;
   pinError: string | null;
   pinLoading: boolean;
-  
-  biometricEnabled: boolean;
-  biometricType: 'fingerprint' | 'face' | 'iris' | 'none';
-  biometricAvailable: boolean;
-  
+
   sessionTimeout: 5 | 15 | 30;
-  
-  activityLog: Array<{
-    id: string;
-    action: string;
-    time: string;
-    ip?: string;
-  }>;
 }
 
 export function SecuritySettings() {
   useStoreVersion();
+  const st = store.state;
+  const hasPinSet = !!st.wallet.pinHash;
   const [state, setState] = useState<SecuritySettingsState>({
     showChangePinModal: false,
-    showBiometricModal: false,
     showActivityLog: false,
     showSignOutModal: false,
     showPrivateKeyExport: false,
-    
+
     oldPin: '',
     newPin: '',
     confirmPin: '',
     pinError: null,
     pinLoading: false,
-    
-    biometricEnabled: false,
-    biometricType: 'none',
-    biometricAvailable: false,
-    
+
     sessionTimeout: 15,
-    
-    activityLog: [
-      { id: '1', action: 'Login', time: new Date(Date.now() - 3600000).toLocaleString(), ip: '192.168.1.1' },
-      { id: '2', action: 'PIN Changed', time: new Date(Date.now() - 86400000).toLocaleString() },
-      { id: '3', action: 'Logout', time: new Date(Date.now() - 172800000).toLocaleString() },
-    ],
   });
 
-  // Detect biometric availability on mount
+  const [settings, setSettings] = useState<UserSettingsData | null>(null);
+
+  // Load real settings on mount (session timeout lives here — backend/src/routes/settings.js).
   React.useEffect(() => {
-    const biometricCheck = detectBiometricAvailability();
-    setState(prev => ({
-      ...prev,
-      biometricAvailable: biometricCheck.available,
-      biometricType: biometricCheck.type || 'none',
-    }));
+    settingsApi.get().then((res) => {
+      if (res.ok && res.data) {
+        setSettings(res.data);
+        const t = res.data.security.sessionTimeout;
+        if (t === 5 || t === 15 || t === 30) {
+          setState((prev) => ({ ...prev, sessionTimeout: t }));
+        }
+      }
+    });
   }, []);
 
-  // Task 11.2-11.3: Change PIN logic
+  // Task 11.2-11.3: Change PIN — verifies the current PIN against the stored
+  // hash (skipped on first-time setup, when no PIN has been set yet), then
+  // hashes and persists the new one AND re-encrypts the wallet mnemonic with
+  // it (services/security.ts) so PrivateKeyExport has something real to
+  // decrypt. Both previously just validated input and threw the result away.
   const handleChangePinSubmit = async () => {
     try {
       setState(prev => ({ ...prev, pinLoading: true, pinError: null }));
 
-      // Validate inputs
-      if (!state.oldPin) {
+      if (hasPinSet && !state.oldPin) {
         setState(prev => ({ ...prev, pinError: 'Please enter your current PIN', pinLoading: false }));
         return;
       }
@@ -110,18 +98,39 @@ export function SecuritySettings() {
         return;
       }
 
-      // Verify old PIN (in production, compare against stored hash)
-      if (!/^\d+$/.test(state.oldPin) || !/^\d+$/.test(state.newPin)) {
+      if ((hasPinSet && !/^\d+$/.test(state.oldPin)) || !/^\d+$/.test(state.newPin)) {
         setState(prev => ({ ...prev, pinError: 'PIN must contain only digits', pinLoading: false }));
         return;
       }
 
-      // Hash new PIN
+      if (hasPinSet) {
+        const verifyResult = await verifyPin(state.oldPin, st.wallet.pinHash);
+        if (!verifyResult.success || !verifyResult.valid) {
+          setState(prev => ({ ...prev, pinError: 'Current PIN is incorrect', pinLoading: false }));
+          return;
+        }
+      }
+
+      if (!st.wallet.mnemonic) {
+        setState(prev => ({ ...prev, pinError: 'No wallet found to secure with a PIN', pinLoading: false }));
+        return;
+      }
+
       const hashResult = await hashPin(state.newPin);
-      if (!hashResult.success) {
+      if (!hashResult.success || !hashResult.hash) {
         setState(prev => ({ ...prev, pinError: hashResult.error || 'Failed to hash PIN', pinLoading: false }));
         return;
       }
+
+      const encryptResult = await encryptMnemonic(st.wallet.mnemonic, state.newPin);
+      if (!encryptResult.success || !encryptResult.encrypted) {
+        setState(prev => ({ ...prev, pinError: encryptResult.error || 'Failed to secure wallet with new PIN', pinLoading: false }));
+        return;
+      }
+
+      st.wallet.pinHash = hashResult.hash;
+      st.wallet.pinEncryptedMnemonic = encryptResult.encrypted;
+      store.commit();
 
       setState(prev => ({
         ...prev,
@@ -132,7 +141,7 @@ export function SecuritySettings() {
         pinLoading: false,
       }));
 
-      toast('PIN changed successfully', true);
+      toast(hasPinSet ? 'PIN changed successfully' : 'PIN set successfully', true);
     } catch (error) {
       setState(prev => ({
         ...prev,
@@ -142,39 +151,17 @@ export function SecuritySettings() {
     }
   };
 
-  // Task 11.4-11.6: Biometric settings
-  const handleBiometricToggle = () => {
-    if (!state.biometricAvailable) {
-      toast('Biometric not available on this device', false);
-      return;
-    }
-
-    setState(prev => ({
-      ...prev,
-      biometricEnabled: !prev.biometricEnabled,
-    }));
-
-    toast(
-      state.biometricEnabled
-        ? 'Biometric authentication disabled'
-        : 'Biometric authentication enabled',
-      true
-    );
-  };
-
-  const handleBiometricTest = () => {
-    if (!state.biometricAvailable) {
-      toast('Biometric not available', false);
-      return;
-    }
-
-    toast('Biometric verification test - In production, would trigger WebAuthn', true);
-  };
-
-  // Task 11.8: Session timeout
-  const handleSessionTimeoutChange = (timeout: 5 | 15 | 30) => {
+  // Task 11.8: Session timeout — persisted via the real settings API
+  // (backend/src/routes/settings.js), same pattern features/settings/Settings.tsx
+  // already uses for other preference fields.
+  const handleSessionTimeoutChange = async (timeout: 5 | 15 | 30) => {
     setState(prev => ({ ...prev, sessionTimeout: timeout }));
-    toast(`Session timeout set to ${timeout} minutes`, true);
+    if (!settings) return;
+    const updatedSecurity = { ...settings.security, sessionTimeout: timeout };
+    setSettings({ ...settings, security: updatedSecurity });
+    const res = await settingsApi.update({ security: updatedSecurity });
+    if (res.ok) toast(`Session timeout set to ${timeout} minutes`, true);
+    else toast(res.error || 'Failed to save session timeout', false);
   };
 
   // Task 11.10: Sign out everywhere — full logout (token clear + store reset)
@@ -196,31 +183,21 @@ export function SecuritySettings() {
       <section className="settings-section">
         <div className="section-header">
           <h2>PIN Management</h2>
-          <span className="section-status">✓ Active</span>
+          <span className="section-status">{hasPinSet ? '✓ Active' : 'Not set'}</span>
         </div>
 
         <div className="settings-card">
           <div className="setting-item">
             <div className="setting-info">
-              <h3>Current PIN</h3>
-              <p>Your 4-8 digit security PIN</p>
+              <h3>{hasPinSet ? 'Current PIN' : 'Set a PIN'}</h3>
+              <p>{hasPinSet ? 'Your 4-8 digit security PIN' : 'Set a 4-8 digit PIN to secure private key export'}</p>
             </div>
             <button
               className="btn btn-secondary"
               onClick={() => setState(prev => ({ ...prev, showChangePinModal: true }))}
             >
-              Change PIN
+              {hasPinSet ? 'Change PIN' : 'Set PIN'}
             </button>
-          </div>
-
-          <div className="setting-divider" />
-
-          <div className="setting-item">
-            <div className="setting-info">
-              <h3>Failed Attempts</h3>
-              <p>Lockout after 3 failed login attempts</p>
-            </div>
-            <span className="status-badge status-good">Protected</span>
           </div>
         </div>
       </section>
@@ -236,12 +213,13 @@ export function SecuritySettings() {
           <div className="setting-item">
             <div className="setting-info">
               <h3>Export Private Key</h3>
-              <p>View and backup your private key (requires PIN verification)</p>
+              <p>{hasPinSet ? 'View and backup your private key (requires PIN verification)' : 'Set a PIN above first — export is PIN-protected'}</p>
             </div>
             <button
               className="btn btn-danger btn-sm"
               onClick={() => setState(prev => ({ ...prev, showPrivateKeyExport: true }))}
-              title="Exports private key with PIN verification"
+              disabled={!hasPinSet}
+              title={hasPinSet ? 'Exports private key with PIN verification' : 'Set a PIN first'}
             >
               Export Key
             </button>
@@ -249,54 +227,18 @@ export function SecuritySettings() {
         </div>
       </section>
 
-      {/* Section 2: Biometric Settings */}
+      {/* Section 2: Biometric Authentication */}
       <section className="settings-section">
         <div className="section-header">
           <h2>Biometric Authentication</h2>
-          <span className={`section-status ${state.biometricAvailable ? 'available' : 'unavailable'}`}>
-            {state.biometricAvailable ? '✓ Available' : '✗ Not available'}
-          </span>
+          <span className="section-status coming-soon">Not available yet</span>
         </div>
 
-        <div className="settings-card">
-          <div className="setting-item">
-            <div className="setting-info">
-              <h3>Enable {state.biometricType === 'face' ? 'Face ID' : state.biometricType === 'fingerprint' ? 'Fingerprint' : 'Biometric'}</h3>
-              <p>
-                {state.biometricAvailable
-                  ? `Use your ${state.biometricType} to authenticate`
-                  : 'Biometric authentication not available on this device'}
-              </p>
-            </div>
-            <label className="toggle-switch">
-              <input
-                type="checkbox"
-                checked={state.biometricEnabled && state.biometricAvailable}
-                onChange={handleBiometricToggle}
-                disabled={!state.biometricAvailable}
-              />
-              <span className="toggle-slider" />
-            </label>
-          </div>
-
-          {state.biometricAvailable && state.biometricEnabled && (
-            <>
-              <div className="setting-divider" />
-
-              <div className="setting-item">
-                <div className="setting-info">
-                  <h3>Test Biometric</h3>
-                  <p>Verify that your biometric data is working correctly</p>
-                </div>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={handleBiometricTest}
-                >
-                  Test Now
-                </button>
-              </div>
-            </>
-          )}
+        <div className="settings-card settings-disabled">
+          <p className="placeholder-text">
+            Biometric authentication isn't available yet — it needs a real WebAuthn
+            enrollment/verification flow, which hasn't been built.
+          </p>
         </div>
       </section>
 
@@ -304,14 +246,21 @@ export function SecuritySettings() {
       <section className="settings-section">
         <div className="section-header">
           <h2>Two-Factor Authentication</h2>
-          <span className="section-status coming-soon">Coming Soon</span>
+          <span className={`section-status ${settings?.security.twoFactorEnabled ? 'available' : ''}`}>
+            {settings?.security.twoFactorEnabled ? '✓ Enabled' : 'Not enabled'}
+          </span>
         </div>
 
-        <div className="settings-card settings-disabled">
-          <p className="placeholder-text">
-            Two-factor authentication will be available in a future update.
-            This will provide an additional layer of security for your account.
-          </p>
+        <div className="settings-card">
+          <div className="setting-item">
+            <div className="setting-info">
+              <h3>Manage 2FA</h3>
+              <p>Two-factor authentication is managed from your Profile page.</p>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={() => { window.location.hash = '#/profile'; }}>
+              Go to Profile
+            </button>
+          </div>
         </div>
       </section>
 
@@ -344,8 +293,8 @@ export function SecuritySettings() {
 
           <div className="setting-item">
             <div className="setting-info">
-              <h3>Active Sessions</h3>
-              <p>You are currently signed in on 1 device</p>
+              <h3>Recent Activity</h3>
+              <p>Your recent account activity on this device</p>
             </div>
             <button
               className="btn btn-secondary btn-sm"
@@ -382,6 +331,7 @@ export function SecuritySettings() {
       {/* Change PIN Modal */}
       {state.showChangePinModal && (
         <ChangePinModal
+          hasPinSet={hasPinSet}
           oldPin={state.oldPin}
           newPin={state.newPin}
           confirmPin={state.confirmPin}
@@ -404,10 +354,10 @@ export function SecuritySettings() {
         />
       )}
 
-      {/* Activity Log Modal */}
+      {/* Activity Log Modal — real activity feed (store.state.activity), not fabricated entries */}
       {state.showActivityLog && (
         <ActivityLogModal
-          activityLog={state.activityLog}
+          activity={st.activity}
           onClose={() => setState(prev => ({ ...prev, showActivityLog: false }))}
         />
       )}
@@ -423,8 +373,8 @@ export function SecuritySettings() {
       {/* Private Key Export Modal (Phase 3 Section 12) */}
       {state.showPrivateKeyExport && (
         <PrivateKeyExport
-          encryptedMnemonic={''}
-          walletAddress={store.state.wallet?.address || ''}
+          encryptedMnemonic={st.wallet.pinEncryptedMnemonic}
+          walletAddress={st.wallet.address || ''}
           onClose={() => setState(prev => ({ ...prev, showPrivateKeyExport: false }))}
         />
       )}
@@ -436,6 +386,7 @@ export function SecuritySettings() {
  * Change PIN Modal (Tasks 11.2-11.3)
  */
 interface ChangePinModalProps {
+  hasPinSet: boolean;
   oldPin: string;
   newPin: string;
   confirmPin: string;
@@ -449,6 +400,7 @@ interface ChangePinModalProps {
 }
 
 function ChangePinModal({
+  hasPinSet,
   oldPin,
   newPin,
   confirmPin,
@@ -463,22 +415,24 @@ function ChangePinModal({
   return (
     <div className="modal-overlay">
       <div className="modal modal-md">
-        <h3>Change PIN</h3>
+        <h3>{hasPinSet ? 'Change PIN' : 'Set PIN'}</h3>
 
         {error && <div className="error-message">{error}</div>}
 
-        <div className="form-group">
-          <label>Current PIN</label>
-          <input
-            type="password"
-            inputMode="numeric"
-            maxLength={8}
-            placeholder="••••"
-            value={oldPin}
-            onChange={e => onOldPinChange(e.target.value.replace(/\D/g, ''))}
-            disabled={loading}
-          />
-        </div>
+        {hasPinSet && (
+          <div className="form-group">
+            <label>Current PIN</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={8}
+              placeholder="••••"
+              value={oldPin}
+              onChange={e => onOldPinChange(e.target.value.replace(/\D/g, ''))}
+              disabled={loading}
+            />
+          </div>
+        )}
 
         <div className="form-group">
           <label>New PIN (4-8 digits)</label>
@@ -514,9 +468,9 @@ function ChangePinModal({
           <button
             className="btn btn-primary"
             onClick={onSubmit}
-            disabled={loading || !oldPin || !newPin || !confirmPin}
+            disabled={loading || (hasPinSet && !oldPin) || !newPin || !confirmPin}
           >
-            {loading ? 'Updating...' : 'Change PIN'}
+            {loading ? 'Saving...' : hasPinSet ? 'Change PIN' : 'Set PIN'}
           </button>
         </div>
       </div>
@@ -525,37 +479,40 @@ function ChangePinModal({
 }
 
 /**
- * Activity Log Modal (Task 11.9)
+ * Activity Log Modal (Task 11.9) — real activity feed, not a fabricated
+ * login-history table (no per-user IP audit log exists on the backend).
  */
 interface ActivityLogModalProps {
-  activityLog: Array<{ id: string; action: string; time: string; ip?: string }>;
+  activity: Activity[];
   onClose: () => void;
 }
 
-function ActivityLogModal({ activityLog, onClose }: ActivityLogModalProps) {
+function ActivityLogModal({ activity, onClose }: ActivityLogModalProps) {
   return (
     <div className="modal-overlay">
       <div className="modal modal-lg">
         <h3>Recent Activity</h3>
 
-        <table className="activity-table">
-          <thead>
-            <tr>
-              <th>Action</th>
-              <th>Time</th>
-              <th>IP Address</th>
-            </tr>
-          </thead>
-          <tbody>
-            {activityLog.map(entry => (
-              <tr key={entry.id}>
-                <td>{entry.action}</td>
-                <td>{entry.time}</td>
-                <td>{entry.ip || '—'}</td>
+        {activity.length === 0 ? (
+          <p className="placeholder-text">No recent activity yet.</p>
+        ) : (
+          <table className="activity-table">
+            <thead>
+              <tr>
+                <th>Activity</th>
+                <th>Time</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {activity.slice(0, 50).map(entry => (
+                <tr key={entry.id}>
+                  <td>{entry.text}</td>
+                  <td>{new Date(entry.ts).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
 
         <div className="modal-buttons">
           <button className="btn btn-secondary" onClick={onClose}>

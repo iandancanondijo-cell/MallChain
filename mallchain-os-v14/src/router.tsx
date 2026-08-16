@@ -3,8 +3,6 @@
  * #/ route map). Every route is deep-linkable on reload.
  */
 import { useEffect, useState } from 'react';
-import { store } from './store/store';
-import { seedIfDemo } from './demo/seeds';
 import { Careers, Learning, SocialTasks, NotificationsView, AnalyticsView, Help } from './features/misc/MiscViews';
 
 /* pages */
@@ -42,7 +40,6 @@ import ValidatorsHome from './features/validators/ValidatorsHome';
 import ValidatorsApply from './features/validators/ValidatorsApply';
 import ValidatorsLeaderboard from './features/validators/ValidatorsLeaderboard';
 import ValidatorsProfile from './features/validators/ValidatorsProfile';
-import Explorer from './features/explorer/Explorer';
 import Messaging from './features/messaging/Messaging';
 import Referrals from './features/referrals/Referrals';
 import Admin from './features/admin/Admin';
@@ -115,21 +112,36 @@ export const ROUTES: RouteDef[] = [
   { path: '/activity', render: (n) => <Dashboard navigate={n} /> },
 ];
 
-export function matchRoute(path: string, isAuthenticated: boolean = true): RouteDef {
+/** Routes only 'admin'/'superadmin' may reach — checked as an exact-or-prefix match, same as the public-route check below. */
+const ADMIN_ROUTES = ['/admin'];
+
+export function matchRoute(path: string, isAuthenticated: boolean = true, role: string = 'user'): RouteDef {
   const clean = path.split('?')[0];
-  
+
   // PHASE 0 FIX: Public routes that don't require authentication
   const publicRoutes = ['/landing', '/auth'];
-  
+  const isAdmin = role === 'admin' || role === 'superadmin';
+
+  const denyIfAdminOnly = (routePath: string): RouteDef | null => {
+    const isAdminRoute = ADMIN_ROUTES.some((r) => routePath === r || routePath.startsWith(r + '/'));
+    // This is the real authorization boundary — a non-admin must never mount
+    // Admin.tsx at all, not just see it render an "access denied" message
+    // inside the normal page content (which is all the previous check did).
+    if (isAdminRoute && !isAdmin) {
+      return { path: '/', render: (n) => <Dashboard navigate={n} /> };
+    }
+    return null;
+  };
+
   const exact = ROUTES.find((r) => r.path === clean);
   if (exact) {
     // If route requires auth but user not authenticated, return landing page
     if (!isAuthenticated && !publicRoutes.includes(clean)) {
       return { path: '/landing', render: (n) => <Landing navigate={n} /> };
     }
-    return exact;
+    return denyIfAdminOnly(clean) || exact;
   }
-  
+
   /* prefix fallback: /mines/campaign/x → mines home, etc. */
   const byPrefix = [...ROUTES].sort((a, b) => b.path.length - a.path.length).find((r) => r.path !== '/' && clean.startsWith(r.path + '/'));
   if (byPrefix) {
@@ -137,9 +149,9 @@ export function matchRoute(path: string, isAuthenticated: boolean = true): Route
     if (!isAuthenticated && !publicRoutes.includes(byPrefix.path)) {
       return { path: '/landing', render: (n) => <Landing navigate={n} /> };
     }
-    return byPrefix;
+    return denyIfAdminOnly(byPrefix.path) || byPrefix;
   }
-  
+
   // Default: if unauthenticated, go to landing; otherwise dashboard
   if (!isAuthenticated) {
     return { path: '/landing', render: (n) => <Landing navigate={n} /> };
@@ -156,8 +168,6 @@ export function useHashRoute(): { path: string; navigate: (p: string) => void } 
       setPath(h);
     };
     window.addEventListener('hashchange', onHash);
-    /* seed demo data once on boot (demoMode gate) */
-    seedIfDemo(store.state);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 

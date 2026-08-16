@@ -1,6 +1,38 @@
 const User = require('../models/user');
+const UserSettings = require('../models/UserSettings');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const totp = require('../utils/totp');
+
+/**
+ * If this account has real 2FA enabled (see settings.js's /2fa/enable),
+ * require and verify a code before completing login. Previously nothing
+ * here ever checked UserSettings at all — enabling "2FA" was purely
+ * cosmetic and provided zero actual login protection.
+ * Returns null if login can proceed, or a response object to send instead.
+ */
+async function checkTwoFactor(userId, otp) {
+  const settings = await UserSettings.findOne({ userId })
+    .select('+security.twoFactorSecret +security.twoFactorBackupCodeHashes');
+  if (!settings?.security?.twoFactorEnabled) return null;
+
+  if (!otp) return { requires2fa: true };
+
+  if (totp.verifyToken(settings.security.twoFactorSecret, otp)) return null;
+
+  const hashes = settings.security.twoFactorBackupCodeHashes || [];
+  for (let i = 0; i < hashes.length; i++) {
+    if (await bcrypt.compare(String(otp).trim().toUpperCase(), hashes[i])) {
+      // Backup codes are single-use — remove this one so it can't be replayed.
+      hashes.splice(i, 1);
+      settings.security.twoFactorBackupCodeHashes = hashes;
+      await settings.save();
+      return null;
+    }
+  }
+
+  return { error: 'invalid 2FA code', status: 400 };
+}
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -27,6 +59,7 @@ function toPublicUser(user) {
     _id: user._id,
     id: user._id,
     email: user.email,
+    name: user.name || null,
     username: user.username || null,
     phone: user.phone || null,
     role: user.role || 'user',
@@ -56,6 +89,34 @@ function makeSyntheticEmail(username) {
 // Flat MLPTS bonus credited to a referrer when someone signs up with their code.
 const REFERRAL_SIGNUP_BONUS = 10;
 
+/**
+ * Assigns a real, persisted referralCode to a freshly-created user and — if
+ * they signed up with someone else's code — links and credits that
+ * referrer. This used to live only in register() (email/password signup);
+ * registerUsername() and googleCallback() created users with no
+ * referralCode at all, so GET /api/referrals fell back to a display-only
+ * code computed from username/id that looked identical to a real one but
+ * was never in the DB — any signup using that shown code as `referralCode`
+ * silently found no matching user and credited nobody. Confirmed live:
+ * referring through a username-signup user's shown code produced zero
+ * referralCount/referralEarnings change, with no error surfaced anywhere.
+ */
+async function assignReferralCode(user, referralCodeInput) {
+  let referrer = null;
+  if (referralCodeInput) {
+    referrer = await User.findOne({ referralCode: String(referralCodeInput).trim().toUpperCase() });
+  }
+  user.referredBy = referrer ? referrer._id : undefined;
+  user.referralCode = `MALL-${user._id.toString().slice(-8)}`.toUpperCase();
+  await user.save();
+
+  if (referrer) {
+    await User.findByIdAndUpdate(referrer._id, {
+      $inc: { referralCount: 1, referralEarnings: REFERRAL_SIGNUP_BONUS },
+    });
+  }
+}
+
 exports.register = async (req, res) => {
   const { email, password, referralCode } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
@@ -63,33 +124,26 @@ exports.register = async (req, res) => {
   if (existing) return res.status(400).json({ error: 'email exists' });
   const hash = await bcrypt.hash(password, 10);
 
-  let referrer = null;
-  if (referralCode) {
-    referrer = await User.findOne({ referralCode: String(referralCode).trim().toUpperCase() });
-  }
-
-  const u = await User.create({ email, password: hash, referredBy: referrer ? referrer._id : undefined });
-  u.referralCode = `MALL-${u._id.toString().slice(-8)}`.toUpperCase();
-  await u.save();
-
-  if (referrer) {
-    await User.findByIdAndUpdate(referrer._id, {
-      $inc: { referralCount: 1, referralEarnings: REFERRAL_SIGNUP_BONUS },
-    });
-  }
+  const u = await User.create({ email, password: hash });
+  await assignReferralCode(u, referralCode);
 
   const token = signToken(u);
   res.json({ token, user: toPublicUser(u) });
 };
 
 exports.login = async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, otp } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
   const u = await User.findOne({ email });
   if (!u) return res.status(400).json({ error: 'invalid credentials' });
   if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
   const ok = await bcrypt.compare(password, u.password);
   if (!ok) return res.status(400).json({ error: 'invalid credentials' });
+
+  const twoFactorResult = await checkTwoFactor(u._id, otp);
+  if (twoFactorResult?.requires2fa) return res.json({ requires2fa: true });
+  if (twoFactorResult?.error) return res.status(twoFactorResult.status).json({ error: twoFactorResult.error });
+
   u.lastLoginAt = new Date();
   await u.save();
   const token = signToken(u);
@@ -116,6 +170,8 @@ exports.registerUsername = async (req, res) => {
 
   const hash = await bcrypt.hash(password, 10);
   const u = await User.create({ username, email: syntheticEmail, password: hash });
+  await assignReferralCode(u, req.body?.referralCode);
+
   const token = signToken(u);
   res.json({ token, user: toPublicUser(u) });
 };
@@ -133,6 +189,10 @@ exports.loginUsername = async (req, res) => {
   if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
   const ok = await bcrypt.compare(password, u.password);
   if (!ok) return res.status(400).json({ error: 'invalid credentials' });
+
+  const twoFactorResult = await checkTwoFactor(u._id, req.body?.otp);
+  if (twoFactorResult?.requires2fa) return res.json({ requires2fa: true });
+  if (twoFactorResult?.error) return res.status(twoFactorResult.status).json({ error: twoFactorResult.error });
 
   u.lastLoginAt = new Date();
   await u.save();
@@ -165,6 +225,13 @@ exports.googleCallback = async (req, res) => {
   let user = await User.findOne({ googleId: profile.id });
   if (!user) {
     user = await User.create({ email, googleId: profile.id });
+    // The Google OAuth redirect flow doesn't currently carry a referral
+    // code through (no `state` param wired up), so this only fixes the
+    // half of the bug that's unconditionally true: without a real
+    // referralCode, nobody could ever successfully refer *using* this
+    // user's code — GET /api/referrals would show a code that looked
+    // real but matched no DB record.
+    await assignReferralCode(user, undefined);
   }
   const token = signToken(user);
   // redirect to frontend with token

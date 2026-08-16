@@ -44,6 +44,33 @@ const paymentSchema = Joi.object({
   userId: Joi.string().optional(),
 });
 
+// send.js's POST /payment was previously validated against paymentSchema
+// (amount/phone/userId, an M-Pesa shape) while sendController.processPayment
+// actually destructures buyerAddress/sellerAddress/amountKES/txBytes/description
+// — with stripUnknown: true, every field the handler reads was silently
+// deleted before it saw the request, and phone/userId (which it never reads)
+// were enforced instead. This matches each handler's real destructuring.
+const mallcoinPaymentSchema = Joi.object({
+  buyerAddress: addressSchema,
+  sellerAddress: addressSchema,
+  amountKES: amountSchema,
+  txBytes: Joi.string().optional(),
+  description: Joi.string().max(256).optional(),
+});
+
+// send.js's POST /mlcns/transfer was previously validated against
+// transferSchema, which requires `amount` — but sendController.transferMlcns
+// reads `amountMlcns` from the body. Every request shaped for the handler
+// (from/to/amountMlcns) was rejected by Joi before the controller ever ran.
+const mlcnsTransferSchema = Joi.object({
+  from: addressSchema,
+  to: addressSchema,
+  amountMlcns: amountSchema,
+  txBytes: Joi.string().optional(),
+  privateKey: Joi.string().optional(),
+  memo: Joi.string().max(256).optional(),
+});
+
 const faucetRequestSchema = Joi.object({
   walletAddress: addressSchema,
 });
@@ -79,12 +106,17 @@ const buyMpesaInitiateSchema = Joi.object({
   description: Joi.string().max(256).optional(),
 });
 
+// quoteId is required (not just one-of with walletAddress/amount): it's what
+// ties a credit to a real, server-confirmed M-Pesa payment
+// (MallcoinPurchase.status === 'confirmed', see buy.js's handleReservedCredit).
+// Without it, amount/walletAddress alone were previously enough to mint MLCNS
+// with no payment reference and no auth — confirmed live as a real
+// unauthenticated free-mint exploit before this schema change.
 const buyCreditSchema = Joi.object({
-  quoteId: Joi.string().optional(),
+  quoteId: Joi.string().required(),
   walletAddress: addressSchema.optional(),
-  amount: amountSchema.optional(),
   idempotencyKey: Joi.string().optional(),
-}).or('quoteId', 'walletAddress');
+});
 
 const stakingSchema = Joi.object({
   validator: Joi.string()
@@ -167,6 +199,8 @@ module.exports = {
   schemas: {
     transfer: transferSchema,
     payment: paymentSchema,
+    mallcoinPayment: mallcoinPaymentSchema,
+    mlcnsTransfer: mlcnsTransferSchema,
     buyReserve: buyReserveSchema,
     buyMpesaInitiate: buyMpesaInitiateSchema,
     buyCredit: buyCreditSchema,

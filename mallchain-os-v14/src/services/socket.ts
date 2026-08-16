@@ -152,12 +152,12 @@ class SocketManager {
 
   /**
    * Task 5.2: Connect to backend Socket.IO server from config.apiBaseUrl
-   * Skip connection if in demo mode (apiBaseUrl is empty)
+   * Skip connection if no backend URL is configured at all.
    */
   connect(url?: string): void {
     // If no URL provided, use config.apiBaseUrl
     if (!url && !config.apiBaseUrl) {
-      console.log('[Socket] Demo mode detected - skipping Socket.IO connection');
+      console.warn('[Socket] No API base URL configured — skipping Socket.IO connection');
       return;
     }
 

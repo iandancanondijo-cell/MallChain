@@ -3,6 +3,8 @@ const router = express.Router();
 const kycCtrl = require('../controllers/kycController');
 const auth = require('../middleware/auth');
 const { validateInput, schemas } = require('../middleware/inputValidation');
+const { uploadKycDocument } = require('../middleware/upload');
+const { limiters } = require('../middleware/rateLimiter');
 const Joi = require('joi');
 
 // KYC validation schema
@@ -20,6 +22,7 @@ const kycSchemas = {
     idType: Joi.string().valid('passport', 'drivers_license', 'national_id').required(),
     idNumber: Joi.string().required(),
     idExpiry: Joi.string().required(),
+    idDocumentUrl: Joi.string().required(),
     occupation: Joi.string().required(),
     sourceOfFunds: Joi.string().required(),
     annualIncome: Joi.string().required(),
@@ -27,8 +30,16 @@ const kycSchemas = {
   })
 };
 
+// Upload the ID document — must happen before /submit, which requires the
+// returned documentRef. Not served statically; only the owner or an admin
+// can read it back via GET /document/:kycId below.
+router.post('/document', auth, uploadKycDocument.single('document'), kycCtrl.uploadDocument);
+
+// Stream an uploaded document back — owner or admin/superadmin only.
+router.get('/document/:kycId', auth, kycCtrl.getDocument);
+
 // Submit KYC data (requires authentication)
-router.post('/submit', auth, validateInput(kycSchemas.submitKYC), kycCtrl.submitKYC);
+router.post('/submit', auth, limiters.strict, validateInput(kycSchemas.submitKYC), kycCtrl.submitKYC);
 
 // Run AML check (requires authentication)
 router.post('/aml/check', auth, kycCtrl.runAMLCheck);

@@ -106,11 +106,49 @@ async function fetchParams() {
   }
 }
 
+async function fetchDepositParams() {
+  try {
+    const { data } = await axios.get(`${CHAIN_REST}/cosmos/gov/v1/params/deposit`, { timeout: 5000 });
+    return data.deposit_params || data.params || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Real x/gov voting power is weighted by bonded x/staking delegation, not
+ * this platform's off-chain MLCNS staking pool (see stakingService.js) —
+ * the two are unrelated. Returns the address's total bonded delegation
+ * across all validators, so the UI can honestly show whether a vote will
+ * actually carry any tally weight.
+ */
+async function fetchVotingPower(address) {
+  try {
+    const { data } = await axios.get(`${CHAIN_REST}/cosmos/staking/v1beta1/delegations/${address}`, { timeout: 5000 });
+    const responses = data.delegation_responses || [];
+    const totalStaked = responses.reduce((sum, r) => sum + BigInt(r.balance?.amount || '0'), 0n);
+    return {
+      address,
+      totalStaked: totalStaked.toString(),
+      denom: responses[0]?.balance?.denom || 'stake',
+      delegations: responses.map((r) => ({
+        validatorAddress: r.delegation?.validator_address,
+        amount: r.balance?.amount,
+        denom: r.balance?.denom,
+      })),
+    };
+  } catch {
+    return { address, totalStaked: '0', denom: 'stake', delegations: [] };
+  }
+}
+
 module.exports = {
   normalizeProposal,
   fetchTally,
   fetchUserVote,
   fetchParams,
+  fetchDepositParams,
+  fetchVotingPower,
   tallyToNumbers,
   mapStatus,
 };

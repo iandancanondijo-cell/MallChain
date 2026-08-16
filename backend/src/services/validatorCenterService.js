@@ -110,7 +110,30 @@ async function getValidatorLeaderboard() {
   return records.sort((a, b) => b.reputationScore - a.reputationScore || b.totalStaked - a.totalStaked);
 }
 
+/**
+ * Direct single-validator lookup, regardless of bond status. The leaderboard
+ * (getValidatorLeaderboard) only queries BOND_STATUS_BONDED — correct for a
+ * "top validators" ranking, but it means a freshly self-bonded validator
+ * that hasn't (or will never, given a small self-delegation) enter the
+ * active bonded set would incorrectly read as "not found" everywhere that
+ * only calls the leaderboard, e.g. the My Application page's on-chain check.
+ */
+async function fetchValidatorAnyStatus(operatorAddress) {
+  try {
+    const response = await axios.get(`${CHAIN_REST}/cosmos/staking/v1beta1/validators/${operatorAddress}`, { timeout: 5000 });
+    return response.data?.validator || null;
+  } catch (err) {
+    return null;
+  }
+}
+
 async function getValidatorDetail(operatorAddress) {
+  const direct = await fetchValidatorAnyStatus(operatorAddress);
+  if (direct) {
+    const [signingInfos, totalBonded] = await Promise.all([fetchSigningInfos(), fetchTotalBonded()]);
+    return buildValidatorRecord(direct, signingInfos[operatorAddress], totalBonded);
+  }
+
   const leaderboard = await getValidatorLeaderboard();
   return leaderboard.find((validator) => validator.operatorAddress === operatorAddress) || null;
 }

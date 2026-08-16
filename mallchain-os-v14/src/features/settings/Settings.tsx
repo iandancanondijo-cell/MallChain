@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { config } from '../../services/config';
+import { COMMON_CURRENCIES } from '../../services/locale';
+import { useSupportedCurrencies } from '../../services/currency';
 import { settingsApi, type UserSettingsData } from '../../services/settingsApi';
 
 /** Settings — real per-user preferences/notifications/security/privacy (backend/src/routes/settings.js). */
@@ -10,6 +12,7 @@ export default function Settings() {
   const st = store.state;
   const [settings, setSettings] = useState<UserSettingsData | null>(null);
   const [loading, setLoading] = useState(false);
+  const allCurrencies = useSupportedCurrencies();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -19,7 +22,10 @@ export default function Settings() {
       // Mirror into the local store so the rest of the app (currency
       // formatting, accent color, etc.) stays reactive without a refactor.
       st.prefs.accent = res.data.prefs.accent as never;
-      st.prefs.currency = res.data.prefs.currency as never;
+      // No backend value yet means the user hasn't explicitly chosen a
+      // currency — keep the browser-locale-detected default (store.ts)
+      // rather than overwriting it with an arbitrary server default.
+      if (res.data.prefs.currency) st.prefs.currency = res.data.prefs.currency as never;
       st.prefs.lang = res.data.prefs.lang as never;
       store.commit();
     }
@@ -68,19 +74,6 @@ export default function Settings() {
     await settingsApi.update({ privacy: updated.privacy });
   };
 
-  const toggleDemo = () => {
-    if (st.settings.demoMode) {
-      if (window.confirm('Disable demo mode? This clears local demo data and shows production empty states.')) {
-        localStorage.removeItem('mallchain_os_v1_v14');
-        window.location.reload();
-      }
-    } else {
-      st.settings.demoMode = true;
-      store.commit();
-      toast('Demo mode enabled — reseeding on reload');
-    }
-  };
-
   return (
     <div>
       <div className="view-head"><h1>Settings</h1><span className="sub">real per-account preferences</span></div>
@@ -96,11 +89,24 @@ export default function Settings() {
 
       <div className="card mb">
         <div className="sec-title"><h2>Currency</h2></div>
-        <div className="row">
-          {['USD', 'KES', 'EUR', 'GBP'].map((c) => (
+        <div className="row" style={{ flexWrap: 'wrap' }}>
+          {COMMON_CURRENCIES.map((c) => (
             <button key={c} className={'btn ' + (st.prefs.currency === c ? 'btn-primary' : 'btn-ghost')} onClick={() => setCurrency(c)}>{c}</button>
           ))}
         </div>
+        {allCurrencies.length > 0 && (
+          <select
+            className="input mt"
+            style={{ maxWidth: 260 }}
+            value={COMMON_CURRENCIES.includes(st.prefs.currency) ? '' : st.prefs.currency}
+            onChange={(e) => { if (e.target.value) setCurrency(e.target.value); }}
+          >
+            <option value="">More currencies…</option>
+            {allCurrencies.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="card mb">
@@ -146,11 +152,7 @@ export default function Settings() {
       )}
 
       <div className="card mb">
-        <div className="sec-title"><h2>Mode &amp; network</h2></div>
-        <div className="flag-row">
-          <div className="desc"><div className="t">Demo mode</div><div className="m">Seeds realistic data; OFF starts the store empty with production empty states</div></div>
-          <button className="btn btn-ghost" onClick={toggleDemo}>{st.settings.demoMode ? 'ON — click to disable' : 'OFF — click to enable'}</button>
-        </div>
+        <div className="sec-title"><h2>Network</h2></div>
         <div className="flag-row">
           <div className="desc"><div className="t">Network</div></div>
           <span className="chip gold">{config.network}</span>

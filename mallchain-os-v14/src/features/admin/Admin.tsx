@@ -7,12 +7,14 @@ import {
   type AdminDashboardStats,
   type AdminUser,
   type AdminValidatorApplication,
+  type AdminKycSubmission,
   type AdminCampaign,
   type AdminSubmission,
   type AuditLogEntry,
 } from '../../services/adminApi';
+import { kycApi } from '../../services/kycApi';
 
-type Tab = 'dashboard' | 'users' | 'validators' | 'mining' | 'audit' | 'local';
+type Tab = 'dashboard' | 'users' | 'kyc' | 'validators' | 'mining' | 'audit' | 'local';
 
 /**
  * Admin Control Center — real backend (backend/src/routes/adminPanel.js),
@@ -57,6 +59,7 @@ export default function Admin() {
       <div className="mc-subnav" style={{ marginBottom: 16 }}>
         <button className={tab === 'dashboard' ? 'on' : ''} onClick={() => setTab('dashboard')}>Dashboard</button>
         <button className={tab === 'users' ? 'on' : ''} onClick={() => setTab('users')}>Users</button>
+        <button className={tab === 'kyc' ? 'on' : ''} onClick={() => setTab('kyc')}>KYC Review</button>
         <button className={tab === 'validators' ? 'on' : ''} onClick={() => setTab('validators')}>Validator Applications</button>
         <button className={tab === 'mining' ? 'on' : ''} onClick={() => setTab('mining')}>Mining</button>
         <button className={tab === 'audit' ? 'on' : ''} onClick={() => setTab('audit')}>Audit Log</button>
@@ -65,6 +68,7 @@ export default function Admin() {
 
       {tab === 'dashboard' && <DashboardTab />}
       {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} />}
+      {tab === 'kyc' && <KycReviewTab />}
       {tab === 'validators' && <ValidatorApplicationsTab />}
       {tab === 'mining' && <MiningTab meId={me.id} />}
       {tab === 'audit' && <AuditTab />}
@@ -156,7 +160,9 @@ function UsersTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
               <tr key={u._id}>
                 <td><b>{u.username || u.email}</b><div className="tiny">{u.email}</div></td>
                 <td>
-                  {isSuperAdmin ? (
+                  {u.role === 'superadmin' ? (
+                    <span className="chip gold" title="A superadmin's role is permanent and can't be changed">superadmin 🔒</span>
+                  ) : isSuperAdmin ? (
                     <select className="input" value={u.role} onChange={(e) => setRole(u, e.target.value as 'user' | 'admin' | 'superadmin')}>
                       <option value="user">user</option>
                       <option value="admin">admin</option>
@@ -215,6 +221,10 @@ function ValidatorApplicationsTab() {
 
   return (
     <div>
+      <div className="tiny muted mb">
+        Approving unlocks the applicant's own "Activate validator" action on their My Application page — they self-bond from their own wallet, since
+        this platform holds no custodial keys to do it on their behalf. It does not itself create anything on-chain.
+      </div>
       {error && <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}><div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div></div>}
       <div className="card">
         {apps?.length === 0 && <div className="empty-state"><div className="es-ico">📝</div><div className="es-t">No pending applications</div></div>}
@@ -229,6 +239,88 @@ function ValidatorApplicationsTab() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function KycReviewTab() {
+  const [subs, setSubs] = useState<AdminKycSubmission[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [docModal, setDocModal] = useState<{ kycId: string; blobUrl: string; loading: boolean } | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+
+  const load = useCallback(async () => {
+    setError(null);
+    const res = await adminApi.listPendingKyc();
+    if (res.ok && res.data) setSubs(res.data.submissions);
+    else setError(res.error || 'Failed to load KYC submissions');
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const review = async (id: string, action: 'approved' | 'rejected') => {
+    const res = await adminApi.reviewKyc(id, action, notes[id]);
+    if (res.ok) { toast(`KYC ${action}`); load(); } else toast(res.error || 'Review failed', false);
+  };
+
+  const viewDocument = async (kycId: string) => {
+    setDocModal({ kycId, blobUrl: '', loading: true });
+    const res = await kycApi.fetchDocumentBlobUrl(kycId);
+    if (res.ok && res.data) setDocModal({ kycId, blobUrl: res.data, loading: false });
+    else {
+      toast(res.error || 'Failed to load document', false);
+      setDocModal(null);
+    }
+  };
+
+  const closeDocModal = () => {
+    if (docModal?.blobUrl) URL.revokeObjectURL(docModal.blobUrl);
+    setDocModal(null);
+  };
+
+  return (
+    <div>
+      {error && <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}><div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div></div>}
+      <div className="card">
+        {subs?.length === 0 && <div className="empty-state"><div className="es-ico">🪪</div><div className="es-t">No pending KYC submissions</div></div>}
+        {(subs || []).map((s) => {
+          const applicant = typeof s.userId === 'object' ? s.userId : null;
+          return (
+            <div key={s._id} className="list-row" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              <div className="grow">
+                <div className="t">{s.firstName} {s.lastName}</div>
+                <div className="m">
+                  {applicant?.email || 'unknown'} · {s.idType.replace('_', ' ')} #{s.idNumber} · risk: {s.riskLevel} ·
+                  {' '}submitted {new Date(s.submittedAt).toLocaleString()}
+                </div>
+                <input
+                  className="input input-sm"
+                  placeholder="Review notes (optional)"
+                  style={{ marginTop: 6, maxWidth: 320 }}
+                  value={notes[s._id] || ''}
+                  onChange={(e) => setNotes((n) => ({ ...n, [s._id]: e.target.value }))}
+                />
+              </div>
+              <button className="btn btn-ghost btn-sm" onClick={() => viewDocument(s._id)}>View document</button>
+              <button className="btn btn-primary btn-sm" onClick={() => review(s._id, 'approved')}>Approve</button>
+              <button className="btn btn-danger btn-sm" style={{ marginLeft: 6 }} onClick={() => review(s._id, 'rejected')}>Reject</button>
+            </div>
+          );
+        })}
+      </div>
+
+      {docModal && (
+        <Modal title="ID document" onClose={closeDocModal}>
+          {docModal.loading ? (
+            <div className="tiny" style={{ padding: 20 }}>Loading…</div>
+          ) : docModal.blobUrl.startsWith('blob:') ? (
+            <img src={docModal.blobUrl} alt="ID document" style={{ maxWidth: '100%', borderRadius: 8 }} onError={() => window.open(docModal.blobUrl, '_blank')} />
+          ) : null}
+          <div className="modal-actions"><button className="btn btn-ghost" onClick={() => window.open(docModal.blobUrl, '_blank')}>Open in new tab</button></div>
+        </Modal>
+      )}
     </div>
   );
 }

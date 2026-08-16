@@ -5,6 +5,7 @@ import { useStoreVersion, toast } from '../../components/ui';
 import { api } from '../../services/api';
 import { handleApiError } from '../../services/errorHandler';
 import { useWizard } from '../../hooks/useWizard';
+import { validateMnemonicPhrase } from '../../services/wallet';
 import { Shield, Lock, Download, Copy, Eye, EyeOff, RefreshCw, ChevronRight, Check, AlertTriangle, Key, Wallet, ArrowLeft } from 'lucide-react';
 
 /**
@@ -361,16 +362,17 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   };
 
   const handleImportPhrase = async () => {
-    const words = importPhrase.trim().split(/\s+/).filter(Boolean);
-    if (words.length !== 24) {
-      setError('Please enter exactly 24 words');
+    const validation = validateMnemonicPhrase(importPhrase);
+    if (!validation.valid) {
+      setError(validation.message || 'Invalid recovery phrase');
       return;
     }
     if (importPassword.length < 8) {
       setError('Password must be at least 8 characters');
       return;
     }
-    
+
+    const words = importPhrase.trim().toLowerCase().split(/\s+/).filter(Boolean);
     setLoading(true);
     try {
       const res = await api.post<{ success: boolean; address: string; accountId: string; chainId: string }>('/api/wallet/create', { mnemonic: words.join(' ') });
@@ -444,20 +446,6 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       setError('Failed to restore wallet');
     }
     setLoading(false);
-  };
-
-  const handleProviderConnect = (provider: string) => {
-    toast(`Connecting to ${provider}... (demo)`);
-    setTimeout(() => {
-      const mockAddress = 'mall1' + Math.random().toString(16).slice(2, 32);
-      setWalletAddress(mockAddress);
-      st.wallet.address = mockAddress;
-      st.wallet.accountId = mockAddress;
-      st.wallet.chainId = 'mallchain-1';
-      st.wallet.createdAt = Date.now();
-      store.commit();
-      goTo('success');
-    }, 1000);
   };
 
   const handleCopyAddress = () => {
@@ -1219,51 +1207,8 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       </div>
       <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Choose how to connect</h1>
       <p style={{ color: 'var(--txt-3)', fontSize: 14, marginBottom: 24 }}>
-        Pick a wallet app, retrieve a phrase you saved here before, or import one directly.
+        Retrieve a phrase you saved here before, or import one directly. (Connecting via an external wallet app/hardware device isn't available yet.)
       </p>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, marginBottom: 24 }}>
-        {['Mallchain Wallet', 'WalletConnect', 'Ledger', 'Coinbase Wallet'].map((provider) => (
-          <button
-            key={provider}
-            onClick={() => handleProviderConnect(provider)}
-            style={{
-              padding: 14,
-              background: 'var(--bg-2)',
-              border: '1px solid var(--border)',
-              borderRadius: 12,
-              color: 'var(--txt)',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              transition: 'border-color 0.15s'
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--gold)'}
-            onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
-          >
-            <div style={{ 
-              width: 24, 
-              height: 24, 
-              borderRadius: 6, 
-              background: provider === 'Mallchain Wallet' ? 'linear-gradient(135deg, #ffd35c, #c9781a)' : 
-                     provider === 'WalletConnect' ? '#3d95ce' :
-                     provider === 'Ledger' ? '#111' :
-                     '#1652f0',
-              flexShrink: 0
-            }} />
-            {provider}
-          </button>
-        ))}
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '24px 0' }}>
-        <div style={{ flex: 1, height: 1, background: 'var(--border-soft)' }} />
-        <span style={{ fontSize: 11, color: 'var(--txt-3)', fontWeight: 600, letterSpacing: 0.5 }}>OR IMPORT MANUALLY</span>
-        <div style={{ flex: 1, height: 1, background: 'var(--border-soft)' }} />
-      </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <button
@@ -1543,7 +1488,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>
           <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
-            Recovery phrase or private key <span style={{ color: 'var(--txt-3)', fontWeight: 400 }}>24 words, or a private key</span>
+            Recovery phrase <span style={{ color: 'var(--txt-3)', fontWeight: 400 }}>12, 15, 18, 21, or 24 words</span>
           </label>
           <textarea
             value={importPhrase}

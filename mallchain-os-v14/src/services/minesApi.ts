@@ -69,6 +69,8 @@ export interface MinesProfile {
   id: string;
   username: string | null;
   email: string;
+  phone: string | null;
+  name: string | null;
   mlpts_balance: number;
   mallcoin_balance: number;
   streak_count: number;

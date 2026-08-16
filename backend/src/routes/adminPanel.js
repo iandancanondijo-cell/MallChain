@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const User = require('../models/user');
 const AuditLog = require('../models/AuditLog');
 const ValidatorApplication = require('../models/ValidatorApplication');
+const KYC = require('../models/kyc');
 const TaskSubmission = require('../models/TaskSubmission');
 const LiquidityReconciliation = require('../models/LiquidityReconciliation');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
@@ -28,18 +29,27 @@ router.post('/bootstrap', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'email and password are required' });
     }
 
+    // findOneAndUpdate(..., {upsert: true}) here would silently overwrite
+    // the password and promote an EXISTING regular user's account the
+    // moment this endpoint's only guard (zero admins in the DB) is ever
+    // true — a fresh deploy, or every admin having been deleted — with no
+    // verification the caller controls that email. Create-only: never touch
+    // an existing user document.
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(409).json({ ok: false, error: 'An account with this email already exists. Bootstrap only creates a brand-new superadmin account.' });
+    }
+
     const bcrypt = require('bcryptjs');
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const user = await User.findOneAndUpdate(
-      { email },
-      { $set: { password: hashedPassword, role: 'superadmin' } },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    ).select('-password');
+    const user = await User.create({ email, password: hashedPassword, role: 'superadmin' });
+    const publicUser = user.toObject();
+    delete publicUser.password;
 
     await AuditLog.create({ action: 'admin_bootstrap', actor: email, details: 'First superadmin created via bootstrap', outcome: 'success' });
 
-    return res.json({ ok: true, user, message: 'Superadmin created successfully' });
+    return res.json({ ok: true, user: publicUser, message: 'Superadmin created successfully' });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
@@ -95,11 +105,18 @@ router.get('/dashboard', async (req, res) => {
 });
 
 // ============ USER MANAGEMENT ============
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 router.get('/users', async (req, res) => {
   try {
     const { page = 0, limit = 50, search, role, banned } = req.query;
     const query = {};
-    if (search) query.$or = [{ email: { $regex: search, $options: 'i' } }];
+    // search was interpolated straight into $regex — a crafted pattern
+    // (e.g. catastrophic-backtracking like (a+)+$) could hang the query.
+    // Escaping regex metacharacters keeps this a plain substring match.
+    if (search) query.$or = [{ email: { $regex: escapeRegex(search), $options: 'i' } }];
     if (role) query.role = role;
     if (banned !== undefined) query.banned = banned === 'true';
 
@@ -111,6 +128,11 @@ router.get('/users', async (req, res) => {
       User.countDocuments(query),
     ]);
 
+    // Bulk PII read (email + profile fields for up to 200 users at once) —
+    // an admin browsing/searching every user is exactly the kind of
+    // reconnaissance-style access a compliance audit trail should capture,
+    // same as the KYC bulk read below.
+    await auditLog('users_search', req.user, { search: search || null, role: role || null, resultCount: users.length });
     return res.json({ ok: true, users, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
@@ -121,6 +143,7 @@ router.get('/users/:id', async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('-password').lean();
     if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
+    await auditLog('user_view', req.user, { targetUserId: req.params.id, email: user.email });
     return res.json({ ok: true, user });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
@@ -133,8 +156,18 @@ router.put('/users/:id/role', requireSuperAdmin, async (req, res) => {
     if (!['user', 'admin', 'superadmin'].includes(role)) {
       return res.status(400).json({ ok: false, error: 'invalid role' });
     }
+
+    const existing = await User.findById(req.params.id).select('role');
+    if (!existing) return res.status(404).json({ ok: false, error: 'user not found' });
+    // A superadmin's role is permanent — it can never be changed to
+    // something else through this endpoint, by anyone, including another
+    // superadmin. Prevents accidental or malicious demotion of the account
+    // that ultimately controls role assignment for everyone else.
+    if (existing.role === 'superadmin' && role !== 'superadmin') {
+      return res.status(403).json({ ok: false, error: 'A superadmin account\'s role cannot be changed' });
+    }
+
     const user = await User.findByIdAndUpdate(req.params.id, { $set: { role } }, { new: true }).select('-password');
-    if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
 
     await auditLog('user_role_change', req.user, { targetUserId: req.params.id, newRole: role });
     notify(user._id, { kind: 'system', title: 'Account role updated', body: `Your account role is now ${role}` });
@@ -219,6 +252,62 @@ router.post('/validators/applications/:id/review', async (req, res) => {
 
     await auditLog('validator_review', req.user, { applicationId: req.params.id, action, applicantAddress: application.applicantAddress });
     return res.json({ ok: true, application });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ============ KYC REVIEW ============
+router.get('/kyc/pending', async (req, res) => {
+  try {
+    const { page = 0, limit = 50 } = req.query;
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const skip = Math.max(Number(page) || 0, 0) * safeLimit;
+    const query = { status: { $in: ['pending', 'review'] } };
+
+    const [submissions, total] = await Promise.all([
+      KYC.find(query)
+        .populate('userId', 'email username')
+        .sort({ submittedAt: 1 })
+        .skip(skip)
+        .limit(safeLimit)
+        .lean(),
+      KYC.countDocuments(query),
+    ]);
+
+    // Bulk read of full KYC PII (name, DOB, nationality, ID number, address,
+    // income, PEP status) for every pending applicant — this is exactly the
+    // kind of access a compliance audit trail needs to capture, not just
+    // approve/reject decisions.
+    await auditLog('kyc_pending_view', req.user, { resultCount: submissions.length });
+    return res.json({ ok: true, submissions, total });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/kyc/:id/review', async (req, res) => {
+  try {
+    const { action, notes } = req.body;
+    if (!['approved', 'rejected'].includes(action)) {
+      return res.status(400).json({ ok: false, error: 'action must be approved or rejected' });
+    }
+
+    const kyc = await KYC.findById(req.params.id);
+    if (!kyc) return res.status(404).json({ ok: false, error: 'KYC submission not found' });
+
+    kyc.status = action;
+    kyc.reviewedAt = new Date();
+    kyc.reviewedBy = req.user._id;
+    kyc.notes = notes || '';
+    await kyc.save();
+
+    if (action === 'approved') {
+      await User.findByIdAndUpdate(kyc.userId, { kycLevel: 2 });
+    }
+
+    await auditLog('kyc_review', req.user, { kycId: req.params.id, action, applicantId: String(kyc.userId) });
+    return res.json({ ok: true, kyc });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }

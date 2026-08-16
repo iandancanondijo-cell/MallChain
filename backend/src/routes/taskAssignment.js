@@ -299,7 +299,12 @@ router.post('/tasks/:id/vote', verifyToken, async (req, res) => {
       },
       { upsert: true, new: true }
     );
+    // Weight uses the reviewer's reputation as it stood going into this vote
+    // (the atomic $inc above only touched the raw counters — the derived
+    // reputation formula is recomputed and persisted just below, for the
+    // *next* vote/read to see).
     const weight = minesReviewService.computeWeight(reviewer);
+    await minesReviewService.refreshReviewerStats(validatorId);
 
     // Record vote
     if (!task.validator_votes) task.validator_votes = {};
@@ -313,13 +318,14 @@ router.post('/tasks/:id/vote', verifyToken, async (req, res) => {
       task.votes_no_weight = (task.votes_no_weight || 0) + weight;
     }
 
+    // Left as 'voting' here even once every reviewer has cast a vote —
+    // checkAndResolve() (below) independently recomputes that same
+    // "all voted" condition and is the one place allowed to advance
+    // assignment_status past 'voting', since only it also runs settle().
+    // Setting 'vote_complete' here would make checkAndResolve's own guard
+    // (`if (!['assigned','voting'].includes(...)) return null;`) bail out
+    // immediately, skipping settlement entirely.
     task.assignment_status = 'voting';
-
-    // Check if all assigned validators have voted
-    const totalVotes = (task.votes_yes || 0) + (task.votes_no || 0);
-    if (totalVotes >= assignedList.length) {
-      task.assignment_status = 'vote_complete';
-    }
 
     await task.save();
 

@@ -1,6 +1,7 @@
 /** Real DevHub API-key management — wraps backend/src/routes/devhub.js. */
 import { api } from './api';
 import { type ApiResult } from './api';
+import { config } from './config';
 
 export interface DevApiKey {
   _id: string;
@@ -44,6 +45,21 @@ class DevHubApi {
 
   async usage(): Promise<ApiResult<UsageStats>> {
     return unwrap(api.get('/api/devhub/usage'));
+  }
+
+  /** Sends the key as the x-api-key header (not a bearer token/body field — that's what the backend actually checks) to really validate it and increment its usage counter. */
+  async testKey(key: string): Promise<ApiResult<{ valid: boolean; keyName: string; used: number }>> {
+    try {
+      const res = await fetch(`${config.apiBaseUrl}/api/devhub/test`, {
+        method: 'POST',
+        headers: { 'x-api-key': key },
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || json?.ok === false) return { ok: false, error: json?.error || `HTTP ${res.status}` };
+      return { ok: true, data: json.data };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
   }
 }
 

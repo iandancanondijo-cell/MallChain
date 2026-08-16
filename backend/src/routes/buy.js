@@ -12,7 +12,6 @@ const { Console } = require('console');
 const { stdout, stderr } = require('process');
 const { Buffer } = require('buffer');
 const console = new Console(stdout, stderr);
-const IdempotencyKey = require('../models/IdempotencyKey');
 const { initiateB2CPayout } = require('../services/b2cPayoutService');
 const B2CPayout = require('../models/B2CPayout');
 const { executeSellBurnWorkflow } = require("../services/sellBurnService");
@@ -331,51 +330,6 @@ async function processMpesaCallback(data) {
   return { ResultCode: 0 };
 }
 
-async function handleStandaloneCredit({ walletAddress, amount, creditMlcns, idempotencyKey }) {
-  let mlcns = Number(amount);
-  if (mlcns > 1_000_000) mlcns = mlcns / 1_000_000;
-  if (!Number.isFinite(mlcns) || mlcns <= 0) {
-    const err = new Error('amount required when quoteId is omitted');
-    err.status = 400;
-    throw err;
-  }
-
-  // Check idempotency if key provided
-  if (idempotencyKey) {
-    const existing = await IdempotencyKey.findOne({ key: idempotencyKey });
-    if (existing) {
-      if (existing.status === 'success') {
-        return { ok: true, success: true, cached: true, ...existing.result };
-      }
-      if (existing.status === 'failed') {
-        const err = new Error(existing.error || 'Previous attempt failed');
-        err.status = 400;
-        throw err;
-      }
-    }
-  }
-
-  const result = await creditMlcns(walletAddress, mlcns);
-
-  // Record idempotency result
-  if (idempotencyKey) {
-    await IdempotencyKey.updateOne(
-      { key: idempotencyKey },
-      {
-        $set: {
-          walletAddress,
-          amount: mlcns,
-          result,
-          status: 'success',
-        },
-      },
-      { upsert: true }
-    );
-  }
-
-  return { ok: true, success: true, ...result };
-}
-
 async function applyLiquidityAfterCredit(purchase, creditAddress, mlcnsAmount) {
   const fiatAmount = Number(purchase.fiatAmount || 0);
   if (fiatAmount <= 0) return null;
@@ -590,14 +544,16 @@ router.post('/mpesa/callback', validate(schemas.mpesaCallback), async (req, res)
 // A future sell implementation should likewise adjust supply and liquidity when Mallcoins are redeemed.
 router.post('/credit', validate(schemas.buyCredit), async (req, res) => {
   try {
-    const { quoteId, walletAddress, amount, idempotencyKey } = req.validatedBody;
+    const { quoteId, walletAddress } = req.validatedBody;
     const { creditMlcns } = require('../services/faucetService');
 
-    if (!quoteId) {
-      const response = await handleStandaloneCredit({ walletAddress, amount, creditMlcns, idempotencyKey });
-      return res.json(response);
-    }
-
+    // quoteId is now required (see buyCreditSchema) — handleReservedCredit
+    // only credits after MallcoinPurchase.status === 'confirmed', i.e. a
+    // real M-Pesa payment the /mpesa/callback route already verified. The
+    // old no-quoteId branch let a caller mint MLCNS with just an amount and
+    // no auth or payment reference at all — confirmed live as unauthenticated
+    // free minting, up to FAUCET_MAX_MLCNS per request. No legitimate caller
+    // ever used it (buyApi.ts's credit() always sends quoteId).
     const response = await handleReservedCredit({ quoteId, walletAddress, creditMlcns });
     return res.json(response);
   } catch (e) {

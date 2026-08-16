@@ -21,7 +21,13 @@ import { MSG_TRANSFER_MALLCOIN, createMlcoinRegistry } from './mlcoinProto';
 const MLCNS_DECIMALS = 6;
 const DEFAULT_GAS_LIMIT = 250000;
 
-export class MallcoinTxError extends Error {}
+export class MallcoinTxError extends Error {
+  code?: string;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
+}
 
 interface AccountInfo {
   accountNumber: number;
@@ -36,7 +42,10 @@ async function fetchAccountInfo(address: string): Promise<AccountInfo> {
     throw new MallcoinTxError(res.error || 'Failed to fetch account info from the chain');
   }
   if (res.data.notFound) {
-    throw new MallcoinTxError('This account has no on-chain history yet — it needs a small stake balance for gas before it can send.');
+    throw new MallcoinTxError(
+      'This account has no on-chain history yet — it needs a small stake balance for gas before it can send.',
+      'NO_ON_CHAIN_HISTORY'
+    );
   }
   return { accountNumber: res.data.accountNumber, sequence: res.data.sequence };
 }

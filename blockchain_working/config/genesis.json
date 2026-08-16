@@ -3,11 +3,9 @@
   "app_version": "",
   "genesis_time": "2026-07-07T10:55:42.289704608Z",
   "chain_id": "mallchain-1",
-  "initial_height": 1,
+  "initial_height": 0,
   "app_hash": null,
   "app_state": {
-    "06-solomachine": null,
-    "07-tendermint": null,
     "auth": {
       "params": {
         "max_memo_characters": "256",
@@ -26,6 +24,13 @@
         },
         {
           "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall1y2tvfjcm6p23cgmzn3gw3y87wznxexzca4lc7l",
+          "pub_key": null,
+          "account_number": "18",
+          "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
           "address": "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6",
           "pub_key": null,
           "account_number": "1",
@@ -33,58 +38,9 @@
         },
         {
           "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5",
+          "address": "mall18u7572gkr30nvfvucrghuplgk3cky253fssl28",
           "pub_key": null,
-          "account_number": "2",
-          "sequence": "0"
-        },
-        {
-          "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall1nma8m9jl3e5mscr0rrn93hq43thw7ve6xfee4f",
-          "pub_key": null,
-          "account_number": "3",
-          "sequence": "0"
-        },
-        {
-          "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall1ldhuk4ghzharsh2swwmda8mx49rjmhe3my96rh",
-          "pub_key": null,
-          "account_number": "4",
-          "sequence": "0"
-        },
-        {
-          "@type": "/cosmos.auth.v1beta1.ModuleAccount",
-          "base_account": {
-            "address": "mall1fl48vsnmsdzcv85q5d2q4z5ajdha8yu37gu5ml",
-            "pub_key": null,
-            "account_number": "0",
-            "sequence": "0"
-          },
-          "name": "bonded_tokens_pool",
-          "permissions": [
-            "burner",
-            "staker"
-          ]
-        },
-        {
-          "@type": "/cosmos.auth.v1beta1.ModuleAccount",
-          "base_account": {
-            "address": "mall1tygms3xhhs3yv487phx3dw4a95jn7t7l2gq9dt",
-            "pub_key": null,
-            "account_number": "0",
-            "sequence": "0"
-          },
-          "name": "not_bonded_tokens_pool",
-          "permissions": [
-            "burner",
-            "staker"
-          ]
-        },
-        {
-          "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall1ednl2qk0a35c4zl493sq6rt96glugzvlf56qvy",
-          "pub_key": null,
-          "account_number": "5",
+          "account_number": "16",
           "sequence": "0"
         },
         {
@@ -96,16 +52,140 @@
         },
         {
           "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
+          "address": "mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5",
           "pub_key": null,
-          "account_number": "7",
+          "account_number": "2",
           "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.ModuleAccount",
+          "base_account": {
+            "address": "mall1fl48vsnmsdzcv85q5d2q4z5ajdha8yu37gu5ml",
+            "pub_key": null,
+            "account_number": "9",
+            "sequence": "0"
+          },
+          "name": "bonded_tokens_pool",
+          "permissions": [
+            "burner",
+            "staking"
+          ]
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.ModuleAccount",
+          "base_account": {
+            "address": "mall1tygms3xhhs3yv487phx3dw4a95jn7t7l2gq9dt",
+            "pub_key": null,
+            "account_number": "10",
+            "sequence": "0"
+          },
+          "name": "not_bonded_tokens_pool",
+          "permissions": [
+            "burner",
+            "staking"
+          ]
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.ModuleAccount",
+          "base_account": {
+            "address": "mall10d07y265gmmuvt4z0w9aw880jnsr700j33x75m",
+            "pub_key": null,
+            "account_number": "13",
+            "sequence": "0"
+          },
+          "name": "gov",
+          "permissions": [
+            "burner"
+          ]
         },
         {
           "@type": "/cosmos.auth.v1beta1.BaseAccount",
           "address": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
-          "pub_key": null,
+          "pub_key": {
+            "@type": "/cosmos.crypto.secp256k1.PubKey",
+            "key": "AwtvkxoL72i3f1vMXWW0Fp2mS9PLStiPQxnnaECudMlq"
+          },
           "account_number": "8",
+          "sequence": "26"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.ModuleAccount",
+          "base_account": {
+            "address": "mall1jv65s3grqf6v6jl3dp4t6c9t9rk99cd8vv38th",
+            "pub_key": null,
+            "account_number": "12",
+            "sequence": "0"
+          },
+          "name": "distribution",
+          "permissions": []
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall1nma8m9jl3e5mscr0rrn93hq43thw7ve6xfee4f",
+          "pub_key": null,
+          "account_number": "3",
+          "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall14cqeeu5q9k0dm9qen8yey8v84c5kaxrcvr0n9r",
+          "pub_key": null,
+          "account_number": "15",
+          "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall1ednl2qk0a35c4zl493sq6rt96glugzvlf56qvy",
+          "pub_key": null,
+          "account_number": "5",
+          "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
+          "pub_key": {
+            "@type": "/cosmos.crypto.secp256k1.PubKey",
+            "key": "A5JU/VQMERknNooW76aW6+zyrYN4KkWzNqa5VhGhVPHW"
+          },
+          "account_number": "7",
+          "sequence": "3"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.ModuleAccount",
+          "base_account": {
+            "address": "mall1m3h30wlvsf8llruxtpukdvsy0km2kum8rzjr9g",
+            "pub_key": null,
+            "account_number": "14",
+            "sequence": "0"
+          },
+          "name": "mint",
+          "permissions": [
+            "minter"
+          ]
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall1u4630e60lufne23my89ktkk43mx70tqtcmlhed",
+          "pub_key": null,
+          "account_number": "17",
+          "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.ModuleAccount",
+          "base_account": {
+            "address": "mall17xpfvakm2amg962yls6f84z3kell8c5lm2kmf4",
+            "pub_key": null,
+            "account_number": "11",
+            "sequence": "0"
+          },
+          "name": "fee_collector",
+          "permissions": []
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall1ldhuk4ghzharsh2swwmda8mx49rjmhe3my96rh",
+          "pub_key": null,
+          "account_number": "4",
           "sequence": "0"
         }
       ]
@@ -137,6 +217,15 @@
           ]
         },
         {
+          "address": "mall1y2tvfjcm6p23cgmzn3gw3y87wznxexzca4lc7l",
+          "coins": [
+            {
+              "denom": "stake",
+              "amount": "1000000"
+            }
+          ]
+        },
+        {
           "address": "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6",
           "coins": [
             {
@@ -146,6 +235,24 @@
             {
               "denom": "stake",
               "amount": "100000000"
+            }
+          ]
+        },
+        {
+          "address": "mall18u7572gkr30nvfvucrghuplgk3cky253fssl28",
+          "coins": [
+            {
+              "denom": "stake",
+              "amount": "1000000"
+            }
+          ]
+        },
+        {
+          "address": "mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd",
+          "coins": [
+            {
+              "denom": "stake",
+              "amount": "10000000"
             }
           ]
         },
@@ -163,6 +270,46 @@
           ]
         },
         {
+          "address": "mall1fl48vsnmsdzcv85q5d2q4z5ajdha8yu37gu5ml",
+          "coins": [
+            {
+              "denom": "stake",
+              "amount": "1000000000"
+            }
+          ]
+        },
+        {
+          "address": "mall10d07y265gmmuvt4z0w9aw880jnsr700j33x75m",
+          "coins": [
+            {
+              "denom": "stake",
+              "amount": "1000000"
+            }
+          ]
+        },
+        {
+          "address": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
+          "coins": [
+            {
+              "denom": "mlc",
+              "amount": "10000000000"
+            },
+            {
+              "denom": "stake",
+              "amount": "5973159"
+            }
+          ]
+        },
+        {
+          "address": "mall1jv65s3grqf6v6jl3dp4t6c9t9rk99cd8vv38th",
+          "coins": [
+            {
+              "denom": "stake",
+              "amount": "13524"
+            }
+          ]
+        },
+        {
           "address": "mall1nma8m9jl3e5mscr0rrn93hq43thw7ve6xfee4f",
           "coins": [
             {
@@ -176,20 +323,11 @@
           ]
         },
         {
-          "address": "mall1ldhuk4ghzharsh2swwmda8mx49rjmhe3my96rh",
+          "address": "mall14cqeeu5q9k0dm9qen8yey8v84c5kaxrcvr0n9r",
           "coins": [
             {
               "denom": "stake",
-              "amount": "1000000000"
-            }
-          ]
-        },
-        {
-          "address": "mall1fl48vsnmsdzcv85q5d2q4z5ajdha8yu37gu5ml",
-          "coins": [
-            {
-              "denom": "stake",
-              "amount": "1000000000"
+              "amount": "1000000"
             }
           ]
         },
@@ -207,19 +345,6 @@
           ]
         },
         {
-          "address": "mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd",
-          "coins": [
-            {
-              "denom": "mlc",
-              "amount": "0"
-            },
-            {
-              "denom": "stake",
-              "amount": "10000000"
-            }
-          ]
-        },
-        {
           "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
           "coins": [
             {
@@ -228,20 +353,25 @@
             },
             {
               "denom": "stake",
-              "amount": "10000000"
+              "amount": "8984000"
             }
           ]
         },
         {
-          "address": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
+          "address": "mall1u4630e60lufne23my89ktkk43mx70tqtcmlhed",
           "coins": [
             {
-              "denom": "mlc",
-              "amount": "10000000000"
-            },
+              "denom": "stake",
+              "amount": "1000000"
+            }
+          ]
+        },
+        {
+          "address": "mall1ldhuk4ghzharsh2swwmda8mx49rjmhe3my96rh",
+          "coins": [
             {
               "denom": "stake",
-              "amount": "10000000"
+              "amount": "1000662617"
             }
           ]
         }
@@ -253,7 +383,7 @@
         },
         {
           "denom": "stake",
-          "amount": "2440000000"
+          "amount": "2440633300"
         }
       ],
       "denom_metadata": [],
@@ -263,7 +393,6 @@
       "account_permissions": [],
       "disabled_type_urls": []
     },
-    "consensus": null,
     "distribution": {
       "params": {
         "community_tax": "0.020000000000000000",
@@ -272,54 +401,98 @@
         "withdraw_addr_enabled": true
       },
       "fee_pool": {
-        "community_pool": []
+        "community_pool": [
+          {
+            "denom": "stake",
+            "amount": "13524.000000000000000000"
+          }
+        ]
       },
       "delegator_withdraw_infos": [],
-      "previous_proposer": "",
-      "outstanding_rewards": [],
-      "validator_accumulated_commissions": [],
-      "validator_historical_rewards": [],
-      "validator_current_rewards": [],
-      "delegator_starting_infos": [],
+      "previous_proposer": "mallvalcons1qfshv44jcayewd432htvr4seg6xasx2zg7hme2",
+      "outstanding_rewards": [
+        {
+          "validator_address": "mallvaloper1ldhuk4ghzharsh2swwmda8mx49rjmhe3xckvnm",
+          "outstanding_rewards": []
+        }
+      ],
+      "validator_accumulated_commissions": [
+        {
+          "validator_address": "mallvaloper1ldhuk4ghzharsh2swwmda8mx49rjmhe3xckvnm",
+          "accumulated": {
+            "commission": []
+          }
+        }
+      ],
+      "validator_historical_rewards": [
+        {
+          "validator_address": "mallvaloper1ldhuk4ghzharsh2swwmda8mx49rjmhe3xckvnm",
+          "period": "1",
+          "rewards": {
+            "cumulative_reward_ratio": [],
+            "reference_count": 2
+          }
+        }
+      ],
+      "validator_current_rewards": [
+        {
+          "validator_address": "mallvaloper1ldhuk4ghzharsh2swwmda8mx49rjmhe3xckvnm",
+          "rewards": {
+            "rewards": [],
+            "period": "2"
+          }
+        }
+      ],
+      "delegator_starting_infos": [
+        {
+          "delegator_address": "mall1ldhuk4ghzharsh2swwmda8mx49rjmhe3my96rh",
+          "validator_address": "mallvaloper1ldhuk4ghzharsh2swwmda8mx49rjmhe3xckvnm",
+          "starting_info": {
+            "previous_period": "1",
+            "stake": "1000000000.000000000000000000",
+            "height": "0"
+          }
+        }
+      ],
       "validator_slash_events": []
     },
     "epochs": {
       "epochs": [
         {
           "identifier": "day",
-          "start_time": "0001-01-01T00:00:00Z",
+          "start_time": "2026-07-07T10:55:42.289704608Z",
           "duration": "86400s",
-          "current_epoch": "0",
-          "current_epoch_start_time": "0001-01-01T00:00:00Z",
-          "epoch_counting_started": false,
-          "current_epoch_start_height": "0"
+          "current_epoch": "40",
+          "current_epoch_start_time": "2026-08-15T10:55:42.289704608Z",
+          "epoch_counting_started": true,
+          "current_epoch_start_height": "11687"
         },
         {
           "identifier": "hour",
-          "start_time": "0001-01-01T00:00:00Z",
+          "start_time": "2026-07-07T10:55:42.289704608Z",
           "duration": "3600s",
-          "current_epoch": "0",
-          "current_epoch_start_time": "0001-01-01T00:00:00Z",
-          "epoch_counting_started": false,
-          "current_epoch_start_height": "0"
+          "current_epoch": "938",
+          "current_epoch_start_time": "2026-08-15T11:55:42.289704608Z",
+          "epoch_counting_started": true,
+          "current_epoch_start_height": "12352"
         },
         {
           "identifier": "minute",
-          "start_time": "0001-01-01T00:00:00Z",
+          "start_time": "2026-07-07T10:55:42.289704608Z",
           "duration": "60s",
-          "current_epoch": "0",
-          "current_epoch_start_time": "0001-01-01T00:00:00Z",
-          "epoch_counting_started": false,
-          "current_epoch_start_height": "0"
+          "current_epoch": "12666",
+          "current_epoch_start_time": "2026-07-16T06:00:42.289704608Z",
+          "epoch_counting_started": true,
+          "current_epoch_start_height": "12666"
         },
         {
           "identifier": "week",
-          "start_time": "0001-01-01T00:00:00Z",
+          "start_time": "2026-07-07T10:55:42.289704608Z",
           "duration": "604800s",
-          "current_epoch": "0",
-          "current_epoch_start_time": "0001-01-01T00:00:00Z",
-          "epoch_counting_started": false,
-          "current_epoch_start_height": "0"
+          "current_epoch": "6",
+          "current_epoch_start_time": "2026-08-11T10:55:42.289704608Z",
+          "epoch_counting_started": true,
+          "current_epoch_start_height": "6"
         }
       ]
     },
@@ -333,10 +506,49 @@
       "gen_txs": []
     },
     "gov": {
-      "starting_proposal_id": "1",
-      "deposits": [],
+      "starting_proposal_id": "2",
+      "deposits": [
+        {
+          "proposal_id": "1",
+          "depositor": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
+          "amount": [
+            {
+              "denom": "stake",
+              "amount": "1000000"
+            }
+          ]
+        }
+      ],
       "votes": [],
-      "proposals": [],
+      "proposals": [
+        {
+          "id": "1",
+          "messages": [],
+          "status": "PROPOSAL_STATUS_DEPOSIT_PERIOD",
+          "final_tally_result": {
+            "yes_count": "0",
+            "abstain_count": "0",
+            "no_count": "0",
+            "no_with_veto_count": "0"
+          },
+          "submit_time": "2026-08-15T12:20:01.811208794Z",
+          "deposit_end_time": "2026-08-17T12:20:01.811208794Z",
+          "total_deposit": [
+            {
+              "denom": "stake",
+              "amount": "1000000"
+            }
+          ],
+          "voting_start_time": null,
+          "voting_end_time": null,
+          "metadata": "ipfs://test",
+          "title": "E2E test proposal",
+          "summary": "Live end-to-end verification of real governance routing",
+          "proposer": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
+          "expedited": false,
+          "failed_reason": ""
+        }
+      ],
       "deposit_params": null,
       "voting_params": null,
       "tally_params": null,
@@ -394,7 +606,30 @@
         "next_client_sequence": "0"
       },
       "connection_genesis": {
-        "connections": [],
+        "connections": [
+          {
+            "id": "connection-localhost",
+            "client_id": "09-localhost",
+            "versions": [
+              {
+                "identifier": "1",
+                "features": [
+                  "ORDER_ORDERED",
+                  "ORDER_UNORDERED"
+                ]
+              }
+            ],
+            "state": "STATE_OPEN",
+            "counterparty": {
+              "client_id": "09-localhost",
+              "connection_id": "connection-localhost",
+              "prefix": {
+                "key_prefix": "aWJj"
+              }
+            },
+            "delay_period": "0"
+          }
+        ],
         "client_connection_paths": [],
         "next_connection_sequence": "0",
         "params": {
@@ -459,8 +694,8 @@
     },
     "mint": {
       "minter": {
-        "inflation": "0.130000000000000000",
-        "annual_provisions": "0.000000000000000000"
+        "inflation": "0.130101323437520619",
+        "annual_provisions": "317529615.850617120291981750"
       },
       "params": {
         "mint_denom": "stake",
@@ -477,30 +712,30 @@
       },
       "wallet_balance_map": [
         {
-          "index": "mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg",
-          "address": "mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg",
-          "balance": "160000000000000",
-          "locked": "160000000000000",
-          "unlock_time": "1926979200"
-        },
-        {
-          "index": "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6",
-          "address": "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6",
-          "balance": "1500000000000",
+          "index": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
+          "address": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
+          "balance": "2599928220",
           "locked": "0",
           "unlock_time": "0"
         },
         {
-          "index": "mall1nma8m9jl3e5mscr0rrn93hq43thw7ve6xfee4f",
-          "address": "mall1nma8m9jl3e5mscr0rrn93hq43thw7ve6xfee4f",
-          "balance": "3000000000000",
+          "index": "",
+          "address": "mall13pt60pt8nyd9vsht59sd8c8hql6h9xzs9fhm5n",
+          "balance": "1000000000",
           "locked": "0",
           "unlock_time": "0"
         },
         {
-          "index": "mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5",
-          "address": "mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5",
-          "balance": "90000000000000",
+          "index": "",
+          "address": "mall14cqeeu5q9k0dm9qen8yey8v84c5kaxrcvr0n9r",
+          "balance": "1000000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "",
+          "address": "mall18u7572gkr30nvfvucrghuplgk3cky253fssl28",
+          "balance": "1000000000",
           "locked": "0",
           "unlock_time": "0"
         },
@@ -512,9 +747,16 @@
           "unlock_time": "0"
         },
         {
+          "index": "mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5",
+          "address": "mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5",
+          "balance": "90000000000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
           "index": "mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd",
           "address": "mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd",
-          "balance": "0",
+          "balance": "400000000",
           "locked": "0",
           "unlock_time": "0"
         },
@@ -526,9 +768,51 @@
           "unlock_time": "0"
         },
         {
-          "index": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
-          "address": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
-          "balance": "10000000000",
+          "index": "mall1nma8m9jl3e5mscr0rrn93hq43thw7ve6xfee4f",
+          "address": "mall1nma8m9jl3e5mscr0rrn93hq43thw7ve6xfee4f",
+          "balance": "3000000000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg",
+          "address": "mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg",
+          "balance": "160000000000000",
+          "locked": "160000000000000",
+          "unlock_time": "1926979200"
+        },
+        {
+          "index": "",
+          "address": "mall1tx04243wsxlun26z4ljsvqs8ylxafk7fmefj3n",
+          "balance": "1000000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "",
+          "address": "mall1u4630e60lufne23my89ktkk43mx70tqtcmlhed",
+          "balance": "1000000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6",
+          "address": "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6",
+          "balance": "1500000000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "",
+          "address": "mall1y2tvfjcm6p23cgmzn3gw3y87wznxexzca4lc7l",
+          "balance": "1000000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "",
+          "address": "mall1ylfasdn9jqkvf20f0jf29244h5lz4yjghr5gcc",
+          "balance": "1000000000",
           "locked": "0",
           "unlock_time": "0"
         }
@@ -549,14 +833,18 @@
       "transaction_count": "0",
       "market_price": null,
       "kes_balance_map": [],
-      "trade_history": []
+      "trade_history": [],
+      "fees_accumulated": {
+        "transaction_fees": "71780",
+        "trading_fees": "0",
+        "conversion_fees": "0",
+        "last_distribution_time": "0"
+      }
     },
     "nft": {
       "classes": [],
       "entries": []
     },
-    "params": null,
-    "runtime": null,
     "slashing": {
       "params": {
         "signed_blocks_window": "100",
@@ -571,14 +859,19 @@
           "validator_signing_info": {
             "address": "mallvalcons1qfshv44jcayewd432htvr4seg6xasx2zg7hme2",
             "start_height": "0",
-            "index_offset": "0",
+            "index_offset": "12665",
             "jailed_until": "1970-01-01T00:00:00Z",
             "tombstoned": false,
             "missed_blocks_counter": "0"
           }
         }
       ],
-      "missed_blocks": []
+      "missed_blocks": [
+        {
+          "address": "mallvalcons1qfshv44jcayewd432htvr4seg6xasx2zg7hme2",
+          "missed_blocks": []
+        }
+      ]
     },
     "staking": {
       "params": {
@@ -589,11 +882,11 @@
         "bond_denom": "stake",
         "min_commission_rate": "0.000000000000000000"
       },
-      "last_total_power": "1",
+      "last_total_power": "1000",
       "last_validator_powers": [
         {
           "address": "mallvaloper1ldhuk4ghzharsh2swwmda8mx49rjmhe3xckvnm",
-          "power": "1"
+          "power": "1000"
         }
       ],
       "validators": [
@@ -624,7 +917,9 @@
             },
             "update_time": "2024-01-01T00:00:00Z"
           },
-          "min_self_delegation": "1"
+          "min_self_delegation": "1",
+          "unbonding_on_hold_ref_count": "0",
+          "unbonding_ids": []
         }
       ],
       "delegations": [
@@ -636,7 +931,7 @@
       ],
       "unbonding_delegations": [],
       "redelegations": [],
-      "exported": false
+      "exported": true
     },
     "transfer": {
       "port_id": "transfer",
@@ -651,6 +946,17 @@
     "vesting": {}
   },
   "consensus": {
+    "validators": [
+      {
+        "address": "02617656B2C7499736B155D6C1D619468DD81942",
+        "pub_key": {
+          "type": "tendermint/PubKeyEd25519",
+          "value": "iMRPBFkaN7AmngGC2qITQiWrr+h34DrH85AdwlMZ2Fc="
+        },
+        "power": "1000",
+        "name": "validator1"
+      }
+    ],
     "params": {
       "block": {
         "max_bytes": "4194304",
@@ -673,16 +979,5 @@
         "vote_extensions_enable_height": "0"
       }
     }
-  },
-  "validators": [
-    {
-      "address": "02617656B2C7499736B155D6C1D619468DD81942",
-      "pub_key": {
-        "type": "tendermint/PubKeyEd25519",
-        "value": "iMRPBFkaN7AmngGC2qITQiWrr+h34DrH85AdwlMZ2Fc="
-      },
-      "power": "1",
-      "name": "validator1"
-    }
-  ]
+  }
 }

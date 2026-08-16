@@ -1,8 +1,12 @@
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcryptjs');
 const logger = require('../utils/logger');
 const auth = require('../middleware/auth');
 const UserSettings = require('../models/UserSettings');
+const User = require('../models/user');
+const totp = require('../utils/totp');
+const { limiters } = require('../middleware/rateLimiter');
 
 function ok(data) { return { ok: true, data }; }
 function fail(err) {
@@ -151,37 +155,120 @@ router.post('/import', auth, async (req, res) => {
   }
 });
 
-// POST /api/settings/security/2fa/enable - Enable 2FA
-router.post('/security/2fa/enable', auth, async (req, res) => {
+// POST /api/settings/security/2fa/setup - Generate a real TOTP secret to enroll
+// (not yet active — /2fa/enable below activates it once a code from it verifies).
+router.post('/security/2fa/setup', auth, async (req, res) => {
   try {
     const settings = await getOrCreateSettings(req.user._id);
-
-    // In production, verify the 2FA code before enabling
-    const { code } = req.body;
-    if (!code) {
-      return res.status(400).json(fail('2FA code is required'));
-    }
-
-    settings.security.twoFactorEnabled = true;
-    settings.security.twoFactorEnabledAt = new Date();
+    const secret = totp.generateSecret();
+    settings.security.twoFactorPendingSecret = secret;
     await settings.save();
 
-    res.json(ok({ enabled: true, backupCodes: ['BACKUP1', 'BACKUP2', 'BACKUP3'] }));
+    res.json(ok({
+      secret,
+      // For manual entry into an authenticator app (no QR renderer wired
+      // up client-side) — the same information a QR code would encode.
+      otpauthUrl: totp.keyUri(secret, req.user.email || String(req.user._id)),
+    }));
   } catch (e) {
     res.status(500).json(fail(e));
   }
 });
 
-// POST /api/settings/security/2fa/disable - Disable 2FA
-router.post('/security/2fa/disable', auth, async (req, res) => {
+// POST /api/settings/security/2fa/enable - Verify a real TOTP code against
+// the pending secret before turning 2FA on. Replaces what used to accept
+// any non-empty code with no secret ever generated or checked — confirmed
+// live that this previously let 2FA be "enabled" with junk input while
+// providing zero actual login protection.
+router.post('/security/2fa/enable', auth, limiters.strict, async (req, res) => {
   try {
-    const settings = await getOrCreateSettings(req.user._id);
+    const settings = await UserSettings.findOne({ userId: req.user._id }).select('+security.twoFactorPendingSecret');
+    const pendingSecret = settings?.security?.twoFactorPendingSecret;
+    if (!pendingSecret) {
+      return res.status(400).json(fail('Call /2fa/setup first to generate a secret'));
+    }
+
+    const { code } = req.body;
+    if (!totp.verifyToken(pendingSecret, code)) {
+      return res.status(400).json(fail('Invalid or expired code'));
+    }
+
+    const backupCodes = totp.generateBackupCodes();
+    const backupCodeHashes = await Promise.all(backupCodes.map((c) => bcrypt.hash(c, 10)));
+
+    settings.security.twoFactorSecret = pendingSecret;
+    settings.security.twoFactorPendingSecret = undefined;
+    settings.security.twoFactorBackupCodeHashes = backupCodeHashes;
+    settings.security.twoFactorEnabled = true;
+    settings.security.twoFactorEnabledAt = new Date();
+    await settings.save();
+
+    // Backup codes are only ever returned this once — only their hashes are stored.
+    res.json(ok({ enabled: true, backupCodes }));
+  } catch (e) {
+    res.status(500).json(fail(e));
+  }
+});
+
+// POST /api/settings/security/2fa/disable - Disable 2FA (re-auth required:
+// a valid current TOTP/backup code, so a hijacked session token alone can't
+// turn off the account's second factor).
+router.post('/security/2fa/disable', auth, limiters.strict, async (req, res) => {
+  try {
+    const settings = await UserSettings.findOne({ userId: req.user._id })
+      .select('+security.twoFactorSecret +security.twoFactorBackupCodeHashes');
+    if (!settings?.security?.twoFactorEnabled) {
+      return res.status(400).json(fail('2FA is not enabled'));
+    }
+
+    const { code } = req.body;
+    const validTotp = code && totp.verifyToken(settings.security.twoFactorSecret, code);
+    let validBackup = false;
+    if (!validTotp && code) {
+      for (const hash of settings.security.twoFactorBackupCodeHashes || []) {
+        if (await bcrypt.compare(String(code).trim().toUpperCase(), hash)) { validBackup = true; break; }
+      }
+    }
+    if (!validTotp && !validBackup) {
+      return res.status(400).json(fail('A valid current 2FA code or backup code is required to disable 2FA'));
+    }
 
     settings.security.twoFactorEnabled = false;
     settings.security.twoFactorDisabledAt = new Date();
+    settings.security.twoFactorSecret = undefined;
+    settings.security.twoFactorBackupCodeHashes = undefined;
     await settings.save();
 
     res.json(ok({ enabled: false }));
+  } catch (e) {
+    res.status(500).json(fail(e));
+  }
+});
+
+// POST /api/settings/security/change-password - Self-service password
+// change while logged in. No password reset/change flow existed anywhere
+// in the backend before this — a user who suspected their account was
+// compromised had no way to rotate their own credentials.
+router.post('/security/change-password', auth, limiters.strict, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json(fail('currentPassword and newPassword are required'));
+    }
+    if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      return res.status(400).json(fail('New password must be at least 8 characters and include uppercase, lowercase, and a number'));
+    }
+
+    const user = await User.findById(req.user._id).select('+password');
+    if (!user?.password) return res.status(400).json(fail('This account has no password set (OAuth-only login)'));
+
+    const ok_ = await bcrypt.compare(currentPassword, user.password);
+    if (!ok_) return res.status(401).json(fail('Current password is incorrect'));
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    res.json(ok({ changed: true }));
   } catch (e) {
     res.status(500).json(fail(e));
   }

@@ -225,7 +225,13 @@ exports.getAccountInfo = async (req, res) => {
     throw new AppError(ErrorCodes.MISSING_REQUIRED_FIELD, 'Address is required', 400, { field: 'address' });
   }
 
-  const accountUrl = `${CHAIN_REST}/cosmos/auth/v1beta1/accounts/${address}`;
+  // account_info (not the older accounts/:address) — the latter 500s with
+  // "no registered implementations of type types.AccountI" for any account
+  // whose stored type isn't a plain BaseAccount (confirmed live against the
+  // treasury/faucet accounts, which are some non-standard account type on
+  // this chain). account_info returns the same account_number/sequence via
+  // a flat, type-erased shape that doesn't hit that interface-registry gap.
+  const accountUrl = `${CHAIN_REST}/cosmos/auth/v1beta1/account_info/${address}`;
   const resp = await axios.get(accountUrl, { timeout: 5000, validateStatus: () => true });
 
   if (resp.status >= 400) {
@@ -239,18 +245,17 @@ exports.getAccountInfo = async (req, res) => {
     });
   }
 
-  const account = resp.data?.account;
-  if (!account) {
+  const info = resp.data?.info;
+  if (!info) {
     return res.json({ success: true, accountNumber: 0, sequence: 0, pubkey: null, notFound: true });
   }
 
-  const baseAccount = account.base_account || account;
-  const accountNumber = Number(baseAccount.account_number ?? account.account_number);
-  const sequence = Number(baseAccount.sequence ?? account.sequence);
-  const pubkey = baseAccount.pub_key || account.pub_key || null;
+  const accountNumber = Number(info.account_number);
+  const sequence = Number(info.sequence);
+  const pubkey = info.pub_key || null;
 
   if (Number.isNaN(accountNumber) || Number.isNaN(sequence)) {
-    logger.error('getAccountInfo', 'Failed to parse account metadata', { address, account });
+    logger.error('getAccountInfo', 'Failed to parse account metadata', { address, info });
     throw new AppError(ErrorCodes.INTERNAL_ERROR, 'Failed to parse account metadata from chain response', 500, { address });
   }
 
@@ -343,7 +348,12 @@ exports.transferMlcns = async (req, res) => {
     }
 
     if (txBytes) {
+      // sendMallcoins reads req.validatedBody first, which at this point
+      // still holds the mlcns/transfer schema's shape (amountMlcns, no
+      // amount) — leaving it stale makes sendMallcoins see amount as
+      // undefined and reject an otherwise-valid transfer.
       req.body = { from, to, amount, txBytes };
+      req.validatedBody = req.body;
       return exports.sendMallcoins(req, res);
     }
 

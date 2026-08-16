@@ -200,12 +200,12 @@ export default function BlockchainExplorer() {
           <div className="stat-card">
             <div className="stat-label">Transactions in Block</div>
             <div className="stat-value">{stats.numTxs ?? '—'}</div>
-            <div className="stat-detail">Total: {fmtNum(stats.totalTxs)}</div>
+            <div className="stat-detail">Total: {stats.totalTxs === null ? '—' : fmtNum(stats.totalTxs)}</div>
           </div>
 
           <div className="stat-card">
             <div className="stat-label">Avg Block Time</div>
-            <div className="stat-value">{stats.averageBlockTime?.toFixed(2) || '—'}s</div>
+            <div className="stat-value">{stats.averageBlockTime === null ? '—' : `${stats.averageBlockTime.toFixed(2)}s`}</div>
             <div className="stat-detail">Block production rate</div>
           </div>
 
@@ -357,17 +357,41 @@ export default function BlockchainExplorer() {
                 <div className="info-row">
                   <span className="label">Status:</span>
                   <span className="value" style={{ color: selectedTx.status === 'success' ? 'var(--green)' : 'var(--red)' }}>
-                    {selectedTx.status.toUpperCase()}
+                    {(selectedTx.status || 'unknown').toUpperCase()}
                   </span>
                 </div>
                 <div className="info-row">
                   <span className="label">Timestamp:</span>
-                  <span className="value">{new Date(selectedTx.timestamp * 1000).toLocaleString()}</span>
+                  <span className="value">{selectedTx.timestamp ? new Date(selectedTx.timestamp * 1000).toLocaleString() : '—'}</span>
                 </div>
                 <div className="info-row">
                   <span className="label">Gas Used/Wanted:</span>
-                  <span className="value">{fmtNum(selectedTx.gasUsed)} / {fmtNum(selectedTx.gasWanted)}</span>
+                  <span className="value">{selectedTx.gasUsed !== undefined ? fmtNum(selectedTx.gasUsed) : '—'} / {selectedTx.gasWanted !== undefined ? fmtNum(selectedTx.gasWanted) : '—'}</span>
                 </div>
+                {selectedTx.from && (
+                  <div className="info-row">
+                    <span className="label">From:</span>
+                    <span className="value mono">{selectedTx.from}</span>
+                  </div>
+                )}
+                {selectedTx.to && (
+                  <div className="info-row">
+                    <span className="label">To:</span>
+                    <span className="value mono">{selectedTx.to}</span>
+                  </div>
+                )}
+                {selectedTx.amount && (
+                  <div className="info-row">
+                    <span className="label">Amount:</span>
+                    <span className="value">{fmtNum(Number(selectedTx.amount) / 1e6)} MALL</span>
+                  </div>
+                )}
+                {selectedTx.memo && (
+                  <div className="info-row">
+                    <span className="label">Memo:</span>
+                    <span className="value">{selectedTx.memo}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -393,17 +417,25 @@ export default function BlockchainExplorer() {
                           {fmtHash(tx.hash)}
                         </div>
                         <div style={{ fontSize: '11px', color: 'var(--txt-3)' }}>
-                          Block {tx.height} · {new Date(tx.timestamp * 1000).toLocaleString()}
+                          Block {tx.height} · {tx.timestamp ? new Date(tx.timestamp * 1000).toLocaleString() : '—'}
                         </div>
+                        {tx.from && tx.to && (
+                          <div style={{ fontSize: '11px', color: 'var(--txt-3)' }}>
+                            {fmtHash(tx.from)} → {fmtHash(tx.to)}
+                          </div>
+                        )}
                       </div>
-                      <div
-                        style={{
-                          color: tx.status === 'success' ? 'var(--green)' : 'var(--red)',
-                          fontSize: '12px',
-                          fontWeight: 'bold',
-                        }}
-                      >
-                        {tx.status.toUpperCase()}
+                      <div style={{ textAlign: 'right' }}>
+                        {tx.amount && <div style={{ fontSize: '12px' }}>{fmtNum(Number(tx.amount) / 1e6)} MALL</div>}
+                        <div
+                          style={{
+                            color: tx.status === 'success' ? 'var(--green)' : 'var(--red)',
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          {(tx.status || 'unknown').toUpperCase()}
+                        </div>
                       </div>
                     </div>
                   </div>

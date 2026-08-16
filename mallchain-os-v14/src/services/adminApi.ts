@@ -48,6 +48,19 @@ export interface AdminValidatorApplication {
   reviewNotes?: string;
 }
 
+export interface AdminKycSubmission {
+  _id: string;
+  userId: { _id: string; email: string; username: string | null } | string;
+  firstName: string;
+  lastName: string;
+  idType: 'passport' | 'drivers_license' | 'national_id';
+  idNumber: string;
+  idDocumentUrl?: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  status: 'pending' | 'approved' | 'rejected' | 'review';
+  submittedAt: string;
+}
+
 export interface AdminCampaign {
   _id: string;
   creator_id: string;
@@ -117,6 +130,14 @@ class AdminApi {
 
   async reviewValidatorApplication(id: string, action: 'approved' | 'rejected', notes?: string): Promise<ApiResult<{ application: AdminValidatorApplication }>> {
     return api.post(`/api/admin/validators/applications/${encodeURIComponent(id)}/review`, { action, notes });
+  }
+
+  async listPendingKyc(): Promise<ApiResult<{ submissions: AdminKycSubmission[]; total: number }>> {
+    return api.get('/api/admin/kyc/pending');
+  }
+
+  async reviewKyc(id: string, action: 'approved' | 'rejected', notes?: string): Promise<ApiResult<{ kyc: AdminKycSubmission }>> {
+    return api.post(`/api/admin/kyc/${encodeURIComponent(id)}/review`, { action, notes });
   }
 
   async listMiningCampaigns(status?: string): Promise<ApiResult<{ campaigns: AdminCampaign[]; total: number }>> {

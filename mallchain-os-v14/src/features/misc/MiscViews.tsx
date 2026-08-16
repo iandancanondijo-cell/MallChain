@@ -8,25 +8,20 @@ import { notificationsApi, type AppNotification } from '../../services/notificat
 export const Careers = () => {
   useStoreVersion();
   const st = store.state;
-  const apply = (t: string) => {
-    const c = st.careers.list.find((x) => x.title === t);
-    if (!c) return;
-    c.applied = true;
-    store.commit();
-    toast(`Application sent for "${t}"`);
-  };
   return (
     <div>
       <div className="view-head"><h1>Careers</h1><span className="sub">join the Mallchain team</span></div>
       <div className="stat-grid">
         <div className="card"><div className="card-label">Open roles</div><div className="card-value">{st.careers.list.length}</div><div className="card-sub">remote-first</div></div>
-        <div className="card"><div className="card-label">Your applications</div><div className="card-value">{st.careers.list.filter((c) => c.applied).length}</div><div className="card-sub">tracked here</div></div>
+      </div>
+      <div className="card mb">
+        <div className="tiny">Applications aren't wired up yet — there's no backend to send them to. Reach out directly for now.</div>
       </div>
       {st.careers.list.map((c) => (
         <div key={c.title} className="card mb">
           <div className="row">
             <div className="grow"><b>{c.title}</b><div className="tiny">{c.dept} · {c.loc}</div></div>
-            {c.applied ? <span className="chip green">Applied ✓</span> : <button className="btn btn-primary btn-sm" onClick={() => apply(c.title)}>Apply</button>}
+            <button className="btn btn-ghost btn-sm" disabled title="Applications aren't available yet">Apply</button>
           </div>
         </div>
       ))}
@@ -62,27 +57,24 @@ export const Learning = () => {
 
 export const SocialTasks = () => {
   useStoreVersion();
-  const st = store.state;
   const tasks = [
-    { t: 'Follow @mallchain on X', r: 25, done: st.socialTasks[0] },
-    { t: 'Join the Telegram community', r: 40, done: st.socialTasks[1] },
-    { t: 'Share your referral link', r: 30, done: st.socialTasks[2] },
-    { t: 'Verify your email + phone', r: 50, done: st.socialTasks[3] },
+    { t: 'Follow @mallchain on X', r: 25 },
+    { t: 'Join the Telegram community', r: 40 },
+    { t: 'Share your referral link', r: 30 },
+    { t: 'Verify your email + phone', r: 50 },
   ];
-  const total = tasks.reduce((a, t) => a + t.r, 0);
-  const earned = tasks.reduce((a, t, i) => a + (st.socialTasks[i] ? t.r : 0), 0);
   return (
     <div>
-      <div className="view-head"><h1>Social Tasks</h1><span className="sub">earn bonus MLPTS</span></div>
-      <div className="stat-grid">
-        <div className="card"><div className="card-label">Earned</div><div className="card-value up">{earned} <span className="unit">MLPTS</span></div><div className="card-sub">of {total} available</div></div>
+      <div className="view-head"><h1>Social Tasks</h1><span className="sub">not available yet</span></div>
+      <div className="card mb">
+        <div className="tiny">Social task rewards aren't wired up yet — there's no real backend crediting MLPTS for these yet, so completing them here wouldn't actually pay out.</div>
       </div>
-      {tasks.map((t, i) => (
+      {tasks.map((t) => (
         <div key={t.t} className="card mb">
           <div className="row">
             <div className="grow"><b>{t.t}</b></div>
             <span className="chip gold">+{t.r} MLPTS</span>
-            {st.socialTasks[i] ? <span className="chip green">Done ✓</span> : <button className="btn btn-primary btn-sm" onClick={() => { st.socialTasks[i] = true; store.commit(); toast(`+${t.r} MLPTS earned`); }}>Complete</button>}
+            <button className="btn btn-ghost btn-sm" disabled title="Not available yet">Complete</button>
           </div>
         </div>
       ))}
@@ -139,15 +131,15 @@ export const NotificationsView = () => {
 
 export const AnalyticsView = () => {
   useStoreVersion();
-  const st = store.state;
   return (
     <div>
-      <div className="view-head"><h1>Network Analytics</h1><span className="sub">Mallchain mainnet</span></div>
-      <div className="stat-grid">
-        <div className="card"><div className="card-label">Daily active wallets</div><div className="card-value">12,410</div><div className="card-sub">+8.2% this week</div></div>
-        <div className="card"><div className="card-label">Transactions / day</div><div className="card-value">88,204</div><div className="card-sub">avg block time 2.1s</div></div>
-        <div className="card"><div className="card-label">Campaign completions</div><div className="card-value">4,982</div><div className="card-sub">validator accuracy 97.4%</div></div>
-        <div className="card"><div className="card-label">Marketplace volume</div><div className="card-value">$1.24M</div><div className="card-sub">USD-M settled</div></div>
+      <div className="view-head"><h1>Network Analytics</h1><span className="sub">not available yet</span></div>
+      <div className="card">
+        <div style={{ textAlign: 'center', padding: 32 }}>
+          <div style={{ fontSize: 40 }}>📊</div>
+          <h2 style={{ margin: '8px 0' }}>Network analytics isn't available yet</h2>
+          <p className="muted">There's no backend endpoint serving real network-wide stats yet — check the Explorer for live chain data in the meantime.</p>
+        </div>
       </div>
     </div>
   );

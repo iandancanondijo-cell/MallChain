@@ -133,11 +133,12 @@ const getSchema = Joi.object({
 
 router.get('/', auth, preventNoSQLInjection, txCtrl.list);
 router.get('/:id', auth, preventNoSQLInjection, txCtrl.get);
-router.post('/relay', 
+// signature/public_key are base64 — sanitizeInputs strips '/', a valid
+// base64 character, which would silently corrupt either field.
+router.post('/relay',
   auth,
   limitPayloadSize(0.5),
   preventNoSQLInjection,
-  sanitizeInputs,
   txCtrl.relay
 );
 router.post('/', 

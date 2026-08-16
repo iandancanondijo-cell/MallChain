@@ -43,7 +43,7 @@ router.post('/payment',
   limitPayloadSize(0.5),
   preventNoSQLInjection,
   sanitizeInputs,
-  validate(schemas.payment), 
+  validate(schemas.mallcoinPayment),
   asyncHandler(sendCtrl.processPayment)
 );
 
@@ -84,7 +84,7 @@ router.post('/mlcns/transfer',
   limitPayloadSize(0.5),
   preventNoSQLInjection,
   sanitizeInputs,
-  validate(schemas.transfer), 
+  validate(schemas.mlcnsTransfer),
   asyncHandler(sendCtrl.transferMlcns)
 );
 

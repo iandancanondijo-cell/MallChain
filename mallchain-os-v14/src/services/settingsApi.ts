@@ -41,12 +41,22 @@ class SettingsApi {
     return unwrap(api.post('/api/settings/reset', {}));
   }
 
+  /** Generates a real TOTP secret to enroll — not active until enable2fa() verifies a code from it. */
+  async setup2fa(): Promise<ApiResult<{ secret: string; otpauthUrl: string }>> {
+    return unwrap(api.post('/api/settings/security/2fa/setup', {}));
+  }
+
   async enable2fa(code: string): Promise<ApiResult<{ enabled: boolean; backupCodes: string[] }>> {
     return unwrap(api.post('/api/settings/security/2fa/enable', { code }));
   }
 
-  async disable2fa(): Promise<ApiResult<{ enabled: boolean }>> {
-    return unwrap(api.post('/api/settings/security/2fa/disable', {}));
+  /** Requires a valid current TOTP or backup code as re-auth before disabling. */
+  async disable2fa(code: string): Promise<ApiResult<{ enabled: boolean }>> {
+    return unwrap(api.post('/api/settings/security/2fa/disable', { code }));
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<ApiResult<{ changed: boolean }>> {
+    return unwrap(api.post('/api/settings/security/change-password', { currentPassword, newPassword }));
   }
 }
 

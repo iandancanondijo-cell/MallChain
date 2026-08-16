@@ -35,20 +35,6 @@ export interface DecryptionResult {
   error?: string;
 }
 
-export interface BiometricData {
-  type: 'fingerprint' | 'face' | 'iris' | 'none';
-  enrolled: boolean;
-  createdAt?: number;
-  lastUsed?: number;
-  error?: string;
-}
-
-export interface BiometricCheckResult {
-  available: boolean;
-  type?: 'fingerprint' | 'face' | 'iris';
-  error?: string;
-}
-
 // Constants
 const PIN_SALT_ROUNDS = 10;
 const PIN_MIN_LENGTH = 4;
@@ -250,112 +236,6 @@ export async function decryptMnemonic(encrypted: string, pin: string): Promise<D
       success: false,
       error: `Failed to decrypt mnemonic: ${error instanceof Error ? error.message : 'Unknown error'}`,
     };
-  }
-}
-
-/**
- * Detect if WebAuthn (biometric) is available on this device
- * @returns BiometricCheckResult with availability and type
- */
-export function detectBiometricAvailability(): BiometricCheckResult {
-  try {
-    // Check for WebAuthn support
-    const webAuthnAvailable =
-      window.PublicKeyCredential !== undefined &&
-      navigator.credentials !== undefined;
-
-    if (!webAuthnAvailable) {
-      return {
-        available: false,
-        error: 'WebAuthn not supported on this device',
-      };
-    }
-
-    // Attempt to detect biometric type
-    let biometricType: 'fingerprint' | 'face' | 'iris' | undefined;
-
-    // Simple detection based on browser and OS
-    const userAgent = navigator.userAgent.toLowerCase();
-
-    if (userAgent.includes('android')) {
-      biometricType = 'fingerprint'; // Android commonly uses fingerprint
-    } else if (userAgent.includes('iphone') || userAgent.includes('mac')) {
-      biometricType = 'face'; // iOS/Mac commonly uses Face ID
-    } else if (userAgent.includes('windows')) {
-      biometricType = 'face'; // Windows Hello typically uses face
-    }
-
-    return {
-      available: true,
-      type: biometricType,
-    };
-  } catch (error) {
-    console.error('[Security] Error detecting biometric:', error);
-    return {
-      available: false,
-      error: 'Failed to detect biometric capability',
-    };
-  }
-}
-
-/**
- * Enroll biometric (store fingerprint/face data)
- * Note: In production, this would interact with WebAuthn API
- * @returns Promise resolving to biometric data
- */
-export async function enrollBiometric(): Promise<BiometricData> {
-  try {
-    const biometricCheck = detectBiometricAvailability();
-
-    if (!biometricCheck.available) {
-      console.warn('[Security] Biometric not available');
-      return {
-        type: 'none',
-        enrolled: false,
-        error: biometricCheck.error,
-      };
-    }
-
-    // In production, this would use WebAuthn API to register credential
-    // For now, we store locally that biometric is enrolled
-    const biometricData: BiometricData = {
-      type: biometricCheck.type || 'fingerprint',
-      enrolled: true,
-      createdAt: Date.now(),
-    };
-
-    return biometricData;
-  } catch (error) {
-    console.error('[Security] Error enrolling biometric:', error);
-    return {
-      type: 'none',
-      enrolled: false,
-    };
-  }
-}
-
-/**
- * Verify biometric (authenticate with fingerprint/face)
- * Note: In production, this would interact with WebAuthn API
- * @returns Promise resolving to verification success
- */
-export async function verifyBiometric(): Promise<boolean> {
-  try {
-    const biometricCheck = detectBiometricAvailability();
-
-    if (!biometricCheck.available) {
-      console.warn('[Security] Biometric not available for verification');
-      return false;
-    }
-
-    // In production, this would use WebAuthn API to authenticate
-    // For now, we simulate successful verification
-    console.log('[Security] Biometric verification simulated (production would use WebAuthn)');
-
-    return true;
-  } catch (error) {
-    console.error('[Security] Error verifying biometric:', error);
-    return false;
   }
 }
 

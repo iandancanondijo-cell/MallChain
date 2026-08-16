@@ -9,7 +9,7 @@
 
 import { generateMnemonic, validateMnemonic, wordlists } from 'bip39';
 import { DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
-import { stringToPath } from '@cosmjs/crypto';
+import { Bip39, EnglishMnemonic, Slip10, Slip10Curve, stringToPath } from '@cosmjs/crypto';
 import { fromBech32, toHex } from '@cosmjs/encoding';
 
 const ADDRESS_PREFIX = 'mall';
@@ -155,6 +155,32 @@ export async function deriveAddressFromMnemonic(
     console.error('[Wallet] Error deriving address:', error);
     throw new Error(`Failed to derive address: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
+}
+
+/**
+ * Derive the raw secp256k1 private key for a mnemonic, using the same HD
+ * path as `deriveAddressFromMnemonic`/the backend's own derivation
+ * (m/44'/118'/0'/0/{index}). `DirectSecp256k1HdWallet` deliberately keeps
+ * its private key internal (signing-only, by design) — this replicates its
+ * derivation with the lower-level SLIP-10 primitives to produce an
+ * exportable key, for the account's own "export private key" feature only.
+ * Never send the result anywhere but stay client-side.
+ * @returns The private key as a lowercase hex string
+ */
+export async function derivePrivateKeyFromMnemonic(
+  mnemonic: string,
+  index: number = 0
+): Promise<string> {
+  const validation = validateMnemonicPhrase(mnemonic);
+  if (!validation.valid) {
+    throw new Error(validation.message);
+  }
+
+  const normalizedMnemonic = mnemonic.trim().toLowerCase().split(/\s+/).join(' ');
+  const path = stringToPath(`m/44'/${COIN_TYPE}'/0'/0/${index}`);
+  const seed = await Bip39.mnemonicToSeed(new EnglishMnemonic(normalizedMnemonic));
+  const { privkey } = Slip10.derivePath(Slip10Curve.Secp256k1, seed, path);
+  return toHex(privkey);
 }
 
 /**

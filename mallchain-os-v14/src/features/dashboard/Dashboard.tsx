@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, fmtMoney, BarChart, StatusChip } from '../../components/ui';
-import { config } from '../../services/config';
 import { minesApi, type MinesSubmission, type MinesCampaign, type ReviewerProfile, type WalletTx } from '../../services/minesApi';
 import { stakingApi, type StakingSummary } from '../../services/stakingApi';
+import { priceApi } from '../../services/priceApi';
+import { useFxRate, toDisplayCurrency } from '../../services/currency';
 
 function dayKey(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { weekday: 'short' });
@@ -25,14 +26,21 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
   useStoreVersion();
   const st = store.state;
   const cur = st.prefs.currency;
+  const fxRate = useFxRate(cur);
 
   const isWalletConnected = st.wallet.address && st.wallet.address.length > 0;
 
-  const totalValue =
-    st.balances.MALL * 0.42 +
-    st.balances.MLPTS * 0.004 +
-    st.balances.USD_M +
-    (cur === 'KES' ? st.balances.USD_M * 129 : cur === 'EUR' ? st.balances.USD_M * 0.92 : cur === 'GBP' ? st.balances.USD_M * 0.79 : 0);
+  // Real MALL price from the chain-polled market endpoint (services/priceApi.ts).
+  // MLPTS has no real price source anywhere in the backend, so it's excluded
+  // from the portfolio total rather than valued at a fabricated rate.
+  const [mallPrice, setMallPrice] = useState<number | null>(null);
+  useEffect(() => {
+    priceApi.getMallPrice().then((res) => {
+      if (res.ok && res.data) setMallPrice(res.data.mid);
+    });
+  }, []);
+
+  const totalValue = (mallPrice !== null ? st.balances.MALL * mallPrice : 0) + st.balances.USD_M;
 
   const [submissions, setSubmissions] = useState<MinesSubmission[]>([]);
   const [campaigns, setCampaigns] = useState<MinesCampaign[]>([]);
@@ -78,7 +86,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
       </div>
 
       {/* SECTION 15.9-15.10: Fallback UI when wallet is not connected */}
-      {!isWalletConnected && !config.demoMode && (
+      {!isWalletConnected && (
         <div className="card" style={{ backgroundColor: 'var(--bg-2)', borderLeft: '4px solid var(--cyan)', padding: '20px', marginBottom: '16px' }}>
           <h3 style={{ margin: '0 0 12px 0', fontSize: '14px' }}>🔗 Connect Your Wallet</h3>
           <p style={{ margin: '0 0 16px 0', color: 'var(--txt-3)', fontSize: '13px' }}>
@@ -97,13 +105,17 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
       <div className="stat-grid">
         <div className="card">
           <div className="card-label">Total portfolio value</div>
-          <div className="card-value">{fmtMoney(totalValue || 0, cur)}</div>
-          <div className="card-sub"><span className="gold">▲ 4.2%</span> this week</div>
+          <div className="card-value">{(() => { const t = toDisplayCurrency(totalValue || 0, cur, fxRate); return t === null ? '…' : fmtMoney(t, cur); })()}</div>
+          <div className="card-sub">{mallPrice === null ? 'MALL price unavailable — MLPTS not priced' : 'excludes MLPTS (unpriced)'}</div>
         </div>
         <div className="card">
           <div className="card-label">MALL balance</div>
           <div className="card-value">{fmtNum(st.balances.MALL || 0)} <span className="unit">MALL</span></div>
-          <div className="card-sub">≈ {fmtMoney((st.balances.MALL || 0) * 0.42, cur)}</div>
+          <div className="card-sub">{(() => {
+            if (mallPrice === null) return 'price unavailable';
+            const t = toDisplayCurrency((st.balances.MALL || 0) * mallPrice, cur, fxRate);
+            return t === null ? '…' : `≈ ${fmtMoney(t, cur)}`;
+          })()}</div>
         </div>
         <div className="card">
           <div className="card-label">Mallpoints</div>

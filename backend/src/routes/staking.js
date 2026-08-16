@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const stakingCtrl = require('../controllers/stakingController');
 const { createLimiter } = require('../middleware/rateLimiter');
-const { preventNoSQLInjection, sanitizeInputs, limitPayloadSize } = require('../middleware/inputValidation');
+const { preventNoSQLInjection, limitPayloadSize } = require('../middleware/inputValidation');
 
 const txLimiter = createLimiter({ windowMs: 60 * 1000, max: 30 });
 
@@ -15,7 +15,6 @@ router.post('/broadcast',
   txLimiter,
   limitPayloadSize(0.5),
   preventNoSQLInjection,
-  sanitizeInputs,
   stakingCtrl.broadcast
 );
 
@@ -24,7 +23,6 @@ router.post('/stake',
   txLimiter,
   limitPayloadSize(0.5),
   preventNoSQLInjection,
-  sanitizeInputs,
   stakingCtrl.broadcast
 );
 
@@ -32,7 +30,6 @@ router.post('/unstake',
   txLimiter,
   limitPayloadSize(0.5),
   preventNoSQLInjection,
-  sanitizeInputs,
   stakingCtrl.broadcast
 );
 

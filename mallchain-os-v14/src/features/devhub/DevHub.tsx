@@ -36,6 +36,16 @@ export default function DevHub() {
     }
   };
 
+  const testKey = async (key: string) => {
+    const res = await devhubApi.testKey(key);
+    if (res.ok && res.data) {
+      toast(`Key valid — ${res.data.used} total call${res.data.used === 1 ? '' : 's'}`);
+      load();
+    } else {
+      toast(res.error || 'Key test failed', false);
+    }
+  };
+
   const revoke = async (id: string) => {
     const res = await devhubApi.revokeKey(id);
     if (res.ok) {
@@ -90,6 +100,7 @@ export default function DevHub() {
             <div key={k._id} className="list-row">
               <div className="grow"><div className="t">{k.name}</div><div className="m mono" style={{ fontSize: 11 }}>{k.key}</div></div>
               <span className="chip">{k.used} calls</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => testKey(k.key)}>Test key</button>
               <button className="btn btn-ghost btn-sm" onClick={() => copy(k.key)}>{copied === k.key ? '✓ copied' : 'Copy'}</button>
               <button className="btn btn-danger btn-sm" onClick={() => revoke(k._id)}>Revoke</button>
             </div>

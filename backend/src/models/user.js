@@ -13,6 +13,7 @@ const UserSchema = new Schema({
   banReason: { type: String },
 
   // Profile (used by mines / task system)
+  name: { type: String },
   username: { type: String },
   phone: { type: String },
   creator_level: { type: Number, default: 0 },

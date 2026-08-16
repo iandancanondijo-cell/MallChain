@@ -58,26 +58,11 @@ MinesReviewerSchema.index({ last_assigned_at: -1 })
 MinesReviewerSchema.index({ is_active: 1, mining_reputation: -1 })
 MinesReviewerSchema.index({ created_at: -1 })
 
-// Calculate derived stats before saving. Only recompute once the reviewer has
-// actually voted at least once — otherwise a brand-new reviewer (tasks_voted=0)
-// would have their default 50 reputation immediately overwritten to a near-zero
-// score by an empty-history formula (0 response + 40 consistency + 0 volume = 12)
-// the moment any unrelated field (e.g. stakedAmount) is saved.
-MinesReviewerSchema.pre('save', function(next) {
-  if (this.tasks_voted > 0) {
-    this.approval_rate = Math.round((this.tasks_approved / this.tasks_voted) * 100);
-    this.response_rate = Math.round((this.tasks_voted / this.tasks_assigned) * 100);
-
-    // Calculate mining reputation: weighted score based on response rate (40%), approval consistency (30%), volume (30%)
-    const responseScore = this.response_rate;
-    const consistencyScore = 100 - Math.abs(this.approval_rate - 60); // Best when around 60% approval (not too lenient, not too strict)
-    const volumeScore = Math.min(this.tasks_voted * 5, 100); // More tasks = higher score, capped at 100
-    this.mining_reputation = Math.round(
-      (responseScore * 0.4) + (consistencyScore * 0.3) + (volumeScore * 0.3)
-    );
-  }
-
-  next();
-});
+// Derived-stats recompute used to live in a pre('save') hook here, but every
+// real call site updates this model via findOneAndUpdate/updateMany (atomic
+// $inc, for concurrency safety) — document middleware never fires for those,
+// so the hook was dead code in production. The formula now lives in
+// minesReviewService.computeReputationStats() and is invoked explicitly by
+// every call site that changes tasks_voted/tasks_approved/tasks_assigned.
 
 module.exports = mongoose.models.MinesReviewer || mongoose.model('MinesReviewer', MinesReviewerSchema);

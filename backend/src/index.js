@@ -23,6 +23,7 @@ const authRoutes = require('./routes/auth');
 const vaultRoutes = require('./routes/vault');
 const txRoutes = require('./routes/tx');
 const marketRoutes = require('./routes/market');
+const fxRoutes = require('./routes/fx');
 const sendRoutes = require('./routes/send');
 const blockchainRoutes = require('./routes/blockchain');
 const blockchainTxRoutes = require('./routes/blockchainTx');
@@ -40,11 +41,14 @@ const buyRoutes = require('./routes/buy');
 const stakingRoutes = require('./routes/staking');
 const validatorsRoutes = require('./routes/validators');
 const onchainRoutes = require('./routes/onchain');
-const inviteRoutes = require('./routes/invite');
 const historyRoutes = require('./routes/history');
 const faucetRoutes = require('./routes/faucet');
-const treasuryRoutes = require('./routes/treasury');
 const adminPanelRoutes = require('./routes/adminPanel');
+const contractsRoutes = require('./routes/contracts');
+const devhubRoutes = require('./routes/devhub');
+const settingsRoutes = require('./routes/settings');
+const rewardsRoutes = require('./routes/rewards');
+const addressMapRoutes = require('./routes/addressMap');
 const axios = require('axios');
 
 const http = require('http')
@@ -326,6 +330,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/vault', vaultRoutes);
 app.use('/api/tx', txRoutes);
 app.use('/api/market', marketRoutes);
+app.use('/api/fx', fxRoutes);
 app.use('/api/send', sendRoutes);
 app.use('/api/blockchain', blockchainRoutes);
 app.use('/api/blockchain/tx', blockchainTxRoutes);
@@ -350,10 +355,14 @@ app.use('/api/withdraw', withdrawRoutes);
 app.use('/api/staking', stakingRoutes);
 app.use('/api/validators', validatorsRoutes);
 app.use('/api/onchain', onchainRoutes);
-app.use('/api/invite', inviteRoutes);
 app.use('/api/history', historyRoutes);
 app.use('/api/faucet', faucetRoutes);
-app.use('/api/treasury', treasuryRoutes);
+// /api/treasury and /api/invite were removed: both were unauthenticated
+// duplicates of real, properly-gated functionality — treasury operations
+// already exist correctly under /api/admin/treasury/* (requireAdmin +
+// audit logging), and invite/claim had no legitimate equivalent, no
+// frontend caller, and let anyone farm real Mallcoin payouts by creating
+// and immediately claiming their own invite with zero auth.
 const minesRoutes = require('./routes/mines');
 app.use('/api/mines', minesRoutes);
 app.use('/api/admin', adminPanelRoutes);
@@ -373,6 +382,14 @@ const transactionsRoutes = require('./routes/transactions')
 const explorerRoutes = require('./routes/explorer')
 app.use('/api/transactions', transactionsRoutes)
 app.use('/api/explorer', explorerRoutes)
+
+// Previously-written but unmounted routes: registering existing, already-
+// implemented handlers — no new backend logic.
+app.use('/api/contracts', contractsRoutes);
+app.use('/api/devhub', devhubRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/api/rewards', rewardsRoutes);
+app.use('/api/address', addressMapRoutes);
 
 // Global error handling middleware
 app.use(errorHandler())

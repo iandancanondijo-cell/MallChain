@@ -5,6 +5,8 @@ const {
   fetchTally,
   fetchUserVote,
   fetchParams,
+  fetchDepositParams,
+  fetchVotingPower,
 } = require('../services/governanceService');
 
 const CHAIN_REST = config.chain.rest.replace(/\/$/, '');
@@ -99,6 +101,25 @@ exports.getProposal = async (req, res) => {
   }
 };
 
+exports.getDepositParams = async (_req, res) => {
+  try {
+    const params = await fetchDepositParams();
+    res.json({ success: true, params });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+};
+
+exports.getVotingPower = async (req, res) => {
+  try {
+    const { address } = req.params;
+    const power = await fetchVotingPower(address);
+    return res.json({ success: true, ...power });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+};
+
 exports.getUserVote = async (req, res) => {
   try {
     const { id, voter } = req.params;
@@ -138,8 +159,8 @@ exports.vote = async (req, res) => {
       txResponse: txResp,
     });
   } catch (e) {
-    console.error('governance vote broadcast error:', e.message);
-    return res.status(500).json({ success: false, error: 'broadcast_failed', detail: e.message });
+    console.error('governance vote broadcast error:', e.message, JSON.stringify(e.response?.data || {}));
+    return res.status(500).json({ success: false, error: 'broadcast_failed', detail: e.response?.data?.message || e.message });
   }
 };
 

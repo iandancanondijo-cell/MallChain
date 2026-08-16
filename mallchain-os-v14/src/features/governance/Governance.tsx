@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, StatusChip, Modal, toast } from '../../components/ui';
-import { governanceApi, type Proposal } from '../../services/governanceApi';
-import { castVote, GovernanceTxError } from '../../services/governanceTx';
-import { type VoteOption } from '../../services/governanceProto';
+import { governanceApi, type Proposal, type DepositParams } from '../../services/governanceApi';
+import { castVote, submitProposal, GovernanceTxError, type VoteOption } from '../../services/governanceTx';
+import { delegate, DelegateTxError } from '../../services/stakingDelegateTx';
+import { validatorsApi, type ChainValidator } from '../../services/validatorsApi';
 
 const VOTE_OPTIONS: { label: string; value: VoteOption }[] = [
   { label: 'Yes', value: 'VOTE_OPTION_YES' },
@@ -12,7 +13,11 @@ const VOTE_OPTIONS: { label: string; value: VoteOption }[] = [
   { label: 'No with veto', value: 'VOTE_OPTION_NO_WITH_VETO' },
 ];
 
-/** Governance — real on-chain proposals + MsgVote (backend/src/routes/governance.js, x/governance). */
+const STAKE_DECIMALS = 6;
+const toBaseUnits = (display: number) => Math.floor(display * 10 ** STAKE_DECIMALS).toString();
+const toDisplay = (base: string) => Number(base) / 10 ** STAKE_DECIMALS;
+
+/** Governance — real on-chain proposals + MsgVote (cosmos.gov.v1, this chain's real module). */
 export default function Governance() {
   useStoreVersion();
   const st = store.state;
@@ -24,6 +29,20 @@ export default function Governance() {
   const [error, setError] = useState<string | null>(null);
   const [sel, setSel] = useState<Proposal | null>(null);
   const [voting, setVoting] = useState<VoteOption | null>(null);
+
+  const [votingPower, setVotingPower] = useState<number | null>(null);
+  const [validator, setValidator] = useState<ChainValidator | null>(null);
+  const [depositParams, setDepositParams] = useState<DepositParams | null>(null);
+
+  const [delegateOpen, setDelegateOpen] = useState(false);
+  const [delegateAmount, setDelegateAmount] = useState('');
+  const [delegating, setDelegating] = useState(false);
+
+  const [newProposalOpen, setNewProposalOpen] = useState(false);
+  const [npTitle, setNpTitle] = useState('');
+  const [npSummary, setNpSummary] = useState('');
+  const [npDeposit, setNpDeposit] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,9 +57,25 @@ export default function Governance() {
     setLoading(false);
   }, []);
 
+  const loadPowerAndParams = useCallback(async () => {
+    if (address) {
+      const p = await governanceApi.getVotingPower(address);
+      if (p.ok && p.data) setVotingPower(toDisplay(p.data.totalStaked));
+    }
+    const dp = await governanceApi.getDepositParams();
+    if (dp.ok && dp.data?.params) {
+      setDepositParams(dp.data.params);
+      const min = dp.data.params.min_deposit?.[0];
+      if (min) setNpDeposit(String(toDisplay(min.amount)));
+    }
+    const vres = await validatorsApi.list();
+    if (vres.ok && vres.data?.validators?.length) setValidator(vres.data.validators[0]);
+  }, [address]);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadPowerAndParams();
+  }, [load, loadPowerAndParams]);
 
   const openProposal = async (p: Proposal) => {
     setSel(p);
@@ -67,11 +102,70 @@ export default function Governance() {
     }
   };
 
+  const doDelegate = async () => {
+    if (!st.wallet.mnemonic || !address) return toast('Wallet not connected', false);
+    if (!validator) return toast('No validator available to delegate to', false);
+    const amt = Number(delegateAmount);
+    if (!amt || amt <= 0) return toast('Enter a valid amount', false);
+    setDelegating(true);
+    try {
+      const result = await delegate({
+        mnemonic: st.wallet.mnemonic,
+        fromAddress: address,
+        validatorAddress: validator.operatorAddress,
+        amount: toBaseUnits(amt),
+        denom: 'stake',
+      });
+      toast(`Delegated — tx ${result.txHash.slice(0, 10)}…`);
+      setDelegateOpen(false);
+      setDelegateAmount('');
+      loadPowerAndParams();
+    } catch (e) {
+      toast(e instanceof DelegateTxError || e instanceof Error ? e.message : 'Delegation failed', false);
+    } finally {
+      setDelegating(false);
+    }
+  };
+
+  const doSubmitProposal = async () => {
+    if (!st.wallet.mnemonic || !address) return toast('Wallet not connected', false);
+    if (!npTitle.trim() || !npSummary.trim()) return toast('Title and summary are required', false);
+    const amt = Number(npDeposit);
+    if (!amt || amt <= 0) return toast('Enter a valid deposit amount', false);
+    setSubmitting(true);
+    try {
+      const result = await submitProposal({
+        mnemonic: st.wallet.mnemonic,
+        fromAddress: address,
+        title: npTitle.trim(),
+        summary: npSummary.trim(),
+        initialDepositAmount: toBaseUnits(amt),
+        denom: 'stake',
+      });
+      toast(`Proposal submitted — tx ${result.txHash.slice(0, 10)}…`);
+      setNewProposalOpen(false);
+      setNpTitle('');
+      setNpSummary('');
+      load();
+    } catch (e) {
+      toast(e instanceof GovernanceTxError || e instanceof Error ? e.message : 'Proposal submission failed', false);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const minDepositDisplay = depositParams?.min_deposit?.[0] ? toDisplay(depositParams.min_deposit[0].amount) : null;
+
   return (
     <div>
       <div className="view-head">
         <h1>Governance</h1>
         <span className="sub">On-chain proposals</span>
+        {address && (
+          <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={() => setNewProposalOpen(true)}>
+            + New proposal
+          </button>
+        )}
       </div>
 
       {error && (
@@ -86,7 +180,32 @@ export default function Governance() {
       <div className="stat-grid">
         <div className="card"><div className="card-label">Open proposals</div><div className="card-value">{loading ? '—' : stats?.active ?? 0}</div><div className="card-sub">active now</div></div>
         <div className="card"><div className="card-label">Total proposals</div><div className="card-value">{loading ? '—' : stats?.total ?? 0}</div></div>
+        <div className="card">
+          <div className="card-label">Your voting power</div>
+          <div className="card-value">{votingPower === null ? '—' : `${votingPower.toLocaleString()} STAKE`}</div>
+          <div className="card-sub">
+            {votingPower === 0 ? (
+              <span className="red">No delegated stake — your vote won't count toward the tally</span>
+            ) : (
+              <>
+                Bonded to the network validator ·{' '}
+                <button className="link-btn" style={{ background: 'none', border: 'none', padding: 0, color: 'var(--gold)', cursor: 'pointer', font: 'inherit' }} onClick={() => setDelegateOpen(true)}>
+                  Delegate more
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       </div>
+
+      {address && (votingPower === 0 || votingPower === null) && (
+        <div className="card" style={{ padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="grow" style={{ fontSize: 13 }}>
+            Real governance voting power comes from bonded stake (x/staking), not your MLCNS balance. Delegate some STAKE to gain real voting weight.
+          </div>
+          <button className="btn btn-gold" onClick={() => setDelegateOpen(true)}>Delegate stake</button>
+        </div>
+      )}
 
       <div className="sec-title"><h2>Proposals</h2></div>
 
@@ -127,6 +246,12 @@ export default function Governance() {
 
           <div className="sec-title mt"><h3>Vote</h3></div>
           {!address && <div className="tiny red mb">Connect a wallet to vote.</div>}
+          {address && (
+            <div className="tiny muted mb">
+              Voting with weight: {votingPower === null ? '…' : `${votingPower.toLocaleString()} STAKE`}
+              {votingPower === 0 && <span className="red"> — this vote will be recorded but won't count toward the tally until you delegate stake.</span>}
+            </div>
+          )}
           {sel.userVote?.voted ? (
             <span className="chip green mb">You voted: {sel.userVote.option}</span>
           ) : (
@@ -138,6 +263,45 @@ export default function Governance() {
               ))}
             </div>
           )}
+        </Modal>
+      )}
+
+      {delegateOpen && (
+        <Modal title="Delegate stake" onClose={() => setDelegateOpen(false)}>
+          <div className="tiny muted mb">
+            Delegating bonds STAKE to {validator ? validator.name : 'the network validator'}. This gives your address real weight in governance tallies. Unbonding later takes the chain's normal unbonding period.
+          </div>
+          <div className="field mb">
+            <label>Amount (STAKE)</label>
+            <input className="input" type="number" min="0" step="0.000001" value={delegateAmount} onChange={(e) => setDelegateAmount(e.target.value)} placeholder="0.00" />
+          </div>
+          <button className="btn btn-gold" disabled={delegating || !validator} onClick={doDelegate}>
+            {delegating && <span className="spin" />} Delegate
+          </button>
+        </Modal>
+      )}
+
+      {newProposalOpen && (
+        <Modal title="Submit a new proposal" onClose={() => setNewProposalOpen(false)} wide>
+          <div className="tiny muted mb">
+            Real on-chain proposal (cosmos.gov.v1.MsgSubmitProposal) — a signal/text proposal with no executable messages. Requires an initial deposit
+            {minDepositDisplay !== null && <> (minimum {minDepositDisplay.toLocaleString()} STAKE to enter voting period; a smaller deposit is accepted but stays in the deposit period)</>}.
+          </div>
+          <div className="field mb">
+            <label>Title</label>
+            <input className="input" value={npTitle} onChange={(e) => setNpTitle(e.target.value)} placeholder="Proposal title" />
+          </div>
+          <div className="field mb">
+            <label>Summary</label>
+            <textarea className="input" rows={4} value={npSummary} onChange={(e) => setNpSummary(e.target.value)} placeholder="What is this proposal about?" />
+          </div>
+          <div className="field mb">
+            <label>Initial deposit (STAKE)</label>
+            <input className="input" type="number" min="0" step="0.000001" value={npDeposit} onChange={(e) => setNpDeposit(e.target.value)} />
+          </div>
+          <button className="btn btn-gold" disabled={submitting} onClick={doSubmitProposal}>
+            {submitting && <span className="spin" />} Submit proposal
+          </button>
         </Modal>
       )}
     </div>

@@ -75,6 +75,9 @@ export default function Contracts() {
           <button className="btn btn-ghost btn-sm" onClick={() => setOpen('deploy')}>▲ Deploy</button>
         </div>
       </div>
+      <div className="tiny mt" style={{ marginBottom: 16 }}>
+        Contract records are real and persist server-side, but deploy/execute don't run an actual wasm pipeline yet — addresses and tx hashes here are placeholders, not on-chain results.
+      </div>
 
       {error && (
         <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>

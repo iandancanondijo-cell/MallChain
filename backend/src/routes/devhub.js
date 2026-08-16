@@ -63,6 +63,31 @@ router.delete('/keys/:id', auth, async (req, res) => {
   }
 });
 
+// POST /api/devhub/test - Validate an x-api-key header against a real,
+// stored, unrevoked key and record real usage (used++/lastUsed). Previously
+// nothing in the backend ever checked a `mk_...` key against anything — a
+// freshly created key returned 401 on every real call, and `used` could
+// never move off 0 no matter what a developer did with it (confirmed live:
+// created a key, called an endpoint with it, got rejected as unauthorized).
+// This is the endpoint the DevHub UI's "Test key" action should call.
+router.post('/test', async (req, res) => {
+  try {
+    const key = req.headers['x-api-key'];
+    if (!key) return res.status(401).json(fail('x-api-key header is required'));
+
+    const apiKey = await ApiKey.findOneAndUpdate(
+      { key, revoked: false },
+      { $inc: { used: 1 }, $set: { lastUsed: new Date() } },
+      { new: true }
+    );
+    if (!apiKey) return res.status(401).json(fail('Invalid or revoked API key'));
+
+    res.json(ok({ valid: true, keyName: apiKey.name, permissions: apiKey.permissions, used: apiKey.used }));
+  } catch (e) {
+    res.status(500).json(fail(e));
+  }
+});
+
 // GET /api/devhub/usage - API usage stats
 router.get('/usage', auth, async (req, res) => {
   try {
@@ -92,7 +117,8 @@ router.get('/docs', async (_req, res) => {
       authentication: 'Bearer token',
       endpoints: [
         { path: '/api/auth/login', method: 'POST', description: 'Authenticate user and get JWT token', auth: false },
-        { path: '/api/wallet/balance', method: 'GET', description: 'Get wallet balance', auth: true },
+        { path: '/api/wallet/:address', method: 'GET', description: 'Get wallet balance for an address', auth: false },
+        { path: '/api/devhub/test', method: 'POST', description: 'Validate an API key (send it as the x-api-key header) and record usage', auth: false },
         { path: '/api/mines/campaigns/active', method: 'GET', description: 'List active campaigns', auth: false },
         { path: '/api/staking/summary/:address', method: 'GET', description: 'Get staking summary for an address', auth: false },
       ],

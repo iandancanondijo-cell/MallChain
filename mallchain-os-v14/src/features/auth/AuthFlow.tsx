@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { api } from '../../services/api';
+import { kycApi } from '../../services/kycApi';
 import { authService } from '../../services/auth';
 import { handleApiError } from '../../services/errorHandler';
 import { useWizard } from '../../hooks/useWizard';
@@ -30,6 +31,7 @@ type KycData = {
   idType: string;
   idNumber: string;
   idExpiry: string;
+  idDocumentUrl: string;
   occupation: string;
   sourceOfFunds: string;
   annualIncome: string;
@@ -40,7 +42,8 @@ type KycData = {
 /** Shape of authController.js's toPublicUser(), returned by /api/auth/{register,login,me}. */
 interface AuthResponse {
   token: string;
-  user?: { id: string; email: string; role: 'user' | 'admin' | 'superadmin'; banned: boolean; kycLevel: number };
+  requires2fa?: boolean;
+  user?: { id: string; email: string; role: 'user' | 'admin' | 'superadmin'; banned: boolean; kycLevel: number; name?: string | null; username?: string | null };
 }
 
 const INITIAL_KYC_DATA: KycData = {
@@ -56,6 +59,7 @@ const INITIAL_KYC_DATA: KycData = {
   idType: '',
   idNumber: '',
   idExpiry: '',
+  idDocumentUrl: '',
   occupation: '',
   sourceOfFunds: '',
   annualIncome: '',
@@ -86,6 +90,11 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
   });
   const [showPass, setShowPass] = useState(false);
   const [showConfirmPass, setShowConfirmPass] = useState(false);
+  // Set once the backend reports this account has real 2FA enabled — see
+  // authController.js's checkTwoFactor(). Shows a code input and blocks
+  // submission until a valid TOTP/backup code is provided.
+  const [requires2fa, setRequires2fa] = useState(false);
+  const [otp, setOtp] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [walletAddress, setWalletAddress] = useState('');
@@ -103,6 +112,42 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
   });
   const kycStep = kyc.stepIndex; // 0=inactive .. 5=review, matches the legacy numeric steps below
   const kycData = kyc.data;
+
+  // Required fields per step, matching backend/src/routes/kyc.js's Joi schema
+  // exactly (every field there is .required()). Previously Next/Submit had no
+  // client-side gating at all, so a user could click straight through empty
+  // fields and hit a 400 "validation_failed" from the backend — silently,
+  // before the error-banner fix, and still avoidably even after it.
+  const KYC_REQUIRED_FIELDS: Record<number, (keyof KycData)[]> = {
+    1: ['firstName', 'lastName', 'dateOfBirth', 'nationality'],
+    2: ['address', 'city', 'country', 'postalCode', 'phoneNumber'],
+    3: ['idType', 'idNumber', 'idExpiry', 'idDocumentUrl'],
+    4: ['occupation', 'sourceOfFunds', 'annualIncome'],
+  };
+  const isKycStepValid = (step: number): boolean => {
+    const fields = KYC_REQUIRED_FIELDS[step];
+    if (!fields) return true;
+    return fields.every((f) => String(kycData[f] ?? '').trim().length > 0);
+  };
+  const docInputRef = useRef<HTMLInputElement>(null);
+  const [docUploading, setDocUploading] = useState(false);
+  const [docFileName, setDocFileName] = useState('');
+  const [docError, setDocError] = useState('');
+
+  const handleDocumentSelect = async (file: File | undefined) => {
+    if (!file) return;
+    setDocError('');
+    setDocUploading(true);
+    const res = await kycApi.uploadDocument(file);
+    setDocUploading(false);
+    if (res.ok && res.data) {
+      kyc.setData({ idDocumentUrl: res.data.documentRef });
+      setDocFileName(file.name);
+    } else {
+      setDocError(res.error || 'Failed to upload document');
+    }
+  };
+
   const [amlRiskLevel, setAmlRiskLevel] = useState<'low' | 'medium' | 'high' | null>(null);
   // Populated by the (removed) AML-check step; always unchecked today since
   // submitKYC's response — not a separate AML call — is what sets amlRiskLevel.
@@ -193,13 +238,14 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
     setErr('');
     try {
       console.log('Submitting KYC data:', kycData);
-      const res = await api.post<{ success: boolean; kycId: string; riskLevel: 'low' | 'medium' | 'high'; status: 'approved' | 'review' }>('/api/kyc/submit', kycData);
+      const res = await api.post<{ success: boolean; kycId: string; riskLevel: 'low' | 'medium' | 'high'; status: 'pending' }>('/api/kyc/submit', kycData);
 
       if (res.ok && res.data?.success) {
         setAmlRiskLevel(res.data.riskLevel);
-        st.user.kycLevel = res.data.status === 'approved' ? 2 : 1;
-        store.commit();
-        toast('KYC submitted successfully!');
+        // Every submission now requires a real admin decision — kycLevel
+        // stays at 1 (unverified) until an admin approves it, regardless of
+        // the automated risk signal.
+        toast('KYC submitted — under review');
         setBusy(false);
         kyc.next(); // financial → review (AML)
       } else {
@@ -245,15 +291,25 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         // Store token in localStorage
         authService.storeToken(res.data.token);
 
+        // A brand-new account must start from a clean slate — reset first,
+        // so any stale local data left over from a previous session/account
+        // on this browser (wallet, balances, mines/staking/governance
+        // caches, etc.) doesn't leak into it and make a new signup look
+        // like "the same app state as before." (store.reset() reassigns
+        // store.state to a fresh object, so read it fresh afterward rather
+        // than the possibly-stale `st` closure captured at render time.)
+        store.reset();
+
         // Update store auth state — id/banned/kycLevel/role come from the
         // real backend user object (toPublicUser() in authController.js),
         // not derived client-side.
         const u = res.data.user;
-        st.user = {
-          ...st.user,
+        store.state.user = {
+          ...store.state.user,
           id: u?.id || '',
           authed: true,
-          name: email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          // Prefer a real name (KYC-derived) or chosen username over a guessed one.
+          name: u?.name || u?.username || email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
           email,
           avatarInitial: email[0].toUpperCase(),
           frozen: !!u?.banned,
@@ -283,18 +339,35 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
       }
     } else {
       // Login flow
-      const res = await api.post<AuthResponse>('/api/auth/login', { email, password: pass });
+      const res = await api.post<AuthResponse>('/api/auth/login', { email, password: pass, otp: otp || undefined });
+
+      if (res.ok && res.data?.requires2fa) {
+        setRequires2fa(true);
+        setBusy(false);
+        return;
+      }
 
       if (res.ok && res.data?.token) {
         // Store token in localStorage
         authService.storeToken(res.data.token);
 
         const u = res.data.user;
-        st.user = {
-          ...st.user,
+        // Only reset if this browser's cached local data belongs to a
+        // DIFFERENT account than the one signing in (including the common
+        // case of stale/demo data with no account attached at all, where
+        // the cached id is ''). If the same account is logging back in on
+        // this browser, leave local state (wallet, caches) untouched —
+        // there's no server-side wallet↔account link (walletCreationController
+        // never persists it), so resetting here could orphan a real wallet.
+        if (store.state.user.id !== (u?.id || '')) {
+          store.reset();
+        }
+        store.state.user = {
+          ...store.state.user,
           id: u?.id || '',
           authed: true,
-          name: email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          // Prefer a real name (KYC-derived) or chosen username over a guessed one.
+          name: u?.name || u?.username || email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
           email,
           avatarInitial: email[0].toUpperCase(),
           frozen: !!u?.banned,
@@ -304,7 +377,11 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         store.commit();
         toast('Welcome back to Mallchain!');
         setBusy(false);
-        navigate('/');
+        // Admin/superadmin credentials go straight to the admin control
+        // center — an operator signing in has no reason to land on the
+        // regular user dashboard first.
+        const role = u?.role || 'user';
+        navigate(role === 'admin' || role === 'superadmin' ? '/admin' : '/');
       } else {
         const errorMsg = res.error || 'Login failed';
         setErr(errorMsg);
@@ -745,22 +822,39 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   Upload ID Document
                 </label>
-                <div style={{
-                  padding: 24,
-                  background: 'var(--bg-2)',
-                  border: '2px dashed var(--border)',
-                  borderRadius: 12,
-                  textAlign: 'center',
-                  cursor: 'pointer'
-                }}>
-                  <Upload size={32} style={{ color: 'var(--txt-3)', marginBottom: 8 }} />
+                <input
+                  ref={docInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,application/pdf"
+                  style={{ display: 'none' }}
+                  onChange={(e) => handleDocumentSelect(e.target.files?.[0])}
+                />
+                <div
+                  onClick={() => docInputRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); handleDocumentSelect(e.dataTransfer.files?.[0]); }}
+                  style={{
+                    padding: 24,
+                    background: 'var(--bg-2)',
+                    border: `2px dashed ${kycData.idDocumentUrl ? 'var(--green-2)' : 'var(--border)'}`,
+                    borderRadius: 12,
+                    textAlign: 'center',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Upload size={32} style={{ color: kycData.idDocumentUrl ? 'var(--green-2)' : 'var(--txt-3)', marginBottom: 8 }} />
                   <div style={{ fontSize: 13, color: 'var(--txt-3)' }}>
-                    Click to upload or drag and drop
+                    {docUploading
+                      ? 'Uploading…'
+                      : kycData.idDocumentUrl
+                      ? `${docFileName || 'Document'} uploaded — click to replace`
+                      : 'Click to upload or drag and drop'}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--txt-3)', marginTop: 4 }}>
-                    PNG, JPG up to 10MB
+                    PNG, JPG, or PDF up to 10MB
                   </div>
                 </div>
+                {docError && <div style={{ color: 'var(--red-2)', fontSize: 12.5, marginTop: 8 }}>⚠ {docError}</div>}
               </div>
             </div>
           )}
@@ -910,24 +1004,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 </div>
               </div>
 
-              {amlRiskLevel === 'low' && (
-                <div style={{
-                  padding: 16,
-                  background: 'var(--green-dim)',
-                  borderRadius: 10,
-                  border: '1px solid var(--green)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12
-                }}>
-                  <Check size={20} style={{ color: 'var(--green)' }} />
-                  <span style={{ fontSize: 13, color: 'var(--green)' }}>
-                    All checks passed. Your account is verified.
-                  </span>
-                </div>
-              )}
-
-              {amlRiskLevel === 'medium' && (
+              {amlRiskLevel && (
                 <div style={{
                   padding: 16,
                   background: 'var(--gold-dim)',
@@ -939,24 +1016,8 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 }}>
                   <AlertTriangle size={20} style={{ color: 'var(--gold)' }} />
                   <span style={{ fontSize: 13, color: 'var(--gold)' }}>
-                    Additional verification may be required.
-                  </span>
-                </div>
-              )}
-
-              {amlRiskLevel === 'high' && (
-                <div style={{
-                  padding: 16,
-                  background: 'var(--red-dim)',
-                  borderRadius: 10,
-                  border: '1px solid var(--red)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12
-                }}>
-                  <AlertCircle size={20} style={{ color: 'var(--red)' }} />
-                  <span style={{ fontSize: 13, color: 'var(--red)' }}>
-                    Your account requires manual review. Please contact support.
+                    Your documents are under review. An admin will verify your identity —
+                    you'll be notified once a decision is made.
                   </span>
                 </div>
               )}
@@ -995,7 +1056,9 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
 
           {kycStep < 4 && (
             <button
-              onClick={() => kyc.next()}
+              onClick={() => { if (isKycStepValid(kycStep)) kyc.next(); else setErr('Please fill in all fields before continuing.'); }}
+              disabled={!isKycStepValid(kycStep)}
+              title={!isKycStepValid(kycStep) ? 'Fill in all fields to continue' : undefined}
               style={{
                 padding: '12px 24px',
                 background: 'linear-gradient(135deg, var(--gold), #c9781a)',
@@ -1004,7 +1067,8 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 color: 'var(--gold-ink)',
                 fontSize: 14,
                 fontWeight: 700,
-                cursor: 'pointer',
+                cursor: isKycStepValid(kycStep) ? 'pointer' : 'not-allowed',
+                opacity: isKycStepValid(kycStep) ? 1 : 0.5,
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
@@ -1019,7 +1083,8 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
           {kycStep === 4 && (
             <button
               onClick={submitKYC}
-              disabled={busy}
+              disabled={busy || !isKycStepValid(4)}
+              title={!isKycStepValid(4) ? 'Fill in all fields to submit' : undefined}
               style={{
                 padding: '12px 24px',
                 background: 'linear-gradient(135deg, var(--gold), #c9781a)',
@@ -1028,8 +1093,8 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 color: 'var(--gold-ink)',
                 fontSize: 14,
                 fontWeight: 700,
-                cursor: busy ? 'not-allowed' : 'pointer',
-                opacity: busy ? 0.5 : 1,
+                cursor: (busy || !isKycStepValid(4)) ? 'not-allowed' : 'pointer',
+                opacity: (busy || !isKycStepValid(4)) ? 0.5 : 1,
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
@@ -1041,7 +1106,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
             </button>
           )}
 
-          {kycStep === 5 && amlRiskLevel === 'low' && (
+          {kycStep === 5 && amlRiskLevel !== null && (
             <button
               onClick={() => { kyc.complete(); setStep(1); }}
               style={{
@@ -1179,7 +1244,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         }}
       >
         <button
-          onClick={() => { setMode('login'); setErr(''); setConfirmPass(''); }}
+          onClick={() => { setMode('login'); setErr(''); setConfirmPass(''); setRequires2fa(false); setOtp(''); }}
           style={{
             flex: 1,
             padding: 12,
@@ -1196,7 +1261,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
           Sign in
         </button>
         <button
-          onClick={() => { setMode('signup'); setErr(''); setConfirmPass(''); }}
+          onClick={() => { setMode('signup'); setErr(''); setConfirmPass(''); setRequires2fa(false); setOtp(''); }}
           style={{
             flex: 1,
             padding: 12,
@@ -1363,7 +1428,34 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
             </button>
           </div>
-          
+
+          {/* 2FA challenge — shown once the backend reports this account has
+              real TOTP enabled (checkTwoFactor() in authController.js). */}
+          {mode === 'login' && requires2fa && (
+            <div style={{ marginTop: 12 }}>
+              <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 600, color: 'var(--txt-2)' }}>
+                Authenticator code
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoFocus
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                placeholder="6-digit code or backup code"
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  background: 'var(--bg-2)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 12,
+                  color: 'var(--txt)',
+                  fontSize: 14,
+                }}
+              />
+            </div>
+          )}
+
           {/* Password Strength */}
           {mode === 'signup' && pass.length > 0 && (
             <div style={{ marginTop: 10 }}>
@@ -1533,7 +1625,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         {/* Submit Button */}
         <button
           onClick={submitAuth}
-          disabled={busy || (mode === 'signup' && !confirmPass)}
+          disabled={busy || (mode === 'signup' && !confirmPass) || (requires2fa && !otp)}
           style={{
             width: '100%',
             padding: 16,
@@ -1562,7 +1654,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
             </>
           ) : (
             <>
-              {mode === 'login' ? 'Sign in' : 'Create account'}
+              {mode === 'login' ? (requires2fa ? 'Verify code' : 'Sign in') : 'Create account'}
               <ArrowRight size={18} />
             </>
           )}
@@ -1602,7 +1694,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
             <span style={{ color: 'var(--txt-3)' }}>
               Already have an account?{' '}
               <button
-                onClick={() => { setMode('login'); setErr(''); setConfirmPass(''); }}
+                onClick={() => { setMode('login'); setErr(''); setConfirmPass(''); setRequires2fa(false); setOtp(''); }}
                 style={{
                   background: 'transparent',
                   border: 'none',

@@ -234,6 +234,18 @@ function createDatabaseBreaker() {
 }
 
 /**
+ * Create circuit breaker for third-party external API calls (FX rates, etc.)
+ */
+function createExternalApiBreaker() {
+  return new CircuitBreaker({
+    name: 'ExternalAPI',
+    failureThreshold: 3,
+    successThreshold: 2,
+    timeout: 20000,
+  })
+}
+
+/**
  * Create exponential backoff for blockchain listener
  */
 function createBlockchainBackoff() {
@@ -252,5 +264,6 @@ module.exports = {
   CircuitState,
   createBlockchainBreaker,
   createDatabaseBreaker,
+  createExternalApiBreaker,
   createBlockchainBackoff,
 }

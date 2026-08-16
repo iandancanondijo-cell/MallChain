@@ -1,7 +1,6 @@
 /**
  * Unit tests for security.ts service
- * Tests hashPin, verifyPin, encryptMnemonic, decryptMnemonic,
- * detectBiometricAvailability, enrollBiometric, verifyBiometric
+ * Tests hashPin, verifyPin, encryptMnemonic, decryptMnemonic
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -10,9 +9,6 @@ import {
   verifyPin,
   encryptMnemonic,
   decryptMnemonic,
-  detectBiometricAvailability,
-  enrollBiometric,
-  verifyBiometric,
 } from './security';
 import { generateMnemonic } from 'bip39';
 
@@ -189,64 +185,6 @@ describe('security.ts', () => {
 
       const reencrypted = await encryptMnemonic(result.decrypted!, pin);
       expect(reencrypted.success).toBe(true);
-    });
-  });
-
-  describe('detectBiometricAvailability()', () => {
-    it('should report unavailable when WebAuthn is not present (default test environment)', () => {
-      const result = detectBiometricAvailability();
-      expect(result.available).toBe(false);
-      expect(result.error).toBeTruthy();
-    });
-
-    it('should report available when WebAuthn APIs are present', () => {
-      const original = window.PublicKeyCredential;
-      (window as any).PublicKeyCredential = function () {};
-
-      const result = detectBiometricAvailability();
-      expect(result.available).toBe(true);
-
-      (window as any).PublicKeyCredential = original;
-    });
-  });
-
-  describe('enrollBiometric()', () => {
-    it('should report not enrolled when biometrics are unavailable', async () => {
-      const result = await enrollBiometric();
-      expect(result.enrolled).toBe(false);
-      expect(result.type).toBe('none');
-    });
-
-    it('should enroll and set a creation timestamp when biometrics are available', async () => {
-      const original = window.PublicKeyCredential;
-      (window as any).PublicKeyCredential = function () {};
-
-      const before = Date.now();
-      const result = await enrollBiometric();
-      const after = Date.now();
-
-      expect(result.enrolled).toBe(true);
-      expect(result.createdAt).toBeGreaterThanOrEqual(before);
-      expect(result.createdAt).toBeLessThanOrEqual(after);
-
-      (window as any).PublicKeyCredential = original;
-    });
-  });
-
-  describe('verifyBiometric()', () => {
-    it('should return false when biometrics are unavailable', async () => {
-      const result = await verifyBiometric();
-      expect(result).toBe(false);
-    });
-
-    it('should return true when biometrics are available (simulated WebAuthn)', async () => {
-      const original = window.PublicKeyCredential;
-      (window as any).PublicKeyCredential = function () {};
-
-      const result = await verifyBiometric();
-      expect(result).toBe(true);
-
-      (window as any).PublicKeyCredential = original;
     });
   });
 

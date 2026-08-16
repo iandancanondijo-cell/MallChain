@@ -2,9 +2,8 @@
  * Mallchain Mission Control v14 — API service layer.
  *
  * Contract: api.get(path, params) / api.post(path, body) / api.mutate(tx) all
- * return Promises. When config.apiBaseUrl is set they perform real fetch()
- * calls (JSON in/out); when it is empty they resolve from the local store —
- * the same simulated engine the v14 HTML preview uses.
+ * return Promises and always perform real fetch() calls (JSON in/out) against
+ * config.apiBaseUrl.
  *
  * Features:
  * - Task 2.1: Token-based authentication: Automatically adds Authorization: Bearer header when JWT exists in localStorage
@@ -13,16 +12,15 @@
  * - Task 2.5: Request deduplication: Prevents duplicate concurrent requests to same endpoint
  * - Task 6.1: Network error display with user-friendly messages and console logging
  * - Task 6.2-6.3: Error handling with user notifications (429, network errors, etc.)
- * 
+ *
  * Error handling flow:
  * 1. Network error (fetch fails): handleNetworkError() shows toast to user
  * 2. 401 (Unauthorized): handle401Error() clears token, shows message, redirects to login
  * 3. Other HTTP errors (4xx, 5xx): Returns error code and message, caller decides if toast needed
  * 4. Success (2xx): Returns {ok: true, data: parsed JSON response}
  */
-import { config, sim } from './config';
-import { store, type AppState } from '../store/store';
-import { handleNetworkError, handleApiError, handle401Error } from './errorHandler';
+import { config } from './config';
+import { handleNetworkError, handle401Error } from './errorHandler';
 
 export interface ApiResult<T = unknown> {
   ok: boolean;
@@ -30,8 +28,6 @@ export interface ApiResult<T = unknown> {
   error?: string;
   code?: number;
 }
-
-const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 /**
  * Task 2.2: Retrieve JWT token from localStorage safely
@@ -194,10 +190,21 @@ class Api {
       // Examples: 400 Bad Request, 403 Forbidden, 404 Not Found, 500 Server Error
       // Task 6.1: Display error with context (caller decides if toast needed)
       if (!res.ok) {
+        // Two real error shapes exist across the backend: a flat string
+        // (`{error: "message"}`, most routes) and AppError's nested object
+        // (`{error: {code, message, statusCode, ...}}`, errorHandler.js's
+        // asyncHandler-wrapped routes — this is what sendController.js's
+        // broadcast failures use). Extracting the raw field without
+        // checking its type passed the object straight through, which
+        // `new Error(...)`/string interpolation downstream coerced to the
+        // literal text "[object Object]" instead of the real message —
+        // confirmed live on a Send broadcast failure.
+        const rawError = (json as { error?: string | { message?: string } } | null)?.error;
+        const errorMessage = typeof rawError === 'string' ? rawError : rawError?.message;
         const errorResult = {
           ok: false,
           code: res.status,
-          error: (json as { error?: string } | null)?.error || `HTTP ${res.status}`,
+          error: errorMessage || `HTTP ${res.status}`,
           details: (json as { details?: unknown } | null)?.details,
         };
         
@@ -226,163 +233,44 @@ class Api {
 
   /**
    * GET request helper
-   * 
+   *
    * Example: api.get('/api/wallets', { limit: 10 })
    * → GET /api/wallets?limit=10
-   * 
-   * If config.apiBaseUrl is set: Makes real HTTP request
-   * If config.apiBaseUrl is empty: Resolves from local store (demo mode)
    */
   get<T = unknown>(path: string, params?: Record<string, string | number>): Promise<ApiResult<T>> {
-    if (config.apiBaseUrl) {
-      const qs = params ? '?' + new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString() : '';
-      return this.request<T>(path + qs);
-    }
-    // local fallback — resolve from the store (demo mode)
-    return delay(sim.enabled ? 120 : 8).then(() => this.localResolve<T>(path, params));
+    const qs = params ? '?' + new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString() : '';
+    return this.request<T>(path + qs);
   }
 
   /**
    * POST request helper
-   * 
+   *
    * Example: api.post('/api/wallets', { name: 'My Wallet' })
    * → POST /api/wallets with JSON body
-   * 
-   * If config.apiBaseUrl is set: Makes real HTTP request
-   * If config.apiBaseUrl is empty: Resolves from local store (demo mode)
    */
   post<T = unknown>(path: string, body?: unknown): Promise<ApiResult<T>> {
-    if (config.apiBaseUrl) {
-      return this.request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) });
-    }
-    return delay(sim.enabled ? 140 : 8).then(() => this.localResolve<T>(path, undefined, body));
+    return this.request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) });
   }
 
   /** PUT request helper — same contract as post(), for REST endpoints that expect PUT (e.g. admin user/role updates). */
   put<T = unknown>(path: string, body?: unknown): Promise<ApiResult<T>> {
-    if (config.apiBaseUrl) {
-      return this.request<T>(path, { method: 'PUT', body: JSON.stringify(body ?? {}) });
-    }
-    return delay(sim.enabled ? 140 : 8).then(() => this.localResolve<T>(path, undefined, body));
+    return this.request<T>(path, { method: 'PUT', body: JSON.stringify(body ?? {}) });
   }
 
   /** DELETE request helper — same contract as post(), for REST endpoints that expect DELETE. */
   del<T = unknown>(path: string): Promise<ApiResult<T>> {
-    if (config.apiBaseUrl) {
-      return this.request<T>(path, { method: 'DELETE' });
-    }
-    return delay(sim.enabled ? 140 : 8).then(() => this.localResolve<T>(path));
+    return this.request<T>(path, { method: 'DELETE' });
   }
 
   /**
    * Task 2.6: Mutate (transaction) helper
-   * 
-   * Handles financial transactions (credit/debit operations)
+   *
+   * POSTs to /api/tx — backend validates, signs, and broadcasts the
+   * transaction to the blockchain.
    * Example: api.mutate({ type: 'send', amount: 100, asset: 'mallcoin', kind: 'debit' })
-   * 
-   * When apiBaseUrl set:
-   * - POSTs to /api/tx endpoint on backend
-   * - Backend validates, signs, and broadcasts transaction to blockchain
-   * 
-   * When apiBaseUrl empty (demo mode):
-   * - Updates local store (simulated transaction)
-   * - Returns mock response
    */
   mutate<T = unknown>(tx: { type: string; amount: number; asset: string; kind: 'credit' | 'debit'; note?: string }): Promise<ApiResult<T>> {
-    if (config.apiBaseUrl) {
-      // Task 2.6: POST to /api/tx when apiBaseUrl is set
-      // Backend endpoint expects transaction data and returns confirmation
-      return this.request<T>('/api/tx', { method: 'POST', body: JSON.stringify(tx) });
-    }
-    
-    // Demo mode: apply transaction to local store
-    const res = store.applyTx({
-      type: tx.type,
-      amount: tx.amount,
-      asset: tx.asset as keyof AppState['balances'],
-      kind: tx.kind,
-      note: tx.note,
-      notifTitle: `${tx.kind === 'credit' ? '+' : '−'}${tx.amount} ${tx.asset} · ${tx.type}`,
-      notifKind: 'tx',
-      activityText: `${tx.kind === 'credit' ? 'Received' : 'Sent'} ${tx.amount} ${tx.asset} (${tx.type})`,
-    });
-    if (!res.ok) return Promise.resolve({ ok: false, error: res.error });
-    return Promise.resolve({ ok: true, data: res.tx as unknown as T });
-  }
-
-  /**
-   * Local store resolver (demo mode)
-   * 
-   * When backend is not available, resolve requests from local store
-   * Allows development/testing without backend running
-   * 
-   * Maps common API paths to store data:
-   * - /api/wallet/{address} → user's token balances (PHASE 1 FIX)
-   * - /balances → user's token balances
-   * - /txs → transaction history
-   * - /notifications → notifications queue
-   * - /validators/leaderboard → validator rankings
-   * etc.
-   */
-  private localResolve<T>(path: string, _params?: unknown, _body?: unknown): ApiResult<T> {
-    // Local mirror of the backend's key read endpoints.
-    const st = store.state;
-    
-    // PHASE 1 FIX: Handle /api/wallet/{address} endpoint
-    // Extracts wallet address from path and returns balance from store
-    const walletMatch = path.match(/^\/api\/wallet\/(.+?)(?:\?|$)/);
-    if (walletMatch) {
-      const walletAddress = walletMatch[1];
-      // Return wallet balance from store
-      return {
-        ok: true,
-        data: {
-          address: walletAddress,
-          MALL: st.balances.MALL,
-          MLPTS: st.balances.MLPTS,
-          USD_M: st.balances.USD_M,
-          KES: st.balances.KES,
-          EUR: st.balances.EUR,
-          GBP: st.balances.GBP,
-          lastUpdated: Date.now(),
-        } as unknown as T,
-      };
-    }
-    
-    // PHASE 1 FIX: Handle /api/transactions endpoint
-    const txMatch = path.match(/^\/api\/transactions/);
-    if (txMatch) {
-      // Return transactions from store
-      return {
-        ok: true,
-        data: {
-          transactions: st.txs,
-          total: st.txs.length,
-          page: 1,
-          pageSize: 20,
-          hasMore: false,
-        } as unknown as T,
-      };
-    }
-    
-    switch (path) {
-      case '/balances':
-        return { ok: true, data: st.balances as unknown as T };
-      case '/txs':
-        return { ok: true, data: st.txs as unknown as T };
-      case '/notifications':
-        return { ok: true, data: st.notifications as unknown as T };
-      case '/activity':
-        return { ok: true, data: st.activity as unknown as T };
-      case '/campaigns':
-        return { ok: true, data: st.mines.campaigns as unknown as T };
-      case '/validators/leaderboard':
-        return { ok: true, data: st.validators.rewardsLeaderboard.validators as unknown as T };
-      case '/explorer/blocks':
-        return { ok: true, data: st.explorer.blocks as unknown as T };
-      default:
-        return { ok: true, data: null as unknown as T };
-    }
+    return this.request<T>('/api/tx', { method: 'POST', body: JSON.stringify(tx) });
   }
 }
 

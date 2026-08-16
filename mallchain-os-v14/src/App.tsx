@@ -1,16 +1,16 @@
 /**
  * App shell — fixed sidebar + topbar + routed content + global banners +
- * toasts + command palette. Demo-mode gate seeds once at boot.
+ * toasts + command palette.
  */
 import { useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
+import AdminSidebar from './components/AdminSidebar';
 import TopBar from './components/TopBar';
 import CommandPalette from './components/CommandPalette';
 import { ToastHost } from './components/ui';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { matchRoute, useHashRoute } from './router';
 import { store } from './store/store';
-import { seedIfDemo } from './demo/seeds';
-import { config, sim } from './services/config';
 import { useStoreVersion } from './components/ui';
 import { storeSync } from './services/storeSync';
 import { socketManager } from './services/socket';
@@ -39,16 +39,37 @@ export default function App() {
         // login/register only set these at the moment of auth, so a reload
         // (or an admin ban/KYC decision since then) would otherwise show stale data.
         if (authService.getToken()) {
-          const res = await api.get<{ user?: { id: string; banned: boolean; kycLevel: number; role: 'user' | 'admin' | 'superadmin' } }>('/api/auth/me');
+          const res = await api.get<{ user?: { id: string; banned: boolean; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string } }>('/api/auth/me');
           if (res.ok && res.data?.user) {
             const u = res.data.user;
             store.state.user.id = u.id;
             store.state.user.frozen = !!u.banned;
             store.state.user.kycLevel = u.kycLevel ?? 1;
             store.state.user.role = u.role || 'user';
+            // Prefer a real name (set from KYC once submitted) over a manually
+            // chosen username, over an email-derived fallback — never show a
+            // fictitious placeholder identity.
+            const realName = u.name || u.username || u.email?.split('@')[0];
+            if (realName) {
+              store.state.user.name = realName;
+              store.state.user.avatarInitial = realName[0]?.toUpperCase() || store.state.user.avatarInitial;
+            }
             store.commit();
             if (socketManager.isConnected()) socketManager.subscribeUser(u.id);
+          } else {
+            // Token exists but the backend rejected/couldn't confirm it —
+            // don't leave a stale "authed" flag with no real identity behind
+            // it (that's exactly what renders as a ghost "Guest" session).
+            store.state.user.authed = false;
+            store.commit();
           }
+        } else if (store.state.user.authed) {
+          // No token at all, yet the persisted store still says authed —
+          // can happen if a token was cleared (e.g. on a 401) but the full
+          // store reset that normally follows didn't complete before this
+          // tab reloaded. Don't trust a stale flag with no token behind it.
+          store.state.user.authed = false;
+          store.commit();
         }
 
         setAuthInitialized(true);
@@ -65,12 +86,6 @@ export default function App() {
     const a = map[st.prefs.accent] || '#f3ba2f';
     document.documentElement.style.setProperty('--accent', a);
     document.documentElement.style.setProperty('--accent-2', a === '#22d3ee' ? '#0ea5e9' : a === '#a78bfa' ? '#8b5cf6' : a === '#34d399' ? '#10b981' : '#f59e0b');
-
-    // Pause simulations when a real API is configured
-    if (config.apiBaseUrl) sim.pause();
-
-    // Seed demo data once on boot
-    seedIfDemo(st);
 
     // Task 5.12: Initialize Socket.IO connection for real-time updates
     socketManager.connect();
@@ -108,14 +123,18 @@ export default function App() {
   }, [authInitialized, st.user.authed, path, navigate]);
 
   const isAuthenticated = st.user.authed;
-  const route = matchRoute(path, isAuthenticated);
+  const route = matchRoute(path, isAuthenticated, st.user.role);
   const hiddenNav = path.startsWith('/auth') || path.startsWith('/landing');
+  // Based on the RESOLVED route, not the raw hash — a non-admin's hash can
+  // still literally read "#/admin" after being redirected (matchRoute swaps
+  // what renders, not the URL), and the badge/accent must not lie about that.
+  const isAdminRoute = route.path.startsWith('/admin');
 
   return (
-    <div className="app-shell">
-      {!hiddenNav && <Sidebar path={path} navigate={navigate} />}
+    <div className={'app-shell' + (isAdminRoute ? ' app-shell--admin' : '')}>
+      {!hiddenNav && (isAdminRoute ? <AdminSidebar navigate={navigate} /> : <Sidebar path={path} navigate={navigate} />)}
       <div className="main" style={hiddenNav ? { marginLeft: 0 } : undefined}>
-        {!hiddenNav && <TopBar navigate={navigate} />}
+        {!hiddenNav && <TopBar navigate={navigate} isAdminRoute={isAdminRoute} />}
 
         {/* global banners (admin-driven) */}
         {!hiddenNav && st.admin.flags.maintenance && (
@@ -136,9 +155,9 @@ export default function App() {
           </div>
         )}
 
-        {route.render(navigate)}
+        <ErrorBoundary resetKey={path}>{route.render(navigate)}</ErrorBoundary>
       </div>
-      <CommandPalette navigate={navigate} />
+      <CommandPalette navigate={navigate} isAdminRoute={isAdminRoute} />
       <ToastHost />
     </div>
   );

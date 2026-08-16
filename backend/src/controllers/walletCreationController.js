@@ -1,9 +1,11 @@
 const { DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
-const { SigningStargateClient, StargateClient } = require('@cosmjs/stargate');
+const { SigningStargateClient } = require('@cosmjs/stargate');
 const bip39 = require('bip39');
+const mallcoinService = require('../services/mallcoinService');
+const MallPointAccount = require('../models/MallPointAccount');
+const { getChainUserPoints, mergePoints } = require('../services/mallpointsService');
 
 const CHAIN_RPC = process.env.CHAIN_RPC_URL || 'http://localhost:26657';
-const CHAIN_REST = process.env.CHAIN_REST_URL || 'http://localhost:1317';
 const CHAIN_ID = process.env.CHAIN_ID || 'mallchain-1';
 
 /**
@@ -105,17 +107,12 @@ async function getWalletBalance(req, res) {
       return res.status(400).json({ error: 'Address is required' });
     }
 
-    // Try to connect to blockchain REST API
-    let client;
-    let balance;
-    
+    let mall = 0;
     try {
-      client = await StargateClient.connect(CHAIN_REST);
-      // Query balance (default denom is umall for mallchain)
-      balance = await client.getBalance(address, 'umall');
+      const mlcns = await mallcoinService.getWalletBalance(address);
+      mall = mlcns.availableDisplay || 0;
     } catch (chainErr) {
-      console.warn('[Wallet Balance] Blockchain REST API unavailable, using fallback:', chainErr.message);
-      // Return zero balance if blockchain is unavailable
+      console.warn('[Wallet Balance] MLCoin module unavailable, using fallback:', chainErr.message);
       return res.json({
         address,
         MALL: 0,
@@ -129,11 +126,20 @@ async function getWalletBalance(req, res) {
       });
     }
 
+    let mlpts = 0;
+    try {
+      const acc = await MallPointAccount.findOne({ address });
+      const chain = await getChainUserPoints(address);
+      mlpts = mergePoints({ chain, dbBalance: acc ? acc.balance : 0 }).balance;
+    } catch (pointsErr) {
+      console.warn('[Wallet Balance] Mallpoints lookup failed:', pointsErr.message);
+    }
+
     res.json({
       address,
-      MALL: parseFloat(balance.amount) / 1_000_000, // Convert from umall to MALL (6 decimals)
-      MLPTS: 0, // Mallpoints would need separate query
-      USD_M: 0, // USD-M would need separate query
+      MALL: mall,
+      MLPTS: mlpts,
+      USD_M: 0, // no USD-M stablecoin module on this chain
       KES: 0,
       EUR: 0,
       GBP: 0,

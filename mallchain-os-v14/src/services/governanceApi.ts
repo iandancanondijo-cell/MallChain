@@ -28,6 +28,18 @@ export interface Proposal {
   userVote?: { voted: boolean; option?: string };
 }
 
+export interface DepositParams {
+  min_deposit: Array<{ denom: string; amount: string }>;
+  max_deposit_period: string;
+}
+
+export interface VotingPower {
+  address: string;
+  totalStaked: string;
+  denom: string;
+  delegations: Array<{ validatorAddress: string; amount: string; denom: string }>;
+}
+
 class GovernanceApi {
   async listProposals(status?: string): Promise<ApiResult<{ proposals: Proposal[]; stats: { total: number; active: number } }>> {
     return api.get('/api/governance/proposals', status ? { status } : undefined);
@@ -39,6 +51,14 @@ class GovernanceApi {
 
   async getUserVote(id: string, voter: string): Promise<ApiResult<{ userVote: { voted: boolean; option?: string } }>> {
     return api.get(`/api/governance/proposal/${id}/vote/${voter}`);
+  }
+
+  async getDepositParams(): Promise<ApiResult<{ params: DepositParams }>> {
+    return api.get('/api/governance/deposit-params');
+  }
+
+  async getVotingPower(address: string): Promise<ApiResult<VotingPower>> {
+    return api.get(`/api/governance/voting-power/${address}`);
   }
 }
 

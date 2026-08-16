@@ -5,19 +5,22 @@
  * These properties are architectural constraints that the system MUST satisfy.
  * 
  * Properties Verified:
- * 1. Mode Consistency - Real backend vs demo mode decision is made once at startup
+ * 1. Startup Configuration - config is defined once at startup with valid values
  * 2. CORS Origin Validation - Only allowed origins receive responses
  * 3. Authentication Token Validity - Protected endpoints require valid JWT
  * 4. Socket Subscription Isolation - wallet:A subscribers don't receive wallet:B events
  * 5. Error Response Format - All errors follow {ok, error, code} structure
  * 6. Real-time Event Ordering - Events delivered in chronological order
  * 7. Configuration Immutability - Settings loaded once at startup and remain constant
- * 8. Simulation Pause on Real API - Demo data disabled when real backend available
+ *
+ * (There used to be an 8th property about a demo/simulation mode toggling
+ * off when a real backend was configured — the app now always talks to a
+ * real backend, so that property no longer applies and was removed.)
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { api } from '../api';
-import { config, sim } from '../config';
+import { config } from '../config';
 import type { ApiResult } from '../api';
 
 describe('Correctness Properties Verification', () => {
@@ -38,56 +41,36 @@ describe('Correctness Properties Verification', () => {
   });
 
   // ============================================================================
-  // Property 1: Mode Consistency
+  // Property 1: Startup Configuration
   // ============================================================================
-  describe('Property 1: Mode Consistency', () => {
-    it('should define config values at startup and maintain them', () => {
+  describe('Property 1: Startup Configuration', () => {
+    it('should define config values at startup', () => {
       // Property: Config values are defined at module load time
       expect(config).toBeDefined();
       expect(typeof config.apiBaseUrl).toBe('string');
-      expect(typeof config.demoMode).toBe('boolean');
       expect(typeof config.network).toBe('string');
       expect(typeof config.sessionTtlMin).toBe('number');
     });
 
-    it('should use consistent mode for multiple requests', async () => {
-      // Setup: Track calls made
+    it('should always make real requests against apiBaseUrl', async () => {
       const mockResponse = { ok: true, data: { id: '1', name: 'Test' } };
       global.fetch = vi.fn(async (url: string, options: any) => {
         mockFetchCalls.push({ url, options, method: options?.method || 'GET' });
         return new Response(JSON.stringify(mockResponse), { status: 200 });
       });
 
-      // Determine current mode from config (could be real backend or demo)
-      const isRealBackendMode = !!config.apiBaseUrl;
-
-      // Make multiple requests
       const result1 = await api.get('/api/test1');
       const result2 = await api.post('/api/test2', { data: 'test' });
 
-      // Verify: Both requests use same mode
-      if (isRealBackendMode) {
-        // In real backend mode, both should be real requests
-        expect(result1.ok).toBe(true);
-        expect(result2.ok).toBe(true);
-      } else {
-        // In demo mode, no real fetch calls
-        expect(mockFetchCalls.length).toBe(0);
-      }
+      expect(result1.ok).toBe(true);
+      expect(result2.ok).toBe(true);
+      expect(mockFetchCalls.length).toBe(2);
     });
 
-    it('should maintain mode consistency throughout session lifetime', () => {
-      // Property: Mode doesn't change during session
-      const initialMode = config.apiBaseUrl;
-      const initialDemoMode = config.demoMode;
-
-      // Verify mode is consistent
-      expect(config.apiBaseUrl).toBe(initialMode);
-      expect(config.demoMode).toBe(initialDemoMode);
-
-      // After some operations, mode should still be consistent
-      expect(config.apiBaseUrl).toBe(initialMode);
-      expect(config.demoMode).toBe(initialDemoMode);
+    it('should keep apiBaseUrl consistent throughout session lifetime', () => {
+      const initialUrl = config.apiBaseUrl;
+      expect(config.apiBaseUrl).toBe(initialUrl);
+      expect(config.apiBaseUrl).toBe(initialUrl);
     });
   });
 
@@ -386,13 +369,11 @@ describe('Correctness Properties Verification', () => {
     it('should load config at startup and keep values consistent', () => {
       // Property: config values are loaded once and remain constant
       const initialUrl = config.apiBaseUrl;
-      const initialDemoMode = config.demoMode;
       const initialNetwork = config.network;
       const initialSessionTtl = config.sessionTtlMin;
 
       // Verify: Config maintains its values
       expect(config.apiBaseUrl).toBe(initialUrl);
-      expect(config.demoMode).toBe(initialDemoMode);
       expect(config.network).toBe(initialNetwork);
       expect(config.sessionTtlMin).toBe(initialSessionTtl);
     });
@@ -400,7 +381,6 @@ describe('Correctness Properties Verification', () => {
     it('should have valid config values', () => {
       // Property: Config values are valid at startup
       expect(typeof config.apiBaseUrl).toBe('string');
-      expect(typeof config.demoMode).toBe('boolean');
       expect(['mainnet', 'testnet']).toContain(config.network);
       expect(typeof config.sessionTtlMin).toBe('number');
       expect(config.sessionTtlMin).toBeGreaterThan(0);
@@ -419,62 +399,14 @@ describe('Correctness Properties Verification', () => {
   });
 
   // ============================================================================
-  // Property 8: Simulation Pause on Real API
-  // ============================================================================
-  describe('Property 8: Simulation Pause on Real API', () => {
-    it('should have sim controller available', () => {
-      // Property: sim controller exists and can pause/resume
-      expect(sim).toBeDefined();
-      expect(typeof sim.pause).toBe('function');
-      expect(typeof sim.resume).toBe('function');
-      expect(typeof sim.every).toBe('function');
-      expect(typeof sim.later).toBe('function');
-    });
-
-    it('should disable simulations when real API is configured', () => {
-      // Property: When apiBaseUrl is set, simulations should be disabled
-      const hasRealBackend = !!config.apiBaseUrl;
-      const hasDemoMode = config.demoMode;
-
-      // Verify the relationship: if real backend is configured, demo mode is irrelevant
-      if (hasRealBackend) {
-        // With real backend, sim should be disabled (or at least not blocking)
-        expect(typeof sim.pause).toBe('function');
-      }
-    });
-
-    it('should enable simulations in demo mode without backend', () => {
-      // Property: When apiBaseUrl is empty, demo mode is active
-      if (!config.apiBaseUrl && config.demoMode) {
-        // In demo mode without backend, sim should be active
-        expect(typeof sim.resume).toBe('function');
-        expect(typeof sim.every).toBe('function');
-      }
-    });
-  });
-
-  // ============================================================================
   // Cross-Property Validation
   // ============================================================================
   describe('Cross-Property Consistency', () => {
-    it('should maintain mode and config consistency together', () => {
-      // Property: Mode consistency (P1), Config immutability (P7), and Simulation control (P8) work together
-      
-      // Verify all properties are present and valid
+    it('should maintain startup config and immutability together', () => {
+      // Property: Startup Configuration (P1) and Config immutability (P7) work together
       expect(config).toBeDefined();
-      expect(sim).toBeDefined();
-
-      // Verify relationship between apiBaseUrl and demoMode
-      const hasBackend = !!config.apiBaseUrl;
-      
-      if (hasBackend) {
-        // With backend configured, we're in real mode
-        expect(typeof config.apiBaseUrl).toBe('string');
-        expect(config.apiBaseUrl.length).toBeGreaterThan(0);
-      } else {
-        // Without backend, we're in demo mode
-        expect(config.apiBaseUrl).toBe('');
-      }
+      expect(typeof config.apiBaseUrl).toBe('string');
+      expect(config.apiBaseUrl.length).toBeGreaterThan(0);
     });
 
     it('should maintain error format consistency across all operations', async () => {
@@ -517,25 +449,22 @@ describe('Correctness Properties Verification', () => {
     });
 
     it('should verify all correctness properties are implemented', () => {
-      // Summary: Verify all 8 properties are validated somewhere in this suite
-      
-      // P1: Mode Consistency ✓ (checked in "Property 1")
+      // Summary: Verify all 7 properties are validated somewhere in this suite
+
+      // P1: Startup Configuration ✓ (checked in "Property 1")
       // P2: CORS Origin Validation ✓ (checked in "Property 2")
       // P3: Authentication Token Validity ✓ (checked in "Property 3")
       // P4: Socket Subscription Isolation ✓ (checked in "Property 4")
       // P5: Error Response Format ✓ (checked in "Property 5")
       // P6: Real-time Event Ordering ✓ (checked in "Property 6")
       // P7: Configuration Immutability ✓ (checked in "Property 7")
-      // P8: Simulation Pause on Real API ✓ (checked in "Property 8")
 
       // Final verification: core components exist
       expect(config).toBeDefined();
       expect(api).toBeDefined();
-      expect(sim).toBeDefined();
 
       // Config has all required fields
       expect('apiBaseUrl' in config).toBe(true);
-      expect('demoMode' in config).toBe(true);
       expect('network' in config).toBe(true);
       expect('sessionTtlMin' in config).toBe(true);
 
@@ -543,12 +472,6 @@ describe('Correctness Properties Verification', () => {
       expect(typeof api.get).toBe('function');
       expect(typeof api.post).toBe('function');
       expect(typeof api.mutate).toBe('function');
-
-      // Sim controller has required methods
-      expect(typeof sim.pause).toBe('function');
-      expect(typeof sim.resume).toBe('function');
-      expect(typeof sim.every).toBe('function');
-      expect(typeof sim.later).toBe('function');
     });
   });
 });

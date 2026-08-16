@@ -6,7 +6,11 @@ const UserSettingsSchema = new Schema({
 
   prefs: {
     accent: { type: String, default: 'gold' },
-    currency: { type: String, default: 'USD' },
+    // No default here on purpose — the frontend derives an initial currency
+    // from the browser's locale (services/locale.ts) and only writes a real
+    // value back once the user (or that detection) explicitly sets one.
+    // A hardcoded default here would silently overwrite that on first load.
+    currency: { type: String },
     lang: { type: String, default: 'EN' },
     theme: { type: String, default: 'dark' },
   },
@@ -33,6 +37,11 @@ const UserSettingsSchema = new Schema({
     twoFactorEnabled: { type: Boolean, default: false },
     twoFactorEnabledAt: { type: Date },
     twoFactorDisabledAt: { type: Date },
+    // Pending secret from /2fa/setup, promoted to twoFactorSecret only once
+    // a real TOTP code generated from it is verified in /2fa/enable.
+    twoFactorPendingSecret: { type: String, select: false },
+    twoFactorSecret: { type: String, select: false },
+    twoFactorBackupCodeHashes: { type: [String], default: undefined, select: false },
     sessionTimeout: { type: Number, default: 120 },
     loginNotifications: { type: Boolean, default: true },
     deviceManagement: { type: Boolean, default: true },

@@ -1,15 +1,16 @@
 /**
  * CommandPalette — Ctrl/Cmd+K global palette. Commands cover every route
  * plus actions: New transaction, Create campaign, Deploy contract,
- * Switch currency, Toggle demo mode.
+ * Switch currency.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { store } from '../store/store';
 import { toast } from './ui';
+import { COMMON_CURRENCIES } from '../services/locale';
 
 interface Cmd { label: string; icon?: string; hint?: string; run: () => void }
 
-export default function CommandPalette({ navigate }: { navigate: (p: string) => void }) {
+export default function CommandPalette({ navigate, isAdminRoute }: { navigate: (p: string) => void; isAdminRoute?: boolean }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
@@ -30,6 +31,13 @@ export default function CommandPalette({ navigate }: { navigate: (p: string) => 
 
   const cmds = useMemo<Cmd[]>(() => {
     const go = (p: string) => () => { navigate(p); setOpen(false); };
+
+    // In an admin session, the palette should offer the same minimal set of
+    // options as the rest of the admin shell — no user-facing routes/actions.
+    if (isAdminRoute) {
+      return [{ label: 'Exit admin — back to app', icon: '←', run: go('/') }];
+    }
+
     return [
       { label: 'Go to Dashboard', icon: '⌂', run: go('/') },
       { label: 'Go to Wallet', icon: '◈', run: go('/wallet') },
@@ -50,32 +58,27 @@ export default function CommandPalette({ navigate }: { navigate: (p: string) => 
       { label: 'Referrals', icon: '🔗', run: go('/referrals') },
       { label: 'Smart Contracts', icon: '📜', run: go('/contracts') },
       { label: 'Developer Hub', icon: '⚙', run: go('/devhub') },
-      { label: 'Admin', icon: '🛠', run: go('/admin') },
+      ...(store.state.user.role === 'admin' || store.state.user.role === 'superadmin'
+        ? [{ label: 'Admin', icon: '🛠', run: go('/admin') }]
+        : []),
       { label: 'Settings', icon: '⚙', run: go('/settings') },
       { label: 'Profile', icon: '👤', run: go('/profile') },
       { label: 'New transaction', icon: '💸', run: go('/wallet/send') },
       { label: 'Create campaign', icon: '➕', run: go('/mines/my-campaigns') },
       { label: 'Deploy contract', icon: '🚀', run: go('/contracts') },
       {
-        label: 'Switch currency', icon: '💱', run: () => {
-          const next = { USD: 'KES', KES: 'EUR', EUR: 'GBP', GBP: 'USD' };
-          store.state.prefs.currency = next[store.state.prefs.currency] as never;
+        label: 'Cycle currency', icon: '💱', run: () => {
+          const cur = store.state.prefs.currency;
+          const idx = COMMON_CURRENCIES.indexOf(cur);
+          const next = COMMON_CURRENCIES[(idx + 1) % COMMON_CURRENCIES.length] || COMMON_CURRENCIES[0];
+          store.state.prefs.currency = next as never;
           store.commit();
-          toast('Currency → ' + store.state.prefs.currency);
-          setOpen(false);
-        },
-      },
-      {
-        label: 'Toggle demo mode', icon: '🎛', run: () => {
-          const next = !store.state.settings.demoMode;
-          store.state.settings.demoMode = next;
-          store.commit();
-          toast(next ? 'Demo mode ON' : 'Demo mode OFF (store stays)');
+          toast('Currency → ' + next);
           setOpen(false);
         },
       },
     ];
-  }, [navigate]);
+  }, [navigate, isAdminRoute]);
 
   const filtered = cmds.filter((c) => c.label.toLowerCase().includes(q.toLowerCase()));
   useEffect(() => { setSel(0); }, [q]);

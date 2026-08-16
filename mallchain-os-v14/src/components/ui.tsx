@@ -163,7 +163,20 @@ export function fmtNum(n: number): string {
   return String(Math.round(n * 100) / 100);
 }
 
+/**
+ * Formats a real amount in any real ISO 4217 currency, using the browser's
+ * own currency-formatting data instead of a hand-maintained symbol table.
+ * Formats using the browser's OWN locale (not a hardcoded 'en-US') so a
+ * Kenyan user sees "Ksh 1,234.50" rather than the bare "KES 1,234.50" code
+ * — Intl only resolves the natural local symbol when the locale matches
+ * the currency's home region.
+ */
 export function fmtMoney(n: number, currency = 'USD'): string {
-  const sym: Record<string, string> = { USD: '$', KES: 'KSh ', EUR: '€', GBP: '£' };
-  return sym[currency] + n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  try {
+    const locale = navigator.language || 'en-US';
+    return new Intl.NumberFormat(locale, { style: 'currency', currency, maximumFractionDigits: 2 }).format(n);
+  } catch {
+    // Intl doesn't recognize the code (shouldn't happen for a real ISO 4217 currency) — fall back to a plain code prefix rather than crashing.
+    return `${currency} ${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  }
 }

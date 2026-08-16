@@ -29,6 +29,37 @@ function computeWeight(reviewer) {
   return Math.max(0.2, reputation / 100);
 }
 
+/**
+ * Derives approval_rate/response_rate/mining_reputation from a reviewer's
+ * raw counters. Pure function (no DB access) so every call site that
+ * mutates tasks_voted/tasks_approved/tasks_assigned via an atomic
+ * findOneAndUpdate/updateMany can recompute and persist these explicitly —
+ * document middleware (pre('save')) never fires for those atomic update
+ * ops, so the recompute can't live there. Returns null (nothing to do) for
+ * a reviewer who hasn't voted yet, so a brand-new reviewer (tasks_voted=0)
+ * keeps their default 50 reputation instead of being immediately dropped
+ * to a near-zero empty-history score (0 response + 40 consistency + 0 volume = 12).
+ */
+function computeReputationStats(reviewer) {
+  if (!reviewer || !(reviewer.tasks_voted > 0)) return null;
+  const approval_rate = Math.round((reviewer.tasks_approved / reviewer.tasks_voted) * 100);
+  const response_rate = Math.round((reviewer.tasks_voted / (reviewer.tasks_assigned || reviewer.tasks_voted)) * 100);
+  const responseScore = response_rate;
+  const consistencyScore = 100 - Math.abs(approval_rate - 60); // best around 60% approval (not too lenient, not too strict)
+  const volumeScore = Math.min(reviewer.tasks_voted * 5, 100);
+  const mining_reputation = Math.round((responseScore * 0.4) + (consistencyScore * 0.3) + (volumeScore * 0.3));
+  return { approval_rate, response_rate, mining_reputation };
+}
+
+/** Recomputes and persists derived stats for one reviewer after a counter change. */
+async function refreshReviewerStats(validatorId, session) {
+  const reviewer = await MinesReviewer.findOne({ validator_id: validatorId }).session(session || null).lean();
+  const stats = computeReputationStats(reviewer);
+  if (!stats) return reviewer;
+  await MinesReviewer.updateOne({ validator_id: validatorId }, { $set: stats }, { session });
+  return { ...reviewer, ...stats };
+}
+
 function shuffle(arr) {
   const copy = [...arr];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -69,6 +100,7 @@ async function autoAssignReviewers(task) {
     { validator_id: { $in: picked.map((r) => r.validator_id) } },
     { $inc: { tasks_assigned: 1 }, $set: { last_assigned_at: new Date() } }
   );
+  await Promise.all(picked.map((r) => refreshReviewerStats(r.validator_id)));
 
   return task;
 }
@@ -236,6 +268,8 @@ module.exports = {
   REVIEWERS_PER_TASK,
   VOTING_WINDOW_MS,
   computeWeight,
+  computeReputationStats,
+  refreshReviewerStats,
   shuffle,
   autoAssignReviewers,
   checkAndResolve,

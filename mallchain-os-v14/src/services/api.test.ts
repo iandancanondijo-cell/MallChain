@@ -16,12 +16,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 vi.mock('./config', () => ({
   config: {
     apiBaseUrl: '',
-    demoMode: true,
     network: 'testnet',
     sessionTtlMin: 120,
-  },
-  sim: {
-    enabled: false,
   },
 }));
 
@@ -687,45 +683,3 @@ describe('API Service - Real Backend Mode', () => {
   });
 });
 
-describe('API Service - Demo Mode', () => {
-  beforeEach(() => {
-    // Set demo mode
-    (config as any).apiBaseUrl = '';
-    (config as any).demoMode = true;
-  });
-
-  it('should resolve from local store when apiBaseUrl is empty', async () => {
-    const result = await api.get('/balances');
-
-    expect(result.ok).toBe(true);
-    expect(result.data).toEqual({ MALL: 1000, USDT: 500 });
-  });
-
-  it('should apply transaction to local store in demo mode', async () => {
-    const tx = {
-      type: 'reward',
-      amount: 50,
-      asset: 'MALL',
-      kind: 'credit' as const,
-    };
-
-    const result = await api.mutate(tx);
-
-    expect(result.ok).toBe(true);
-    expect(result.data).toBeDefined();
-  });
-
-  it('should handle POST requests in demo mode', async () => {
-    const result = await api.post('/api/test', { data: 'test' });
-
-    // In demo mode, POST to non-mapped paths returns null
-    expect(result.ok).toBe(true);
-  });
-
-  it('should return empty data for unmapped paths in demo mode', async () => {
-    const result = await api.get('/unknown/path');
-
-    expect(result.ok).toBe(true);
-    expect(result.data).toBeNull();
-  });
-});

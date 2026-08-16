@@ -101,6 +101,7 @@ router.get('/profile/me', verifyToken, async (req, res) => {
      res.json(ok({
        id: u._id.toString(),
        username: u.username || null,
+       name: u.name || null,
        email: u.email,
        phone: u.phone || null,
        role: u.role,

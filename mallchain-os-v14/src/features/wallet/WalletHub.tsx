@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, fmtMoney } from '../../components/ui';
 import { useWalletData } from '../../hooks/useWalletData';
-import { config } from '../../services/config';
+import { priceApi } from '../../services/priceApi';
+import { useFxRate, toDisplayCurrency } from '../../services/currency';
 
 /**
  * SECTION 15: Remove Mock Data & Migration
@@ -17,6 +19,8 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
   useStoreVersion();
   const st = store.state;
   const cur = st.prefs.currency;
+  const fxRate = useFxRate(cur);
+  const disp = (usd: number | null) => (usd === null ? null : toDisplayCurrency(usd, cur, fxRate));
   const walletAddress = st.wallet.address;
   const walletCreatedAt = st.wallet.createdAt;
 
@@ -36,12 +40,16 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
     return `${Math.floor(days / 365)} year${Math.floor(days / 365) > 1 ? 's' : ''} ago`;
   };
 
-  // Asset pricing constants - would come from price API in production
-  const prices = {
-    MALL: 0.42,
-    MLPTS: 0.004,
-    USD_M: 1.0,
-  };
+  // Real MALL price from the chain-polled market endpoint (services/priceApi.ts).
+  // MLPTS has no real price source anywhere in the backend — shown as native
+  // amount only, not a fabricated conversion. USD_M is a USD-pegged
+  // stablecoin (1:1 by design, not a fetched/fake rate).
+  const [mallPrice, setMallPrice] = useState<number | null>(null);
+  useEffect(() => {
+    priceApi.getMallPrice().then((res) => {
+      if (res.ok && res.data) setMallPrice(res.data.mid);
+    });
+  }, []);
 
   // SECTION 15.3: Check if wallet is connected
   const isWalletConnected = walletAddress && walletAddress.length > 0;
@@ -55,9 +63,9 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
   };
 
   const assets = [
-    { sym: 'MALL', name: 'Mallcoin', val: realBalance.MALL, usd: realBalance.MALL * prices.MALL, color: 'var(--gold)' },
-    { sym: 'MLPTS', name: 'Mallpoints', val: realBalance.MLPTS, usd: realBalance.MLPTS * prices.MLPTS, color: 'var(--cyan)' },
-    { sym: 'USD-M', name: 'USD stablecoin', val: realBalance.USD_M, usd: realBalance.USD_M * prices.USD_M, color: 'var(--green)' },
+    { sym: 'MALL', name: 'Mallcoin', val: realBalance.MALL, usd: mallPrice !== null ? realBalance.MALL * mallPrice : null, color: 'var(--gold)' },
+    { sym: 'MLPTS', name: 'Mallpoints', val: realBalance.MLPTS, usd: null, color: 'var(--cyan)' },
+    { sym: 'USD-M', name: 'USD stablecoin', val: realBalance.USD_M, usd: realBalance.USD_M, color: 'var(--green)' },
   ];
 
   const actions = [
@@ -104,7 +112,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
       </div>
 
       {/* SECTION 15.5: Empty state - No wallet connected */}
-      {!isWalletConnected && !config.demoMode && (
+      {!isWalletConnected && (
         <div className="card" style={{ backgroundColor: 'var(--bg-2)', borderLeft: '4px solid var(--cyan)', padding: '20px', marginBottom: '16px' }}>
           <h3 style={{ margin: '0 0 12px 0', fontSize: '14px' }}>🔗 No Wallet Connected</h3>
           <p style={{ margin: '0 0 16px 0', color: 'var(--txt-3)', fontSize: '13px' }}>
@@ -142,7 +150,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
             <BalanceSkeleton />
             {[1, 2, 3].map((i) => <BalanceSkeleton key={i} />)}
           </>
-        ) : !isWalletConnected && !config.demoMode ? (
+        ) : !isWalletConnected ? (
           // SECTION 15.5: Empty state - no wallet connected
           <>
             <div className="card">
@@ -163,14 +171,14 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
           <>
             <div className="card">
               <div className="card-label">Total balance</div>
-              <div className="card-value">{fmtMoney(assets.reduce((a, x) => a + x.usd, 0), cur)}</div>
-              <div className="card-sub">across {assets.length} assets</div>
+              <div className="card-value">{(() => { const t = disp(assets.reduce((a, x) => a + (x.usd ?? 0), 0)); return t === null ? '…' : fmtMoney(t, cur); })()}</div>
+              <div className="card-sub">across {assets.length} assets{assets.some((a) => a.usd === null) ? ' · MLPTS value unavailable' : ''}</div>
             </div>
             {assets.map((a) => (
               <div key={a.sym} className="card">
                 <div className="card-label">{a.name} ({a.sym})</div>
                 <div className="card-value" style={{ color: a.color }}>{fmtNum(a.val)}</div>
-                <div className="card-sub">≈ {fmtMoney(a.usd, cur)}</div>
+                <div className="card-sub">{a.usd !== null ? (disp(a.usd) !== null ? `≈ ${fmtMoney(disp(a.usd)!, cur)}` : '…') : 'value unavailable'}</div>
               </div>
             ))}
           </>
@@ -181,7 +189,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
       <div className="card mb">
         <div className="sec-title"><h2>Actions</h2></div>
         <div className="row">
-          {isWalletConnected || config.demoMode ? (
+          {isWalletConnected ? (
             <>
               {actions.map((a) => (
                 <button key={a.label} className="btn btn-ghost" onClick={() => navigate(a.p)}>
@@ -201,7 +209,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
       {/* SECTION 15.7: Assets section with empty state */}
       <div className="card">
         <div className="sec-title"><h2>Assets</h2></div>
-        {!isWalletConnected && !config.demoMode ? (
+        {!isWalletConnected ? (
           <div className="empty" style={{ color: 'var(--txt-3)', padding: 24, textAlign: 'center' }}>
             <div style={{ fontSize: '24px', marginBottom: '8px' }}>📋</div>
             <div>No wallet connected</div>
@@ -212,7 +220,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
             <thead><tr><th>Asset</th><th className="num">Balance</th><th className="num">Value ({cur})</th></tr></thead>
             <tbody>
               {assets.map((a) => (
-                <tr key={a.sym}><td><b>{a.sym}</b> <span className="muted">· {a.name}</span></td><td className="num">{fmtNum(a.val)}</td><td className="num">{fmtMoney(a.usd, cur)}</td></tr>
+                <tr key={a.sym}><td><b>{a.sym}</b> <span className="muted">· {a.name}</span></td><td className="num">{fmtNum(a.val)}</td><td className="num">{a.usd !== null ? (disp(a.usd) !== null ? fmtMoney(disp(a.usd)!, cur) : '…') : '—'}</td></tr>
               ))}
             </tbody>
           </table>

@@ -1,10 +1,10 @@
 /**
- * Wallet Settings Page (Placeholder)
+ * Wallet Settings Page
  * Phase 2 Section 7: Wallet Settings Page - Tasks 7.1-7.10
- * Note: Extends existing store structure for full implementation
  */
 
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { store } from '../store/store';
 import { useStoreVersion, toast } from '../components/ui';
 import { formatAddressForDisplay } from '../services/wallet';
@@ -12,11 +12,19 @@ import '../styles/wallet-settings.css';
 
 export function WalletSettings() {
   useStoreVersion(); // Re-render on store changes
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   const walletAddress = store.state.wallet?.address || '';
   const requests = store.state.wallet?.requests || [];
+
+  useEffect(() => {
+    if (!walletAddress) { setQrDataUrl(null); return; }
+    let cancelled = false;
+    QRCode.toDataURL(walletAddress, { width: 140, margin: 1 })
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch((err) => console.error('[WalletSettings] Failed to generate QR code:', err));
+    return () => { cancelled = true; };
+  }, [walletAddress]);
 
   const handleCopyAddress = (address: string) => {
     if (!address) return;
@@ -24,12 +32,36 @@ export function WalletSettings() {
     toast('Address copied to clipboard', true);
   };
 
-  const handleViewMnemonic = () => {
-    toast('Mnemonic viewing requires PIN verification (Task 8)', false);
+  const goToSecurity = () => { window.location.hash = '#/security'; };
+
+  // Real backup content — same shape as WalletFlow.tsx's handleDownloadBackup,
+  // built from the actual stored mnemonic rather than a disabled placeholder.
+  const buildBackupContent = () =>
+    `Mallchain Wallet Backup\nAddress: ${walletAddress}\nRecovery phrase:\n${store.state.wallet.mnemonic}\n\nKeep this file private. Anyone with this phrase can access your wallet.`;
+
+  const handleDownloadBackup = () => {
+    if (!store.state.wallet.mnemonic) { toast('No recovery phrase available for this wallet', false); return; }
+    const content = buildBackupContent();
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mallchain-wallet-${walletAddress.slice(0, 10)}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('Backup file downloaded');
   };
 
-  const handleImportWallet = () => {
-    setShowImportModal(true);
+  const handlePrintBackup = () => {
+    if (!store.state.wallet.mnemonic) { toast('No recovery phrase available for this wallet', false); return; }
+    const win = window.open('', '_blank', 'width=600,height=600');
+    if (!win) { toast('Pop-up blocked — allow pop-ups to print your backup', false); return; }
+    win.document.write(`<pre style="font: 14px monospace; white-space: pre-wrap; padding: 24px;">${buildBackupContent().replace(/</g, '&lt;')}</pre>`);
+    win.document.close();
+    win.focus();
+    win.print();
   };
 
   return (
@@ -48,16 +80,11 @@ export function WalletSettings() {
 
             {/* Task 7.3: QR Code Display */}
             <div className="qr-section">
-              <div className="qr-placeholder">
-                <svg viewBox="0 0 29 29" className="qr-icon">
-                  <rect fill="#fff" width="29" height="29" />
-                  <g fill="#000">
-                    <rect width="9" height="9" />
-                    <rect x="11" y="11" width="7" height="7" />
-                    <rect x="20" y="20" width="9" height="9" />
-                  </g>
-                </svg>
-              </div>
+              {qrDataUrl ? (
+                <img src={qrDataUrl} alt="Wallet address QR code" width={140} height={140} />
+              ) : (
+                <div className="qr-placeholder" />
+              )}
               <p className="qr-label">Scan to receive funds</p>
             </div>
 
@@ -94,16 +121,13 @@ export function WalletSettings() {
               <h4>Mnemonic Backup</h4>
               <p className="backup-warning">⚠️ Never share your mnemonic with anyone</p>
               <div className="backup-buttons">
-                <button
-                  className="btn btn-secondary"
-                  onClick={handleViewMnemonic}
-                >
+                <button className="btn btn-secondary" onClick={goToSecurity} title="PIN-protected, in Security Settings">
                   View Mnemonic
                 </button>
-                <button className="btn btn-secondary" disabled title="Coming soon">
+                <button className="btn btn-secondary" onClick={handleDownloadBackup}>
                   Download Backup
                 </button>
-                <button className="btn btn-secondary" disabled title="Coming soon">
+                <button className="btn btn-secondary" onClick={handlePrintBackup}>
                   Print Backup
                 </button>
               </div>
@@ -116,10 +140,7 @@ export function WalletSettings() {
       <div className="additional-wallets-section">
         <div className="section-header">
           <h2>Wallet Management</h2>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={handleImportWallet}
-          >
+          <button className="btn btn-primary btn-sm" disabled title="This account supports one wallet at a time">
             + Import Wallet
           </button>
         </div>
@@ -151,114 +172,26 @@ export function WalletSettings() {
           </table>
         ) : (
           <div className="empty-state">
-            <p>No additional wallets. Create or import one to manage multiple addresses.</p>
+            <p>No additional wallets. Importing a second wallet isn't supported yet — this account manages one wallet at a time.</p>
           </div>
         )}
       </div>
 
-      {/* Task 7.9: Advanced Options */}
+      {/* Task 7.9: Advanced Options — all three are real, PIN-protected flows in Security Settings */}
       <div className="advanced-options-section">
         <h2>Advanced Options</h2>
         <div className="options-list">
-          <button className="option-item" disabled title="Phase 3 - Private Key Export">
+          <button className="option-item" onClick={goToSecurity}>
             <span>Export Private Key</span>
             <span className="arrow">→</span>
           </button>
-          <button className="option-item" disabled title="Phase 3 - Security Settings">
+          <button className="option-item" onClick={goToSecurity}>
             <span>Security Settings</span>
             <span className="arrow">→</span>
           </button>
-          <button className="option-item" disabled title="Coming soon">
+          <button className="option-item" onClick={goToSecurity}>
             <span>View Activity Log</span>
             <span className="arrow">→</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Import Wallet Modal */}
-      {showImportModal && (
-        <ImportWalletModal
-          onClose={() => setShowImportModal(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-/**
- * Import Wallet Modal
- */
-function ImportWalletModal({
-  onClose,
-}: {
-  onClose: () => void;
-}) {
-  const [mnemonic, setMnemonic] = useState('');
-  const [walletName, setWalletName] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const handleImport = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      if (!mnemonic.trim()) {
-        setError('Please enter a mnemonic');
-        return;
-      }
-
-      if (!walletName.trim()) {
-        setError('Please enter a wallet name');
-        return;
-      }
-
-      toast('Wallet import feature coming in Phase 2', false);
-      onClose();
-    } catch (error) {
-      setError(`Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="modal-overlay">
-      <div className="modal modal-lg">
-        <h3>Import Wallet</h3>
-
-        {error && <div className="error-message">{error}</div>}
-
-        <div className="form-group">
-          <label>Wallet Name</label>
-          <input
-            type="text"
-            placeholder="My Imported Wallet"
-            value={walletName}
-            onChange={e => setWalletName(e.target.value)}
-          />
-        </div>
-
-        <div className="form-group">
-          <label>Mnemonic (12, 15, 18, 21, or 24 words)</label>
-          <textarea
-            placeholder="Enter your mnemonic phrase..."
-            value={mnemonic}
-            onChange={e => setMnemonic(e.target.value)}
-            rows={4}
-          />
-        </div>
-
-        <div className="modal-buttons">
-          <button className="btn btn-secondary" onClick={onClose} disabled={loading}>
-            Cancel
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={handleImport}
-            disabled={loading}
-          >
-            {loading ? 'Importing...' : 'Import Wallet'}
           </button>
         </div>
       </div>

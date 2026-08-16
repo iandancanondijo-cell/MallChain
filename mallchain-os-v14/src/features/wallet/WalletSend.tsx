@@ -1,13 +1,10 @@
 import { useMemo, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
-import { config } from '../../services/config';
 import { sendMallcoinTransfer, MallcoinTxError } from '../../services/mallcoinTx';
+import { isValidMallAddress } from '../../services/wallet';
+import { faucetApi } from '../../services/faucetApi';
 import { useWizard } from '../../hooks/useWizard';
-
-const MALL_ADDRESS_PATTERN = /^mall1[a-z0-9]{38,58}$/;
-// Fallback word list only used in demo mode, where there's no real mnemonic to check against.
-const DEMO_WORDS = ['ocean', 'vault', 'golden', 'raptor', 'silver', 'matrix', 'cobalt', 'falcon', 'summit', 'helix', 'ember', 'quest'];
 
 const SEND_STEPS = ['recipient', 'review', 'authorize', 'broadcast'] as const;
 type SendStep = typeof SEND_STEPS[number];
@@ -50,34 +47,23 @@ export default function WalletSend() {
 
   const mnemonicWords = useMemo(() => (st.wallet.mnemonic ? st.wallet.mnemonic.trim().split(/\s+/) : []), [st.wallet.mnemonic]);
   // Pick once per mount so it doesn't shift between the "sign" and "authorize" steps.
-  const [wordIdx] = useState(() => {
-    const len = mnemonicWords.length || DEMO_WORDS.length;
-    return 1 + Math.floor(Math.random() * len);
-  });
+  const [wordIdx] = useState(() => 1 + Math.floor(Math.random() * (mnemonicWords.length || 1)));
+  const [gasError, setGasError] = useState(false);
 
-  const validAddr = MALL_ADDRESS_PATTERN.test(addr);
+  const validAddr = isValidMallAddress(addr);
   const max = st.balances.MALL;
 
   const review = () => {
     setErr('');
     const amt = parseFloat(amount);
-    if (!validAddr) { setErr('Invalid address — must start with "mall1" followed by 38-58 lowercase letters/digits.'); return; }
+    if (!validAddr) { setErr('Invalid address — not a valid Mallchain (mall1…) address.'); return; }
     if (!amt || amt <= 0) { setErr('Enter a valid amount.'); return; }
     if (amt + fee > max) { setErr(`Insufficient balance — you have ${max.toFixed(2)} MALL.`); return; }
     wizard.next();
   };
 
-  const sign = () => {
-    setBusy(true);
-    setErr('');
-    setTimeout(() => {
-      wizard.next();
-      setBusy(false);
-    }, 600);
-  };
-
   const authorize = async (word: string) => {
-    const expected = config.apiBaseUrl ? mnemonicWords[wordIdx - 1] : DEMO_WORDS[wordIdx - 1];
+    const expected = mnemonicWords[wordIdx - 1];
     if (!expected || word.trim().toLowerCase() !== expected.toLowerCase()) {
       setErr('Incorrect word — try again.');
       return;
@@ -85,55 +71,54 @@ export default function WalletSend() {
 
     setBusy(true);
     setErr('');
+    setGasError(false);
 
-    if (config.apiBaseUrl) {
-      // Real backend: sign a MsgTransferMallcoin client-side and broadcast it.
-      if (!st.wallet.mnemonic || !st.wallet.address) {
-        setBusy(false);
-        toast('No wallet loaded — import or create a wallet first', false);
-        return;
-      }
-      try {
-        const result = await sendMallcoinTransfer({
-          mnemonic: st.wallet.mnemonic,
-          fromAddress: st.wallet.address,
-          toAddress: addr,
-          amountMlcns: parseFloat(amount),
-        });
-        store.applyTx({
-          type: 'send', amount: parseFloat(amount), asset: 'MALL', kind: 'debit', to: addr, fee,
-          note: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
-          notifTitle: `Sent ${amount} MALL`, notifKind: 'tx',
-          activityText: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
-        });
-        setTxHash(result.txHash);
-        setBusy(false);
-        toast('Transaction broadcast — pending confirmation');
-        wizard.next();
-      } catch (e) {
-        setBusy(false);
-        const message = e instanceof MallcoinTxError || e instanceof Error ? e.message : 'Failed to send';
-        setErr(message);
-        toast(message, false);
-      }
+    if (!st.wallet.mnemonic || !st.wallet.address) {
+      setBusy(false);
+      toast('No wallet loaded — import or create a wallet first', false);
       return;
     }
-
-    // Demo mode: purely local simulation, no real chain interaction.
-    setTimeout(() => {
-      const res = store.applyTx({
+    try {
+      const result = await sendMallcoinTransfer({
+        mnemonic: st.wallet.mnemonic,
+        fromAddress: st.wallet.address,
+        toAddress: addr,
+        amountMlcns: parseFloat(amount),
+      });
+      store.applyTx({
         type: 'send', amount: parseFloat(amount), asset: 'MALL', kind: 'debit', to: addr, fee,
         note: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
         notifTitle: `Sent ${amount} MALL`, notifKind: 'tx',
         activityText: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
       });
+      setTxHash(result.txHash);
       setBusy(false);
-      if (res.ok) {
-        setTxHash(`0x${Date.now().toString(16)}…${Math.floor(Math.random() * 0xffff).toString(16)}`);
-        toast('Transaction broadcast — pending confirmation');
-        wizard.next();
-      } else toast(res.error || 'Failed', false);
-    }, 900);
+      toast('Transaction broadcast — pending confirmation');
+      wizard.next();
+    } catch (e) {
+      setBusy(false);
+      if (e instanceof MallcoinTxError && e.code === 'NO_ON_CHAIN_HISTORY') {
+        setGasError(true);
+        return;
+      }
+      const message = e instanceof MallcoinTxError || e instanceof Error ? e.message : 'Failed to send';
+      setErr(message);
+      toast(message, false);
+    }
+  };
+
+  const [gettingGas, setGettingGas] = useState(false);
+  const getGas = async () => {
+    if (!st.wallet.address) return;
+    setGettingGas(true);
+    const res = await faucetApi.fundGas(st.wallet.address);
+    setGettingGas(false);
+    if (res.ok) {
+      toast('Network fee tokens received — you can retry now');
+      setGasError(false);
+    } else {
+      toast(res.error || 'Could not get network fee tokens right now', false);
+    }
   };
 
   if (step === 'broadcast') {
@@ -195,7 +180,7 @@ export default function WalletSend() {
             </table>
             <div className="modal-actions">
               <button className="btn btn-ghost" onClick={() => wizard.back()}>← Back</button>
-              <button className="btn btn-primary" onClick={sign} disabled={busy}>{busy && <span className="spin" />} Sign transaction</button>
+              <button className="btn btn-primary" onClick={() => wizard.next()}>Continue to authorize →</button>
             </div>
           </>
         )}
@@ -208,6 +193,17 @@ export default function WalletSend() {
               <input className="input" style={{ textAlign: 'center', maxWidth: 220, margin: '0 auto' }} placeholder="your recovery word" onKeyDown={(e) => e.key === 'Enter' && authorize((e.target as HTMLInputElement).value)} />
             </div>
             {err && <div style={{ color: 'var(--red-2)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
+            {gasError && (
+              <div className="card" style={{ background: 'var(--bg-2)', borderColor: 'var(--gold)', marginTop: 10, padding: 14 }}>
+                <div style={{ fontSize: 13, color: 'var(--txt-2)' }}>
+                  Your wallet needs a small amount of network fee tokens before it can send — this is
+                  separate from your MALL balance and only needed once.
+                </div>
+                <button className="btn btn-primary btn-sm mt" disabled={gettingGas} onClick={getGas}>
+                  {gettingGas && <span className="spin" />} Get network fee tokens
+                </button>
+              </div>
+            )}
             <div className="modal-actions">
               <button className="btn btn-ghost" onClick={() => wizard.back()}>← Back</button>
               <button className="btn btn-primary" disabled={busy} onClick={() => authorize((document.querySelector('.input[placeholder="your recovery word"]') as HTMLInputElement)?.value || '')}>

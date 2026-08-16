@@ -6,10 +6,10 @@
  *  - pub/sub: subscribe(listener) fires on every mutation
  *  - applyTx: the ONE mutation path — validate → mutate balances →
  *    record transaction → notification → activity → notify subscribers
- *  - demo-mode seed gate: seeds are applied only when config.demoMode is
- *    true AND the store is empty; production starts empty.
+ *  - store starts empty; every module reads real data from the backend.
  */
 import { config } from '../services/config';
+import { detectDefaultCurrency } from '../services/locale';
 
 export const OS_KEY = 'mallchain_os_v1_v14';
 
@@ -74,12 +74,12 @@ export interface AppState {
   activity: Activity[];
   prefs: {
     accent: 'gold' | 'cyan' | 'purple' | 'emerald';
-    currency: 'USD' | 'KES' | 'EUR' | 'GBP';
+    /** Any real ISO 4217 code — see services/locale.ts for auto-detection and services/currency.ts for conversion. */
+    currency: string;
     lang: 'EN' | 'FR' | 'ES' | 'SW';
   };
   settings: {
     theme: 'dark';
-    demoMode: boolean;
     network: string;
   };
   wallet: {
@@ -89,6 +89,10 @@ export interface AppState {
     mnemonic: string;
     createdAt: number;
     requests: Array<{ id: string; amount: number; note: string; status: 'pending' | 'paid'; ts: number }>;
+    /** bcrypt hash of the account security PIN; empty string if no PIN has been set yet. */
+    pinHash: string;
+    /** Mnemonic encrypted with the current PIN (services/security.ts encryptMnemonic) — what PrivateKeyExport decrypts. */
+    pinEncryptedMnemonic: string;
   };
   marketplace: {
     cart: Array<{ id: string; qty: number }>;
@@ -259,7 +263,7 @@ function emptyState(): AppState {
     user: {
       id: '',
       authed: false,
-      name: 'Campaign Participant',
+      name: '',
       email: '',
       phone: '',
       avatarInitial: 'C',
@@ -272,9 +276,9 @@ function emptyState(): AppState {
     txs: [],
     notifications: [],
     activity: [],
-    prefs: { accent: 'gold', currency: 'USD', lang: 'EN' },
-    settings: { theme: 'dark', demoMode: config.demoMode, network: config.network },
-    wallet: { address: '', accountId: '', chainId: '', mnemonic: '', createdAt: 0, requests: [] },
+    prefs: { accent: 'gold', currency: detectDefaultCurrency(), lang: 'EN' },
+    settings: { theme: 'dark', network: config.network },
+    wallet: { address: '', accountId: '', chainId: '', mnemonic: '', createdAt: 0, requests: [], pinHash: '', pinEncryptedMnemonic: '' },
     marketplace: { cart: [], wishlist: [], orders: [] },
     staking: { delegated: 0, apy: 12.4, pendingUnstake: 0, cooldownEnds: null, history: [] },
     governance: { proposals: [] },
@@ -379,12 +383,14 @@ class Store {
 
   private merge(saved: AppState): AppState {
     const base = emptyState();
+    const savedCurrency = (saved.prefs as unknown as { currency?: string })?.currency;
+    const currency = savedCurrency && /^[A-Z]{3}$/.test(savedCurrency) ? savedCurrency : detectDefaultCurrency();
     const out: AppState = {
       ...base,
       ...saved,
       user: { ...base.user, ...saved.user },
       balances: { ...base.balances, ...saved.balances },
-      prefs: { ...base.prefs, ...saved.prefs },
+      prefs: { ...base.prefs, ...saved.prefs, currency },
       settings: { ...base.settings, ...saved.settings },
       wallet: { ...base.wallet, ...saved.wallet },
       marketplace: { ...base.marketplace, ...saved.marketplace },
@@ -524,9 +530,6 @@ class Store {
   reset() {
     localStorage.removeItem(OS_KEY);
     this.state = emptyState();
-    if (this.state.settings.demoMode && this.state.mines.campaigns.length === 0) {
-      // reseed happens via the demo gate on next render
-    }
     this.commit();
   }
 }

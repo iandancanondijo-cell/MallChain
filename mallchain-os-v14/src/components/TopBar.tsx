@@ -1,26 +1,31 @@
 /**
  * TopBar — universal search, wallet selector, notifications bell with badge,
- * theme/currency/language switchers, demo-mode chip, user chip.
+ * theme/currency/language switchers, user chip. In an admin session
+ * (isAdminRoute) the user-facing search, wallet chip, and preferences panel
+ * are hidden entirely — only connection status, notifications, and account
+ * identity remain.
  */
 import { useCallback, useEffect, useState } from 'react';
+import { Search, Bell, SlidersHorizontal, ShieldAlert, Wrench } from 'lucide-react';
 import { store } from '../store/store';
 import { useStoreVersion, fmtNum, toast } from './ui';
 import { config } from '../services/config';
+import { COMMON_CURRENCIES } from '../services/locale';
+import { useSupportedCurrencies } from '../services/currency';
 import SocketStatus from './SocketStatus';
 import { notificationsApi, type AppNotification } from '../services/notificationsApi';
 import { socketManager } from '../services/socket';
-
-const CURRENCIES = ['USD', 'KES', 'EUR', 'GBP'];
 const LANGS = ['EN', 'FR', 'ES', 'SW'];
 const ACCENTS = ['gold', 'cyan', 'purple', 'emerald'];
 
-export default function TopBar({ navigate }: { navigate: (p: string) => void }) {
+export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: string) => void; isAdminRoute?: boolean }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<'notif' | 'prefs' | null>(null);
   const [nf, setNf] = useState<'all' | 'unread'>('all');
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   useStoreVersion();
   const st = store.state;
+  const allCurrencies = useSupportedCurrencies();
 
   const loadNotifications = useCallback(async () => {
     if (!st.user.authed) return;
@@ -60,20 +65,6 @@ export default function TopBar({ navigate }: { navigate: (p: string) => void }) 
     toastLocal('Theme accent → ' + a);
   };
 
-  const toggleDemo = () => {
-    if (st.settings.demoMode) {
-      if (window.confirm('Disable demo mode? This clears local demo data and shows production empty states.')) {
-        localStorage.removeItem('mallchain_os_v1_v14');
-        window.location.hash = '#/';
-        window.location.reload();
-      }
-      return;
-    }
-    st.settings.demoMode = true;
-    store.commit();
-    toastLocal('Demo mode enabled');
-  };
-
   const search = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && q.trim()) {
       navigate('/search?q=' + encodeURIComponent(q.trim()));
@@ -82,38 +73,73 @@ export default function TopBar({ navigate }: { navigate: (p: string) => void }) 
 
   return (
     <header className="topbar">
-      {st.admin.flags.maintenance && (
-        <span className="chip red">🛠 Maintenance mode — new transactions blocked</span>
+      {isAdminRoute && (
+        <span className="chip red" style={{ fontWeight: 800, letterSpacing: 0.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <ShieldAlert size={13} /> ADMIN MODE
+        </span>
       )}
-      <div className="tb-search">
-        <span>🔍</span>
-        <input placeholder="Search campaigns, blocks, txs, validators…  (Ctrl+K)" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={search} />
-      </div>
-      <div className="tb-wallet" onClick={() => navigate('/wallet')} title="Wallet selector">
-        <span style={{ fontSize: 11, color: 'var(--txt-3)' }}>MALL</span>
-        <span className="bal">{fmtNum(st.balances.MALL)}</span>
-      </div>
+      {st.admin.flags.maintenance && (
+        <span className="chip red" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Wrench size={13} /> Maintenance mode — new transactions blocked
+        </span>
+      )}
+      {!isAdminRoute && (
+        <div className="tb-search">
+          <Search size={15} />
+          <input placeholder="Search campaigns, blocks, txs, validators…  (Ctrl+K)" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={search} />
+        </div>
+      )}
+      {!isAdminRoute && (
+        <div className="tb-wallet" onClick={() => navigate('/wallet')} title="Wallet selector">
+          <span style={{ fontSize: 11, color: 'var(--txt-3)' }}>MALL</span>
+          <span className="bal">{fmtNum(st.balances.MALL)}</span>
+        </div>
+      )}
+      {/* The only way back into the admin panel once an admin has left it —
+          the sidebar deliberately has no admin entry (see Sidebar.tsx), so
+          without this an admin account can get stranded on the regular
+          user shell with no route back short of hand-editing the URL. */}
+      {!isAdminRoute && (st.user.role === 'admin' || st.user.role === 'superadmin') && (
+        <span className="chip red" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => navigate('/admin')} title="Go to the admin control center">
+          <ShieldAlert size={13} /> Admin panel
+        </span>
+      )}
       <SocketStatus />
-      <div className="tb-icon" title="Preferences" onClick={() => setOpen(open === 'prefs' ? null : 'prefs')}>
-        ⚙
-      </div>
+      {!isAdminRoute && (
+        <div className="tb-icon" title="Preferences" onClick={() => setOpen(open === 'prefs' ? null : 'prefs')}>
+          <SlidersHorizontal size={16} />
+        </div>
+      )}
       <div className="tb-icon" title="Notifications" onClick={() => setOpen(open === 'notif' ? null : 'notif')}>
-        🔔
+        <Bell size={16} />
         {unread > 0 && <span className="tb-badge">{unread}</span>}
       </div>
-      {open === 'prefs' && (
+      {open === 'prefs' && !isAdminRoute && (
         <div className="panel" style={{ right: 90 }}>
           <div className="panel-head"><span className="grow">Preferences</span></div>
           <div style={{ padding: '12px 14px' }}>
             <div className="field">
               <label>Currency</label>
-              <div className="row" style={{ gap: 6 }}>
-                {CURRENCIES.map((c) => (
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                {COMMON_CURRENCIES.map((c) => (
                   <button key={c} className={'btn btn-ghost btn-sm' + (st.prefs.currency === c ? ' gold' : '')} onClick={() => { st.prefs.currency = c as never; store.commit(); toastLocal('Currency → ' + c); }}>
                     {c}
                   </button>
                 ))}
               </div>
+              {allCurrencies.length > 0 && (
+                <select
+                  className="input"
+                  style={{ marginTop: 6 }}
+                  value={COMMON_CURRENCIES.includes(st.prefs.currency) ? '' : st.prefs.currency}
+                  onChange={(e) => { if (!e.target.value) return; st.prefs.currency = e.target.value as never; store.commit(); toastLocal('Currency → ' + e.target.value); }}
+                >
+                  <option value="">More currencies…</option>
+                  {allCurrencies.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              )}
             </div>
             <div className="field">
               <label>Language</label>
@@ -164,13 +190,10 @@ export default function TopBar({ navigate }: { navigate: (p: string) => void }) 
           </div>
         </div>
       )}
-      <span className="demo-chip" onClick={toggleDemo} title="Toggle demo mode">
-        {st.settings.demoMode ? 'Demo data · click to disable' : 'Production mode'}
-      </span>
-      <div className="tb-user" onClick={() => navigate('/profile')}>
+      <div className="tb-user" onClick={isAdminRoute ? undefined : () => navigate('/profile')} style={isAdminRoute ? { cursor: 'default' } : undefined}>
         <div className="avatar">{st.user.avatarInitial || 'C'}</div>
         <div style={{ lineHeight: 1.2 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 800 }}>{st.user.name}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 800 }}>{st.user.name || st.user.email?.split('@')[0] || 'Guest'}</div>
           <div style={{ fontSize: 10.5, color: 'var(--txt-3)' }}>{st.user.frozen ? '❄ Frozen' : st.settings.network}</div>
         </div>
       </div>

@@ -19,6 +19,7 @@ const router = express.Router();
 const authCtrl = require('../controllers/authController');
 const passport = require('passport');
 const { validateInput, preventNoSQLInjection, sanitizeInputs, limitPayloadSize, schemas } = require('../middleware/inputValidation');
+const { limiters } = require('../middleware/rateLimiter');
 
 /**
  * Task 4.1: POST /api/auth/register
@@ -30,7 +31,8 @@ const { validateInput, preventNoSQLInjection, sanitizeInputs, limitPayloadSize, 
  * - Sanitize inputs (remove HTML tags)
  * - Validate email format, password strength (uppercase, lowercase, numbers)
  */
-router.post('/register', 
+router.post('/register',
+  limiters.auth,
   limitPayloadSize(0.1),
   sanitizeInputs,
   validateInput(schemas.auth.register),
@@ -48,7 +50,8 @@ router.post('/register',
  * - JWT token generated if successful (in authCtrl.login)
  * - Token sent to client for storage in localStorage
  */
-router.post('/login', 
+router.post('/login',
+  limiters.auth,
   limitPayloadSize(0.1),
   sanitizeInputs,
   validateInput(schemas.auth.login),
@@ -59,7 +62,8 @@ router.post('/login',
  * Task 4.1: POST /api/auth/register-username
  * Alternative registration with username instead of email
  */
-router.post('/register-username', 
+router.post('/register-username',
+  limiters.auth,
   limitPayloadSize(0.1),
   preventNoSQLInjection,
   sanitizeInputs,
@@ -71,7 +75,8 @@ router.post('/register-username',
  * Task 4.1: POST /api/auth/login-username
  * Alternative login with username instead of email
  */
-router.post('/login-username', 
+router.post('/login-username',
+  limiters.auth,
   limitPayloadSize(0.1),
   preventNoSQLInjection,
   sanitizeInputs,

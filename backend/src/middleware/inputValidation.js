@@ -83,6 +83,7 @@ const authSchemas = {
         'string.min': 'Password must be at least 8 characters',
         'string.pattern.base': 'Password must contain uppercase, lowercase, and numbers',
       }),
+    referralCode: Joi.string().trim().optional(),
   }),
 
   // Login with email
@@ -348,9 +349,22 @@ function preventNoSQLInjection(req, res, next) {
  * This middleware removes angle brackets that could break out of HTML context
  * Note: This is a basic sanitizer. For production, use DOMPurify or similar library
  */
+// Fields that must reach the controller byte-for-byte: credentials and
+// opaque binary/base64 payloads. Stripping HTML-context characters from a
+// password silently narrows its entropy and can collapse two different
+// "real" passwords to the same stored hash (confirmed live: registering
+// with `Sup3r/Secret'Pass(1)` and later logging in with the
+// character-stripped `Sup3rSecretPass1` both succeeded against the same
+// account, since only the stripped string was ever hashed). The same class
+// of bug already corrupted base64 tx payloads elsewhere in this codebase
+// (see routes/governance.js, routes/staking.js) — this is that fix applied
+// to auth.
+const SANITIZE_SKIP_FIELDS = new Set(['password', 'newPassword', 'oldPassword', 'confirmPassword', 'txBytes', 'signature', 'signedTx']);
+
 function sanitizeInputs(req, res, next) {
-  const sanitize = (value) => {
+  const sanitize = (value, key) => {
     if (typeof value === 'string') {
+      if (key && SANITIZE_SKIP_FIELDS.has(key)) return value;
       // Remove characters that could inject or break out of HTML/JS context
       return value
         .replace(/[<>()"'/]/g, '')
@@ -358,19 +372,19 @@ function sanitizeInputs(req, res, next) {
     } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
       // Recursively sanitize object properties
       const sanitized = {};
-      for (const key of Object.keys(value)) {
-        sanitized[key] = sanitize(value[key]);
+      for (const k of Object.keys(value)) {
+        sanitized[k] = sanitize(value[k], k);
       }
       return sanitized;
     } else if (Array.isArray(value)) {
       // Recursively sanitize array elements
-      return value.map(sanitize);
+      return value.map((v) => sanitize(v, key));
     }
     return value;
   };
 
   if (req.body && typeof req.body === 'object') {
-    req.body = sanitize(req.body);
+    req.body = sanitize(req.body, undefined);
   }
 
   next();

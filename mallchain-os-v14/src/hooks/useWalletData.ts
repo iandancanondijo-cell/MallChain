@@ -83,6 +83,19 @@ export function useWalletData(address: string | null | undefined) {
           retry: () => fetchBalance(0), // Allow manual retry
         });
         retryCountRef.current = 0; // Reset retry counter on success
+
+        // Keep the global store in sync too — TopBar and flows like Send
+        // read st.balances directly and would otherwise only ever see a
+        // real balance after a socket push (see handleWalletUpdate below).
+        store.state.balances = {
+          MALL: result.data.MALL || 0,
+          MLPTS: result.data.MLPTS || 0,
+          USD_M: result.data.USD_M || 0,
+          KES: result.data.KES || 0,
+          EUR: result.data.EUR || 0,
+          GBP: result.data.GBP || 0,
+        };
+        store.commit();
       } else {
         throw new Error(result.error || 'Failed to fetch balance');
       }
