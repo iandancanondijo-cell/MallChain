@@ -40,15 +40,22 @@ export default function WalletPoints() {
 
   const doConvert = async () => {
     if (!address) return;
+    if (!st.wallet.mnemonic) {
+      toast('Unlock your wallet to sign this conversion');
+      return;
+    }
     setConverting(true);
-    const result = await mallpointsApi.convert(address);
-    setConverting(false);
-
-    if (result.ok && result.data) {
-      toast(`Converted ${fmtNum(result.data.convertedPoints)} Mallpoints → ${fmtNum(result.data.mallcoins)} Mallcoin`);
-      load();
-    } else {
-      toast(result.error || 'Conversion failed', false);
+    try {
+      const result = await mallpointsApi.convert(address, st.wallet.mnemonic);
+      if (result.ok && result.data) {
+        toast(`Converted ${fmtNum(result.data.convertedPoints)} Mallpoints → ${fmtNum(result.data.mallcoins)} Mallcoin`);
+      } else {
+        toast(result.error || 'Conversion failed', false);
+      }
+    } catch (err) {
+      toast((err as Error).message || 'Conversion failed', false);
+    } finally {
+      setConverting(false);
       load();
     }
   };

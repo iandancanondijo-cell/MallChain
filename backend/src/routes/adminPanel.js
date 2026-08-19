@@ -14,11 +14,10 @@ const TreasuryLedger = require('../models/TreasuryLedger');
 const { notify } = require('../services/notify');
 const MaintenanceMode = require('../models/MaintenanceMode');
 const { invalidateCache: invalidateMaintenanceCache } = require('../middleware/maintenanceMode');
+const Campaign = require('../models/Campaign');
+const WalletTransaction = require('../models/WalletTransaction');
 
 const MAINTENANCE_SCOPES = ['send', 'withdraw', 'buy', 'payment', 'marketplace', 'staking', 'vault'];
-
-const Campaign = mongoose.models.Campaign || mongoose.model('Campaign', new mongoose.Schema({}, { strict: false }));
-const WalletTransaction = mongoose.models.WalletTransaction || mongoose.model('WalletTransaction', new mongoose.Schema({}, { strict: false }));
 
 // ============ BOOTSTRAP: Create first admin (only works when no admins exist) ============
 router.post('/bootstrap', async (req, res) => {

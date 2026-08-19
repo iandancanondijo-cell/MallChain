@@ -60,14 +60,18 @@ export function ToastHost() {
 }
 
 /* ---------------- StatusChip ---------------- */
-export function StatusChip({ status }: { status: string }) {
+export function StatusChip({ status }: { status: string | null | undefined }) {
   const cls = (s: string) =>
     s === 'approved' || s === 'confirmed' || s === 'delivered' || s === 'passed' ? 'b-approved'
     : s === 'rejected' || s === 'failed' || s === 'defeated' || s === 'cancelled' ? 'b-rejected'
     : s === 'active' || s === 'voting' || s === 'pending' || s === 'transit' ? 'b-pending'
     : 'b-live';
-  const label = status.charAt(0).toUpperCase() + status.slice(1).replace(/-/g, ' ');
-  return <span className={'mc-badge ' + cls(status)}>{label}</span>;
+  // Data from the backend isn't always guaranteed to have this field set
+  // (e.g. a document written before a schema default existed) — a missing
+  // status shouldn't crash the whole page over a single badge.
+  const safeStatus = status || 'unknown';
+  const label = safeStatus.charAt(0).toUpperCase() + safeStatus.slice(1).replace(/-/g, ' ');
+  return <span className={'mc-badge ' + cls(safeStatus)}>{label}</span>;
 }
 
 /* ---------------- ScoreRing ---------------- */

@@ -31,6 +31,11 @@ jest.mock('../controllers/liquidityController', () => ({
 jest.mock('../services/liquidityActivityService', () => ({
   recordLiquidityActivity: jest.fn(),
 }));
+// Same ESM/argon2 issue as above, one level deeper: verifyAdr036 (the
+// /convert wallet-signature check) requires @cosmjs/amino directly.
+jest.mock('../mallwallet/security/verifyAdr036', () => ({
+  verifyConvertSignature: jest.fn(),
+}));
 
 const MallPointAccount = require('../models/MallPointAccount');
 const mallpointsRouter = require('../routes/mallpoints');

@@ -8,6 +8,13 @@ const { creditMlcns } = require('../services/faucetService')
 const { getMarketPrice } = require('../services/mallcoinService')
 const { addLiquidityToPool } = require('../controllers/liquidityController')
 const { recordLiquidityActivity } = require('../services/liquidityActivityService')
+const { verifyConvertSignature } = require('../mallwallet/security/verifyAdr036')
+const { config } = require('../config')
+
+// How long a signed convert request stays valid. Short enough that a
+// leaked/logged signature is useless shortly after, long enough to survive
+// normal request latency.
+const CONVERT_SIGNATURE_MAX_AGE_MS = 5 * 60 * 1000
 
 const pointPrice = () =>
   (typeof process.env.MALLPOINT_PRICE_KES !== 'undefined' && !isNaN(Number(process.env.MALLPOINT_PRICE_KES)))
@@ -126,11 +133,38 @@ router.post('/award', createLimiter({ windowMs: 60*1000, max: 20 }), async (req,
 
 // POST /api/mallpoints/convert - convert mallpoints to mallcoins using the same
 // eligibility rules exposed by the status/sync endpoints.
-// body: { address }
+//
+// This moves real value (a MLPTS balance -> a real operator-signed MLCNS
+// credit + on-chain liquidity-add) on behalf of `address`, with no other
+// verification step in front of it (unlike /buy, which requires a real
+// M-Pesa payment, or Send, whose fund movement is itself a client-signed
+// on-chain tx). Without proof of address ownership, anyone who knows an
+// address with a badge + balance could force a conversion for it. Requires
+// an ADR-036 signature over a fixed message binding the request to this
+// address and a short-lived timestamp (replay window: CONVERT_SIGNATURE_MAX_AGE_MS).
+// body: { address, timestamp, pubKey, signature }
 router.post('/convert', async (req, res) => {
   try {
-    const { address } = req.body || {}
+    const { address, timestamp, pubKey, signature } = req.body || {}
     if (!address) return res.status(400).json({ error: 'missing address' })
+
+    if (!timestamp || !pubKey || !signature) {
+      return res.status(401).json({ error: 'a wallet signature is required to convert Mallpoints for this address' })
+    }
+    const signedAtMs = Date.parse(timestamp)
+    if (!Number.isFinite(signedAtMs) || Math.abs(Date.now() - signedAtMs) > CONVERT_SIGNATURE_MAX_AGE_MS) {
+      return res.status(401).json({ error: 'signature expired — please try again' })
+    }
+    const ownsAddress = verifyConvertSignature({
+      address,
+      timestamp,
+      pubKeyBase64: pubKey,
+      signatureBase64: signature,
+      addressPrefix: config.chain.prefix,
+    })
+    if (!ownsAddress) {
+      return res.status(401).json({ error: 'invalid signature — unable to verify you control this wallet' })
+    }
 
     const acc = await MallPointAccount.findOne({ address })
     if (!acc || !acc.balance || acc.balance <= 0) return res.status(400).json({ error: 'no mallpoints to convert' })
