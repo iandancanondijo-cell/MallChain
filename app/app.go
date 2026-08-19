@@ -11,6 +11,7 @@ import (
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
+	circuitante "cosmossdk.io/x/circuit/ante"
 	circuitkeeper "cosmossdk.io/x/circuit/keeper"
 	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
 
@@ -51,9 +52,16 @@ import (
 
 	"marketplace/docs"
 	badgemodulekeeper "marketplace/x/badge/keeper"
+	crosschainmodulekeeper "marketplace/x/crosschain/keeper"
+	dexmodulekeeper "marketplace/x/dex/keeper"
+	governancemodulekeeper "marketplace/x/governance/keeper"
 	mallcoinmodulekeeper "marketplace/x/mallcoin/keeper"
 	mallpointsmodulekeeper "marketplace/x/mallpoints/keeper"
+	marketplacemodulekeeper "marketplace/x/marketplace/keeper"
 	mlcoinmodulekeeper "marketplace/x/mlcoin/keeper"
+	vaultmodulekeeper "marketplace/x/vault/keeper"
+	wasmmodulekeeper "marketplace/x/wasm/keeper"
+	wasmbridgemodulekeeper "marketplace/x/wasmbridge/keeper"
 )
 
 const (
@@ -113,6 +121,16 @@ type App struct {
 	MallpointsKeeper mallpointsmodulekeeper.Keeper
 	BadgeKeeper      badgemodulekeeper.Keeper
 
+	// keepers for modules registered manually in registerCustomModules()
+	// (app/custom_modules.go) rather than via the depinject app config above.
+	VaultKeeper       *vaultmodulekeeper.Keeper
+	DexKeeper         dexmodulekeeper.Keeper
+	CrosschainKeeper  crosschainmodulekeeper.Keeper
+	GovernanceKeeper  governancemodulekeeper.Keeper
+	MarketplaceKeeper marketplacemodulekeeper.Keeper
+	WasmbridgeKeeper  wasmbridgemodulekeeper.Keeper
+	WasmKeeper        wasmmodulekeeper.Keeper
+
 	// Future 2026 feature keepers:
 	// - AgentKeeper for autonomous workflow authorization
 	// - AAKeeper for smart wallet / account abstraction support
@@ -161,8 +179,16 @@ func New(
 		anteStoreKey = storetypes.NewKVStoreKey("ante")
 	)
 
-	// merge the AppConfig and other configuration in one config
-	appConfig = depinject.Configs(
+	// merge the AppConfig and other configuration in one config.
+	//
+	// This must stay a local variable, not a reassignment of the
+	// package-level appConfig: New() used to overwrite the package var with
+	// this merged config, so every subsequent call to New() in the same
+	// process re-wrapped an already-wrapped config, causing depinject to see
+	// duplicate provisions (e.g. map[string]module.AppModuleBasic) and panic.
+	// That made calling New() more than once per process (e.g. across two
+	// tests in this package) unconditionally crash.
+	instanceConfig := depinject.Configs(
 		AppConfig(),
 		depinject.Supply(
 			appOpts, // supply app options
@@ -189,7 +215,7 @@ func New(
 	// The wrapper will skip rate-limit/replay logic if the store key is not present.
 
 	var appModules map[string]appmodule.AppModule
-	if err := depinject.Inject(appConfig,
+	if err := depinject.Inject(instanceConfig,
 		&appBuilder,
 		&appModules,
 		&app.appCodec,
@@ -234,8 +260,8 @@ func New(
 		panic(err)
 	}
 
-	// wrappedAnte emits an audit event and delegates to the SDK ante handler.
-	wrappedAnte := func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
+	// innerAnte emits an audit event and delegates to the SDK ante handler.
+	innerAnte := func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
 		curH := uint64(ctx.BlockHeight())
 
 		// Emit a simple audit event with minimal info (no sensitive data)
@@ -380,10 +406,28 @@ func New(
 		return anteHandler(ctx, tx, simulate)
 	}
 
+	// wrappedAnte runs the circuit breaker check first, so a message type
+	// paused via x/circuit (governance/authority-gated) is rejected before
+	// any rate-limit/replay bookkeeping or signature verification happens.
+	// CircuitBreakerKeeper.IsAllowed has a pointer receiver, hence &app.CircuitBreakerKeeper.
+	circuitBreaker := circuitante.NewCircuitBreakerDecorator(&app.CircuitBreakerKeeper)
+	wrappedAnte := func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
+		return circuitBreaker.AnteHandle(ctx, tx, simulate, innerAnte)
+	}
+
 	// We will set the ante handler on the built app below (after Build())
 
 	// build app
 	app.App = appBuilder.Build(db, traceStore, baseAppOptions...)
+
+	// Mount the ante store now that app.App exists (RegisterStores requires
+	// it) and before app.Load() below. Without this, app.GetKey(anteStoreKey.Name())
+	// always returns nil and wrappedAnte silently skips its rate-limit/replay
+	// logic entirely — the store existing was a documented precondition
+	// that was never actually satisfied.
+	if err := app.RegisterStores(anteStoreKey); err != nil {
+		panic(err)
+	}
 
 	// set the wrapped ante handler (audit + scaffold for rate-limiting)
 	app.App.SetAnteHandler(wrappedAnte)

@@ -240,6 +240,10 @@ func (k Keeper) AddLiquidity(ctx context.Context, provider sdk.AccAddress, poolI
 		return fmt.Errorf("token denominations do not match pool")
 	}
 
+	if pool.TokenAReserve.Amount.IsZero() || pool.TokenBReserve.Amount.IsZero() {
+		return fmt.Errorf("pool has been fully drained and can no longer accept liquidity")
+	}
+
 	liquidityA := tokenAAmount.Amount.Mul(pool.TotalLiquidity.Amount).Quo(pool.TokenAReserve.Amount)
 	liquidityB := tokenBAmount.Amount.Mul(pool.TotalLiquidity.Amount).Quo(pool.TokenBReserve.Amount)
 	var liquidityToMint math.Int

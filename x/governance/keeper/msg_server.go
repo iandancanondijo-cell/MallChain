@@ -115,3 +115,18 @@ func (k msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams)
 
 	return &types.MsgUpdateParamsResponse{}, nil
 }
+
+// SlashValidator implements MsgServer.SlashValidator method. Only reachable
+// as a message attached to a passed governance proposal (see
+// ExecuteProposal), same authority-gating as UpdateParams.
+func (k msgServer) SlashValidator(ctx context.Context, msg *types.MsgSlashValidator) (*types.MsgSlashValidatorResponse, error) {
+	if msg.Authority != sdk.AccAddress(k.authority).String() {
+		return nil, fmt.Errorf("invalid authority; expected %s, got %s", sdk.AccAddress(k.authority).String(), msg.Authority)
+	}
+
+	if err := k.Keeper.SlashValidatorProposal(ctx, msg.ValidatorAddress, msg.SlashPercentage); err != nil {
+		return nil, err
+	}
+
+	return &types.MsgSlashValidatorResponse{}, nil
+}

@@ -24,7 +24,7 @@ type queryServer struct {
 	k Keeper
 }
 
-func (q queryServer) GetEscrow(ctx context.Context, req *types.QueryGetEscrowRequest) (*types.QueryGetEscrowResponse, error) {
+func (q queryServer) Escrow(ctx context.Context, req *types.QueryEscrowRequest) (*types.QueryEscrowResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid request")
 	}
@@ -32,15 +32,15 @@ func (q queryServer) GetEscrow(ctx context.Context, req *types.QueryGetEscrowReq
 	escrow, err := q.k.Escrows.Get(sdk.UnwrapSDKContext(ctx), req.EscrowId)
 	if err != nil {
 		if err == collections.ErrNotFound {
-			return &types.QueryGetEscrowResponse{}, nil
+			return nil, status.Error(codes.NotFound, "escrow not found")
 		}
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &types.QueryGetEscrowResponse{Escrow: &escrow}, nil
+	return &types.QueryEscrowResponse{Escrow: escrow}, nil
 }
 
-func (q queryServer) ListEscrows(ctx context.Context, req *types.QueryListEscrowsRequest) (*types.QueryListEscrowsResponse, error) {
+func (q queryServer) Escrows(ctx context.Context, req *types.QueryEscrowsRequest) (*types.QueryEscrowsResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid request")
 	}
@@ -50,5 +50,5 @@ func (q queryServer) ListEscrows(ctx context.Context, req *types.QueryListEscrow
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &types.QueryListEscrowsResponse{Escrows: escrows}, nil
+	return &types.QueryEscrowsResponse{Escrows: escrows}, nil
 }

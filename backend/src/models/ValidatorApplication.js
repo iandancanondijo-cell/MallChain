@@ -18,7 +18,15 @@ const ValidatorApplicationSchema = new Schema({
     enum: ['pending', 'approved', 'rejected'],
     default: 'pending',
   },
-  // When approved, set to true to indicate validator is active
+  // Despite the name, this is an off-chain review-eligibility flag, not
+  // proof of real on-chain validator bonding: it's set purely by admin
+  // review (routes/adminPanel.js) and is what routes/taskAssignment.js
+  // uses to pick the mines task-review reviewer pool — a separate,
+  // intentionally off-chain system (see models/MinesReviewer.js). Real
+  // chain bonding happens independently via the applicant's own signed
+  // MsgCreateValidator self-bond (mallchain-os-v14/src/services/validatorCreateTx.ts)
+  // and is NOT reflected here. Use getMyApplication's `onChainBonded`
+  // field (controllers/validatorController.js) for actual chain state.
   isActiveValidator: { type: Boolean, default: false },
   submittedAt: { type: Date, default: Date.now },
   reviewedAt: { type: Date },

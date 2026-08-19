@@ -5,7 +5,7 @@ import { buyApi, type BuyConfig, type BuyQuote } from '../../services/buyApi';
 
 type Step = 'form' | 'awaiting_payment' | 'crediting' | 'done';
 
-const KES_PER_MLCNS = 0.62; // illustrative default rate; user can adjust the KES amount before reserving
+const FALLBACK_KES_PER_MLCNS = 0.62; // used only until /api/buy/config's live rate loads
 
 /** Buy Mallcoin with real money via M-Pesa STK push (real API: reserve -> STK -> poll -> on-chain credit). */
 export default function WalletBuy() {
@@ -15,26 +15,34 @@ export default function WalletBuy() {
 
   const [config, setConfig] = useState<BuyConfig | null>(null);
   const [amount, setAmount] = useState('100');
-  const [fiat, setFiat] = useState(String(Math.round(100 * KES_PER_MLCNS)));
+  const [fiat, setFiat] = useState(String(Math.round(100 * FALLBACK_KES_PER_MLCNS)));
   const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<Step>('form');
   const [quote, setQuote] = useState<BuyQuote | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
 
+  const buyRateKes = config?.rates?.buyPriceKes || FALLBACK_KES_PER_MLCNS;
+  const directBuyLocked = config?.directBuy?.locked ?? false;
+
   useEffect(() => {
     buyApi.getConfig().then((r) => {
-      if (r.ok && r.data) setConfig(r.data);
+      if (r.ok && r.data) {
+        setConfig(r.data);
+        const n = parseFloat(amount);
+        if (Number.isFinite(n)) setFiat(String(Math.round(n * (r.data.rates?.buyPriceKes || FALLBACK_KES_PER_MLCNS))));
+      }
     });
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onAmountChange = (v: string) => {
     setAmount(v);
     const n = parseFloat(v);
-    if (Number.isFinite(n)) setFiat(String(Math.round(n * KES_PER_MLCNS)));
+    if (Number.isFinite(n)) setFiat(String(Math.round(n * buyRateKes)));
   };
 
   const pollStatus = (paymentId: string, onConfirmed: () => void, onCredited: () => void) => {
@@ -155,6 +163,25 @@ export default function WalletBuy() {
     );
   }
 
+  if (directBuyLocked) {
+    return (
+      <div>
+        <div className="view-head"><h1>Buy Mallcoin</h1></div>
+        <div className="card" style={{ maxWidth: 480 }}>
+          <div style={{ textAlign: 'center', padding: 24 }}>
+            <div style={{ fontSize: 40 }}>🔒</div>
+            <h2 style={{ margin: '8px 0' }}>Direct purchases are closed</h2>
+            <div className="muted">
+              The MLCN/KES liquidity pool has reached its threshold, so buying MLCNS directly
+              with fiat is no longer available. You can still get MLCNS by converting your
+              Mallpoints or receiving a transfer from another wallet.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="view-head">
@@ -181,7 +208,7 @@ export default function WalletBuy() {
             <div className="field">
               <label>You pay (KES)</label>
               <input className="input" type="number" min="1" value={fiat} onChange={(e) => setFiat(e.target.value)} disabled={busy} />
-              <div className="hint">Illustrative rate ≈ {KES_PER_MLCNS} KES / MLCNS — adjust if needed.</div>
+              <div className="hint">Rate ≈ {buyRateKes.toFixed(2)} KES / MLCNS — adjust if needed.</div>
             </div>
             <div className="field">
               <label>M-Pesa phone number</label>

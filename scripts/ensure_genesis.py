@@ -371,10 +371,14 @@ def main(chain_home: str):
 
     # ── Final wallet audit (informational) ────────────────────────────────
     print("\n  Wallet balances:")
+    # These are the actual founder/afa/orthopharm/team addresses (must match
+    # backend/src/routes/economy.js's WALLET_ADDRESSES) — NOT positional.
+    # Everything else in wallet_balance_map is an unlabeled test/dev wallet.
     wallet_labels = {
-        genesis["app_state"]["mlcoin"]["wallet_balance_map"][i]["address"]: lbl
-        for i, lbl in enumerate(["founder", "afa", "orthopharm", "team"])
-        if i < len(genesis["app_state"]["mlcoin"]["wallet_balance_map"])
+        "mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg": "founder",
+        "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6": "afa",
+        "mall1nma8m9jl3e5mscr0rrn93hq43thw7ve6xfee4f": "orthopharm",
+        "mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5": "team",
     }
     for w in genesis["app_state"]["mlcoin"]["wallet_balance_map"]:
         addr  = w["address"]

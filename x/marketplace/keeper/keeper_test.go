@@ -153,7 +153,12 @@ func TestReleaseFunds(t *testing.T) {
 	escrowID, err := k.CreateEscrow(ctx, buyer, seller, "1000", "uatom", "Test escrow", 3600)
 	require.NoError(t, err)
 
+	// Releasing funds is the buyer's call (they confirm receipt) — a seller
+	// (or anyone else) attempting to release should be rejected.
 	err = k.ReleaseFunds(ctx, escrowID, seller)
+	assert.ErrorIs(t, err, mp.ErrUnauthorized)
+
+	err = k.ReleaseFunds(ctx, escrowID, buyer)
 	assert.NoError(t, err)
 
 	escrow, err := k.GetEscrow(ctx, escrowID)
@@ -170,7 +175,12 @@ func TestRefundBuyer(t *testing.T) {
 	escrowID, err := k.CreateEscrow(ctx, buyer, seller, "1000", "uatom", "Test escrow", 3600)
 	require.NoError(t, err)
 
-	err = k.RefundBuyer(ctx, escrowID)
+	// A refund must be approved by the seller — the buyer (or anyone else)
+	// requesting it themselves should be rejected.
+	err = k.RefundBuyer(ctx, escrowID, buyer)
+	assert.ErrorIs(t, err, mp.ErrUnauthorized)
+
+	err = k.RefundBuyer(ctx, escrowID, seller)
 	assert.NoError(t, err)
 
 	escrow, err := k.GetEscrow(ctx, escrowID)

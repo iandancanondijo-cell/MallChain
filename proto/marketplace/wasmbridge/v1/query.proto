@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package marketplace.wasmbridge.v1;
+
+option go_package = "marketplace/x/wasmbridge/types";
+
+import "google/api/annotations.proto";
+
+// Query defines the gRPC querier service for the wasmbridge module.
+service Query {
+  // Balance queries an address's MGP20 (mlcoin) balance.
+  rpc Balance(QueryBalanceRequest) returns (QueryBalanceResponse) {
+    option (google.api.http).get = "/marketplace/wasmbridge/v1/balance/{address}";
+  }
+
+  // Allowance queries the amount a spender is approved to move on an
+  // owner's behalf.
+  rpc Allowance(QueryAllowanceRequest) returns (QueryAllowanceResponse) {
+    option (google.api.http).get = "/marketplace/wasmbridge/v1/allowance/{owner}/{spender}";
+  }
+}
+
+message QueryBalanceRequest {
+  string address = 1;
+}
+
+message QueryBalanceResponse {
+  uint64 balance = 1;
+}
+
+message QueryAllowanceRequest {
+  string owner = 1;
+  string spender = 2;
+}
+
+message QueryAllowanceResponse {
+  uint64 allowance = 1;
+}

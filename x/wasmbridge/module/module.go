@@ -31,7 +31,9 @@ func (AppModuleBasic) Name() string {
 	return types.ModuleName
 }
 
-func (AppModuleBasic) RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {}
+func (AppModuleBasic) RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {
+	types.RegisterCodec(cdc)
+}
 
 func (AppModuleBasic) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux *runtime.ServeMux) {}
 
@@ -43,7 +45,9 @@ func (AppModuleBasic) GetQueryCmd() *cobra.Command {
 	return nil
 }
 
-func (AppModuleBasic) RegisterInterfaces(reg codectypes.InterfaceRegistry) {}
+func (AppModuleBasic) RegisterInterfaces(reg codectypes.InterfaceRegistry) {
+	types.RegisterInterfaces(reg)
+}
 
 type AppModule struct {
 	AppModuleBasic
@@ -63,11 +67,15 @@ func (am AppModule) Name() string {
 	return types.ModuleName
 }
 
-func (AppModule) RegisterLegacyAminoCodec(*codec.LegacyAmino) {}
+func (AppModule) RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {
+	types.RegisterCodec(cdc)
+}
 
 func (am AppModule) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux *runtime.ServeMux) {}
 
-func (am AppModule) RegisterInterfaces(reg codectypes.InterfaceRegistry) {}
+func (am AppModule) RegisterInterfaces(reg codectypes.InterfaceRegistry) {
+	types.RegisterInterfaces(reg)
+}
 
 func (am AppModule) RegisterServices(cfg module.Configurator) {
 	msgServer := keeper.NewMsgServerImpl(am.keeper)

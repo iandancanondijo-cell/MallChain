@@ -15,8 +15,13 @@ const (
 	GovModuleName = "gov"
 )
 
-// TreasurySnapshotKey is the key for storing the latest treasury snapshot
+// TreasurySnapshotKey is unused (kept to avoid churn) — TreasurySnapshotsKey
+// below is the real collection prefix, keyed by block height so history can
+// be stored, not just a single "latest" value.
 var TreasurySnapshotKey = []byte("treasury_snapshot")
+
+// TreasurySnapshotsKey is the prefix for the treasury snapshot history map.
+var TreasurySnapshotsKey = collections.NewPrefix("treasurySnapshot/value/")
 
 // ParamsKey is the prefix to retrieve all Params
 var ParamsKey = collections.NewPrefix("p_mlcoin_params")

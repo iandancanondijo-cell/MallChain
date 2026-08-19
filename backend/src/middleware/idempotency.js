@@ -58,14 +58,52 @@ function idempotency(options = {}) {
         }
       }
 
-      // Create pending idempotency record
-      await IdempotencyKey.create({
-        key: idempotencyKey,
-        walletAddress: req.body?.walletAddress || req.body?.userId || 'unknown',
-        amount: req.body?.amount || 0,
-        status: 'pending',
-        result: null,
-      });
+      // Create pending idempotency record. The unique index on `key` is
+      // what actually enforces idempotency under concurrent requests —
+      // the findOne above is just an optimization to avoid the insert
+      // attempt in the common case.
+      try {
+        await IdempotencyKey.create({
+          key: idempotencyKey,
+          walletAddress: req.body?.walletAddress || req.body?.userId || 'unknown',
+          // Different money-moving routes name their amount field
+          // differently (e.g. withdraw/mpesa uses amountMlcns, not amount)
+          // — this record is audit/monitoring metadata only (dedup itself
+          // is keyed on `key`), but it should still reflect the real size.
+          amount: req.body?.amount ?? req.body?.amountMlcns ?? req.body?.amountKes ?? 0,
+          status: 'pending',
+          result: null,
+        });
+      } catch (createError) {
+        if (createError?.code === 11000) {
+          // Lost the race: another request with the same key is already
+          // in flight or completed. Do NOT fall through to next() here —
+          // that would let both requests execute the underlying
+          // (possibly money-moving) operation. Return the same responses
+          // the pre-existing-key branch above would have.
+          logger.info('Idempotency key race detected, blocking duplicate', { key: idempotencyKey });
+          const existingAfterRace = await IdempotencyKey.findOne({ key: idempotencyKey }).lean();
+          if (existingAfterRace?.status === 'success') {
+            return res.status(200).json({
+              ok: true,
+              data: existingAfterRace.result,
+              idempotent: true,
+            });
+          } else if (existingAfterRace?.status === 'failed') {
+            return res.status(400).json({
+              ok: false,
+              error: existingAfterRace.error || 'Previous request failed',
+              idempotent: true,
+            });
+          }
+          return res.status(202).json({
+            ok: false,
+            error: 'Request still processing',
+            idempotent: true,
+          });
+        }
+        throw createError;
+      }
 
       // Store original res.json to intercept response
       const originalJson = res.json.bind(res);

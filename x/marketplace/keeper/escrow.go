@@ -90,7 +90,7 @@ func (k Keeper) CreateEscrow(sdkCtx sdk.Context, buyer, seller, amount, denom, d
 
 	// Generate unique escrow ID using block height and timestamp to avoid collisions
 	escrowID := fmt.Sprintf("%s-%d-%d", buyer, sdkCtx.BlockHeight(), sdkCtx.BlockTime().UnixNano())
-	escrow.ID = escrowID
+	escrow.Id = escrowID
 
 	if err := k.Escrows.Set(sdkCtx, escrowID, escrow); err != nil {
 		// Refund if escrow creation fails
@@ -117,6 +117,10 @@ func (k Keeper) ReleaseFunds(sdkCtx sdk.Context, escrowID string, releaseBy stri
 	escrow, err := k.Escrows.Get(sdkCtx, escrowID)
 	if err != nil {
 		return cosmossdkerrors.Wrap(types.ErrEscrowNotFound, fmt.Sprintf("escrow %s not found", escrowID))
+	}
+
+	if releaseBy != escrow.Buyer {
+		return cosmossdkerrors.Wrap(types.ErrUnauthorized, "only the escrow's buyer can release funds")
 	}
 
 	if escrow.Status != types.StatusHeld && escrow.Status != types.StatusDisputed {
@@ -167,11 +171,17 @@ func (k Keeper) ReleaseFunds(sdkCtx sdk.Context, escrowID string, releaseBy stri
 	return nil
 }
 
-// RefundBuyer refunds escrow funds back to buyer
-func (k Keeper) RefundBuyer(sdkCtx sdk.Context, escrowID string) error {
+// RefundBuyer refunds escrow funds back to buyer. requestedBy must be the
+// escrow's seller — the counterparty who is giving up their claim to the
+// held funds by agreeing to the refund.
+func (k Keeper) RefundBuyer(sdkCtx sdk.Context, escrowID string, requestedBy string) error {
 	escrow, err := k.Escrows.Get(sdkCtx, escrowID)
 	if err != nil {
 		return cosmossdkerrors.Wrap(types.ErrEscrowNotFound, fmt.Sprintf("escrow %s not found", escrowID))
+	}
+
+	if requestedBy != escrow.Seller {
+		return cosmossdkerrors.Wrap(types.ErrUnauthorized, "only the escrow's seller can approve a refund")
 	}
 
 	// Allow refund in any state except released/refunded

@@ -4,9 +4,48 @@ package marketplace.marketplace.v1;
 
 option go_package = "marketplace/x/marketplace/types";
 
-import "cosmos/base/v1beta1/coin.proto";
+import "gogoproto/gogo.proto";
+import "cosmos/msg/v1/msg.proto";
 
+// Escrow represents a buyer/seller escrow holding locked funds.
+message Escrow {
+  string id = 1;
+  string buyer = 2;
+  string seller = 3;
+  string amount = 4;
+  string denom = 5;
+  string description = 6;
+  string status = 7;
+  string locked_funds = 8 [(gogoproto.jsontag) = "locked_funds"];
+  int64 created_at = 9 [(gogoproto.jsontag) = "created_at"];
+  int64 release_time = 10 [(gogoproto.jsontag) = "release_time"];
+  int64 dispute_window = 11 [(gogoproto.jsontag) = "dispute_window"];
+}
+
+// Msg defines the marketplace Msg service.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  // CreateEscrow locks buyer funds into a new escrow held by the module.
+  rpc CreateEscrow(MsgCreateEscrow) returns (MsgCreateEscrowResponse);
+
+  // ReleaseFunds releases a held escrow's funds to the seller. Must be
+  // signed by the escrow's buyer.
+  rpc ReleaseFunds(MsgReleaseFunds) returns (MsgReleaseFundsResponse);
+
+  // RefundBuyer returns a held escrow's funds to the buyer. Must be signed
+  // by the escrow's seller (the counterparty giving up their claim).
+  rpc RefundBuyer(MsgRefundBuyer) returns (MsgRefundBuyerResponse);
+
+  // OpenDispute opens a dispute window on a held escrow. Must be signed by
+  // the escrow's buyer.
+  rpc OpenDispute(MsgOpenDispute) returns (MsgOpenDisputeResponse);
+}
+
+// MsgCreateEscrow creates a new escrow, locking amount/denom from buyer.
 message MsgCreateEscrow {
+  option (cosmos.msg.v1.signer) = "buyer";
+
   string buyer = 1;
   string seller = 2;
   string amount = 3;
@@ -19,20 +58,33 @@ message MsgCreateEscrowResponse {
   string escrow_id = 1;
 }
 
+// MsgReleaseFunds releases escrow funds to the seller. release_by must be
+// the escrow's buyer (enforced by the keeper, not just by who signs).
 message MsgReleaseFunds {
+  option (cosmos.msg.v1.signer) = "release_by";
+
   string escrow_id = 1;
   string release_by = 2;
 }
 
 message MsgReleaseFundsResponse {}
 
+// MsgRefundBuyer returns escrow funds to the buyer. requested_by must be
+// the escrow's seller (enforced by the keeper, not just by who signs).
 message MsgRefundBuyer {
+  option (cosmos.msg.v1.signer) = "requested_by";
+
   string escrow_id = 1;
+  string requested_by = 2;
 }
 
 message MsgRefundBuyerResponse {}
 
+// MsgOpenDispute opens a dispute on a held escrow. opener must be the
+// escrow's buyer.
 message MsgOpenDispute {
+  option (cosmos.msg.v1.signer) = "opener";
+
   string escrow_id = 1;
   string opener = 2;
 }

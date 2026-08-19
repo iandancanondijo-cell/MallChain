@@ -42,8 +42,20 @@ export interface MallchainConfig {
  * Errors caught at module load time, not runtime
  */
 function validateApiUrl(url: string): string {
-  if (!url) return '';
-  
+  if (!url) {
+    // Only enforced for production builds: dev/test runs (no VITE_API_BASE_URL
+    // set) still need to load without a backend configured. A production
+    // build silently falling back to relative fetches against the app's own
+    // static-hosting origin is a misconfiguration that should fail loudly
+    // instead of shipping a broken build.
+    if (import.meta.env.PROD) {
+      throw new Error(
+        'VITE_API_BASE_URL is required for production builds — set it before running `npm run build` (see .env.example).'
+      );
+    }
+    return '';
+  }
+
   // Must be HTTP or HTTPS (not FTP, etc.)
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     throw new Error(`VITE_API_BASE_URL must start with http:// or https://, got: ${url}`);

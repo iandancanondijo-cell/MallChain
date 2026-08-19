@@ -80,7 +80,13 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
     return 0; // Not authenticated - login/signup
   });
   const [showWalletFlow, setShowWalletFlow] = useState(false);
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  // Landing's "Get Started"/"Create Your Account" CTAs link here with
+  // ?mode=signup so first-time users land on the signup tab instead of
+  // defaulting to sign-in and having to notice/click "Create account".
+  const [mode, setMode] = useState<'login' | 'signup'>(() => {
+    const match = /[?&]mode=([^&]+)/.exec(window.location.hash);
+    return match && match[1] === 'signup' ? 'signup' : 'login';
+  });
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');

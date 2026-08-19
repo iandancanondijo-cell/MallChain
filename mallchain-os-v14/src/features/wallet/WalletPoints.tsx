@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, toast } from '../../components/ui';
 import { mallpointsApi, type MallpointsBalance } from '../../services/mallpointsApi';
+import { buyApi } from '../../services/buyApi';
 
 /** Mallpoints balance + convert-to-Mallcoin (real API, gated by the on-chain conversion window). */
 export default function WalletPoints() {
@@ -10,6 +11,7 @@ export default function WalletPoints() {
   const address = st.wallet.address;
 
   const [data, setData] = useState<MallpointsBalance | null>(null);
+  const [mlcnsPriceKes, setMlcnsPriceKes] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
@@ -29,6 +31,11 @@ export default function WalletPoints() {
 
   useEffect(() => {
     load();
+    // Same live MLCNS/KES rate the backend conversion uses (see
+    // routes/mallpoints.js POST /convert) — shown here just as an estimate.
+    buyApi.getConfig().then((r) => {
+      if (r.ok && r.data) setMlcnsPriceKes(r.data.rates.buyPriceKes);
+    });
   }, [load]);
 
   const doConvert = async () => {
@@ -129,8 +136,11 @@ export default function WalletPoints() {
         )}
 
         <p className="muted" style={{ fontSize: 12.5 }}>
-          Converting exchanges your full Mallpoints balance for Mallcoin at a 1:1 rate. This can only be
-          done once per eligibility window (monthly for badge holders, yearly otherwise).
+          Converting exchanges your full Mallpoints balance for Mallcoin at the live MLCNS/KES rate
+          {data && mlcnsPriceKes ? (
+            <> — ≈ <b className="gold">{fmtNum((data.convertiblePoints * data.pointPrice) / mlcnsPriceKes)} MLCNS</b> at
+            current rates</>
+          ) : null}. This can only be done once per eligibility window (monthly for badge holders, yearly otherwise).
         </p>
 
         <button

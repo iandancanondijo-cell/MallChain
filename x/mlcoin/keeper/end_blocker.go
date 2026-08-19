@@ -62,10 +62,76 @@ func (k Keeper) EndBlocker(ctx context.Context) error {
 		}
 	}
 
+	if tick > 0 && sdkCtx.BlockHeight()%int64(tick) == 0 {
+		if err := k.DistributeFees(ctx); err != nil {
+			sdkCtx.Logger().Error("Failed to distribute accumulated fees", "error", err)
+		}
+	}
+
+	if intervals.BlocksPerDay > 0 && sdkCtx.BlockHeight()%int64(intervals.BlocksPerDay) == 0 {
+		if err := k.RecordTreasurySnapshot(ctx); err != nil {
+			sdkCtx.Logger().Error("Failed to record treasury snapshot", "error", err)
+		}
+	}
+
 	return nil
 }
 
-// RecordTreasurySnapshot captures the state of the treasury and supply at the end of each block
+// maxTreasurySnapshotsToKeep bounds TreasurySnapshots so daily snapshots
+// don't grow the store unboundedly over the chain's lifetime (~1.6 years
+// of daily history at this cap).
+const maxTreasurySnapshotsToKeep = 600
+
+// RecordTreasurySnapshot captures the treasury/supply state (see
+// TreasuryMetrics in query_treasury.go for the same figures on demand) as a
+// point-in-time entry so TreasuryHistory has real data instead of always
+// returning empty.
+func (k Keeper) RecordTreasurySnapshot(ctx context.Context) error {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	snapshot := types.TreasurySnapshot{
+		BlockHeight:       sdkCtx.BlockHeight(),
+		TotalSupply:       k.GetTotalSupply(ctx),
+		CirculatingSupply: k.GetCirculatingSupply(ctx),
+		BurnedSupply:      k.GetBurnedSupply(ctx),
+		StakedSupply:      k.GetTotalStaked(ctx),
+		TreasuryBalance:   k.GetTreasuryBalance(ctx),
+		Timestamp:         sdkCtx.BlockTime().Unix(),
+	}
+	return k.StoreTreasurySnapshot(ctx, snapshot)
+}
+
+// StoreTreasurySnapshot persists a snapshot and prunes oldest entries beyond
+// maxTreasurySnapshotsToKeep. Split out from RecordTreasurySnapshot so the
+// storage/pruning logic can be tested without needing a real bank keeper
+// (GetTreasuryBalance queries one, which the lightweight unit-test fixture
+// can't provide — mlcoin's BankKeeper is a type alias to the SDK's concrete
+// BaseKeeper, not an interface, so it can't be mocked like other modules do).
+func (k Keeper) StoreTreasurySnapshot(ctx context.Context, snapshot types.TreasurySnapshot) error {
+	if err := k.TreasurySnapshots.Set(ctx, snapshot.BlockHeight, snapshot); err != nil {
+		return err
+	}
+
+	// Prune oldest entries beyond the cap. Int64Key preserves numeric
+	// ordering, so a forward Walk visits snapshots oldest-first.
+	var count uint64
+	var oldest []int64
+	_ = k.TreasurySnapshots.Walk(ctx, nil, func(h int64, _ types.TreasurySnapshot) (bool, error) {
+		count++
+		oldest = append(oldest, h)
+		return false, nil
+	})
+	if count > maxTreasurySnapshotsToKeep {
+		toPrune := oldest[:count-maxTreasurySnapshotsToKeep]
+		for _, h := range toPrune {
+			if err := k.TreasurySnapshots.Remove(ctx, h); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
 
 // updateDynamicPricing adjusts market prices based on community activity
 func (k Keeper) updateDynamicPricing(ctx context.Context) error {

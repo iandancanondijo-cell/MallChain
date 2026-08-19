@@ -9,7 +9,7 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 import "cosmos_proto/cosmos.proto";
 
-option go_package = "github.com/tmp/marketplace/x/governance/types";
+option go_package = "marketplace/x/governance/types";
 
 // Proposal defines the core field members of a governance proposal.
 message Proposal {

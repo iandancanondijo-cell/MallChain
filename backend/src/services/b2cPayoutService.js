@@ -6,6 +6,8 @@ const { Console } = require('console');
 const { stdout, stderr } = require('process');
 const { config } = require('../config');
 const { createBlockchainBreaker } = require('../utils/circuitBreaker');
+const { paymentFailuresTotal } = require('../utils/metrics');
+const { getMarketPrice } = require('./mallcoinService');
 const console = new Console(stdout, stderr);
 
 const {
@@ -18,7 +20,9 @@ const {
   commandId: COMMAND_ID,
   payoutCallbackUrl: PAYOUT_CALLBACK_URL,
 } = config.payment.safaricom;
-const DEFAULT_PESA_PRICE_KES = Number(process.env.MLCNS_BASE_PRICE_KES || 0.6);
+// Fallback only, matching mallcoinService's on-chain MarketPrice default
+// (SellPrice: 58 => KES 0.58) — used if the chain is unreachable.
+const DEFAULT_PESA_PRICE_KES = Number(process.env.MLCNS_SELL_PRICE_KES || 0.58);
 const safaricomBreaker = createBlockchainBreaker();
 
 function getProviderMode() {
@@ -49,8 +53,14 @@ async function getSafaricomToken() {
 }
 
 async function initiateB2CPayout({ sellerPhone, mlcnsAmount, saleId }) {
+  // Use the live on-chain sell price so payouts track dynamic pricing
+  // instead of a stale fixed rate; fall back to the default if the chain
+  // is unreachable (getMarketPrice already handles that internally).
+  const { sellPriceKes } = await getMarketPrice();
+  const effectiveSellPriceKes = sellPriceKes || DEFAULT_PESA_PRICE_KES;
+
   // Calculate pesa amount from MLCNS
-  const pesaAmount = Math.round(mlcnsAmount * DEFAULT_PESA_PRICE_KES * 100);
+  const pesaAmount = Math.round(mlcnsAmount * effectiveSellPriceKes * 100);
   if (!pesaAmount || pesaAmount <= 0) {
     return { ok: false, error: 'Invalid pesa amount' };
   }
@@ -62,6 +72,7 @@ async function initiateB2CPayout({ sellerPhone, mlcnsAmount, saleId }) {
   try {
     const token = await getSafaricomToken();
     if (!token) {
+      paymentFailuresTotal.inc({ reason: 'b2c_token_unavailable' });
       return { ok: false, error: 'Safaricom token could not be generated', providerMode: 'unconfigured' };
     }
 
@@ -97,6 +108,7 @@ async function initiateB2CPayout({ sellerPhone, mlcnsAmount, saleId }) {
     };
   } catch (err) {
     console.warn('B2C payout initiation failed:', err.message || err);
+    paymentFailuresTotal.inc({ reason: 'b2c_initiation_error' });
     return { ok: false, error: err.message || 'Payout initiation failed', providerMode: 'live' };
   }
 }
@@ -127,6 +139,7 @@ async function handlePayoutCallback(callbackData) {
   } else {
     payout.payoutStatus = 'failed';
     payout.payoutError = resultDesc;
+    paymentFailuresTotal.inc({ reason: 'b2c_callback_failed' });
   }
 
   payout.payoutAttemptedAt = new Date();

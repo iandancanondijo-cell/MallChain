@@ -1,11 +1,17 @@
 const axios = require('axios');
+const bech32 = require('bech32');
 const { config } = require('../config');
 const { createBlockchainBreaker } = require('../utils/circuitBreaker');
 const { getCacheService, CacheService } = require('./cacheService');
 
 const CHAIN_REST = config.chain.rest.replace(/\/$/, '');
 const MLCNS_DECIMALS = Number(process.env.MLCNS_DECIMALS || 6);
-const DEFAULT_PRICE_KES = Number(process.env.MLCNS_BASE_PRICE_KES || 0.6);
+// Matches the on-chain MarketPrice default (x/mlcoin/keeper/end_blocker.go:
+// BuyPrice: 62, SellPrice: 58, i.e. cents of KES) — used only when the chain
+// is unreachable, so the fallback should reflect the same buy/sell spread
+// rather than quoting one flat rate for both sides.
+const DEFAULT_BUY_PRICE_KES = Number(process.env.MLCNS_BUY_PRICE_KES || 0.62);
+const DEFAULT_SELL_PRICE_KES = Number(process.env.MLCNS_SELL_PRICE_KES || 0.58);
 const blockchainBreaker = createBlockchainBreaker();
 
 function fromBaseUnits(units) {
@@ -97,10 +103,10 @@ async function getMarketPrice() {
     const mp = data.market_price || data.marketPrice || {};
     const buy = Number(mp.buy_price || 0) / 100;
     const sell = Number(mp.sell_price || 0) / 100;
-    const mid = buy && sell ? (buy + sell) / 2 : buy || sell || DEFAULT_PRICE_KES;
+    const mid = buy && sell ? (buy + sell) / 2 : buy || sell || DEFAULT_BUY_PRICE_KES;
     const result = {
-      buyPriceKes: buy || DEFAULT_PRICE_KES,
-      sellPriceKes: sell || DEFAULT_PRICE_KES,
+      buyPriceKes: buy || DEFAULT_BUY_PRICE_KES,
+      sellPriceKes: sell || DEFAULT_SELL_PRICE_KES,
       midPriceKes: mid,
       engagementScore: data.activity_metrics?.engagement_score,
       priceImpactMultiplier: data.activity_metrics?.price_impact_multiplier,
@@ -115,9 +121,9 @@ async function getMarketPrice() {
     return result;
   } catch {
     const fallbackResult = {
-      buyPriceKes: DEFAULT_PRICE_KES,
-      sellPriceKes: DEFAULT_PRICE_KES,
-      midPriceKes: DEFAULT_PRICE_KES,
+      buyPriceKes: DEFAULT_BUY_PRICE_KES,
+      sellPriceKes: DEFAULT_SELL_PRICE_KES,
+      midPriceKes: (DEFAULT_BUY_PRICE_KES + DEFAULT_SELL_PRICE_KES) / 2,
       fallback: true,
     };
     // Cache fallback for shorter time
@@ -159,9 +165,25 @@ async function getActivityMetrics() {
   }
 }
 
+// Real bech32 decode + checksum validation — not just a prefix/length check.
+// A prefix/length heuristic accepts typo'd addresses (e.g. one flipped
+// character) as "valid", since bech32's whole purpose is a checksum that
+// catches exactly that class of error. This gates real fund-moving paths
+// (sendController.js send/broadcast, faucetService.js minting), so letting
+// a mistyped address through here means the failure only surfaces after
+// broadcast (or, worse, some other consequence) instead of a clear
+// client-visible rejection up front.
 function isValidAddress(address) {
-  const prefix = config.chain.prefix;
-  return typeof address === 'string' && address.startsWith(prefix) && address.length > prefix.length + 10;
+  if (typeof address !== 'string' || !address) return false;
+  let decoded;
+  try {
+    decoded = bech32.decode(address);
+  } catch {
+    return false;
+  }
+  if (decoded.prefix !== config.chain.prefix) return false;
+  // Standard Cosmos SDK addresses are 20 bytes (RIPEMD-160 of the pubkey).
+  return bech32.fromWords(decoded.words).length === 20;
 }
 
 module.exports = {

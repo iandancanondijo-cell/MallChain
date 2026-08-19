@@ -142,7 +142,7 @@ export default function ValidatorsProfile() {
               devnet — there's no separate machine running a live consensus process for your validator, so it will show as jailed for missing
               blocks shortly after activation unless you run your own node with the generated key.
             </div>
-            <button className="btn btn-gold" onClick={openActivate}>Activate validator</button>
+            <button className="btn btn-primary" onClick={openActivate}>Activate validator</button>
           </div>
         )}
 
@@ -166,7 +166,7 @@ export default function ValidatorsProfile() {
           </div>
           <button className="btn btn-ghost mb" onClick={downloadKey}>Download key file</button>
           {!keySaved && <div className="tiny red mb">You haven't downloaded the key yet — once broadcast, it can't be retrieved again.</div>}
-          <button className="btn btn-gold" disabled={activating} onClick={activate}>
+          <button className="btn btn-primary" disabled={activating} onClick={activate}>
             {activating && <span className="spin" />} Broadcast MsgCreateValidator
           </button>
         </Modal>

@@ -31,11 +31,12 @@ func main() {
 	switch cmd {
 	case "setup":
 		fs := flag.NewFlagSet("setup", flag.ExitOnError)
+		owner := fs.String("owner", "local", "vault owner identifier")
 		pw := fs.String("password", "", "password")
 		acct := fs.String("account", "user@example.com", "account name")
 		iss := fs.String("issuer", "marketplace", "issuer")
 		fs.Parse(os.Args[2:])
-		uri, err := k.SetupVault(nil, *pw, *acct, *iss)
+		uri, err := k.SetupVault(nil, *owner, *pw, *acct, *iss)
 		if err != nil {
 			log.Fatalf("setup failed: %v", err)
 		}
@@ -43,6 +44,7 @@ func main() {
 
 	case "confirm":
 		fs := flag.NewFlagSet("confirm", flag.ExitOnError)
+		owner := fs.String("owner", "local", "vault owner identifier")
 		pw := fs.String("password", "", "password")
 		code := fs.String("code", "", "totp code")
 		privB64 := fs.String("priv", "", "base64 ed25519 private key (64 bytes)")
@@ -51,18 +53,19 @@ func main() {
 		if err != nil {
 			log.Fatalf("invalid private key: %v", err)
 		}
-		if err := k.ConfirmVault(nil, *pw, *code, priv); err != nil {
+		if err := k.ConfirmVault(nil, *owner, *pw, *code, priv); err != nil {
 			log.Fatalf("confirm failed: %v", err)
 		}
 		fmt.Println("vault confirmed")
 
 	case "sign":
 		fs := flag.NewFlagSet("sign", flag.ExitOnError)
+		owner := fs.String("owner", "local", "vault owner identifier")
 		pw := fs.String("password", "", "password")
 		code := fs.String("code", "", "totp code")
 		msg := fs.String("msg", "", "message to sign")
 		fs.Parse(os.Args[2:])
-		sig, err := k.UnlockAndSign(nil, *pw, *code, []byte(*msg))
+		sig, err := k.UnlockAndSign(nil, *owner, *pw, *code, []byte(*msg))
 		if err != nil {
 			log.Fatalf("sign failed: %v", err)
 		}
@@ -70,10 +73,11 @@ func main() {
 
 	case "disable":
 		fs := flag.NewFlagSet("disable", flag.ExitOnError)
+		owner := fs.String("owner", "local", "vault owner identifier")
 		pw := fs.String("password", "", "password")
 		code := fs.String("code", "", "totp code")
 		fs.Parse(os.Args[2:])
-		if err := k.DisableVault(nil, *pw, *code); err != nil {
+		if err := k.DisableVault(nil, *owner, *pw, *code); err != nil {
 			log.Fatalf("disable failed: %v", err)
 		}
 		fmt.Println("vault disabled")

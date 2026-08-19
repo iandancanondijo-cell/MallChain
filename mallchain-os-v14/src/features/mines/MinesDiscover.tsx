@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, Modal, toast } from '../../components/ui';
 import { minesApi, type MinesCampaign, type MinesSubmission } from '../../services/minesApi';
+import { PlatformIcon } from './platformIcons';
 
 /** Discover — real active campaigns (backend/src/routes/mines.js: GET /campaigns/active) + submit proof. */
 export default function MinesDiscover({ navigate }: { navigate: (p: string) => void }) {
@@ -65,12 +66,15 @@ export default function MinesDiscover({ navigate }: { navigate: (p: string) => v
           return (
             <div key={c._id} className="c-card">
               <div className="c-banner">
-                <span className="pl-ico">🎯</span>
+                <span className="pl-ico">{c.platform ? <PlatformIcon platform={c.platform} /> : '🎯'}</span>
                 <div><div className="nm">{c.title}</div></div>
                 <div className="rv">{c.rate_per_task}<small>MLPTS</small></div>
               </div>
               <div className="c-body">
                 <div style={{ fontSize: 12.5, color: 'var(--txt-2)' }}>{c.description}</div>
+                {c.directive && (
+                  <div style={{ fontSize: 12, color: 'var(--txt-3)', marginTop: 4 }}><b>Do this:</b> {c.directive}</div>
+                )}
                 <div className="c-meta">
                   <span><b>{c.completions_count}</b> completions</span>
                   <span>budget <b>{c.budget_remaining}</b></span>

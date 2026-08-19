@@ -2,11 +2,12 @@ syntax = "proto3";
 
 package marketplace.wasm.types.v1;
 
-option go_package = "github.com/tmp/marketplace/x/wasm/types";
+option go_package = "marketplace/x/wasm/types";
 
 import "cosmos/app/v1alpha1/module.proto";
 
-// Module is the config object for the wasm module.
+// Module is the config object for the wasm module. Unused today: x/wasm is
+// wired manually in app/custom_modules.go, not via depinject appconfig.
 message Module {
-  option (cosmos.app.v1alpha1.module) = {go_import: "github.com/tmp/marketplace/x/wasm"};
+  option (cosmos.app.v1alpha1.module) = {go_import: "marketplace/x/wasm"};
 }

@@ -7,14 +7,36 @@
 /* global require, module */
 
 const Joi = require('joi')
+const bech32 = require('bech32')
+
+const ADDRESS_PREFIXES = ['cosmos', 'mall', 'tmp']
 
 /**
  * Address validation
- * Supports cosmos, mall, and tmp prefixes
+ * Supports cosmos, mall, and tmp prefixes.
+ *
+ * Real bech32 decode + checksum validation, not a prefix/length regex — the
+ * regex this replaced (/^(cosmos|mall|tmp)[a-z0-9]{38,}$/) accepted anything
+ * shaped like an address, including one with a single mistyped character,
+ * since bech32's checksum exists specifically to catch that class of error.
+ * This is the first validation layer hit by nearly every address field in
+ * the API (toAddress, from/to, buyerAddress/sellerAddress, delegatorAddress,
+ * voterAddress, walletAddress, ...), so a typo here should be rejected here,
+ * not surface later as a failed on-chain broadcast.
  */
 const addressSchema = Joi.string()
   .required()
-  .pattern(/^(cosmos|mall|tmp)[a-z0-9]{38,}$/)
+  .custom((value, helpers) => {
+    let decoded
+    try {
+      decoded = bech32.decode(value)
+    } catch {
+      return helpers.error('string.pattern.base')
+    }
+    if (!ADDRESS_PREFIXES.includes(decoded.prefix)) return helpers.error('string.pattern.base')
+    if (bech32.fromWords(decoded.words).length !== 20) return helpers.error('string.pattern.base')
+    return value
+  }, 'bech32 address checksum validation')
   .messages({
     'string.pattern.base': 'Invalid blockchain address format. Expected bech32 format (cosmos..., mall..., or tmp...).',
     'any.required': 'Address is required',
@@ -121,16 +143,6 @@ const processPaymentSchema = Joi.object({
     'string.base': 'txBytes must be provided as a base64 string',
   }),
   description: memoSchema,
-}).required()
-
-const sellSchema = Joi.object({
-  sellerAddress: addressSchema,
-  amount: amountSchema,
-  txBytes: Joi.string().required().messages({
-    'any.required': 'Signed transaction bytes (txBytes) are required',
-    'string.base': 'txBytes must be provided as a base64 string',
-  }),
-  phone: Joi.string().optional(),
 }).required()
 
 const txHashParamSchema = Joi.object({
@@ -332,7 +344,6 @@ module.exports = {
   buyCreditSchema,
   withdrawMpesaSchema,
   walletConnectionSchema,
-  sellSchema,
 
   // Helpers
   validate,

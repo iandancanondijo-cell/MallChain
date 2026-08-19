@@ -20,6 +20,8 @@ const LiquidityReconciliation = require('../models/LiquidityReconciliation');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 const { getMarketPrice } = require('../services/mallcoinService');
 const { createBlockchainBreaker } = require('../utils/circuitBreaker');
+const { getBuyGateStatus, requireDirectBuyUnlocked } = require('../services/buyGateService');
+const { checkSellLiquidity } = require('../services/sellGateService');
 const {
   recordBuyLiquidityActivity,
   recordWithdrawLiquidityActivity,
@@ -258,6 +260,7 @@ async function saleSummary(sale) {
 
 router.get('/config', async (_req, res) => {
   const keys = config.payment.envPlacement || [];
+  const [gate, price] = await Promise.all([getBuyGateStatus(), getMarketPrice()]);
   return res.json({
     ok: true,
     provider: 'safaricom_mpesa',
@@ -277,8 +280,34 @@ router.get('/config', async (_req, res) => {
       withdrawSellRoute: '/api/buy/sell',
       cashoutReceiverAddress: config.payment.safaricom.cashoutReceiverAddress || null,
     },
+    rates: {
+      buyPriceKes: price.buyPriceKes,
+      sellPriceKes: price.sellPriceKes,
+    },
+    directBuy: {
+      locked: gate.locked,
+      thresholdKes: gate.thresholdKes,
+      reserveKes: gate.reserveKes,
+    },
   });
 });
+
+// Safaricom can't sign its webhook payloads, so authentication relies on a
+// shared-secret token baked into the callback URL registered with them (see
+// config's appendWebhookToken). If PAYMENT_WEBHOOK_SECRET isn't configured
+// this is a no-op (matches dev/test where the secret is never required).
+function verifyWebhookToken(req, res, next) {
+  const secret = process.env.PAYMENT_WEBHOOK_SECRET;
+  if (!secret) return next();
+
+  const provided = String(req.query.token || '');
+  const expected = Buffer.from(secret);
+  const actual = Buffer.from(provided);
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
+    return res.status(401).json({ error: 'invalid webhook token' });
+  }
+  return next();
+}
 
 function getMpesaCallbackData(data) {
   const callback = data?.Body?.stkCallback || {};
@@ -444,7 +473,7 @@ async function handleReservedCredit({ quoteId, walletAddress, creditMlcns }) {
 }
 
 // Reserve a quote for Mallcoin purchase
-router.post('/reserve', validate(schemas.buyReserve), async (req, res) => {
+router.post('/reserve', requireDirectBuyUnlocked(), validate(schemas.buyReserve), async (req, res) => {
   try {
     const { amount, fiat, currency, walletAddress, phone } = req.validatedBody;
 
@@ -483,7 +512,7 @@ router.post('/reserve', validate(schemas.buyReserve), async (req, res) => {
 });
 
 // Initiate M-Pesa STK push
-router.post('/mpesa', validate(schemas.buyMpesaInitiate), async (req, res) => {
+router.post('/mpesa', requireDirectBuyUnlocked(), validate(schemas.buyMpesaInitiate), async (req, res) => {
   try {
     const { quoteId, phone, amount, description } = req.validatedBody;
 
@@ -528,7 +557,7 @@ router.get('/status/:paymentId', async (req, res) => {
 });
 
 // M-Pesa callback (simulated for sandbox)
-router.post('/mpesa/callback', validate(schemas.mpesaCallback), async (req, res) => {
+router.post('/mpesa/callback', verifyWebhookToken, validate(schemas.mpesaCallback), async (req, res) => {
   try {
     const result = await processMpesaCallback(req.body);
     return res.json(result);
@@ -564,7 +593,7 @@ router.post('/credit', validate(schemas.buyCredit), async (req, res) => {
 });
 
 // Payout callback from Safaricom B2C
-router.post('/payout/callback', validate(schemas.payoutCallback), async (req, res) => {
+router.post('/payout/callback', verifyWebhookToken, validate(schemas.payoutCallback), async (req, res) => {
   try {
     const { handlePayoutCallback } = require('../services/b2cPayoutService');
     const result = await handlePayoutCallback(req.body);
@@ -576,7 +605,7 @@ router.post('/payout/callback', validate(schemas.payoutCallback), async (req, re
 });
 
 // Sell Mallcoins: accept client-signed txBytes that transfer MLCNS from seller to operator
-router.post('/sell', validate(schemas.transfer), async (req, res) => {
+router.post('/sell', validate(schemas.sell), async (req, res) => {
   try {
     const { sellerAddress, amount, txBytes, phone } = req.validatedBody;
 
@@ -584,10 +613,30 @@ router.post('/sell', validate(schemas.transfer), async (req, res) => {
       return res.status(503).json({ error: 'Safaricom cash-out is not configured yet' });
     }
 
+    // A failed price fetch must not silently become "this sale is worth
+    // 0 KES" — that made checkSellLiquidity's fail-closed guard below a
+    // no-op (0 KES always fits under the reserve), defeating the exact
+    // protection it exists to provide right when pool state is least
+    // trustworthy. Fail closed here too, consistent with sellGateService.
+    let marketPrice;
+    try {
+      marketPrice = await getMarketPrice();
+    } catch (err) {
+      return res.status(503).json({ error: 'Unable to verify the current market price right now. Please try again shortly.' });
+    }
+    const estimatedKes = Number(amount) * Number(marketPrice?.sellPriceKes || 0);
+
+    // The pool's KES-side reserve is what a cash-out payout is actually
+    // backed by — reject before broadcasting anything if it can't cover
+    // this withdrawal, rather than burning MLCNS and promising a Safaricom
+    // payout the system can't back.
+    const liquidityCheck = await checkSellLiquidity(estimatedKes);
+    if (!liquidityCheck.ok) {
+      return res.status(409).json({ error: liquidityCheck.error });
+    }
+
     const saleId = crypto.randomBytes(12).toString('hex');
     const sale = await MallcoinSale.create({ saleId, sellerAddress, amount, phone, status: 'pending' });
-    const marketPrice = await getMarketPrice().catch(() => ({ sellPriceKes: 0 }));
-    const estimatedKes = Number(amount) * Number(marketPrice?.sellPriceKes || 0);
     const withdrawalId = `withdrawal-${saleId}`;
     const withdrawal = await WithdrawalRequest.create({
       withdrawalId,

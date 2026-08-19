@@ -2,10 +2,18 @@ package types
 
 const (
 	// StoreKey for vault module
-	StoreKey   = "vault"
-	VaultKey   = "vault:record"
-	ModuleName = "vault"
+	StoreKey = "vault"
+	// VaultKeyPrefix namespaces per-owner vault records: the full storage
+	// key is VaultKeyPrefix+owner, so each account gets its own vault
+	// instead of every account sharing one global record.
+	VaultKeyPrefix = "vault:record:"
+	ModuleName     = "vault"
 )
+
+// VaultKeyFor returns the storage key for a given owner's vault record.
+func VaultKeyFor(owner string) []byte {
+	return []byte(VaultKeyPrefix + owner)
+}
 
 // Argon2Params mirrors the KDF params used by crypto helpers.
 type Argon2Params struct {
@@ -29,9 +37,16 @@ type VaultBlob struct {
 	PublicKey           string       `json:"public_key"` // base64
 }
 
+// OwnerVault pairs a vault record with the account it belongs to, for
+// genesis export/import of the per-owner vault store.
+type OwnerVault struct {
+	Owner string     `json:"owner"`
+	Vault *VaultBlob `json:"vault"`
+}
+
 // GenesisState defines the vault module genesis state
 type GenesisState struct {
-	Vault *VaultBlob `json:"vault,omitempty"`
+	Vaults []OwnerVault `json:"vaults,omitempty"`
 }
 
 func (GenesisState) Reset()         {}

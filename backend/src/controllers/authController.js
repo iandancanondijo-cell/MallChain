@@ -82,6 +82,16 @@ function normalizeUsername(username) {
   return String(username || '').trim().toLowerCase();
 }
 
+// The Joi schema (middleware/inputValidation.js) declares .email().lowercase().trim()
+// on register/login, but writes the normalized value to req.validatedBody —
+// which these handlers never read (they read req.body directly). That left
+// email lookups case-sensitive: "Foo@x.com" and "foo@x.com" could register as
+// two separate accounts, and a user could get locked out of their own account
+// by typing their email with different casing than they registered with.
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
 function makeSyntheticEmail(username) {
   return `${username}@mines.mallchain.local`;
 }
@@ -118,7 +128,8 @@ async function assignReferralCode(user, referralCodeInput) {
 }
 
 exports.register = async (req, res) => {
-  const { email, password, referralCode } = req.body;
+  const { password, referralCode } = req.body;
+  const email = normalizeEmail(req.body.email);
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
   const existing = await User.findOne({ email });
   if (existing) return res.status(400).json({ error: 'email exists' });
@@ -132,7 +143,8 @@ exports.register = async (req, res) => {
 };
 
 exports.login = async (req, res) => {
-  const { email, password, otp } = req.body;
+  const { password, otp } = req.body;
+  const email = normalizeEmail(req.body.email);
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
   const u = await User.findOne({ email });
   if (!u) return res.status(400).json({ error: 'invalid credentials' });
@@ -221,7 +233,7 @@ exports.me = async (req, res) => {
 exports.googleCallback = async (req, res) => {
   // passport attaches profile in req.user
   const profile = req.user;
-  const email = (profile.emails && profile.emails[0] && profile.emails[0].value) || `${profile.id}@google`;
+  const email = normalizeEmail((profile.emails && profile.emails[0] && profile.emails[0].value) || `${profile.id}@google`);
   let user = await User.findOne({ googleId: profile.id });
   if (!user) {
     user = await User.create({ email, googleId: profile.id });

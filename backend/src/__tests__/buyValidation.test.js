@@ -68,19 +68,44 @@ describe('schemas.buyCredit (POST /api/buy/credit)', () => {
     expect(value.idempotencyKey).toBe('idem-1');
   });
 
-  test('retains walletAddress and amount for the standalone-credit path', () => {
-    const { error, value } = schemas.buyCredit.validate({
+  // quoteId is unconditionally required (see the comment above
+  // buyCreditSchema in middleware/validation.js): a standalone
+  // walletAddress+amount credit path with no payment reference was a live,
+  // unauthenticated free-mint exploit and was intentionally removed, not
+  // merely made optional.
+  test('rejects walletAddress+amount with no quoteId, even though walletAddress is a valid address', () => {
+    const { error } = schemas.buyCredit.validate({
       walletAddress: VALID_ADDRESS,
       amount: 500,
-    }, { stripUnknown: true });
-
-    expect(error).toBeUndefined();
-    expect(value.walletAddress).toBe(VALID_ADDRESS);
-    expect(value.amount).toBe(500);
+    });
+    expect(error).toBeDefined();
+    expect(error.details.some((d) => d.path.includes('quoteId'))).toBe(true);
   });
 
   test('rejects a request with neither quoteId nor walletAddress', () => {
     const { error } = schemas.buyCredit.validate({ amount: 500 });
+    expect(error).toBeDefined();
+  });
+});
+
+describe('schemas.sell (POST /api/buy/sell)', () => {
+  test('retains sellerAddress, amount, txBytes, and phone instead of stripping them', () => {
+    const { error, value } = schemas.sell.validate({
+      sellerAddress: VALID_ADDRESS,
+      amount: 250,
+      txBytes: 'c2lnbmVkLXR4',
+      phone: VALID_PHONE,
+    }, { stripUnknown: true });
+
+    expect(error).toBeUndefined();
+    expect(value.sellerAddress).toBe(VALID_ADDRESS);
+    expect(value.amount).toBe(250);
+    expect(value.txBytes).toBe('c2lnbmVkLXR4');
+    expect(value.phone).toBe(VALID_PHONE);
+  });
+
+  test('rejects a request missing txBytes', () => {
+    const { error } = schemas.sell.validate({ sellerAddress: VALID_ADDRESS, amount: 250 });
     expect(error).toBeDefined();
   });
 });

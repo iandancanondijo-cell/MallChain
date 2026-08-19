@@ -3,7 +3,7 @@
   "app_version": "",
   "genesis_time": "2026-07-07T10:55:42.289704608Z",
   "chain_id": "mallchain-1",
-  "initial_height": 0,
+  "initial_height": 1,
   "app_hash": null,
   "app_state": {
     "auth": {
@@ -24,30 +24,9 @@
         },
         {
           "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall1y2tvfjcm6p23cgmzn3gw3y87wznxexzca4lc7l",
-          "pub_key": null,
-          "account_number": "18",
-          "sequence": "0"
-        },
-        {
-          "@type": "/cosmos.auth.v1beta1.BaseAccount",
           "address": "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6",
           "pub_key": null,
           "account_number": "1",
-          "sequence": "0"
-        },
-        {
-          "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall18u7572gkr30nvfvucrghuplgk3cky253fssl28",
-          "pub_key": null,
-          "account_number": "16",
-          "sequence": "0"
-        },
-        {
-          "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd",
-          "pub_key": null,
-          "account_number": "6",
           "sequence": "0"
         },
         {
@@ -99,16 +78,6 @@
           ]
         },
         {
-          "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
-          "pub_key": {
-            "@type": "/cosmos.crypto.secp256k1.PubKey",
-            "key": "AwtvkxoL72i3f1vMXWW0Fp2mS9PLStiPQxnnaECudMlq"
-          },
-          "account_number": "8",
-          "sequence": "26"
-        },
-        {
           "@type": "/cosmos.auth.v1beta1.ModuleAccount",
           "base_account": {
             "address": "mall1jv65s3grqf6v6jl3dp4t6c9t9rk99cd8vv38th",
@@ -127,30 +96,6 @@
           "sequence": "0"
         },
         {
-          "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall14cqeeu5q9k0dm9qen8yey8v84c5kaxrcvr0n9r",
-          "pub_key": null,
-          "account_number": "15",
-          "sequence": "0"
-        },
-        {
-          "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall1ednl2qk0a35c4zl493sq6rt96glugzvlf56qvy",
-          "pub_key": null,
-          "account_number": "5",
-          "sequence": "0"
-        },
-        {
-          "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
-          "pub_key": {
-            "@type": "/cosmos.crypto.secp256k1.PubKey",
-            "key": "A5JU/VQMERknNooW76aW6+zyrYN4KkWzNqa5VhGhVPHW"
-          },
-          "account_number": "7",
-          "sequence": "3"
-        },
-        {
           "@type": "/cosmos.auth.v1beta1.ModuleAccount",
           "base_account": {
             "address": "mall1m3h30wlvsf8llruxtpukdvsy0km2kum8rzjr9g",
@@ -162,13 +107,6 @@
           "permissions": [
             "minter"
           ]
-        },
-        {
-          "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "mall1u4630e60lufne23my89ktkk43mx70tqtcmlhed",
-          "pub_key": null,
-          "account_number": "17",
-          "sequence": "0"
         },
         {
           "@type": "/cosmos.auth.v1beta1.ModuleAccount",
@@ -217,15 +155,6 @@
           ]
         },
         {
-          "address": "mall1y2tvfjcm6p23cgmzn3gw3y87wznxexzca4lc7l",
-          "coins": [
-            {
-              "denom": "stake",
-              "amount": "1000000"
-            }
-          ]
-        },
-        {
           "address": "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6",
           "coins": [
             {
@@ -235,24 +164,6 @@
             {
               "denom": "stake",
               "amount": "100000000"
-            }
-          ]
-        },
-        {
-          "address": "mall18u7572gkr30nvfvucrghuplgk3cky253fssl28",
-          "coins": [
-            {
-              "denom": "stake",
-              "amount": "1000000"
-            }
-          ]
-        },
-        {
-          "address": "mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd",
-          "coins": [
-            {
-              "denom": "stake",
-              "amount": "10000000"
             }
           ]
         },
@@ -279,28 +190,6 @@
           ]
         },
         {
-          "address": "mall10d07y265gmmuvt4z0w9aw880jnsr700j33x75m",
-          "coins": [
-            {
-              "denom": "stake",
-              "amount": "1000000"
-            }
-          ]
-        },
-        {
-          "address": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
-          "coins": [
-            {
-              "denom": "mlc",
-              "amount": "10000000000"
-            },
-            {
-              "denom": "stake",
-              "amount": "5973159"
-            }
-          ]
-        },
-        {
           "address": "mall1jv65s3grqf6v6jl3dp4t6c9t9rk99cd8vv38th",
           "coins": [
             {
@@ -323,50 +212,6 @@
           ]
         },
         {
-          "address": "mall14cqeeu5q9k0dm9qen8yey8v84c5kaxrcvr0n9r",
-          "coins": [
-            {
-              "denom": "stake",
-              "amount": "1000000"
-            }
-          ]
-        },
-        {
-          "address": "mall1ednl2qk0a35c4zl493sq6rt96glugzvlf56qvy",
-          "coins": [
-            {
-              "denom": "mlc",
-              "amount": "1000000"
-            },
-            {
-              "denom": "stake",
-              "amount": "10000000"
-            }
-          ]
-        },
-        {
-          "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
-          "coins": [
-            {
-              "denom": "mlc",
-              "amount": "10000000000"
-            },
-            {
-              "denom": "stake",
-              "amount": "8984000"
-            }
-          ]
-        },
-        {
-          "address": "mall1u4630e60lufne23my89ktkk43mx70tqtcmlhed",
-          "coins": [
-            {
-              "denom": "stake",
-              "amount": "1000000"
-            }
-          ]
-        },
-        {
           "address": "mall1ldhuk4ghzharsh2swwmda8mx49rjmhe3my96rh",
           "coins": [
             {
@@ -379,11 +224,11 @@
       "supply": [
         {
           "denom": "mlc",
-          "amount": "254520001000000"
+          "amount": "254500000000000"
         },
         {
           "denom": "stake",
-          "amount": "2440633300"
+          "amount": "2400676141"
         }
       ],
       "denom_metadata": [],
@@ -506,49 +351,10 @@
       "gen_txs": []
     },
     "gov": {
-      "starting_proposal_id": "2",
-      "deposits": [
-        {
-          "proposal_id": "1",
-          "depositor": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
-          "amount": [
-            {
-              "denom": "stake",
-              "amount": "1000000"
-            }
-          ]
-        }
-      ],
+      "starting_proposal_id": "1",
+      "deposits": [],
       "votes": [],
-      "proposals": [
-        {
-          "id": "1",
-          "messages": [],
-          "status": "PROPOSAL_STATUS_DEPOSIT_PERIOD",
-          "final_tally_result": {
-            "yes_count": "0",
-            "abstain_count": "0",
-            "no_count": "0",
-            "no_with_veto_count": "0"
-          },
-          "submit_time": "2026-08-15T12:20:01.811208794Z",
-          "deposit_end_time": "2026-08-17T12:20:01.811208794Z",
-          "total_deposit": [
-            {
-              "denom": "stake",
-              "amount": "1000000"
-            }
-          ],
-          "voting_start_time": null,
-          "voting_end_time": null,
-          "metadata": "ipfs://test",
-          "title": "E2E test proposal",
-          "summary": "Live end-to-end verification of real governance routing",
-          "proposer": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
-          "expedited": false,
-          "failed_reason": ""
-        }
-      ],
+      "proposals": [],
       "deposit_params": null,
       "voting_params": null,
       "tally_params": null,
@@ -712,58 +518,9 @@
       },
       "wallet_balance_map": [
         {
-          "index": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
-          "address": "mall130ec9f903l5ylmztxzwzawpywy2s43xrfwfplu",
-          "balance": "2599928220",
-          "locked": "0",
-          "unlock_time": "0"
-        },
-        {
-          "index": "",
-          "address": "mall13pt60pt8nyd9vsht59sd8c8hql6h9xzs9fhm5n",
-          "balance": "1000000000",
-          "locked": "0",
-          "unlock_time": "0"
-        },
-        {
-          "index": "",
-          "address": "mall14cqeeu5q9k0dm9qen8yey8v84c5kaxrcvr0n9r",
-          "balance": "1000000000",
-          "locked": "0",
-          "unlock_time": "0"
-        },
-        {
-          "index": "",
-          "address": "mall18u7572gkr30nvfvucrghuplgk3cky253fssl28",
-          "balance": "1000000000",
-          "locked": "0",
-          "unlock_time": "0"
-        },
-        {
-          "index": "mall1ednl2qk0a35c4zl493sq6rt96glugzvlf56qvy",
-          "address": "mall1ednl2qk0a35c4zl493sq6rt96glugzvlf56qvy",
-          "balance": "1000000",
-          "locked": "0",
-          "unlock_time": "0"
-        },
-        {
           "index": "mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5",
           "address": "mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5",
           "balance": "90000000000000",
-          "locked": "0",
-          "unlock_time": "0"
-        },
-        {
-          "index": "mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd",
-          "address": "mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd",
-          "balance": "400000000",
-          "locked": "0",
-          "unlock_time": "0"
-        },
-        {
-          "index": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
-          "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
-          "balance": "10000000000",
           "locked": "0",
           "unlock_time": "0"
         },
@@ -782,37 +539,9 @@
           "unlock_time": "1926979200"
         },
         {
-          "index": "",
-          "address": "mall1tx04243wsxlun26z4ljsvqs8ylxafk7fmefj3n",
-          "balance": "1000000000",
-          "locked": "0",
-          "unlock_time": "0"
-        },
-        {
-          "index": "",
-          "address": "mall1u4630e60lufne23my89ktkk43mx70tqtcmlhed",
-          "balance": "1000000000",
-          "locked": "0",
-          "unlock_time": "0"
-        },
-        {
           "index": "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6",
           "address": "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6",
           "balance": "1500000000000",
-          "locked": "0",
-          "unlock_time": "0"
-        },
-        {
-          "index": "",
-          "address": "mall1y2tvfjcm6p23cgmzn3gw3y87wznxexzca4lc7l",
-          "balance": "1000000000",
-          "locked": "0",
-          "unlock_time": "0"
-        },
-        {
-          "index": "",
-          "address": "mall1ylfasdn9jqkvf20f0jf29244h5lz4yjghr5gcc",
-          "balance": "1000000000",
           "locked": "0",
           "unlock_time": "0"
         }
@@ -979,5 +708,16 @@
         "vote_extensions_enable_height": "0"
       }
     }
-  }
+  },
+  "validators": [
+    {
+      "address": "02617656B2C7499736B155D6C1D619468DD81942",
+      "pub_key": {
+        "type": "tendermint/PubKeyEd25519",
+        "value": "iMRPBFkaN7AmngGC2qITQiWrr+h34DrH85AdwlMZ2Fc="
+      },
+      "power": "1",
+      "name": "validator1"
+    }
+  ]
 }

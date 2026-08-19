@@ -5,6 +5,11 @@ jest.mock('../models/user', () => ({
   findOne: jest.fn(),
   create: jest.fn(),
 }));
+// login's checkTwoFactor() always queries UserSettings; without this mock any
+// login test in this file 500s hitting the real (unconnected) mongoose model.
+jest.mock('../models/UserSettings', () => ({
+  findOne: jest.fn(() => ({ select: jest.fn().mockResolvedValue(null) })),
+}));
 jest.mock('bcryptjs', () => ({
   hash: jest.fn().mockResolvedValue('hashed'),
   compare: jest.fn().mockResolvedValue(true),
@@ -72,7 +77,12 @@ describe('POST /api/auth/register — user payload + referral bonus', () => {
 
     await request(app).post('/api/auth/register').send({ email: 'new@x.com', password: 'pw123456', referralCode: 'mall-ref1' });
 
-    expect(User.create).toHaveBeenCalledWith(expect.objectContaining({ referredBy: 'referrer1' }));
+    // assignReferralCode() looks up the referrer *after* User.create() (it
+    // needs the new user's own _id to build referralCode), so referredBy is
+    // set by mutating the created user and calling .save() — not passed as
+    // a User.create() argument.
+    expect(created.referredBy).toBe('referrer1');
+    expect(created.save).toHaveBeenCalled();
     expect(User.findByIdAndUpdate).toHaveBeenCalledWith('referrer1', {
       $inc: { referralCount: 1, referralEarnings: 10 },
     });
@@ -100,5 +110,29 @@ describe('POST /api/auth/register — user payload + referral bonus', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.user.banned).toBe(true);
+  });
+
+  test('register lowercases a mixed-case email before the duplicate check and storage', async () => {
+    User.findOne.mockResolvedValue(null);
+    const created = fakeCreatedUser({ email: 'foo@example.com' });
+    User.create.mockResolvedValue(created);
+
+    const res = await request(app).post('/api/auth/register').send({ email: 'Foo@Example.com', password: 'pw123456' });
+
+    expect(res.status).toBe(200);
+    expect(User.findOne).toHaveBeenCalledWith({ email: 'foo@example.com' });
+    expect(User.create).toHaveBeenCalledWith(expect.objectContaining({ email: 'foo@example.com' }));
+  });
+
+  test('login looks up a mixed-case email address in lowercase', async () => {
+    User.findOne.mockResolvedValue({
+      _id: 'u2', email: 'foo@example.com', password: 'hashed', banned: false, kycLevel: 1, role: 'user',
+      save: jest.fn().mockResolvedValue(undefined),
+    });
+
+    const res = await request(app).post('/api/auth/login').send({ email: 'FOO@EXAMPLE.COM', password: 'pw123456' });
+
+    expect(res.status).toBe(200);
+    expect(User.findOne).toHaveBeenCalledWith({ email: 'foo@example.com' });
   });
 });

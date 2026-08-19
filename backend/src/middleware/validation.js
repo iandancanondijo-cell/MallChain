@@ -1,9 +1,27 @@
 const Joi = require('joi');
+const bech32 = require('bech32');
 
 // Common validation schemas
+//
+// Real bech32 decode + checksum validation, not a prefix/length regex — see
+// utils/validationSchemas.js's addressSchema for the same fix and the full
+// rationale (a regex here silently accepted a mistyped address; bech32's
+// checksum exists specifically to catch that). This is a separate schema
+// object from utils/validationSchemas.js, not a re-export of it — routes/
+// send.js's primary /mallcoins and /payment routes go through this one.
 const addressSchema = Joi.string()
-  .pattern(/^mall1[a-z0-9]{38,58}$/)
   .required()
+  .custom((value, helpers) => {
+    let decoded;
+    try {
+      decoded = bech32.decode(value);
+    } catch {
+      return helpers.error('string.pattern.base');
+    }
+    if (decoded.prefix !== 'mall') return helpers.error('string.pattern.base');
+    if (bech32.fromWords(decoded.words).length !== 20) return helpers.error('string.pattern.base');
+    return value;
+  }, 'bech32 address checksum validation')
   .messages({
     'string.pattern.base': 'Invalid Mallchain address format',
   });
@@ -118,21 +136,18 @@ const buyCreditSchema = Joi.object({
   idempotencyKey: Joi.string().optional(),
 });
 
-const stakingSchema = Joi.object({
-  validator: Joi.string()
-    .pattern(/^mallvaloper1[a-z0-9]{38,58}$/)
-    .required()
-    .messages({
-      'string.pattern.base': 'Invalid validator address format',
-    }),
+// buy.js's POST /sell was previously validated against schemas.transfer
+// (from/to/amount/memo/txBytes) while the handler destructures
+// sellerAddress/amount/txBytes/phone from req.validatedBody — stripUnknown
+// deleted sellerAddress/phone and required a from/to pair the handler never
+// reads, so the cash-out flow could never actually run.
+const sellSchema = Joi.object({
+  sellerAddress: addressSchema,
   amount: amountSchema,
-});
-
-const governanceSchema = Joi.object({
-  proposalId: Joi.number().integer().positive().required(),
-  option: Joi.string()
-    .valid('VOTE_OPTION_YES', 'VOTE_OPTION_NO', 'VOTE_OPTION_ABSTAIN', 'VOTE_OPTION_NO_WITH_VETO')
-    .required(),
+  txBytes: Joi.string().required().messages({
+    'any.required': 'Signed transaction bytes (txBytes) are required',
+  }),
+  phone: Joi.string().optional(),
 });
 
 const buyStatusParamSchema = Joi.object({
@@ -204,9 +219,8 @@ module.exports = {
     buyReserve: buyReserveSchema,
     buyMpesaInitiate: buyMpesaInitiateSchema,
     buyCredit: buyCreditSchema,
+    sell: sellSchema,
     faucetRequest: faucetRequestSchema,
-    staking: stakingSchema,
-    governance: governanceSchema,
     address: addressSchema,
     amount: amountSchema,
     paymentId: paymentIdSchema,

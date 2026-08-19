@@ -103,6 +103,13 @@ export interface AppState {
       total: number;
       status: 'processing' | 'shipped' | 'transit' | 'delivered' | 'cancelled' | 'disputed';
       ts: number;
+      // Shipping stage above is a local/off-chain UI concern; fund custody
+      // is the real x/marketplace escrow identified by escrowId — see
+      // services/marketplaceTx.ts.
+      escrowId?: string;
+      sellerAddress?: string;
+      createTxHash?: string;
+      releaseTxHash?: string;
     }>;
   };
   staking: {

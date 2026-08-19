@@ -1,11 +1,13 @@
 const express = require('express')
 const router = express.Router()
-const axios = require('axios')
 const MallPointAccount = require('../models/MallPointAccount')
 const { createLimiter } = require('../middleware/rateLimiter')
 const { getChainUserPoints, getConversionWindow, mergePoints, buildConversionStatus } = require('../services/mallpointsService')
 const { getUserBadgeInfo } = require('../services/badgeService')
 const { creditMlcns } = require('../services/faucetService')
+const { getMarketPrice } = require('../services/mallcoinService')
+const { addLiquidityToPool } = require('../controllers/liquidityController')
+const { recordLiquidityActivity } = require('../services/liquidityActivityService')
 
 const pointPrice = () =>
   (typeof process.env.MALLPOINT_PRICE_KES !== 'undefined' && !isNaN(Number(process.env.MALLPOINT_PRICE_KES)))
@@ -150,15 +152,14 @@ router.post('/convert', async (req, res) => {
       })
     }
 
-    // fetch live mlcoin mid price (via backend market controller)
-    let mlcoinPrice = 1
-    try {
-      const m = await axios.get(`${req.protocol}://${req.get('host')}/api/market/price`)
-      if (m.data && m.data.market_price && typeof m.data.market_price.mid !== 'undefined') mlcoinPrice = Number(m.data.market_price.mid)
-    } catch (e) { /* ignore - fallback to 1 */ }
+    // Conversion rate: KES value of the points being spent, divided by the
+    // live MLCNS/KES price — NOT 1:1. Economic baseline: 1 MLPTS = KSh 2.00,
+    // 1 MLCNS ~= KSh 0.60-0.62, so 1 MLPTS ~= 3.2-3.3 MLCNS. This used to
+    // fetch the live price and then ignore it (hardcoded 1:1 conversion),
+    // silently undervaluing every conversion by a factor of ~3.
+    const marketPrice = await getMarketPrice()
+    const mlcoinPrice = marketPrice.midPriceKes
 
-    // Conversion policy: on-chain ConvertToMallcoin is 1:1 by default.
-    // We'll convert using 1:1 (points -> mallcoins) and credit mallcoins via existing credit flow.
     const pointsToConvert = Math.floor(acc.balance) // integer points; if decimals were used, floor to integer
     if (pointsToConvert <= 0) return res.status(400).json({ error: 'insufficient points' })
 
@@ -168,14 +169,57 @@ router.post('/convert', async (req, res) => {
     acc.lastConversionAt = new Date()
     await acc.save()
 
-    const mlcoins = pointsToConvert
+    const kesValue = pointsToConvert * pointPrice()
+    const mlcoins = Math.round((kesValue / mlcoinPrice) * 1_000_000) / 1_000_000
 
     try {
       const credit = await creditMlcns(address, mlcoins)
+
+      // All Mallpoints mined on the platform eventually convert to MLCNS —
+      // once fiat buying permanently locks (see buyGateService.js), this
+      // becomes the primary way new MLCNS enters circulation, so it needs
+      // to feed the same MLCN/KES pool fiat buys do (mirrors buy.js's
+      // applyLiquidityAfterCredit). Non-fatal: the MLCNS credit already
+      // succeeded, a liquidity-add failure shouldn't roll that back.
+      let liquidityResult = null
+      try {
+        liquidityResult = await addLiquidityToPool({
+          poolId: 2,
+          amount0: mlcoins,
+          amount1: kesValue,
+          userAddress: address,
+        })
+        await recordLiquidityActivity({
+          flow: 'mallpoints_convert',
+          stage: 'liquidity_added',
+          status: 'success',
+          poolId: 2,
+          walletAddress: address,
+          amountMlcns: mlcoins,
+          fiatAmount: kesValue,
+          lpTokens: liquidityResult?.lpTokens,
+          note: 'Liquidity added to pool after a Mallpoints->MLCNS conversion.',
+        })
+      } catch (liqErr) {
+        console.warn('Mallpoints conversion: liquidity add failed', liqErr.message)
+        await recordLiquidityActivity({
+          flow: 'mallpoints_convert',
+          stage: 'liquidity_add_failed',
+          status: 'failed',
+          poolId: 2,
+          walletAddress: address,
+          amountMlcns: mlcoins,
+          fiatAmount: kesValue,
+          reason: liqErr.message,
+        }).catch(() => {})
+      }
+
       return res.json({
         ok: true,
         convertedPoints: pointsToConvert,
         mallcoins: mlcoins,
+        mlcoinPrice,
+        liquidity: liquidityResult,
         credit,
       })
     } catch (creditErr) {

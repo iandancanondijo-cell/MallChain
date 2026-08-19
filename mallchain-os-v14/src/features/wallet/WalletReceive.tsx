@@ -53,6 +53,23 @@ export default function WalletReceive() {
     toast('Address copied to clipboard');
   };
 
+  const share = async () => {
+    if (!addr) return;
+    // Distinct from "Copy address": use the native share sheet when
+    // available (mobile browsers, most desktop browsers over HTTPS) so the
+    // address can go straight into a messaging app, not just the clipboard.
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'My Mallchain address', text: addr });
+        return;
+      } catch (err) {
+        // AbortError = user dismissed the share sheet, not a failure.
+        if (err instanceof Error && err.name === 'AbortError') return;
+      }
+    }
+    await copy();
+  };
+
   const startPoll = () => {
     if (!addr) return;
     setStartBalance(st.balances.MALL);
@@ -86,7 +103,7 @@ export default function WalletReceive() {
             <div className="mono" style={{ fontSize: 12, wordBreak: 'break-all', color: 'var(--txt-2)' }}>{addr}</div>
             <div className="row" style={{ marginTop: 10 }}>
               <button className="btn btn-primary btn-sm" onClick={copy}>Copy address</button>
-              <button className="btn btn-ghost btn-sm" onClick={copy}>Share link</button>
+              <button className="btn btn-ghost btn-sm" onClick={share}>Share</button>
             </div>
           </div>
         </div>

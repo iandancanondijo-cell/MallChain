@@ -139,6 +139,51 @@ func initFixture(t *testing.T) *fixture {
 	return &fixture{ctx: ctx, k: k, codec: addressCdc, bank: bank}
 }
 
+// initFixtureWithoutBridgeState mirrors initFixture but skips seeding
+// BridgeState, reproducing the real-chain condition this genesis didn't
+// (or a fresh chain that hasn't recorded a bridge transfer yet): the
+// collections.Item singleton has never been written.
+func initFixtureWithoutBridgeState(t *testing.T) *fixture {
+	t.Helper()
+	protoCdc := cdctypes.NewInterfaceRegistry()
+	codec := codec.NewProtoCodec(protoCdc)
+	addressCdc := addresscodec.NewBech32Codec(sdk.GetConfig().GetBech32AccountAddrPrefix())
+	storeKey := storetypes.NewKVStoreKey(types.StoreKey)
+	storeService := runtime.NewKVStoreService(storeKey)
+	ctx := testutil.DefaultContextWithDB(t, storeKey, storetypes.NewTransientStoreKey("transient_test")).Ctx
+
+	bank := &mockBankKeeper{balances: make(map[string]sdk.Coins)}
+	k, err := keeper.NewKeeper(
+		codec,
+		storeService,
+		log.NewNopLogger(),
+		mockAccountKeeper{},
+		bank,
+		mockIBCTransferKeeper{},
+		mockStakingKeeper{},
+		mockIBCClientKeeper{},
+	)
+	require.NoError(t, err)
+
+	return &fixture{ctx: ctx, k: k, codec: addressCdc, bank: bank}
+}
+
+// Regression test: on a real node this hit every single block. EndBlocker
+// calls PruneOldTransfers -> GetBridgeState every block, and this genesis
+// didn't seed BridgeState (no "crosschain" key in app_state), so it logged
+// an ERROR-level "failed to prune completed bridge transfers" forever.
+func TestGetBridgeState_NotYetInitializedIsEmptyNotError(t *testing.T) {
+	f := initFixtureWithoutBridgeState(t)
+
+	state, err := f.k.GetBridgeState(f.ctx)
+	require.NoError(t, err)
+	require.Equal(t, types.BridgeState{}, state)
+
+	pruned, err := f.k.PruneOldTransfers(f.ctx, 10000)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), pruned)
+}
+
 func TestInitiateBridgeTransfer(t *testing.T) {
 	testSender := sdk.AccAddress([]byte("test_address_______")).String()
 
@@ -355,6 +400,43 @@ func TestEndBlockerTimeout(t *testing.T) {
 
 	got, _ := f.k.GetBridgeTransfer(f.ctx, 1)
 	assert.Equal(t, "timed_out", got.Status)
+}
+
+// TestEndBlockerTimeoutRefundsRoutelessTransfer locks in the fix for
+// transfers to a supported-but-routeless destination (no ChainRoute
+// configured): InitiateBridgeTransfer used to skip setting TransferMeta
+// entirely on that path, so EndBlocker's timeout scan (which skips any
+// transfer lacking TransferMeta) could never find it — the sender's funds
+// stayed locked in the module account forever with no refund path. The
+// fixture's "osmosis" destination has no ChainRoute registered, so this
+// exercises exactly that path end-to-end via the real InitiateBridgeTransfer
+// entrypoint (not by hand-seeding TransferMeta like TestEndBlockerTimeout).
+func TestEndBlockerTimeoutRefundsRoutelessTransfer(t *testing.T) {
+	f := initFixture(t)
+	sender := sdk.AccAddress([]byte("test_address_______")).String()
+	f.bank.balances[sender] = sdk.NewCoins(sdk.NewCoin("uatom", math.NewInt(1000)))
+
+	id, err := f.k.InitiateBridgeTransfer(f.ctx, &types.MsgInitiateBridgeTransfer{
+		Sender: sender, Recipient: "recipient",
+		Amount: sdk.NewCoin("uatom", math.NewInt(500)), DestinationChain: "osmosis",
+	})
+	require.NoError(t, err)
+
+	// Funds are held in the module account pending completion.
+	assert.True(t, f.bank.balances[sender].Equal(sdk.NewCoins(sdk.NewCoin("uatom", math.NewInt(500)))))
+
+	// TransferMeta must exist even though no route was configured — this is
+	// the crux of the fix.
+	_, err = f.k.TransferMeta.Get(f.ctx, id)
+	require.NoError(t, err, "TransferMeta must be set for routeless transfers so EndBlocker can find them")
+
+	ctx := f.ctx.WithBlockHeight(int64(1000 + 1001))
+	require.NoError(t, f.k.EndBlocker(ctx))
+
+	got, err := f.k.GetBridgeTransfer(f.ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, "timed_out", got.Status)
+	assert.True(t, f.bank.balances[sender].Equal(sdk.NewCoins(sdk.NewCoin("uatom", math.NewInt(1000)))), "sender must be refunded")
 }
 
 func TestMsgServerInitiateBridgeTransfer(t *testing.T) {

@@ -38,7 +38,6 @@ const MinesReviewerSchema = new Schema({
   total_earnings: { type: Number, default: 0 },     // MLPTS earned from reviewing
 
   // Status
-  is_active: { type: Boolean, default: true },
   last_vote_at: { type: Date },
   last_assigned_at: { type: Date },
 
@@ -49,13 +48,11 @@ const MinesReviewerSchema = new Schema({
 // Add additional indexes for common query patterns
 MinesReviewerSchema.index({ validator_address: 1 }, { sparse: true })
 MinesReviewerSchema.index({ moniker: 1 }, { sparse: true })
-MinesReviewerSchema.index({ is_active: 1 })
 MinesReviewerSchema.index({ stakeStatus: 1 })
 MinesReviewerSchema.index({ mining_reputation: -1 })
 MinesReviewerSchema.index({ total_earnings: -1 })
 MinesReviewerSchema.index({ last_vote_at: -1 })
 MinesReviewerSchema.index({ last_assigned_at: -1 })
-MinesReviewerSchema.index({ is_active: 1, mining_reputation: -1 })
 MinesReviewerSchema.index({ created_at: -1 })
 
 // Derived-stats recompute used to live in a pre('save') hook here, but every

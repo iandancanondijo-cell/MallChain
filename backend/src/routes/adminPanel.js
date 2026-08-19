@@ -12,6 +12,10 @@ const { requireAdmin, requireSuperAdmin } = require('../middleware/adminAuth');
 const { BurnPolicy, DynamicBurnThreshold } = require('../models/BurnPolicy');
 const TreasuryLedger = require('../models/TreasuryLedger');
 const { notify } = require('../services/notify');
+const MaintenanceMode = require('../models/MaintenanceMode');
+const { invalidateCache: invalidateMaintenanceCache } = require('../middleware/maintenanceMode');
+
+const MAINTENANCE_SCOPES = ['send', 'withdraw', 'buy', 'payment', 'marketplace', 'staking', 'vault'];
 
 const Campaign = mongoose.models.Campaign || mongoose.model('Campaign', new mongoose.Schema({}, { strict: false }));
 const WalletTransaction = mongoose.models.WalletTransaction || mongoose.model('WalletTransaction', new mongoose.Schema({}, { strict: false }));
@@ -246,6 +250,9 @@ router.post('/validators/applications/:id/review', async (req, res) => {
     application.reviewedAt = new Date();
     application.reviewer = req.user.email;
     application.reviewNotes = notes || '';
+    // isActiveValidator only grants mines task-review eligibility (see the
+    // field comment in models/ValidatorApplication.js) — it has no effect
+    // on, and isn't evidence of, real on-chain validator bonding.
     if (action === 'approved') application.isActiveValidator = true;
 
     await application.save();
@@ -616,6 +623,57 @@ router.get('/withdrawals', async (req, res) => {
       .lean();
 
     return res.json({ ok: true, withdrawals, total: withdrawals.length });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// ============ EMERGENCY PAUSE / MAINTENANCE MODE ============
+// Break-glass control for money-moving surfaces (send/withdraw/buy/payment/
+// marketplace/staking/vault). Read is available to any admin; toggling
+// requires superadmin, the same bar as user role changes and deletes.
+router.get('/maintenance', async (_req, res) => {
+  try {
+    const state = await MaintenanceMode.findById('singleton').lean();
+    return res.json({
+      ok: true,
+      global: state?.global || false,
+      scopes: state?.scopes || {},
+      reason: state?.reason || '',
+      updatedBy: state?.updatedBy || null,
+      updatedAt: state?.updatedAt || null,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+router.post('/maintenance', requireSuperAdmin, async (req, res) => {
+  try {
+    const { global, scope, paused, reason } = req.body || {};
+
+    if (scope !== undefined && !MAINTENANCE_SCOPES.includes(scope)) {
+      return res.status(400).json({ ok: false, error: `unknown scope; must be one of ${MAINTENANCE_SCOPES.join(', ')}` });
+    }
+    if (global === undefined && scope === undefined) {
+      return res.status(400).json({ ok: false, error: 'must provide either global or scope' });
+    }
+
+    const update = { reason: reason || '', updatedBy: req.user.email || String(req.user._id) };
+    if (global !== undefined) update.global = !!global;
+    if (scope !== undefined) update[`scopes.${scope}`] = !!paused;
+
+    const state = await MaintenanceMode.findByIdAndUpdate(
+      'singleton',
+      { $set: update },
+      { upsert: true, new: true }
+    ).lean();
+
+    invalidateMaintenanceCache();
+
+    await auditLog('maintenance_mode_change', req.user, { global, scope, paused, reason }, 'success');
+
+    return res.json({ ok: true, global: state.global, scopes: state.scopes, reason: state.reason });
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err) });
   }

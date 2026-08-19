@@ -111,6 +111,17 @@ func (k msgServer) TransferMallcoin(ctx context.Context, msg *types.MsgTransferM
 		sdkCtx.Logger().Info("transfer recording failed (transfer succeeded)", "from", msg.Creator, "to", msg.To, "error", err)
 	}
 
+	// Feed the dynamic-pricing engine (updateDynamicPricing in end_blocker.go
+	// reads ActivityMetrics.EngagementScore to move MarketPrice.BuyPrice/
+	// SellPrice). BuyMallcoin/SellMallcoin/Stake already call this, but every
+	// real MLCNS movement in the app — fiat buys, Mallpoints conversions,
+	// campaign reward payouts, and plain peer sends — goes through this
+	// TransferMallcoin handler instead, so without this call the "dynamic"
+	// price never actually moved in response to real usage.
+	if err := k.Keeper.RecordActivity(ctx, "transfer", msg.Amount, msg.Creator, msg.To); err != nil {
+		sdkCtx.Logger().Info("transfer activity recording failed (transfer succeeded)", "from", msg.Creator, "to", msg.To, "error", err)
+	}
+
 	sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeTransfer,
 		sdk.NewAttribute(sdk.AttributeKeyModule, types.ModuleName),

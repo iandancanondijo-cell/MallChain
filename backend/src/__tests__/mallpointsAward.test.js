@@ -17,6 +17,20 @@ jest.mock('../services/badgeService', () => ({
 jest.mock('../services/faucetService', () => ({
   creditMlcns: jest.fn(),
 }));
+// mallpoints.js also pulls in mallcoinService/liquidityController for the
+// /convert route's live pricing + liquidity wiring — mock them so requiring
+// the router here doesn't transitively load liquidityController's real
+// dexTxBuilder -> @cosmjs/stargate chain (that package ships ESM-only
+// sources that Jest's CommonJS transform can't parse).
+jest.mock('../services/mallcoinService', () => ({
+  getMarketPrice: jest.fn(),
+}));
+jest.mock('../controllers/liquidityController', () => ({
+  addLiquidityToPool: jest.fn(),
+}));
+jest.mock('../services/liquidityActivityService', () => ({
+  recordLiquidityActivity: jest.fn(),
+}));
 
 const MallPointAccount = require('../models/MallPointAccount');
 const mallpointsRouter = require('../routes/mallpoints');

@@ -54,17 +54,6 @@ router.get('/tasks/voting', requireAdmin, async (_req, res) => {
   } catch (e) { return res.status(500).json(fail(e)); }
 });
 
-// Get tasks with votes complete (ready for admin final review)
-router.get('/tasks/vote-complete', requireAdmin, async (_req, res) => {
-  try {
-    const tasks = await TaskSubmission.find({
-      assignment_status: 'vote_complete',
-      status: 'manual_review',
-    }).sort({ created_at: -1 }).limit(100).lean();
-    return res.json(ok(tasks));
-  } catch (e) { return res.status(500).json(fail(e)); }
-});
-
 // Get all active validators with their mining activity stats for the assignment window
 router.get('/validators/active', requireAdmin, async (_req, res) => {
   try {
@@ -350,100 +339,18 @@ router.post('/tasks/:id/vote', verifyToken, async (req, res) => {
   } catch (e) { return res.status(500).json(fail(e)); }
 });
 
-// ============ ADMIN: FINAL APPROVAL (after votes are complete) ============
-
-// Admin: Approve task after reviewing validator votes
-router.post('/tasks/:id/final-approve', requireAdmin, async (req, res) => {
-  try {
-    const { rewardAmount } = req.body || {};
-    const task = await TaskSubmission.findById(req.params.id);
-    if (!task) return res.status(404).json(fail('task not found'));
-
-    if (task.assignment_status !== 'vote_complete') {
-      return res.status(400).json(fail(`votes are not complete. Status: ${task.assignment_status}`));
-    }
-
-    const yesVotes = task.votes_yes || 0;
-    const noVotes = task.votes_no || 0;
-
-    // Require majority YES votes
-    if (yesVotes <= noVotes) {
-      return res.status(400).json(fail(`majority rejected: ${noVotes} NO vs ${yesVotes} YES`));
-    }
-
-    // Determine reward: use provided amount, or auto-use campaign rate_per_task
-    let finalReward = rewardAmount || task.reward_amount || 0;
-    if (task.campaign_id && !rewardAmount) {
-      const Campaign = mongoose.models.Campaign || mongoose.model('Campaign', new mongoose.Schema({}, { strict: false }));
-      const campaign = await Campaign.findById(task.campaign_id).lean();
-      if (campaign && campaign.rate_per_task) {
-        finalReward = campaign.rate_per_task;
-      }
-    }
-
-    // Approve the task
-    task.status = 'auto_approved';
-    task.assignment_status = 'approved';
-    task.completed_at = new Date();
-    task.reward_amount = finalReward;
-    await task.save();
-
-    // Use transaction for atomic balance update
-    const session = await mongoose.startSession();
-    try {
-      await session.withTransaction(async () => {
-        // Credit reward to miner via WalletTransaction
-        const WalletTransaction = require('../models/WalletTransaction');
-        await WalletTransaction.create([{
-          user_id: task.miner_id,
-          type: 'credit',
-          amount: finalReward,
-          currency: task.reward_currency || 'MLPTS',
-          description: `Task reward approved after ${yesVotes} YES / ${noVotes} NO validator votes`,
-        }], { session });
-
-        // Update miner's mlpts_balance atomically
-        await User.findByIdAndUpdate(task.miner_id, { $inc: { mlpts_balance: finalReward } }).session(session);
-      });
-    } finally {
-      session.endSession();
-    }
-
-    // Update campaign budget if applicable
-    const Campaign = mongoose.models.Campaign || mongoose.model('Campaign', new mongoose.Schema({}, { strict: false }));
-    if (task.campaign_id) {
-      await Campaign.findByIdAndUpdate(task.campaign_id, {
-        $inc: { completions_count: 1, budget_remaining: -finalReward },
-      });
-    }
-
-    // Update validator earnings for those who voted YES
-    for (const [vid, v] of Object.entries(task.validator_votes || {})) {
-      if (v === 'yes') {
-        await MinesReviewer.findOneAndUpdate(
-          { validator_id: vid },
-          { $inc: { total_earnings: Math.ceil(finalReward * 0.05) } }, // 5% bonus per validator
-          { upsert: true }
-        );
-      }
-    }
-
-    await AuditLog.create({
-      action: 'task_final_approve',
-      actor: req.user?.email || 'admin',
-      details: { taskId: req.params.id, yesVotes, noVotes, reward: finalReward },
-      outcome: 'success'
-    });
-
-    notify(task.miner_id, {
-      kind: 'mines',
-      title: 'Submission approved',
-      body: `Your Mines submission was approved by admin review — +${finalReward} ${task.reward_currency || 'MLPTS'}`,
-    });
-
-    return res.json(ok(task));
-  } catch (e) { return res.status(500).json(fail(e)); }
-});
+// ============ ADMIN: FINAL REJECTION (manual override) ============
+//
+// There used to be a matching POST /tasks/:id/final-approve here, gated on
+// assignment_status === 'vote_complete'. Nothing ever sets that status —
+// checkAndResolve() (see the vote handler above) resolves straight from
+// 'voting' to 'auto_approved'/'rejected' and is the only path that also
+// runs minesReviewService.settle() for payout. final-approve was therefore
+// unreachable, and its own reward logic (a flat 5% bonus per YES voter) was
+// inconsistent with settle()'s real VOTE_REWARD payout — reintroducing it
+// without reconciling both would risk double-paying reviewers. Removed
+// rather than wired back up; final-reject below has no such gate since it
+// doesn't touch rewards.
 
 // Admin: Reject task after reviewing validator votes
 router.post('/tasks/:id/final-reject', requireAdmin, async (req, res) => {

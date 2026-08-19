@@ -39,6 +39,26 @@ func (mockBankKeeper) SendCoinsFromModuleToAccount(ctx context.Context, senderMo
 	return nil
 }
 
+func (mockBankKeeper) BurnCoins(ctx context.Context, moduleName string, amt sdk.Coins) error {
+	return nil
+}
+
+// burnTrackingBankKeeper records BurnCoins calls so tests can assert a
+// passed proposal's deposit is actually burned, not just checked.
+type burnTrackingBankKeeper struct {
+	mockBankKeeper
+	burnedModule string
+	burnedAmt    sdk.Coins
+	burnCalls    int
+}
+
+func (b *burnTrackingBankKeeper) BurnCoins(ctx context.Context, moduleName string, amt sdk.Coins) error {
+	b.burnedModule = moduleName
+	b.burnedAmt = amt
+	b.burnCalls++
+	return nil
+}
+
 type mockStakingKeeper struct{}
 
 func (mockStakingKeeper) GetDelegatorDelegations(ctx context.Context, delegator sdk.AccAddress, maxRetrieve uint16) ([]stakingtypes.Delegation, error) {
@@ -64,6 +84,11 @@ func initFixture(t *testing.T) *fixture {
 
 func initFixtureWithStakingKeeper(t *testing.T, stakingKeeper types.StakingKeeper) *fixture {
 	t.Helper()
+	return initFixtureWithKeepers(t, mockBankKeeper{}, stakingKeeper)
+}
+
+func initFixtureWithKeepers(t *testing.T, bankKeeper types.BankKeeper, stakingKeeper types.StakingKeeper) *fixture {
+	t.Helper()
 	protoCdc := codec.NewProtoCodec(cdctypes.NewInterfaceRegistry())
 	addressCdc := addresscodec.NewBech32Codec(sdk.GetConfig().GetBech32AccountAddrPrefix())
 	storeKey := storetypes.NewKVStoreKey(types.StoreKey)
@@ -77,7 +102,7 @@ func initFixtureWithStakingKeeper(t *testing.T, stakingKeeper types.StakingKeepe
 		protoCdc,
 		addressCdc,
 		[]byte(authority),
-		mockBankKeeper{},
+		bankKeeper,
 		stakingKeeper,
 		nil,
 	)
@@ -224,4 +249,36 @@ func TestEndBlockerHasQuorumNilStakingKeeper(t *testing.T) {
 	got, err := f.k.GetProposal(f.ctx, 1)
 	require.NoError(t, err)
 	assert.Equal(t, types.StatusRejected, got.Status)
+}
+
+// TestExecuteTreasuryTransferBurnsDeposit locks in the fix for
+// ExecuteTreasuryTransfer: it used to only emit a "treasury_checked" event
+// and never actually call BurnCoins, silently leaving a passed proposal's
+// deposit stuck in the module account forever.
+func TestExecuteTreasuryTransferBurnsDeposit(t *testing.T) {
+	bank := &burnTrackingBankKeeper{}
+	f := initFixtureWithKeepers(t, bank, mockStakingKeeper{})
+
+	deposit := sdk.NewCoins(sdk.NewCoin("stake", math.NewInt(1000)))
+	proposal := types.Proposal{
+		Id:           1,
+		Status:       types.StatusPassed,
+		TotalDeposit: deposit,
+	}
+
+	require.NoError(t, f.k.ExecuteTreasuryTransfer(f.ctx, proposal))
+
+	assert.Equal(t, 1, bank.burnCalls)
+	assert.Equal(t, types.ModuleName, bank.burnedModule)
+	assert.True(t, bank.burnedAmt.Equal(deposit))
+}
+
+func TestExecuteTreasuryTransferSkipsZeroDeposit(t *testing.T) {
+	bank := &burnTrackingBankKeeper{}
+	f := initFixtureWithKeepers(t, bank, mockStakingKeeper{})
+
+	proposal := types.Proposal{Id: 2, Status: types.StatusPassed}
+
+	require.NoError(t, f.k.ExecuteTreasuryTransfer(f.ctx, proposal))
+	assert.Equal(t, 0, bank.burnCalls)
 }

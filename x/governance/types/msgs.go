@@ -14,6 +14,7 @@ func RegisterInterfaces(registry types.InterfaceRegistry) {
 		&MsgVoteWeighted{},
 		&MsgDeposit{},
 		&MsgUpdateParams{},
+		&MsgSlashValidator{},
 	)
 }
 
@@ -127,6 +128,32 @@ func (m *MsgUpdateParams) ValidateBasic() error {
 	}
 	if _, err := sdk.AccAddressFromBech32(m.Authority); err != nil {
 		return errorsmod.Wrap(err, "invalid authority address")
+	}
+	return nil
+}
+
+// GetSigners returns the signer addresses for MsgSlashValidator
+func (m *MsgSlashValidator) GetSigners() []sdk.AccAddress {
+	authority, _ := sdk.AccAddressFromBech32(m.Authority)
+	return []sdk.AccAddress{authority}
+}
+
+// ValidateBasic performs basic validation for MsgSlashValidator
+func (m *MsgSlashValidator) ValidateBasic() error {
+	if m.Authority == "" {
+		return errorsmod.Wrap(ErrInvalidAuthority, "authority is required")
+	}
+	if _, err := sdk.AccAddressFromBech32(m.Authority); err != nil {
+		return errorsmod.Wrap(err, "invalid authority address")
+	}
+	if m.ValidatorAddress == "" {
+		return errorsmod.Wrap(ErrInvalidProposal, "validator_address is required")
+	}
+	if _, err := sdk.ValAddressFromBech32(m.ValidatorAddress); err != nil {
+		return errorsmod.Wrap(err, "invalid validator address")
+	}
+	if m.SlashPercentage > 100 {
+		return errorsmod.Wrap(ErrInvalidProposal, "slash_percentage cannot exceed 100")
 	}
 	return nil
 }

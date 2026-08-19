@@ -35,15 +35,29 @@ func NewAppModule(cdc codec.Codec, k *keeper.Keeper) AppModule {
 
 func (AppModule) IsAppModule() {}
 
+// IsOnePerModuleType implements the depinject.OnePerModuleType interface.
+// Vault is wired manually (see app/custom_modules.go), not via depinject
+// appconfig — its module.pb.go doesn't carry a valid cosmos.app.v1alpha1.module
+// extension, which made appconfig.Compose() panic unconditionally for the
+// whole app the moment this package's depinject.go (now removed) was
+// imported anywhere, regardless of whether vault was actually in the
+// composed Modules list. This method is still required to satisfy
+// appmodule.AppModule itself, independent of depinject registration.
+func (AppModule) IsOnePerModuleType() {}
+
 func (AppModule) Name() string { return types.ModuleName }
 
-func (AppModule) RegisterLegacyAminoCodec(*codec.LegacyAmino) {}
+func (AppModule) RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {
+	types.RegisterCodec(cdc)
+}
 
 func (AppModule) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux *runtime.ServeMux) {
 	// no-op for now
 }
 
-func (AppModule) RegisterInterfaces(registrar codectypes.InterfaceRegistry) {}
+func (AppModule) RegisterInterfaces(registrar codectypes.InterfaceRegistry) {
+	types.RegisterInterfaces(registrar)
+}
 
 func (am AppModule) RegisterServices(registrar grpc.ServiceRegistrar) error {
 	types.RegisterMsgServer(registrar, keeper.NewMsgServerImpl(am.keeper))

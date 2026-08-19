@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package marketplace.wasmbridge.v1;
+
+option go_package = "marketplace/x/wasmbridge/types";
+
+import "cosmos/msg/v1/msg.proto";
+
+// Msg defines the wasmbridge Msg service: direct MGP20 (mlcoin) token
+// actions (transfer/approve/transfer_from), dispatched by an action tag
+// rather than through wasm contract execution. This is a token-action
+// dispatcher, not a CosmWasm contract call — see x/wasm for real contract
+// execution, which uses this module as a host capability for MGP20 access.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  // ExecuteAction dispatches a direct MGP20 token action (transfer, approve,
+  // or transfer_from) identified by the action field.
+  rpc ExecuteAction(MsgExecuteAction) returns (MsgExecuteActionResponse);
+}
+
+// MsgExecuteAction dispatches one of ActionTransfer/ActionApprove/
+// ActionTransferFrom against the mlcoin (MGP20) ledger. message carries the
+// JSON-encoded action payload (MGP20TransferMsg/MGP20ApproveMsg/
+// MGP20TransferFromMsg).
+message MsgExecuteAction {
+  option (cosmos.msg.v1.signer) = "sender";
+
+  string sender = 1;
+  string action = 2;
+  bytes message = 3;
+}
+
+message MsgExecuteActionResponse {
+  bool success = 1;
+}

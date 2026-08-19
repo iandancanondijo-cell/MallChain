@@ -6,9 +6,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	corestore "cosmossdk.io/core/store"
+	storetypes "cosmossdk.io/store/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -31,13 +33,13 @@ func (k Keeper) kvStore(ctx context.Context) (corestore.KVStore, error) {
 	return s, nil
 }
 
-// getVault reads the vault blob (JSON) from KV and unmarshals it
-func (k Keeper) getVault(ctx context.Context) (*types.VaultBlob, error) {
+// getVault reads owner's vault blob (JSON) from KV and unmarshals it
+func (k Keeper) getVault(ctx context.Context, owner string) (*types.VaultBlob, error) {
 	s, err := k.kvStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-	b, err := s.Get([]byte(types.VaultKey))
+	b, err := s.Get(types.VaultKeyFor(owner))
 	if err != nil {
 		return nil, err
 	}
@@ -51,8 +53,8 @@ func (k Keeper) getVault(ctx context.Context) (*types.VaultBlob, error) {
 	return &vb, nil
 }
 
-// setVault writes the vault blob
-func (k Keeper) setVault(ctx context.Context, vb *types.VaultBlob) error {
+// setVault writes owner's vault blob
+func (k Keeper) setVault(ctx context.Context, owner string, vb *types.VaultBlob) error {
 	s, err := k.kvStore(ctx)
 	if err != nil {
 		return err
@@ -61,11 +63,22 @@ func (k Keeper) setVault(ctx context.Context, vb *types.VaultBlob) error {
 	if err != nil {
 		return err
 	}
-	return s.Set([]byte(types.VaultKey), b)
+	return s.Set(types.VaultKeyFor(owner), b)
 }
 
-// SetupVault initializes salt/params and TOTP secret; returns provisioning URI.
-func (k Keeper) SetupVault(ctx context.Context, password, accountName, issuer string) (string, error) {
+// SetupVault initializes salt/params and TOTP secret for owner's vault and
+// returns a provisioning URI. Fails if owner already has a vault — without
+// this check, any address could call SetupVault again and destroy a
+// previously confirmed vault's encrypted key material.
+func (k Keeper) SetupVault(ctx context.Context, owner, password, accountName, issuer string) (string, error) {
+	existing, err := k.getVault(ctx, owner)
+	if err != nil {
+		return "", err
+	}
+	if existing != nil {
+		return "", errors.New("vault already exists for this account")
+	}
+
 	// generate salt
 	salt, err := crypto.GenerateSalt(16)
 	if err != nil {
@@ -98,15 +111,15 @@ func (k Keeper) SetupVault(ctx context.Context, password, accountName, issuer st
 		PublicKey:           "",
 	}
 
-	if err := k.setVault(ctx, vb); err != nil {
+	if err := k.setVault(ctx, owner, vb); err != nil {
 		return "", err
 	}
 	return uri, nil
 }
 
 // ConfirmVault stores the encrypted private key after verifying an initial TOTP code
-func (k Keeper) ConfirmVault(ctx context.Context, password, totpCode string, privKey []byte) error {
-	vb, err := k.getVault(ctx)
+func (k Keeper) ConfirmVault(ctx context.Context, owner, password, totpCode string, privKey []byte) error {
+	vb, err := k.getVault(ctx, owner)
 	if err != nil {
 		return err
 	}
@@ -155,13 +168,33 @@ func (k Keeper) ConfirmVault(ctx context.Context, password, totpCode string, pri
 	vb.Ciphertext = base64.StdEncoding.EncodeToString(c2)
 	vb.PublicKey = base64.StdEncoding.EncodeToString(pub)
 
-	return k.setVault(ctx, vb)
+	return k.setVault(ctx, owner, vb)
+}
+
+// emitUnlockFailed emits vault_unlock_failed (and vault_locked, once the
+// lockout threshold is crossed) so a burst of failed unlock attempts against
+// a custody vault — a brute-force signal — is visible to any chain event
+// listener instead of only being reflected in KV state nothing observes.
+func (k Keeper) emitUnlockFailed(sdkCtx sdk.Context, owner string, vb *types.VaultBlob, reason string) {
+	sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeVaultUnlockFailed,
+		sdk.NewAttribute(types.AttributeKeyOwner, owner),
+		sdk.NewAttribute(types.AttributeKeyReason, reason),
+		sdk.NewAttribute(types.AttributeKeyFailedAttempts, strconv.Itoa(vb.FailedAttempts)),
+	))
+	if vb.LockedUntilUnix > 0 {
+		sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+			types.EventTypeVaultLocked,
+			sdk.NewAttribute(types.AttributeKeyOwner, owner),
+			sdk.NewAttribute(types.AttributeKeyLockedUntil, strconv.FormatInt(vb.LockedUntilUnix, 10)),
+		))
+	}
 }
 
 // UnlockAndSign verifies password+TOTP, decrypts private key in-memory, signs message and returns signature.
-func (k Keeper) UnlockAndSign(ctx context.Context, password, totpCode string, message []byte) ([]byte, error) {
+func (k Keeper) UnlockAndSign(ctx context.Context, owner, password, totpCode string, message []byte) ([]byte, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	vb, err := k.getVault(ctx)
+	vb, err := k.getVault(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -170,6 +203,11 @@ func (k Keeper) UnlockAndSign(ctx context.Context, password, totpCode string, me
 	}
 	// check locked
 	if vb.LockedUntilUnix > sdkCtx.BlockTime().Unix() {
+		sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
+			types.EventTypeVaultUnlockRejected,
+			sdk.NewAttribute(types.AttributeKeyOwner, owner),
+			sdk.NewAttribute(types.AttributeKeyLockedUntil, strconv.FormatInt(vb.LockedUntilUnix, 10)),
+		))
 		return nil, errors.New("vault locked due to failed attempts")
 	}
 	salt, err := base64.StdEncoding.DecodeString(vb.Salt)
@@ -192,9 +230,10 @@ func (k Keeper) UnlockAndSign(ctx context.Context, password, totpCode string, me
 	secretBytes, err := crypto.Decrypt(nonceT, ctT, key)
 	if err != nil {
 		vb.FailedAttempts++
-		if err := k.setVault(ctx, vb); err != nil {
+		if err := k.setVault(ctx, owner, vb); err != nil {
 			sdkCtx.Logger().Error("Failed to update vault failed attempts after decryption error", "error", err)
 		}
+		k.emitUnlockFailed(sdkCtx, owner, vb, "decryption_error")
 		return nil, errors.New("invalid credentials")
 	}
 	if !crypto.VerifyTOTPCode(string(secretBytes), totpCode) {
@@ -203,9 +242,10 @@ func (k Keeper) UnlockAndSign(ctx context.Context, password, totpCode string, me
 			vb.LockedUntilUnix = sdkCtx.BlockTime().Add(5 * time.Minute).Unix()
 		}
 
-		if err := k.setVault(ctx, vb); err != nil {
+		if err := k.setVault(ctx, owner, vb); err != nil {
 			sdkCtx.Logger().Error("Failed to update vault failed attempts after invalid TOTP", "error", err)
 		}
+		k.emitUnlockFailed(sdkCtx, owner, vb, "invalid_totp")
 		return nil, errors.New("invalid totp code")
 	}
 
@@ -230,16 +270,16 @@ func (k Keeper) UnlockAndSign(ctx context.Context, password, totpCode string, me
 	// reset failed attempts on success
 	vb.FailedAttempts = 0
 	vb.LockedUntilUnix = 0
-	if err := k.setVault(ctx, vb); err != nil {
+	if err := k.setVault(ctx, owner, vb); err != nil {
 		sdkCtx.Logger().Error("Failed to reset vault failed attempts on success", "error", err)
 	}
 
 	return sig, nil
 }
 
-// DisableVault removes the vault record
-func (k Keeper) DisableVault(ctx context.Context, password, totpCode string) error {
-	vb, err := k.getVault(ctx)
+// DisableVault removes owner's vault record
+func (k Keeper) DisableVault(ctx context.Context, owner, password, totpCode string) error {
+	vb, err := k.getVault(ctx, owner)
 	if err != nil {
 		return err
 	}
@@ -273,20 +313,42 @@ func (k Keeper) DisableVault(ctx context.Context, password, totpCode string) err
 	if err != nil {
 		return err
 	}
-	return s.Delete([]byte(types.VaultKey))
+	return s.Delete(types.VaultKeyFor(owner))
 }
 
 func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) error {
-	if genState.Vault != nil {
-		return k.setVault(ctx, genState.Vault)
+	for _, ov := range genState.Vaults {
+		if ov.Vault == nil {
+			continue
+		}
+		if err := k.setVault(ctx, ov.Owner, ov.Vault); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func (k Keeper) ExportGenesis(ctx context.Context) (types.GenesisState, error) {
-	vb, err := k.getVault(ctx)
+	s, err := k.kvStore(ctx)
 	if err != nil {
 		return types.GenesisState{}, err
 	}
-	return types.GenesisState{Vault: vb}, nil
+
+	prefix := []byte(types.VaultKeyPrefix)
+	iter, err := s.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
+	if err != nil {
+		return types.GenesisState{}, err
+	}
+	defer iter.Close()
+
+	var out types.GenesisState
+	for ; iter.Valid(); iter.Next() {
+		owner := string(iter.Key()[len(prefix):])
+		var vb types.VaultBlob
+		if err := json.Unmarshal(iter.Value(), &vb); err != nil {
+			return types.GenesisState{}, err
+		}
+		out.Vaults = append(out.Vaults, types.OwnerVault{Owner: owner, Vault: &vb})
+	}
+	return out, nil
 }

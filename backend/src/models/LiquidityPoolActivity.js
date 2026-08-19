@@ -6,7 +6,7 @@ const LiquidityPoolActivitySchema = new mongoose.Schema(
   {
     flow: {
       type: String,
-      enum: ['buy', 'withdraw', 'reconciliation'],
+      enum: ['buy', 'withdraw', 'reconciliation', 'mallpoints_convert'],
       required: true,
     },
     stage: { type: String, required: true },

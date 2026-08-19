@@ -4,6 +4,7 @@
  */
 
 const logger = require('./logger')
+const { backendErrorsTotal } = require('./metrics')
 
 /**
  * Error code definitions
@@ -181,14 +182,20 @@ function errorHandler() {
       `${req.method} ${req.path} - ${error.code}`,
       error,
       {
+        requestId: req.id,
         statusCode: error.statusCode,
         path: req.path,
         method: req.method,
       }
     )
 
-    // Send response
-    res.status(error.statusCode).json(error.toJSON())
+    backendErrorsTotal.inc({ code: error.code, status_code: error.statusCode })
+
+    // Send response — includes requestId (set by index.js's request-id
+    // middleware) so a client-reported error can be correlated with logs.
+    const body = error.toJSON()
+    if (req.id) body.error.requestId = req.id
+    res.status(error.statusCode).json(body)
   }
 }
 

@@ -18,6 +18,8 @@ const logger = require('./utils/logger')
 const correlationId = require('./middleware/correlationId')
 const { metricsMiddleware, register } = require('./utils/metrics')
 const { initCacheService } = require('./services/cacheService')
+const { maintenanceGuard } = require('./middleware/maintenanceMode')
+const { computeBlockStaleness } = require('./utils/chainHealth')
 
 const authRoutes = require('./routes/auth');
 const vaultRoutes = require('./routes/vault');
@@ -223,6 +225,11 @@ try {
 }
 
 const CHAIN_REST = config.chain.rest;
+// How stale the latest block can be before we consider consensus halted
+// rather than just slow. A REST endpoint that responds but keeps returning
+// the same old block (validator down, consensus stuck) previously reported
+// as fully healthy — this endpoint responding was the only thing checked.
+const CHAIN_STALE_BLOCK_MS = Number(process.env.CHAIN_STALE_BLOCK_MS || 60000);
 
 async function checkChainHealth() {
   const base = CHAIN_REST.replace(/\/$/, '');
@@ -236,12 +243,15 @@ async function checkChainHealth() {
   const latestHeight = blockRes.data?.block?.header?.height || '0';
   const latestBlockTime = blockRes.data?.block?.header?.time || null;
 
+  const { blockAgeMs, isStale } = computeBlockStaleness(latestBlockTime, CHAIN_STALE_BLOCK_MS);
+
   return {
-    status: 'ok',
+    status: isStale ? 'stale' : 'ok',
     chainId,
     moniker,
     latestHeight,
     latestBlockTime,
+    blockAgeMs,
     restEndpoint: base,
     timestamp: new Date().toISOString(),
   };
@@ -250,7 +260,7 @@ async function checkChainHealth() {
 app.get('/api/health', async (req, res) => {
   try {
     const chainStatus = await checkChainHealth();
-    
+
     // Check database connectivity
     let dbStatus = 'ok';
     try {
@@ -276,9 +286,10 @@ app.get('/api/health', async (req, res) => {
       redisStatus = 'error';
     }
 
-    return res.json({ 
-      status: 'ok', 
-      backend: 'ok', 
+    const overallStatus = chainStatus.status === 'ok' ? 'ok' : 'degraded';
+    return res.status(overallStatus === 'ok' ? 200 : 503).json({
+      status: overallStatus,
+      backend: 'ok',
       chain: chainStatus,
       database: { status: dbStatus },
       redis: { status: redisStatus }
@@ -294,6 +305,9 @@ app.get('/api/ready', async (req, res) => {
   try {
     // Check if blockchain is responding
     const chainStatus = await checkChainHealth();
+    if (chainStatus.status === 'stale') {
+      return res.status(503).json({ status: 'not_ready', reason: 'blockchain_stale', blockAgeMs: chainStatus.blockAgeMs });
+    }
     if (chainStatus.status !== 'ok') {
       return res.status(503).json({ status: 'not_ready', reason: 'blockchain_unavailable' });
     }
@@ -327,11 +341,11 @@ app.get('/metrics', async (req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
-app.use('/api/vault', vaultRoutes);
+app.use('/api/vault', maintenanceGuard('vault'), vaultRoutes);
 app.use('/api/tx', txRoutes);
 app.use('/api/market', marketRoutes);
 app.use('/api/fx', fxRoutes);
-app.use('/api/send', sendRoutes);
+app.use('/api/send', maintenanceGuard('send'), sendRoutes);
 app.use('/api/blockchain', blockchainRoutes);
 app.use('/api/blockchain/tx', blockchainTxRoutes);
 app.use('/api/wallets', walletsRoutes);
@@ -345,14 +359,14 @@ app.use('/api/notifications', notificationsRoutes);
 const referralsRoutes = require('./routes/referrals');
 app.use('/api/referrals', referralsRoutes);
 const marketplaceEscrowRoutes = require('./routes/marketplace');
-app.use('/api/marketplace', marketplaceEscrowRoutes);
+app.use('/api/marketplace', maintenanceGuard('marketplace'), marketplaceEscrowRoutes);
 const messagingRoutes = require('./routes/messaging');
 app.use('/api/messaging', messagingRoutes);
-app.use('/api/payment', paymentRoutes);
-app.use('/api/buy', buyRoutes);
+app.use('/api/payment', maintenanceGuard('payment'), paymentRoutes);
+app.use('/api/buy', maintenanceGuard('buy'), buyRoutes);
 const withdrawRoutes = require('./routes/withdraw');
-app.use('/api/withdraw', withdrawRoutes);
-app.use('/api/staking', stakingRoutes);
+app.use('/api/withdraw', maintenanceGuard('withdraw'), withdrawRoutes);
+app.use('/api/staking', maintenanceGuard('staking'), stakingRoutes);
 app.use('/api/validators', validatorsRoutes);
 app.use('/api/onchain', onchainRoutes);
 app.use('/api/history', historyRoutes);
@@ -502,10 +516,6 @@ const io = new Server(server, {
 })
 
 global.io = io
-
-// C13: Global error handler (must be after all routes)
-const errorHandler = require('./middleware/errorHandler');
-app.use(errorHandler);
 
 // Task 5.1: Main connection handler for new Socket.IO clients
 io.on('connection', socket => {

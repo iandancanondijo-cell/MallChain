@@ -107,15 +107,22 @@ export default function App() {
     if (!authInitialized) return;
     
     const isAuthenticated = st.user.authed;
-    
+
+    // Strip query string before comparing — matchRoute() (router.tsx) does
+    // the same via clean = path.split('?')[0]. Without this, a path like
+    // /auth?mode=signup fails the exact-match check below and this effect
+    // force-redirects to /landing before matchRoute's render ever shows,
+    // discarding the query string in the process.
+    const cleanPath = path.split('?')[0];
+
     // Routes that don't require authentication
-    const isPublicRoute = path === '/landing' || path === '/auth';
-    
+    const isPublicRoute = cleanPath === '/landing' || cleanPath === '/auth';
+
     if (!isAuthenticated && !isPublicRoute) {
       // Unauthenticated user on protected route → redirect to landing
       console.log('[App] Auth required for route:', path, '→ redirecting to landing');
       navigate('/landing');
-    } else if (isAuthenticated && path === '/landing') {
+    } else if (isAuthenticated && cleanPath === '/landing') {
       // Authenticated user on landing → redirect to dashboard
       console.log('[App] User authenticated, redirecting from landing to dashboard');
       navigate('/');

@@ -32,8 +32,11 @@ async function pollChainPriceOnce() {
   }
 }
 
-// start background poller
-setInterval(pollChainPriceOnce, PRICE_POLL_INTERVAL_MS)
+// start background poller. unref() so this timer alone never keeps the
+// Node process (or a test runner that requires this module) alive — the
+// HTTP server is what should hold the process open, not a price poller.
+const pricePollTimer = setInterval(pollChainPriceOnce, PRICE_POLL_INTERVAL_MS)
+if (pricePollTimer && typeof pricePollTimer.unref === 'function') pricePollTimer.unref()
 // initial fill
 pollChainPriceOnce().catch(() => {})
 

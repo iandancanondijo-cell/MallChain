@@ -4,26 +4,33 @@ package marketplace.marketplace.v1;
 
 option go_package = "marketplace/x/marketplace/types";
 
-message MsgGetEscrow {
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+import "marketplace/marketplace/v1/tx.proto";
+
+// Query defines the gRPC querier service for the marketplace module.
+service Query {
+  // Escrow queries a single escrow by id.
+  rpc Escrow(QueryEscrowRequest) returns (QueryEscrowResponse) {
+    option (google.api.http).get = "/marketplace/marketplace/v1/escrow/{escrow_id}";
+  }
+
+  // Escrows queries all escrows.
+  rpc Escrows(QueryEscrowsRequest) returns (QueryEscrowsResponse) {
+    option (google.api.http).get = "/marketplace/marketplace/v1/escrow";
+  }
+}
+
+message QueryEscrowRequest {
   string escrow_id = 1;
 }
 
-message MsgGetEscrowResponse {
-  string id = 1;
-  string buyer = 2;
-  string seller = 3;
-  string amount = 4;
-  string denom = 5;
-  string description = 6;
-  string status = 7;
-  int64 created_at = 8;
-  int64 release_time = 9;
-  int64 dispute_window = 10;
+message QueryEscrowResponse {
+  Escrow escrow = 1 [(gogoproto.nullable) = false];
 }
 
-message MsgListEscrows {
-}
+message QueryEscrowsRequest {}
 
-message MsgListEscrowsResponse {
-  repeated MsgGetEscrowResponse escrows = 1;
+message QueryEscrowsResponse {
+  repeated Escrow escrows = 1 [(gogoproto.nullable) = false];
 }

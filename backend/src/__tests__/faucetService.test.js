@@ -24,7 +24,7 @@ describe('Faucet Service Tests', () => {
   describe('validateFaucetRequest', () => {
     test('should validate valid faucet request', () => {
       const request = {
-        walletAddress: 'mall1testaddress',
+        walletAddress: 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg',
         amount: 1000
       };
       
@@ -45,7 +45,7 @@ describe('Faucet Service Tests', () => {
 
     test('should reject request with zero amount', () => {
       const request = {
-        walletAddress: 'mall1testaddress',
+        walletAddress: 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg',
         amount: 0
       };
       
@@ -55,7 +55,7 @@ describe('Faucet Service Tests', () => {
 
     test('should reject request exceeding max amount', () => {
       const request = {
-        walletAddress: 'mall1testaddress',
+        walletAddress: 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg',
         amount: 100000
       };
       

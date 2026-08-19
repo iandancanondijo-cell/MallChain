@@ -43,10 +43,47 @@ export interface MinesCampaign {
   creator_id: string;
   title: string;
   description?: string;
+  content_link?: string;
+  directive?: string;
+  platform?: string;
+  activity_type?: string;
+  multiplier?: number;
   rate_per_task: number;
   budget_remaining: number;
   status: 'active' | 'paused' | 'completed';
   completions_count: number;
+}
+
+export interface RewardActivity {
+  rate?: number;
+  min?: number;
+  max?: number;
+  tier: string;
+  note?: string;
+}
+
+export interface RewardPlatform {
+  label: string;
+  icon: string;
+  dailyCapMlpts?: number;
+  activities: Record<string, RewardActivity>;
+}
+
+export interface RewardRatesTable {
+  platforms: Record<string, RewardPlatform>;
+  defaultDailyCapMlpts: number;
+  minMultiplier: number;
+  maxMultiplier: number;
+}
+
+export interface CreateCampaignPayload {
+  platform: string;
+  activity_type: string;
+  content_link: string;
+  description?: string;
+  directive?: string;
+  multiplier: number;
+  budget_mlpts: number;
 }
 
 export interface MinesSubmission {
@@ -144,6 +181,15 @@ class MinesApi {
 
   async myCampaigns(creatorId: string): Promise<ApiResult<MinesCampaign[]>> {
     return unwrap(api.get(`/api/mines/campaigns/creator/${encodeURIComponent(creatorId)}`));
+  }
+
+  async getRewardRates(): Promise<ApiResult<RewardRatesTable>> {
+    return unwrap(api.get('/api/mines/reward-rates'));
+  }
+
+  /** Self-serve campaign creation — funded from the creator's own Mallpoints balance. */
+  async createCampaign(payload: CreateCampaignPayload): Promise<ApiResult<MinesCampaign>> {
+    return unwrap(api.post('/api/mines/campaigns/create', payload));
   }
 
   async getProfile(): Promise<ApiResult<MinesProfile>> {

@@ -16,7 +16,7 @@ func NewMsgServerImpl(k *Keeper) types.MsgServer {
 }
 
 func (m *msgServer) SetupVault(ctx context.Context, msg *types.MsgSetupVault) (*types.MsgSetupVaultResponse, error) {
-	uri, err := m.k.SetupVault(ctx, msg.Password, msg.Account, msg.Issuer)
+	uri, err := m.k.SetupVault(ctx, msg.Authority, msg.Password, msg.Account, msg.Issuer)
 	if err != nil {
 		return nil, err
 	}
@@ -24,14 +24,14 @@ func (m *msgServer) SetupVault(ctx context.Context, msg *types.MsgSetupVault) (*
 }
 
 func (m *msgServer) ConfirmVault(ctx context.Context, msg *types.MsgConfirmVault) (*types.MsgConfirmVaultResponse, error) {
-	if err := m.k.ConfirmVault(ctx, msg.Password, msg.TotpCode, msg.PrivKey); err != nil {
+	if err := m.k.ConfirmVault(ctx, msg.Authority, msg.Password, msg.TotpCode, msg.PrivKey); err != nil {
 		return nil, err
 	}
 	return &types.MsgConfirmVaultResponse{}, nil
 }
 
 func (m *msgServer) UnlockAndSign(ctx context.Context, msg *types.MsgUnlockAndSign) (*types.MsgUnlockAndSignResponse, error) {
-	sig, err := m.k.UnlockAndSign(ctx, msg.Password, msg.TotpCode, msg.Message)
+	sig, err := m.k.UnlockAndSign(ctx, msg.Authority, msg.Password, msg.TotpCode, msg.Message)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +39,7 @@ func (m *msgServer) UnlockAndSign(ctx context.Context, msg *types.MsgUnlockAndSi
 }
 
 func (m *msgServer) DisableVault(ctx context.Context, msg *types.MsgDisableVault) (*types.MsgDisableVaultResponse, error) {
-	if err := m.k.DisableVault(ctx, msg.Password, msg.TotpCode); err != nil {
+	if err := m.k.DisableVault(ctx, msg.Authority, msg.Password, msg.TotpCode); err != nil {
 		return nil, err
 	}
 	return &types.MsgDisableVaultResponse{}, nil

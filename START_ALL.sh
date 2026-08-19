@@ -51,11 +51,54 @@ echo "✅ Genesis validated."
 
 # ──────────────────────────────────────────────────────────────────────────────
 # STEP 3: Check MongoDB
+# The backend needs a replica set (transactions require it), so it runs its
+# own mongod on a dedicated port/dbpath rather than the system package's
+# plain single-node instance on the default port. `pgrep -x mongod` alone
+# can't tell those two apart — it matches whichever is running — so we
+# check the actual port from backend/.env's MONGO_URI instead.
 # ──────────────────────────────────────────────────────────────────────────────
-if ! pgrep -x mongod > /dev/null; then
-    echo "⚠️  MongoDB not running. Starting..."
-    sudo systemctl start mongod 2>/dev/null || true
-    sleep 2
+MONGO_HOME="${HOME}/.local/mallchain-mongo"
+MONGO_URI_VAL="$(grep -m1 '^MONGO_URI=' "${REPO_DIR}/backend/.env" 2>/dev/null | cut -d'=' -f2-)"
+MONGO_PORT=27017
+if [[ "$MONGO_URI_VAL" =~ :([0-9]+)/ ]]; then
+    MONGO_PORT="${BASH_REMATCH[1]}"
+fi
+
+if ! nc -z localhost "$MONGO_PORT" 2>/dev/null; then
+    echo "⚠️  MongoDB (replica set rs0, port ${MONGO_PORT}) not running. Starting..."
+    mkdir -p "${MONGO_HOME}/data" "${MONGO_HOME}/logs"
+    nohup mongod --bind_ip 127.0.0.1 --port "$MONGO_PORT" --replSet rs0 \
+      --dbpath "${MONGO_HOME}/data" --logpath "${MONGO_HOME}/logs/mongod.log" \
+      > /dev/null 2>&1 &
+    disown
+
+    for i in {1..20}; do
+        nc -z localhost "$MONGO_PORT" 2>/dev/null && break
+        sleep 1
+    done
+fi
+
+MONGO_READY=0
+for i in {1..15}; do
+    if mongosh --port "$MONGO_PORT" --quiet --eval 'db.runCommand({ping:1}).ok' 2>/dev/null | grep -q '^1$'; then
+        MONGO_READY=1
+        break
+    fi
+    sleep 1
+done
+
+if [[ $MONGO_READY -eq 1 ]]; then
+    # Fresh dbpath (e.g. first run on a new machine) won't have a replica
+    # set initiated yet — self-heal that the same way genesis is repaired.
+    RS_STATE="$(mongosh --port "$MONGO_PORT" --quiet --eval 'try { rs.status().ok } catch (e) { print("noRS") }' 2>/dev/null | tail -1)"
+    if [[ "$RS_STATE" == "noRS" ]]; then
+        echo "Initializing replica set rs0..."
+        mongosh --port "$MONGO_PORT" --quiet --eval 'rs.initiate()' > /dev/null 2>&1 || true
+        sleep 2
+    fi
+    echo "✅ MongoDB responding on :${MONGO_PORT} (rs0)"
+else
+    echo "❌ MongoDB failed to start on :${MONGO_PORT}. Backend will run in degraded mode."
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -201,10 +244,11 @@ else
     echo "❌ Redis not running"
 fi
 
-# Check MongoDB
-if pgrep -x mongod > /dev/null; then
-    MONGO_PID=$(pgrep -x mongod)
-    echo "✅ MongoDB running (PID: $MONGO_PID)"
+# Check MongoDB (the dedicated replica-set instance backend/.env points at —
+# pgrep -x mongod alone would also match an unrelated system mongod, if any)
+if nc -z localhost "$MONGO_PORT" 2>/dev/null; then
+    MONGO_PID=$(pgrep -f "mongod .*--port $MONGO_PORT" | head -1)
+    echo "✅ MongoDB running on :${MONGO_PORT} (PID: $MONGO_PID)"
 else
     echo "❌ MongoDB not running"
 fi

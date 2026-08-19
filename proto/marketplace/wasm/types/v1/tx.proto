@@ -2,31 +2,63 @@ syntax = "proto3";
 
 package marketplace.wasm.types.v1;
 
-option go_package = "github.com/tmp/marketplace/x/wasm/types";
+option go_package = "marketplace/x/wasm/types";
 
 import "gogoproto/gogo.proto";
-import "google/protobuf/any.proto";
+import "cosmos/msg/v1/msg.proto";
 
-// MsgStoreCode stores wasm contract code
+// Msg defines the wasm Msg service: a minimal custom contract VM lifecycle
+// (store code, instantiate, execute). Contracts get MGP20 token access
+// through the host ABI, which calls into x/wasmbridge.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  // StoreCode stores wasm contract bytecode and returns its code id.
+  rpc StoreCode(MsgStoreCode) returns (MsgStoreCodeResponse);
+
+  // InstantiateContract creates a new contract instance from stored code.
+  rpc InstantiateContract(MsgInstantiateContract) returns (MsgInstantiateContractResponse);
+
+  // ExecuteContract invokes a contract instance.
+  rpc ExecuteContract(MsgExecuteContract) returns (MsgExecuteContractResponse);
+}
+
+// MsgStoreCode stores wasm contract code.
 message MsgStoreCode {
+  option (cosmos.msg.v1.signer) = "sender";
+
   bytes wasm_code = 1 [(gogoproto.jsontag) = "wasm_code"];
   string sender = 2 [(gogoproto.jsontag) = "sender"];
 }
 
-// MsgStoreCodeResponse is the response for MsgStoreCode
 message MsgStoreCodeResponse {
   uint64 code_id = 1 [(gogoproto.jsontag) = "code_id"];
 }
 
-// MsgInstantiateContract instantiates a wasm contract
+// MsgInstantiateContract instantiates a wasm contract.
 message MsgInstantiateContract {
+  option (cosmos.msg.v1.signer) = "sender";
+
   string sender = 1 [(gogoproto.jsontag) = "sender"];
   uint64 code_id = 2 [(gogoproto.jsontag) = "code_id"];
   string label = 3 [(gogoproto.jsontag) = "label"];
   bytes init_msg = 4 [(gogoproto.jsontag) = "init_msg"];
 }
 
-// MsgInstantiateContractResponse is the response for MsgInstantiateContract
 message MsgInstantiateContractResponse {
   string contract_address = 1 [(gogoproto.jsontag) = "contract_address"];
+}
+
+// MsgExecuteContract invokes a stored contract instance.
+message MsgExecuteContract {
+  option (cosmos.msg.v1.signer) = "sender";
+
+  string sender = 1 [(gogoproto.jsontag) = "sender"];
+  string contract_address = 2 [(gogoproto.jsontag) = "contract_address"];
+  bytes msg = 3 [(gogoproto.jsontag) = "msg"];
+  uint64 gas_limit = 4 [(gogoproto.jsontag) = "gas_limit"];
+}
+
+message MsgExecuteContractResponse {
+  string data = 1 [(gogoproto.jsontag) = "data"];
 }

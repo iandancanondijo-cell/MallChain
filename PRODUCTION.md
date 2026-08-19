@@ -86,13 +86,24 @@ Serve `frontend/dist` with nginx, Caddy, or a static host. Point `VITE_API_URL` 
 ## 4. Security checklist
 
 - [ ] Rotate all dev secrets from `.env`
-- [ ] `NODE_ENV=production` on the API
-- [ ] CORS limited to your frontend origin(s)
-- [ ] Wallet service disabled or bound to `127.0.0.1` only
+- [ ] `NODE_ENV=production` on the API — enforced at startup: the API refuses to
+      boot in production without `JWT_SECRET`, `SESSION_SECRET`, `ADMIN_API_KEY`,
+      `OPERATOR_MNEMONIC`, `FAUCET_MNEMONIC`, `PAYMENT_WEBHOOK_SECRET`, and
+      `VAULT_ADDR`/`VAULT_TOKEN` (see `config/index.js`'s `validateRuntimeSecrets`)
+- [ ] CORS limited to your frontend origin(s) — enforced in code via `CORS_ORIGINS`;
+      the `localhost`/`127.0.0.1` dev fallback is automatically disabled when
+      `NODE_ENV=production`
+- [ ] Wallet service disabled or bound to `127.0.0.1` only — this is already the
+      default (`WALLET_SERVICE_HOST`); only override it if you understand the risk
 - [ ] TLS on API and static site
 - [ ] MongoDB auth + network isolation
 - [ ] Rate limits reviewed (`RATE_LIMIT_*` in backend config)
-- [ ] Payment webhooks use `PAYMENT_WEBHOOK_SECRET` + HMAC verification
+- [ ] Payment webhooks use `PAYMENT_WEBHOOK_SECRET` + verification — enforced:
+      production startup fails without `PAYMENT_WEBHOOK_SECRET` set, and
+      `/api/buy/mpesa/callback` / `/api/buy/payout/callback` reject any request
+      whose `?token=` query param doesn't match it (Safaricom doesn't support
+      signing webhook payloads, so the secret is embedded in the callback URL
+      registered with them instead of an HMAC header)
 
 ## 5. Optional services
 

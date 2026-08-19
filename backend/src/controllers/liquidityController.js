@@ -439,4 +439,9 @@ module.exports = {
   removeLiquidity,
   getUserPosition,
   addLiquidityToPool,
+  // routes/adminPanel.js's POST /api/admin/reconcile calls this directly
+  // (liquidityController.fetchPoolsFromBlockchain()) — it was missing from
+  // this export list, so every reconcile request threw
+  // "fetchPoolsFromBlockchain is not a function" and always 500'd.
+  fetchPoolsFromBlockchain,
 }

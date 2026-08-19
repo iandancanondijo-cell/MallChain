@@ -50,6 +50,12 @@ export function useWalletData(address: string | null | undefined) {
   const retryCountRef = useRef(0);
   const maxRetriesRef = useRef(3);
   const retryTimeoutRef = useRef<NodeJS.Timeout>();
+  // Guards against out-of-order responses: a retry-delayed fetch, a manual
+  // retry, and an address-change refetch can all be in flight at once, and
+  // an older one resolving last would otherwise overwrite a newer balance
+  // (including one just set optimistically by store.applyTx() in a Send/Swap
+  // flow) with stale data. Only the most recently issued fetch may commit.
+  const fetchSeqRef = useRef(0);
 
   /**
    * Calculate exponential backoff delay
@@ -68,10 +74,17 @@ export function useWalletData(address: string | null | undefined) {
       return;
     }
 
+    const seq = ++fetchSeqRef.current;
     setState((prev) => ({ ...prev, loading: true, error: null }));
 
     try {
       const result = await walletApi.getBalance(address);
+
+      if (seq !== fetchSeqRef.current) {
+        // A newer fetch was issued while this one was in flight — drop this
+        // stale result instead of letting it clobber more recent state.
+        return;
+      }
 
       if (result.ok && result.data) {
         setState({
@@ -100,6 +113,10 @@ export function useWalletData(address: string | null | undefined) {
         throw new Error(result.error || 'Failed to fetch balance');
       }
     } catch (error) {
+      if (seq !== fetchSeqRef.current) {
+        return;
+      }
+
       const errorMsg = (error as Error).message || 'Unknown error';
 
       if (retryCount < maxRetriesRef.current) {

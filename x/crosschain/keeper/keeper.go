@@ -117,6 +117,14 @@ func (k Keeper) SetBridgeTransfer(sdkCtx sdk.Context, transfer types.BridgeTrans
 func (k Keeper) GetBridgeState(sdkCtx sdk.Context) (types.BridgeState, error) {
 	state, err := k.BridgeState.Get(sdkCtx)
 	if err != nil {
+		if errors.Is(err, collections.ErrNotFound) {
+			// The singleton hasn't been written yet — e.g. genesis didn't
+			// seed it and no bridge transfer has occurred since. That's a
+			// legitimate empty state, not a failure: callers like
+			// PruneOldTransfers (run every block from EndBlocker) would
+			// otherwise log an error on every single block forever.
+			return types.BridgeState{}, nil
+		}
 		return types.BridgeState{}, err
 	}
 	return state, nil

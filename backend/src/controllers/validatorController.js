@@ -94,6 +94,23 @@ exports.applyValidator = async (req, res) => {
 // duplicate it behind a shared static API key with no audit trail; removed
 // as dead, insecure code (confirmed no frontend caller).
 
+// Checks the chain directly for whether validatorAddress is a real bonded
+// validator — independent of (and not implied by) the application's own
+// status/isActiveValidator, which are admin-review bookkeeping only.
+async function checkOnChainBonded(validatorAddress) {
+  if (!validatorAddress) return false;
+  try {
+    const base = CHAIN_REST.replace(/\/$/, '');
+    const { data } = await axios.get(
+      `${base}/cosmos/staking/v1beta1/validators/${encodeURIComponent(validatorAddress)}`,
+      { timeout: 5000 }
+    );
+    return data?.validator?.status === 'BOND_STATUS_BONDED';
+  } catch {
+    return false;
+  }
+}
+
 exports.getMyApplication = async (req, res) => {
   try {
     const address = req.query.address?.trim();
@@ -104,7 +121,8 @@ exports.getMyApplication = async (req, res) => {
     if (!application) {
       return res.json({ success: true, application: null });
     }
-    return res.json({ success: true, application });
+    const onChainBonded = await checkOnChainBonded(application.validatorAddress);
+    return res.json({ success: true, application, onChainBonded });
   } catch (e) {
     console.error('get my application error:', e.message);
     return res.status(500).json({ success: false, error: 'lookup_failed', message: e.message });

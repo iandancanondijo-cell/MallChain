@@ -5,12 +5,19 @@ import (
 
 	_ "marketplace/x/badge/module"
 	badgemoduletypes "marketplace/x/badge/types"
+	crosschainmoduletypes "marketplace/x/crosschain/types"
+	dexmoduletypes "marketplace/x/dex/types"
+	governancemoduletypes "marketplace/x/governance/types"
 	_ "marketplace/x/mallcoin/module"
 	mallcoinmoduletypes "marketplace/x/mallcoin/types"
 	_ "marketplace/x/mallpoints/module"
 	mallpointsmoduletypes "marketplace/x/mallpoints/types"
+	marketplacemoduletypes "marketplace/x/marketplace/types"
 	_ "marketplace/x/mlcoin/module"
 	mlcoinmoduletypes "marketplace/x/mlcoin/types"
+	vaultmoduletypes "marketplace/x/vault/types"
+	wasmmoduletypes "marketplace/x/wasm/types"
+	wasmbridgemoduletypes "marketplace/x/wasmbridge/types"
 
 	runtimev1alpha1 "cosmossdk.io/api/cosmos/app/runtime/v1alpha1"
 	appv1alpha1 "cosmossdk.io/api/cosmos/app/v1alpha1"
@@ -90,6 +97,9 @@ var (
 		{Account: nft.ModuleName},
 		{Account: ibctransfertypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
 		{Account: icatypes.ModuleName},
+		// governance burns a passed proposal's deposit (see
+		// x/governance/keeper/proposal_execution.go's ExecuteTreasuryTransfer).
+		{Account: governancemoduletypes.ModuleName, Permissions: []string{authtypes.Burner}},
 	}
 
 	blockAccAddrs = []string{
@@ -124,6 +134,14 @@ var (
 						mlcoinmoduletypes.ModuleName,
 						mallpointsmoduletypes.ModuleName,
 						badgemoduletypes.ModuleName,
+						// vault, wasm, and wasmbridge implement
+						// appmodule.HasBeginBlocker (no-op bodies, but the
+						// interface is satisfied), so SetOrderBeginBlockers
+						// requires them listed too — same reasoning as
+						// InitGenesis/EndBlockers above.
+						vaultmoduletypes.ModuleName,
+						wasmmoduletypes.ModuleName,
+						wasmbridgemoduletypes.ModuleName,
 					},
 					EndBlockers: []string{
 						govtypes.ModuleName,
@@ -134,6 +152,22 @@ var (
 						mlcoinmoduletypes.ModuleName,
 						mallpointsmoduletypes.ModuleName,
 						badgemoduletypes.ModuleName,
+						// crosschain (bridge-timeout enforcement) and governance
+						// (proposal tallying/execution) are registered manually
+						// in registerCustomModules() (app/custom_modules.go), but
+						// still must be listed here: runtime.App.Load() calls
+						// ModuleManager.SetOrderEndBlockers(a.config.EndBlockers...)
+						// using this static list, and it panics
+						// ("all modules must be defined") if any module already
+						// present in ModuleManager.Modules that implements
+						// appmodule.HasEndBlocker is missing from it.
+						crosschainmoduletypes.ModuleName,
+						governancemoduletypes.ModuleName,
+						// vault, wasm, and wasmbridge implement
+						// appmodule.HasEndBlocker too (no-op bodies).
+						vaultmoduletypes.ModuleName,
+						wasmmoduletypes.ModuleName,
+						wasmbridgemoduletypes.ModuleName,
 					},
 					OverrideStoreKeys: []*runtimev1alpha1.StoreKeyConfig{
 						{
@@ -167,6 +201,18 @@ var (
 						mlcoinmoduletypes.ModuleName,
 						mallpointsmoduletypes.ModuleName,
 						badgemoduletypes.ModuleName,
+						// Same requirement as EndBlockers above, for modules
+						// registered manually in registerCustomModules() that
+						// implement HasGenesis/HasABCIGenesis. (wasmbridge and
+						// wasm's genesis methods don't trip this check, but are
+						// listed anyway for completeness/consistency.)
+						crosschainmoduletypes.ModuleName,
+						dexmoduletypes.ModuleName,
+						governancemoduletypes.ModuleName,
+						marketplacemoduletypes.ModuleName,
+						wasmbridgemoduletypes.ModuleName,
+						wasmmoduletypes.ModuleName,
+						vaultmoduletypes.ModuleName,
 					},
 				}),
 			},
@@ -204,7 +250,16 @@ var (
 			{Name: mlcoinmoduletypes.ModuleName, Config: appconfig.WrapAny(&mlcoinmoduletypes.Module{})},
 			{Name: mallpointsmoduletypes.ModuleName, Config: appconfig.WrapAny(&mallpointsmoduletypes.Module{})},
 			{Name: badgemoduletypes.ModuleName, Config: appconfig.WrapAny(&badgemoduletypes.Module{})},
-			// Note: crosschain, governance, and dex are registered manually...
+			// Note: crosschain, governance, dex, marketplace, wasmbridge, wasm,
+			// and vault are all registered manually in registerCustomModules()
+			// (app/custom_modules.go). The others here predate/don't use the
+			// app-config-v2 depinject Module config pattern; vault's own
+			// module.pb.go doesn't carry a valid cosmos.app.v1alpha1.module
+			// extension (a pre-existing defect, not something regenerating it
+			// fixes — see x/vault/module/module.go's IsOnePerModuleType comment),
+			// which makes depinject.appconfig.Compose() panic unconditionally
+			// for the whole app the moment x/vault/module is registered via
+			// appconfig.Register, regardless of whether it's listed here.
 		},
 	})
 )

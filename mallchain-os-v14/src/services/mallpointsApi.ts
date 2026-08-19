@@ -31,6 +31,8 @@ export interface ConvertResult {
   ok: boolean;
   convertedPoints: number;
   mallcoins: number;
+  mlcoinPrice?: number;
+  liquidity?: unknown;
   credit: unknown;
 }
 

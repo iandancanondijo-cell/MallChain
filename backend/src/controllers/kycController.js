@@ -27,7 +27,15 @@ exports.getDocument = async (req, res) => {
       return res.status(404).json({ error: 'No document on file' });
     }
 
-    const filePath = path.join(KYC_UPLOAD_DIR, kyc.idDocumentUrl);
+    // idDocumentUrl only needs to start with `${userId}-` (see submitKYC) —
+    // nothing stops an owner from submitting e.g. `${userId}-../../../etc/passwd`
+    // as the value. path.join would happily resolve that outside
+    // KYC_UPLOAD_DIR, turning this into an arbitrary-file-read via a KYC
+    // record the attacker owns. Strip any directory component so only a
+    // bare filename inside KYC_UPLOAD_DIR can ever be served — this matches
+    // what uploadDocument actually produces (multer's filename has no path
+    // separators) and is a no-op for every legitimate document.
+    const filePath = path.join(KYC_UPLOAD_DIR, path.basename(kyc.idDocumentUrl));
     res.sendFile(filePath, (err) => {
       if (err && !res.headersSent) res.status(404).json({ error: 'Document not found' });
     });

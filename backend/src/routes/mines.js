@@ -11,6 +11,8 @@ const TaskSubmission = require('../models/TaskSubmission');
 const Campaign = require('../models/Campaign');
 const WalletTransaction = require('../models/WalletTransaction');
 const { autoAssignReviewers } = require('../services/minesReviewService');
+const { PLATFORMS, DEFAULT_DAILY_CAP_MLPTS, getDailyCapMlpts } = require('../config/socialRewardRates');
+const { computeCampaignRate, clampMultiplier, MIN_CAMPAIGN_MULTIPLIER, MAX_CAMPAIGN_MULTIPLIER } = require('../services/rewardEngineService');
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -37,6 +39,23 @@ function fail(err, context = {}) {
   // Return generic message to client to avoid information leakage
   return { ok: false, error: 'Invalid request' };
 }
+// For expected, safe-to-show rejections (validation, business-rule limits) —
+// unlike fail(), which deliberately genericizes everything to avoid leaking
+// internals on real errors, these messages are meant to be read by the user.
+function badRequest(res, message, status = 400) {
+  return res.status(status).json({ ok: false, error: message });
+}
+
+// Public: the base reward-rate table campaign creators pick from, and what
+// participants see so they know what a given action is worth before doing it.
+router.get('/reward-rates', (_req, res) => {
+  res.json(ok({
+    platforms: PLATFORMS,
+    defaultDailyCapMlpts: DEFAULT_DAILY_CAP_MLPTS,
+    minMultiplier: MIN_CAMPAIGN_MULTIPLIER,
+    maxMultiplier: MAX_CAMPAIGN_MULTIPLIER,
+  }));
+});
 
 // Public endpoints (no auth required) - return empty array if DB unavailable
 router.get('/campaigns/active', async (_req, res) => {
@@ -85,6 +104,89 @@ router.post('/campaigns', requireAdmin, async (req, res) => {
     const row = await Campaign.create(req.body);
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }
+});
+
+// Self-serve campaign creation: any user can bring a content link +
+// description, pick a platform/activity and a budget multiplier, and fund
+// it from their own Mallpoints balance. rate_per_task is always
+// server-computed (Base Reward x Campaign Multiplier) from the rate table —
+// never trusted from the client — so a creator can't just declare an
+// arbitrary payout. budget_mlpts is escrowed out of the creator's balance
+// immediately so a campaign can never promise more than it can pay.
+router.post('/campaigns/create', verifyToken, async (req, res) => {
+  const { platform, activity_type, content_link, description, directive, multiplier, budget_mlpts } = req.body || {};
+
+  const platformDef = PLATFORMS[platform];
+  if (!platformDef) return badRequest(res, `unknown platform: ${platform}`);
+  if (!platformDef.activities[activity_type]) {
+    return badRequest(res, `unknown activity "${activity_type}" for platform "${platform}"`);
+  }
+
+  const budget = Number(budget_mlpts);
+  if (!Number.isFinite(budget) || budget <= 0) {
+    return badRequest(res, 'budget_mlpts must be a positive number');
+  }
+  if (!content_link || typeof content_link !== 'string') {
+    return badRequest(res, 'content_link is required');
+  }
+
+  const clampedMultiplier = clampMultiplier(multiplier);
+  const ratePerTask = computeCampaignRate({ platform, activity: activity_type, multiplier: clampedMultiplier });
+  if (ratePerTask === null) return badRequest(res, 'could not compute a rate for this platform/activity');
+  if (budget < ratePerTask) {
+    return badRequest(res, `budget_mlpts must cover at least one completion (${ratePerTask} MLPTS)`);
+  }
+
+  try {
+    const session = await mongoose.startSession();
+    let campaign;
+    try {
+      await session.withTransaction(async () => {
+        // Atomic balance check + deduct — same pattern as /balance/deduct below.
+        const user = await User.findOneAndUpdate(
+          { _id: req.userId, mlpts_balance: { $gte: budget } },
+          { $inc: { mlpts_balance: -budget } },
+          { session, new: true }
+        );
+        if (!user) {
+          throw new Error('insufficient Mallpoints balance to fund this campaign');
+        }
+
+        const created = await Campaign.create([{
+          creator_id: req.userId,
+          title: `${platformDef.label} — ${activity_type.replace(/_/g, ' ')}`,
+          description: description || '',
+          content_link,
+          directive: directive || '',
+          platform,
+          activity_type,
+          base_rate_mlpts: ratePerTask / clampedMultiplier,
+          multiplier: clampedMultiplier,
+          rate_per_task: ratePerTask,
+          budget_remaining: budget,
+          status: 'active',
+        }], { session });
+        campaign = created[0];
+
+        await WalletTransaction.create([{
+          user_id: req.userId,
+          type: 'debit',
+          amount: budget,
+          currency: 'MLPTS',
+          description: `Campaign funding — ${platformDef.label} ${activity_type}`,
+        }], { session });
+      });
+    } finally {
+      session.endSession();
+    }
+
+    res.json(ok(campaign));
+  } catch (e) {
+    if (e.message === 'insufficient Mallpoints balance to fund this campaign') {
+      return badRequest(res, e.message);
+    }
+    res.status(500).json(fail(e, { operation: 'campaign_create', userId: req.userId }));
+  }
 });
 
 router.put('/campaigns/:id', requireAdmin, async (req, res) => {
@@ -153,15 +255,103 @@ router.get('/submissions/me', verifyToken, async (req, res) => {
   } catch (e) { res.status(500).json(fail(e)); }
 });
 
-router.post('/submissions', verifyToken, async (req, res) => {
+// Anti-abuse for campaign submissions: caps how many times one user can be
+// rewarded per campaign, enforces a cooldown between their submissions to
+// it, and caps how much they can have pending/earned on that platform in a
+// rolling 24h window. Not unrestricted engagement farming — a submission
+// only ever pays out after reviewer-vote approval (settle(), see
+// minesReviewService.js), this just bounds how much can be *queued up*.
+// No-op (returns ok) for non-campaign submissions.
+async function checkCampaignAbuseLimits(userId, campaignId, session) {
+  if (!campaignId) return { ok: true };
+
+  const campaign = await Campaign.findById(campaignId).session(session).lean();
+  if (!campaign) return { ok: false, error: 'campaign not found' };
+  if (campaign.status !== 'active' || campaign.budget_remaining <= 0) {
+    return { ok: false, error: 'campaign is no longer accepting submissions' };
+  }
+
+  const existing = await TaskSubmission.find({
+    miner_id: userId,
+    campaign_id: campaignId,
+    status: { $ne: 'rejected' },
+  }).session(session).sort({ created_at: -1 }).lean();
+
+  const maxPerUser = campaign.max_completions_per_user || 1;
+  if (existing.length >= maxPerUser) {
+    return { ok: false, error: `you've already reached the limit (${maxPerUser}) of rewarded submissions for this campaign` };
+  }
+
+  const cooldownMs = (campaign.cooldown_seconds || 0) * 1000;
+  if (cooldownMs > 0 && existing[0]) {
+    const lastAt = new Date(existing[0].created_at).getTime();
+    const elapsedMs = Date.now() - lastAt;
+    if (elapsedMs < cooldownMs) {
+      const waitSec = Math.ceil((cooldownMs - elapsedMs) / 1000);
+      return { ok: false, error: `please wait ${waitSec}s before submitting to this campaign again` };
+    }
+  }
+
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  let recentSameplatform;
   try {
-    const body = { ...req.body, miner_id: req.userId };
-    const row = await TaskSubmission.create(body);
+    recentSameplatform = await TaskSubmission.aggregate([
+      { $match: { miner_id: userId, status: { $ne: 'rejected' }, created_at: { $gte: dayAgo }, campaign_id: { $ne: null } } },
+      { $lookup: { from: 'campaigns', localField: 'campaign_id', foreignField: '_id', as: 'campaign' } },
+      { $unwind: '$campaign' },
+      { $match: { 'campaign.platform': campaign.platform } },
+      // reward_amount is only populated at settle() time (0 for anything
+      // still pending review), so summing it here would silently ignore
+      // every not-yet-reviewed submission and let the daily cap be blown
+      // through by queuing many pending ones. campaign.rate_per_task is
+      // each submission's committed value regardless of review state — a
+      // rejected one is already excluded by the $match above.
+      { $group: { _id: null, total: { $sum: '$campaign.rate_per_task' }, pendingCount: { $sum: 1 } } },
+    ]).session(session);
+  } catch (err) {
+    // Fail closed: an unreadable aggregate must not silently disable the
+    // cap (same reasoning as sellGateService's liquidity check).
+    return { ok: false, error: 'unable to verify daily earning cap right now, please try again shortly' };
+  }
+
+  const dailyCap = getDailyCapMlpts(campaign.platform);
+  const pendingTotal = (recentSameplatform[0]?.total || 0) + campaign.rate_per_task;
+  if (pendingTotal > dailyCap) {
+    return { ok: false, error: `daily earning cap for ${campaign.platform} is ${dailyCap} MLPTS — try again tomorrow` };
+  }
+
+  return { ok: true };
+}
+
+router.post('/submissions', verifyToken, async (req, res) => {
+  // The check-then-create below must be atomic: without a transaction,
+  // concurrent requests for the same campaign can all read the same
+  // under-limit submission count before any of their creates land,
+  // letting a user blow past max_completions_per_user/cooldown/daily-cap.
+  const session = await mongoose.startSession();
+  try {
+    let row;
+    await session.withTransaction(async () => {
+      const abuseCheck = await checkCampaignAbuseLimits(req.userId, req.body?.campaign_id, session);
+      if (!abuseCheck.ok) {
+        const err = new Error(abuseCheck.error);
+        err.abuseCheck = true;
+        throw err;
+      }
+
+      const body = { ...req.body, miner_id: req.userId };
+      [row] = await TaskSubmission.create([body], { session });
+    });
     // Randomly assign up to 6 staked reviewers; if none are eligible yet the
     // submission is untouched and falls back to the admin manual-review queue.
     await autoAssignReviewers(row);
     res.json(ok(row));
-  } catch (e) { res.status(400).json(fail(e)); }
+  } catch (e) {
+    if (e.abuseCheck) return badRequest(res, e.message, 429);
+    res.status(400).json(fail(e));
+  } finally {
+    session.endSession();
+  }
 });
 
 router.put('/submissions/:id', verifyToken, async (req, res) => {

@@ -9,6 +9,10 @@ import (
 	"marketplace/x/crosschain/types"
 )
 
+// maxCompletedTransfersToKeep bounds CompletedTransfers so it can't grow
+// unboundedly as the bridge processes transfers over the chain's lifetime.
+const maxCompletedTransfersToKeep = 10000
+
 // EndBlocker enforces transfer timeouts and emits lifecycle events.
 func (k Keeper) EndBlocker(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -42,5 +46,12 @@ func (k Keeper) EndBlocker(ctx context.Context) error {
 		}
 		return false, nil
 	})
-	return err
+	if err != nil {
+		return err
+	}
+
+	if _, pruneErr := k.PruneOldTransfers(ctx, maxCompletedTransfersToKeep); pruneErr != nil {
+		sdkCtx.Logger().Error("failed to prune completed bridge transfers", "error", pruneErr)
+	}
+	return nil
 }

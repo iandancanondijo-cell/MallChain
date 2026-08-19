@@ -26,12 +26,17 @@ const mallcoinService = require('../services/mallcoinService');
 const { errorHandler } = require('../utils/errorHandler');
 const sendRoutes = require('../routes/send');
 
-// Real mall1... bech32 addresses matching addressSchema
-// (/^mall1[a-z0-9]{38,58}$/) used throughout routes/send.js and
-// middleware/validation.js. Two distinct addresses are needed for
-// from/to and buyer/seller pairs below.
+// Real, checksum-valid mall1... bech32 addresses — addressSchema
+// (utils/validationSchemas.js) now does a real bech32 decode, not a regex,
+// so fixtures must be genuinely valid addresses. ADDR_A is a real genesis
+// wallet address (see routes/economy.js WALLET_ADDRESSES.founder); ADDR_B
+// used to be ADDR_A with a couple of characters hand-edited to "look"
+// different, which broke its checksum — exactly the class of typo bech32
+// checksums exist to catch, and exactly what the new validation now rejects
+// (see the checksum-rejection test below). Replaced with a second real,
+// independently-generated address.
 const ADDR_A = 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg';
-const ADDR_B = 'mall1z9f39uylkjv956xeltkdtsel5y6xu36xh2m6qh';
+const ADDR_B = 'mall1dqd2t5avk0hfu5mmaq2dgmgydvlv8qhxffymaw';
 const VALID_TX_BYTES = Buffer.from('signed-tx-payload').toString('base64');
 
 function buildApp() {
@@ -76,6 +81,23 @@ describe('sendController — real mall1... address flow (regression for a81288e)
       const res = await request(app).post('/api/send/mallcoins').send({
         from: '0x1234567890abcdef1234567890abcdef12345678',
         to: ADDR_B,
+        amount: 100,
+        txBytes: VALID_TX_BYTES,
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('validation_failed');
+      expect(axios.post).not.toHaveBeenCalled();
+    });
+
+    test('rejects a well-formed-but-typo\'d address (valid prefix/length, invalid checksum)', async () => {
+      // Same shape as ADDR_A with two characters swapped — exactly the class
+      // of error bech32's checksum exists to catch, and what a prefix/length
+      // regex would have silently accepted.
+      const typoed = 'mall1z9f39uylkjv956xeltkdtsel5y6xu36xh2m6qh';
+      const res = await request(app).post('/api/send/mallcoins').send({
+        from: ADDR_A,
+        to: typoed,
         amount: 100,
         txBytes: VALID_TX_BYTES,
       });

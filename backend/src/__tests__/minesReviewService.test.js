@@ -37,8 +37,20 @@ const {
   SUSPEND_AFTER_MISSES,
 } = require('../services/minesReviewService');
 
+// Mimics Mongoose Query chaining: .session()/.lean() can be called in
+// either order (or not at all) and the whole thing is awaitable at any
+// point. refreshReviewerStats() specifically does
+// `.findOne(...).session(session || null).lean()`, which the previous
+// version of this helper didn't support (.session() was a terminal,
+// already-resolved call with no further chaining).
 function chainable(resolvedValue) {
-  return { session: jest.fn().mockResolvedValue(resolvedValue) };
+  const node = {
+    session: jest.fn(() => node),
+    lean: jest.fn().mockResolvedValue(resolvedValue),
+    then: (onFulfilled, onRejected) => Promise.resolve(resolvedValue).then(onFulfilled, onRejected),
+    catch: (onRejected) => Promise.resolve(resolvedValue).catch(onRejected),
+  };
+  return node;
 }
 
 function fakeTask(overrides = {}) {

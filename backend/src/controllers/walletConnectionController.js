@@ -1,15 +1,28 @@
 const axios = require('axios');
 const bip39 = require('bip39');
+const bech32 = require('bech32');
 const { DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
 
 const CHAIN_REST = (process.env.CHAIN_REST_URL || process.env.VITE_CHAIN_REST || 'http://localhost:1317').replace(/\/$/, '');
 
+const VALID_ADDRESS_PREFIXES = ['cosmos', 'mall', 'tmp'];
+
 /**
- * Validate Cosmos wallet address format
- * Cosmos addresses start with a prefix like "cosmos", "mall", etc and are 42 chars total
+ * Validate Cosmos wallet address format via real bech32 decode + checksum
+ * (not just prefix/length) — a prefix+length regex accepts typo'd addresses
+ * (bech32's checksum exists specifically to catch that), which matters here
+ * since this gates wallet connection and balance lookups.
  */
 function isValidCosmosAddress(address) {
-  return /^(cosmos|mall|tmp)[a-z0-9]{39,}$/.test(address);
+  if (typeof address !== 'string' || !address) return false;
+  let decoded;
+  try {
+    decoded = bech32.decode(address);
+  } catch {
+    return false;
+  }
+  if (!VALID_ADDRESS_PREFIXES.includes(decoded.prefix)) return false;
+  return bech32.fromWords(decoded.words).length === 20;
 }
 
 /**
@@ -89,9 +102,16 @@ async function connectWallet(req, res) {
     const accountUrl = `${CHAIN_REST}/cosmos/auth/v1beta1/accounts/${address}`;
 
     try {
+      // Both queries swallow their own errors below (so one endpoint being
+      // down doesn't hide data the other successfully returned) — track
+      // whether they failed so we can still surface the "no balance yet"
+      // warning instead of silently reporting a zero balance as if it were
+      // confirmed on-chain truth.
+      let balanceFailed = false;
+      let accountFailed = false;
       const [balanceResp, accountResp] = await Promise.all([
-        axios.get(balanceUrl, { timeout: 5000 }).catch(e => ({ data: { balances: [] } })),
-        axios.get(accountUrl, { timeout: 5000 }).catch(e => ({ data: {} }))
+        axios.get(balanceUrl, { timeout: 5000 }).catch(() => { balanceFailed = true; return { data: { balances: [] } }; }),
+        axios.get(accountUrl, { timeout: 5000 }).catch(() => { accountFailed = true; return { data: {} }; })
       ]);
 
       const balances = balanceResp.data?.balances || [];
@@ -111,7 +131,7 @@ async function connectWallet(req, res) {
       });
 
       // Return connected wallet info
-      res.json({
+      const response = {
         success: true,
         address,
         method,
@@ -127,7 +147,11 @@ async function connectWallet(req, res) {
           sequence: account.sequence,
         } : null,
         timestamp: new Date().toISOString(),
-      });
+      };
+      if (balanceFailed && accountFailed) {
+        response.warning = 'Wallet found but has no balance yet';
+      }
+      res.json(response);
 
     } catch (blockchainErr) {
       console.error('Blockchain query error:', blockchainErr.message);

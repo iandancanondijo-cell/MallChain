@@ -6,7 +6,7 @@ import "marketplace/governance/v1/query.proto";
 import "gogoproto/gogo.proto";
 import "marketplace/governance/v1/types.proto";
 
-option go_package = "github.com/tmp/marketplace/x/governance/types";
+option go_package = "marketplace/x/governance/types";
 
 // GenesisState defines the governance module's genesis state.
 message GenesisState {

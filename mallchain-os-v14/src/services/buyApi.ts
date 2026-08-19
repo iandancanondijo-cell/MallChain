@@ -11,6 +11,8 @@ export interface BuyConfig {
   provider: string;
   providerMode: 'live' | 'unconfigured';
   configured: { stkPush: boolean; b2cPayout: boolean };
+  rates: { buyPriceKes: number; sellPriceKes: number };
+  directBuy: { locked: boolean; thresholdKes: number; reserveKes: number | null };
 }
 
 export interface BuyQuote {

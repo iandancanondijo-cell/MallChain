@@ -23,37 +23,31 @@ func NewQueryServerImpl(k Keeper) QueryServer {
 	return QueryServer{Keeper: k}
 }
 
-func (m MsgServer) StoreCode(ctx context.Context, msg *types.MsgStoreCode) (*types.MsgStoreCodeResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	_ = sdkCtx
+// moduleDisabledErr rejects the state-mutating x/wasm messages until the VM
+// integration described in wasm_vm.go's WasmVM doc comment is finished:
+// contract input/output is never actually wired to the sandboxed wazero
+// instance, no host functions are registered (no way to read/write state or
+// move tokens from inside a contract), and gas is a flat fee rather than
+// metered per instruction. Shipping StoreCode/Instantiate/Execute as-is
+// would let anyone deploy "contracts" that always report hardcoded success
+// regardless of what they actually do — unacceptable for a surface that can
+// hold or move funds. Queries stay open since they're read-only against
+// pre-existing (pre-this-change) state and can't move funds. Remove this
+// gate once that VM work lands.
+func moduleDisabledErr(msgName string) error {
+	return types.ErrModuleDisabled.Wrapf("%s is disabled: x/wasm's contract execution is not production-ready (see WasmVM doc comment in keeper/wasm_vm.go)", msgName)
+}
 
-	codeID, err := m.Keeper.StoreCode(ctx, msg.WasmCode)
-	if err != nil {
-		return nil, err
-	}
-	return &types.MsgStoreCodeResponse{CodeID: codeID}, nil
+func (m MsgServer) StoreCode(ctx context.Context, msg *types.MsgStoreCode) (*types.MsgStoreCodeResponse, error) {
+	return nil, moduleDisabledErr("MsgStoreCode")
 }
 
 func (m MsgServer) InstantiateContract(ctx context.Context, msg *types.MsgInstantiateContract) (*types.MsgInstantiateContractResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	_ = sdkCtx
-
-	contractAddr, err := m.Keeper.InstantiateContract(ctx, msg.Sender, msg.CodeID, msg.Label, msg.InitMsg)
-	if err != nil {
-		return nil, err
-	}
-	return &types.MsgInstantiateContractResponse{ContractAddress: contractAddr}, nil
+	return nil, moduleDisabledErr("MsgInstantiateContract")
 }
 
 func (m MsgServer) ExecuteContract(ctx context.Context, msg *types.MsgExecuteContract) (*types.MsgExecuteContractResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	_ = sdkCtx
-
-	result, err := m.Keeper.ExecuteContract(ctx, msg.Sender, msg.ContractAddress, msg.Msg)
-	if err != nil {
-		return nil, err
-	}
-	return &types.MsgExecuteContractResponse{Data: result}, nil
+	return nil, moduleDisabledErr("MsgExecuteContract")
 }
 
 func (q QueryServer) Contract(ctx context.Context, req *types.QueryContractRequest) (*types.QueryContractResponse, error) {

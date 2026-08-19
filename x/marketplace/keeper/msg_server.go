@@ -1,9 +1,9 @@
 package keeper
 
 import (
+	"context"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"marketplace/x/marketplace/types"
 )
@@ -18,13 +18,10 @@ func NewMsgServerImpl(k Keeper) types.MsgServer {
 
 var _ types.MsgServer = msgServer{}
 
-func (m msgServer) CreateEscrow(sdkCtx interface{}, msg *types.MsgCreateEscrow) (*types.MsgCreateEscrowResponse, error) {
-	ctx, ok := sdkCtx.(sdk.Context)
-	if !ok {
-		return nil, status.Error(codes.Internal, "invalid context type")
-	}
+func (m msgServer) CreateEscrow(ctx context.Context, msg *types.MsgCreateEscrow) (*types.MsgCreateEscrowResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
-	escrowID, err := m.Keeper.CreateEscrow(ctx, msg.Buyer, msg.Seller, msg.Amount, msg.Denom, msg.Description, msg.DisputeWindowSeconds)
+	escrowID, err := m.Keeper.CreateEscrow(sdkCtx, msg.Buyer, msg.Seller, msg.Amount, msg.Denom, msg.Description, msg.DisputeWindowSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -32,39 +29,30 @@ func (m msgServer) CreateEscrow(sdkCtx interface{}, msg *types.MsgCreateEscrow) 
 	return &types.MsgCreateEscrowResponse{EscrowId: escrowID}, nil
 }
 
-func (m msgServer) ReleaseFunds(sdkCtx interface{}, msg *types.MsgReleaseFunds) (*types.MsgReleaseFundsResponse, error) {
-	ctx, ok := sdkCtx.(sdk.Context)
-	if !ok {
-		return nil, status.Error(codes.Internal, "invalid context type")
-	}
+func (m msgServer) ReleaseFunds(ctx context.Context, msg *types.MsgReleaseFunds) (*types.MsgReleaseFundsResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
-	if err := m.Keeper.ReleaseFunds(ctx, msg.EscrowId, msg.ReleaseBy); err != nil {
+	if err := m.Keeper.ReleaseFunds(sdkCtx, msg.EscrowId, msg.ReleaseBy); err != nil {
 		return nil, err
 	}
 
 	return &types.MsgReleaseFundsResponse{}, nil
 }
 
-func (m msgServer) RefundBuyer(sdkCtx interface{}, msg *types.MsgRefundBuyer) (*types.MsgRefundBuyerResponse, error) {
-	ctx, ok := sdkCtx.(sdk.Context)
-	if !ok {
-		return nil, status.Error(codes.Internal, "invalid context type")
-	}
+func (m msgServer) RefundBuyer(ctx context.Context, msg *types.MsgRefundBuyer) (*types.MsgRefundBuyerResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
-	if err := m.Keeper.RefundBuyer(ctx, msg.EscrowId); err != nil {
+	if err := m.Keeper.RefundBuyer(sdkCtx, msg.EscrowId, msg.RequestedBy); err != nil {
 		return nil, err
 	}
 
 	return &types.MsgRefundBuyerResponse{}, nil
 }
 
-func (m msgServer) OpenDispute(sdkCtx interface{}, msg *types.MsgOpenDispute) (*types.MsgOpenDisputeResponse, error) {
-	ctx, ok := sdkCtx.(sdk.Context)
-	if !ok {
-		return nil, status.Error(codes.Internal, "invalid context type")
-	}
+func (m msgServer) OpenDispute(ctx context.Context, msg *types.MsgOpenDispute) (*types.MsgOpenDisputeResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
-	if err := m.Keeper.OpenDispute(ctx, msg.EscrowId, msg.Opener); err != nil {
+	if err := m.Keeper.OpenDispute(sdkCtx, msg.EscrowId, msg.Opener); err != nil {
 		return nil, err
 	}
 

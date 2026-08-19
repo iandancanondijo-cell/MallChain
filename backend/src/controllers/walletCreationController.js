@@ -1,11 +1,9 @@
 const { DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
-const { SigningStargateClient } = require('@cosmjs/stargate');
 const bip39 = require('bip39');
 const mallcoinService = require('../services/mallcoinService');
 const MallPointAccount = require('../models/MallPointAccount');
 const { getChainUserPoints, mergePoints } = require('../services/mallpointsService');
 
-const CHAIN_RPC = process.env.CHAIN_RPC_URL || 'http://localhost:26657';
 const CHAIN_ID = process.env.CHAIN_ID || 'mallchain-1';
 
 /**
@@ -28,11 +26,13 @@ async function createWallet(req, res) {
     const [firstAccount] = await wallet.getAccounts();
     const address = firstAccount.address;
 
-    // Create signing client to interact with blockchain
-    const signingClient = await SigningStargateClient.connectWithSigner(
-      CHAIN_RPC,
-      wallet
-    );
+    // Deriving the address is a pure local crypto operation and doesn't
+    // require a live chain connection. This used to also open a
+    // SigningStargateClient to CHAIN_RPC here, but the client was never
+    // used (no tx is signed/broadcast in this handler) — it only made the
+    // endpoint fail with a 500 whenever the chain node was briefly
+    // unreachable, even though wallet creation itself had already
+    // succeeded.
 
     res.json({
       success: true,

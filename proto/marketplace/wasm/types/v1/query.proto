@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package marketplace.wasm.types.v1;
+
+option go_package = "marketplace/x/wasm/types";
+
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+
+// Query defines the gRPC querier service for the wasm module.
+service Query {
+  // Contract executes a read-only query against a contract instance.
+  rpc Contract(QueryContractRequest) returns (QueryContractResponse) {
+    option (google.api.http).get = "/marketplace/wasm/v1/contract/{contract_address}";
+  }
+
+  // AllContracts lists all stored contract instances.
+  rpc AllContracts(QueryAllContractsRequest) returns (QueryAllContractsResponse) {
+    option (google.api.http).get = "/marketplace/wasm/v1/contracts";
+  }
+}
+
+message QueryContractRequest {
+  string contract_address = 1 [(gogoproto.jsontag) = "contract_address"];
+  bytes query = 2 [(gogoproto.jsontag) = "query"];
+}
+
+message QueryContractResponse {
+  bytes response = 1 [(gogoproto.jsontag) = "response"];
+}
+
+message QueryAllContractsRequest {
+  bytes pagination_key = 1 [(gogoproto.jsontag) = "pagination_key"];
+}
+
+message QueryAllContractsResponse {
+  repeated string contracts = 1 [(gogoproto.jsontag) = "contracts"];
+  bytes pagination_key = 2 [(gogoproto.jsontag) = "pagination_key"];
+}

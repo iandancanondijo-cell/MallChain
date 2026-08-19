@@ -80,7 +80,7 @@ class ValidatorsApi {
     return api.post('/api/validators/apply', payload);
   }
 
-  async myApplication(address: string): Promise<ApiResult<{ application: ValidatorApplication | null }>> {
+  async myApplication(address: string): Promise<ApiResult<{ application: ValidatorApplication | null; onChainBonded?: boolean }>> {
     if (!address) return { ok: false, error: 'Wallet address is required' };
     return api.get('/api/validators/my-application', { address });
   }

@@ -18,6 +18,7 @@ import { wordlists } from 'bip39';
 import { toast } from '../components/ui';
 import { handleNetworkError } from './errorHandler';
 import type { ErrorContext } from './errorHandler';
+import { isValidMallAddress } from './wallet';
 
 /* ============== TYPES ============== */
 
@@ -56,10 +57,6 @@ const PASSWORD_SYMBOL = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/;
 
 // Task 4.4: PIN pattern - 4-8 digits
 const PIN_PATTERN = /^\d{4,8}$/;
-
-// Task 4.6: Mallchain address pattern — bech32 with the "mall" HRP, matching the
-// backend's validator (backend/src/routes/send.js addressParamSchema).
-const MALL_ADDRESS_PATTERN = /^mall1[a-z0-9]{38,58}$/;
 
 /* ============== SIMPLE WORD DICTIONARY (Task 4.5) ============== */
 
@@ -507,8 +504,13 @@ export function validateMnemonic(mnemonic: string): ValidationResult {
 
 /**
  * Task 4.6: Address validation for wallet imports/sends.
- * Validates Mallchain bech32 addresses (HRP "mall"), matching the backend's
- * validator (backend/src/routes/send.js addressParamSchema / mallcoinService.isValidAddress).
+ * Validates Mallchain bech32 addresses (HRP "mall") via a real bech32 decode
+ * + checksum check (isValidMallAddress, services/wallet.ts) — matching the
+ * backend's validator (mallcoinService.isValidAddress / the addressSchema
+ * used by routes/send.js and friends), not a prefix/length regex. A regex
+ * shaped like /^mall1[a-z0-9]{38,58}$/ accepts a mistyped address (one
+ * flipped character) as "valid", which is exactly the class of error
+ * bech32's checksum exists to catch.
  */
 export function validateAddress(address: string): AddressValidation {
   // Handle empty/whitespace
@@ -522,10 +524,10 @@ export function validateAddress(address: string): AddressValidation {
 
   const trimmed = address.trim();
 
-  if (!MALL_ADDRESS_PATTERN.test(trimmed)) {
+  if (!isValidMallAddress(trimmed)) {
     return {
       valid: false,
-      message: 'Invalid address format. Must start with "mall1" followed by 38-58 lowercase letters/digits',
+      message: 'Invalid address format. Must be a valid mall1... bech32 address',
       severity: 'error',
     };
   }

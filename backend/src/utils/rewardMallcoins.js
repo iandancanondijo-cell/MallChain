@@ -1,17 +1,25 @@
 /**
- * rewardMallcoins — on-chain MLCNS reward transfer.
- *
- * IMPLEMENTATION STATUS: stub — no on-chain transaction is sent.
- * Any call to this function will throw so callers fail loudly rather than
- * silently returning `true` while no funds move.
- *
- * TODO: replace the throw with a real MsgTransferMallcoin using the treasury
- * mnemonic (see mallcoinTxBuilder.transferFromMnemonic).
+ * rewardMallcoins — on-chain MLCNS reward transfer, signed by the treasury
+ * mnemonic (Vault-backed in production, TEST_MODE env fallback locally —
+ * see utils/keyManager.getTreasuryMnemonic).
  */
-module.exports = async function rewardMallcoins(_address, _amount) {
-  throw new Error(
-    'rewardMallcoins is not yet implemented. ' +
-    'No on-chain transaction has been sent. ' +
-    'Implement via mallcoinTxBuilder.transferFromMnemonic before enabling.'
-  );
+const { getTreasuryMnemonic } = require('./keyManager');
+const { transferFromMnemonic } = require('../services/mallcoinTxBuilder');
+
+module.exports = async function rewardMallcoins(address, amount) {
+  const amountMlcns = Number(amount);
+  if (!address || typeof address !== 'string') {
+    throw new Error('rewardMallcoins: address is required');
+  }
+  if (!Number.isFinite(amountMlcns) || amountMlcns <= 0) {
+    throw new Error('rewardMallcoins: amount must be a positive number');
+  }
+
+  const mnemonic = await getTreasuryMnemonic();
+  return transferFromMnemonic({
+    mnemonic,
+    toAddress: address,
+    amountMlcns,
+    memo: 'Mallcoin reward',
+  });
 };

@@ -1,11 +1,13 @@
 package keeper_test
 
 import (
+	"context"
 	"testing"
 
 	"cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	"github.com/stretchr/testify/require"
 
 	"marketplace/x/governance/keeper"
@@ -191,6 +193,50 @@ func TestMsgServerUpdateParams_Unauthorized(t *testing.T) {
 	_, err := srv.UpdateParams(f.ctx, &types.MsgUpdateParams{
 		Authority: "mall1notthegovmodule",
 		Params:    types.DefaultParams(),
+	})
+	require.Error(t, err)
+}
+
+// slashTestStakingKeeper overrides GetValidator with a real bonded-token
+// balance so SlashValidatorProposal's slash-amount arithmetic has something
+// to operate on (the shared mockStakingKeeper returns a zero-value
+// Validator, whose nil-internal Tokens panics math.LegacyNewDecFromInt).
+type slashTestStakingKeeper struct {
+	mockStakingKeeper
+}
+
+func (slashTestStakingKeeper) GetValidator(ctx context.Context, addr sdk.ValAddress) (stakingtypes.Validator, error) {
+	return stakingtypes.Validator{Tokens: math.NewInt(1_000_000)}, nil
+}
+
+// TestMsgServerSlashValidator locks in the fix wiring validator slashing to
+// a real, reachable message: SlashValidatorProposal was fully implemented
+// but had zero callers anywhere (no message type, no handler).
+func TestMsgServerSlashValidator(t *testing.T) {
+	f := initFixtureWithKeepers(t, mockBankKeeper{}, slashTestStakingKeeper{})
+	srv := keeper.NewMsgServerImpl(f.k)
+	moduleAddr := authtypes.NewModuleAddress(types.ModuleName).String()
+	authority := sdk.AccAddress([]byte(moduleAddr)).String()
+
+	valAddr := sdk.ValAddress([]byte("test_validator_addr_bytes"))
+
+	_, err := srv.SlashValidator(f.ctx, &types.MsgSlashValidator{
+		Authority:        authority,
+		ValidatorAddress: valAddr.String(),
+		SlashPercentage:  10,
+	})
+	require.NoError(t, err)
+}
+
+func TestMsgServerSlashValidator_Unauthorized(t *testing.T) {
+	f := initFixture(t)
+	srv := keeper.NewMsgServerImpl(f.k)
+	valAddr := sdk.ValAddress([]byte("test_validator_addr_bytes"))
+
+	_, err := srv.SlashValidator(f.ctx, &types.MsgSlashValidator{
+		Authority:        "mall1notthegovmodule",
+		ValidatorAddress: valAddr.String(),
+		SlashPercentage:  10,
 	})
 	require.Error(t, err)
 }

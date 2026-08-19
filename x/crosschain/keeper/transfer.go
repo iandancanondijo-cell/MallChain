@@ -86,6 +86,26 @@ func (k Keeper) InitiateBridgeTransfer(ctx sdk.Context, msg *types.MsgInitiateBr
 			return 0, err
 		}
 	} else {
+		// No IBC route configured for this destination — no packet was ever
+		// sent, so there's nothing for a proof-based CompleteBridgeTransfer
+		// to verify. Without TransferMeta, EndBlocker's timeout scan (which
+		// skips any transfer lacking a TransferMeta entry) can never find
+		// this transfer either, leaving the sender's funds locked in the
+		// module account forever. Set TransferMeta here too so the same
+		// timeout-refund path that covers failed IBC sends also covers
+		// routeless ones.
+		timeoutBlocks := params.TransferTimeoutBlocks
+		if timeoutBlocks == 0 {
+			timeoutBlocks = 1000
+		}
+		meta := types.TransferMeta{
+			InitHeight:    uint64(sdkCtx.BlockHeight()),
+			TimeoutBlocks: timeoutBlocks,
+		}
+		if err := k.TransferMeta.Set(ctx, transferId, meta); err != nil {
+			return 0, err
+		}
+
 		k.emitBridgeEvent(sdkCtx, types.EventTypeBridgeInitiated,
 			sdk.NewAttribute(types.AttributeKeyTransferID, fmt.Sprintf("%d", transferId)),
 			sdk.NewAttribute(types.AttributeKeySender, msg.Sender),

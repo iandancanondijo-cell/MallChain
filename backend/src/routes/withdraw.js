@@ -10,6 +10,7 @@ const B2CPayout = require('../models/B2CPayout');
 const { initiateB2CPayout } = require('../services/b2cPayoutService');
 const { validateRequest } = require('../utils/validationSchemas');
 const schemas = require('../utils/validationSchemas');
+const idempotency = require('../middleware/idempotency');
 const { config } = require('../config');
 const { recordWithdrawLiquidityActivity } = require('../services/liquidityActivityService');
 
@@ -81,7 +82,12 @@ router.get('/config', async (_req, res) => {
   });
 });
 
-router.post('/mpesa', validateRequest(schemas.withdrawMpesaSchema), async (req, res) => {
+// initiateB2CPayout moves real money via Safaricom B2C with no dedupe key of
+// its own — a client retry (timeout, double-tap) previously meant a second
+// real payout for the same withdrawal intent. Require an Idempotency-Key so
+// a retried request returns the cached first response instead of paying out
+// twice.
+router.post('/mpesa', idempotency({ required: true }), validateRequest(schemas.withdrawMpesaSchema), async (req, res) => {
   try {
     const { walletAddress, phone, amountMlcns, amountKes, currency } = req.validatedBody;
     const withdrawalId = crypto.randomBytes(12).toString('hex');

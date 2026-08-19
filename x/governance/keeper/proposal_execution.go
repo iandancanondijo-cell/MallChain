@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 
 	"marketplace/x/governance/types"
 )
@@ -68,17 +67,31 @@ func (k Keeper) ExecuteProposal(ctx context.Context, proposal types.Proposal) er
 	return nil
 }
 
-// ExecuteTreasuryTransfer sends coins from the governance module account when encoded in proposal metadata.
+// ExecuteTreasuryTransfer settles a passed proposal's deposit. Any treasury
+// payout the proposal itself calls for is one of proposal.Messages, already
+// run by ExecuteProposal above; this only disposes of the deposit that was
+// locked up to submit the proposal. Rejected/failed proposals get their
+// deposit back via refundDeposits (end_blocker.go) — a passed proposal's
+// deposit is burned instead, matching the deposit's role as a spam
+// deterrent rather than a refundable stake.
 func (k Keeper) ExecuteTreasuryTransfer(ctx context.Context, proposal types.Proposal) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	if proposal.TotalDeposit.IsZero() {
 		return nil
 	}
-	// Treasury payouts are encoded as the first message; if none, burn deposits remain in module.
-	_ = authtypes.NewModuleAddress(types.ModuleName)
-	k.emitGovEvent(sdkCtx, types.EventTypeProposalExecuted,
+
+	if err := k.bankKeeper.BurnCoins(sdkCtx, types.ModuleName, proposal.TotalDeposit); err != nil {
+		k.emitGovEvent(sdkCtx, types.EventTypeDepositBurnFail,
+			sdk.NewAttribute(types.AttributeKeyProposalID, strconv.FormatUint(proposal.Id, 10)),
+			sdk.NewAttribute(types.AttributeKeyAmount, proposal.TotalDeposit.String()),
+			sdk.NewAttribute(types.AttributeKeyError, err.Error()),
+		)
+		return fmt.Errorf("failed to burn deposit for proposal %d: %w", proposal.Id, err)
+	}
+
+	k.emitGovEvent(sdkCtx, types.EventTypeDepositBurned,
 		sdk.NewAttribute(types.AttributeKeyProposalID, strconv.FormatUint(proposal.Id, 10)),
-		sdk.NewAttribute(types.AttributeKeyStatus, "treasury_checked"),
+		sdk.NewAttribute(types.AttributeKeyAmount, proposal.TotalDeposit.String()),
 	)
 	return nil
 }

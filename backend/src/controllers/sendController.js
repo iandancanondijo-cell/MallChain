@@ -194,6 +194,11 @@ exports.getTransactionStatus = async (req, res) => {
       gasUsed: tx.gas_used,
       gasWanted: tx.gas_wanted,
       timestamp: tx.timestamp,
+      rawLog: tx.raw_log,
+      // Callers that need a specific message's response (e.g. the
+      // escrow_id an x/marketplace MsgCreateEscrow emits) read it from
+      // here rather than this endpoint knowing about any module's events.
+      events: tx.events || [],
     });
   } catch (e) {
     if (e.response?.status === 404) {
@@ -298,7 +303,7 @@ exports.getMlcnsPrice = async (req, res) => {
     return res.json({
       success: true,
       symbol: 'MLCNS',
-      basePriceKes: Number(process.env.MLCNS_BASE_PRICE_KES || 0.6),
+      basePriceKes: price.midPriceKes,
       market: price,
       momentum: {
         engagementScore: metrics.engagement_score || activity?.engagement_score,

@@ -46,6 +46,11 @@ type Keeper struct {
 	// staking records
 	StakingRecords  collections.Map[string, types.StakingInfo]
 	StakingSequence collections.Sequence
+
+	// TreasurySnapshots is keyed by block height so entries are naturally
+	// ordered chronologically; RecordTreasurySnapshot (end_blocker.go) prunes
+	// old entries so this stays bounded.
+	TreasurySnapshots collections.Map[int64, types.TreasurySnapshot]
 }
 
 func NewKeeper(
@@ -88,6 +93,8 @@ func NewKeeper(
 		internalMinting:  0,
 		StakingRecords:   collections.NewMap(sb, types.StakingInfoKey, "staking_records", collections.StringKey, codec.CollValue[types.StakingInfo](cdc)),
 		StakingSequence:  collections.NewSequence(sb, types.StakingSequenceKey, "staking_sequence"),
+
+		TreasurySnapshots: collections.NewMap(sb, types.TreasurySnapshotsKey, "treasury_snapshots", collections.Int64Key, codec.CollValue[types.TreasurySnapshot](cdc)),
 	}
 
 	schema, err := sb.Build()

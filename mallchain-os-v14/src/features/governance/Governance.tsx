@@ -203,7 +203,7 @@ export default function Governance() {
           <div className="grow" style={{ fontSize: 13 }}>
             Real governance voting power comes from bonded stake (x/staking), not your MLCNS balance. Delegate some STAKE to gain real voting weight.
           </div>
-          <button className="btn btn-gold" onClick={() => setDelegateOpen(true)}>Delegate stake</button>
+          <button className="btn btn-primary" onClick={() => setDelegateOpen(true)}>Delegate stake</button>
         </div>
       )}
 
@@ -275,7 +275,7 @@ export default function Governance() {
             <label>Amount (STAKE)</label>
             <input className="input" type="number" min="0" step="0.000001" value={delegateAmount} onChange={(e) => setDelegateAmount(e.target.value)} placeholder="0.00" />
           </div>
-          <button className="btn btn-gold" disabled={delegating || !validator} onClick={doDelegate}>
+          <button className="btn btn-primary" disabled={delegating || !validator} onClick={doDelegate}>
             {delegating && <span className="spin" />} Delegate
           </button>
         </Modal>
@@ -299,7 +299,7 @@ export default function Governance() {
             <label>Initial deposit (STAKE)</label>
             <input className="input" type="number" min="0" step="0.000001" value={npDeposit} onChange={(e) => setNpDeposit(e.target.value)} />
           </div>
-          <button className="btn btn-gold" disabled={submitting} onClick={doSubmitProposal}>
+          <button className="btn btn-primary" disabled={submitting} onClick={doSubmitProposal}>
             {submitting && <span className="spin" />} Submit proposal
           </button>
         </Modal>

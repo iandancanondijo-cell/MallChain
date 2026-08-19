@@ -89,7 +89,7 @@ func CmdInstantiateContract() *cobra.Command {
 
 			msg := &types.MsgInstantiateContract{
 				Sender:   clientCtx.GetFromAddress().String(),
-				CodeID:   codeID,
+				CodeId:   codeID,
 				Label:    label,
 				InitMsg:  bz,
 			}

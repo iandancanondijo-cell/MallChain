@@ -11,6 +11,8 @@ const (
 	EventTypeProposalExecFail  = "proposal_execution_failed"
 	EventTypeDepositRefunded   = "deposit_refunded"
 	EventTypeDepositRefundFail = "deposit_refund_failed"
+	EventTypeDepositBurned     = "deposit_burned"
+	EventTypeDepositBurnFail   = "deposit_burn_failed"
 	EventTypeParamsUpdated     = "governance_params_updated"
 
 	AttributeKeyProposalID = "proposal_id"

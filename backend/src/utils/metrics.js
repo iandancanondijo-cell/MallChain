@@ -55,6 +55,16 @@ const paymentFailuresTotal = new promClient.Counter({
   registers: [register],
 });
 
+// Backend error rate — every response the global error handler formats,
+// labeled by the structured AppError code and HTTP status. Feeds alerting
+// on error-rate spikes.
+const backendErrorsTotal = new promClient.Counter({
+  name: 'backend_errors_total',
+  help: 'Total number of errors handled by the global error handler',
+  labelNames: ['code', 'status_code'],
+  registers: [register],
+});
+
 // Middleware to track HTTP requests
 function metricsMiddleware(req, res, next) {
   const start = Date.now();
@@ -83,4 +93,5 @@ module.exports = {
   balanceAdjustmentsTotal,
   transactionsProcessedTotal,
   paymentFailuresTotal,
+  backendErrorsTotal,
 };
