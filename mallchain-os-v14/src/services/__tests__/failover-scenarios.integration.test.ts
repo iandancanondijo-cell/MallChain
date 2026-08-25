@@ -542,7 +542,7 @@ describe('Frontend Failover Scenarios Integration Tests (Task 14.6)', () => {
 
       // Now simulate failure
       mockFetch.mockRejectedValueOnce(new Error('Network error'));
-      let failedResult = await api.get('/api/value');
+      const failedResult = await api.get('/api/value');
       expect(failedResult.ok).toBe(false);
 
       // Next successful call should still return valid data

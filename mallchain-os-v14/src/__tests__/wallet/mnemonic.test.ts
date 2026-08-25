@@ -284,6 +284,7 @@ describe('Mnemonic Handling', () => {
 
     it('should reject mnemonic with unicode characters', () => {
       const mnemonic = 'abandon abouté above…';
+      // eslint-disable-next-line no-control-regex -- \x00 here is the bottom of the intended ASCII range, not a stray control character
       const hasNonAscii = /[^\x00-\x7F]/.test(mnemonic);
 
       expect(hasNonAscii).toBe(true);

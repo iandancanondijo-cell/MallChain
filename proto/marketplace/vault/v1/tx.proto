@@ -8,52 +8,60 @@ import "cosmos_proto/cosmos.proto";
 
 option go_package = "github.com/tmp/marketplace/x/vault/types";
 
-// Msg service for vault operations. NOTE: some fields are sensitive; ensure
-// operators understand privacy implications before exposing these txs on-chain.
+// Msg service for vault operations.
+//
+// The vault stores an encrypted key-recovery blob on-chain (Argon2id +
+// AES-GCM). Passwords and TOTP codes must never be submitted in a Msg: any
+// value carried by a Cosmos Msg is broadcast to the mempool and permanently
+// recorded in plaintext in chain history, which every full node (i.e.
+// everyone) can read. Key derivation, TOTP verification, and signing all
+// happen client-side; the chain only ever receives and stores ciphertext
+// the client already produced.
 service Msg {
   option (cosmos.msg.v1.service) = true;
 
   rpc SetupVault(MsgSetupVault) returns (MsgSetupVaultResponse) {}
   rpc ConfirmVault(MsgConfirmVault) returns (MsgConfirmVaultResponse) {}
-  rpc UnlockAndSign(MsgUnlockAndSign) returns (MsgUnlockAndSignResponse) {}
   rpc DisableVault(MsgDisableVault) returns (MsgDisableVaultResponse) {}
 }
 
+// MsgSetupVault registers the KDF parameters and an already-encrypted TOTP
+// secret for `authority`'s vault. The client generates the TOTP secret and
+// its own salt locally, derives the Argon2id key from the user's password
+// in-browser, encrypts the secret with it, and submits only the resulting
+// ciphertext here.
 message MsgSetupVault {
   string authority = 1 [(gogoproto.moretags) = "yaml:\"authority\"", (gogoproto.casttype) = "string"];
-  string password = 2; // sensitive
-  string account = 3;
-  string issuer = 4;
+  string salt = 2;                  // base64, client-generated
+  uint32 kdf_time = 3;
+  uint32 kdf_memory = 4;
+  uint32 kdf_threads = 5;
+  uint32 kdf_key_len = 6;
+  string nonce_totp = 7;             // base64
+  string encrypted_totp_secret = 8;  // base64 ciphertext — chain never sees the plaintext secret
 }
 
-message MsgSetupVaultResponse {
-  string provisioning_uri = 1;
-}
+message MsgSetupVaultResponse {}
 
+// MsgConfirmVault finalizes a vault by storing the client-encrypted ed25519
+// signing key, once the client has verified locally (by decrypting its own
+// just-submitted TOTP secret and checking a live code) that the user saved
+// their authenticator entry correctly.
 message MsgConfirmVault {
   string authority = 1;
-  string password = 2; // sensitive
-  string totp_code = 3;
-  bytes priv_key = 4; // sensitive (ed25519 private key bytes)
+  string nonce_priv = 2;   // base64
+  string ciphertext = 3;   // base64 — encrypted ed25519 private key
+  string public_key = 4;   // base64 ed25519 public key (not sensitive)
 }
 
 message MsgConfirmVaultResponse {}
 
-message MsgUnlockAndSign {
-  string authority = 1;
-  string password = 2; // sensitive
-  string totp_code = 3;
-  bytes message = 4;
-}
-
-message MsgUnlockAndSignResponse {
-  bytes signature = 1;
-}
-
+// MsgDisableVault deletes `authority`'s vault record. Authorization is the
+// normal Cosmos Msg signer check (only the account itself can sign this) —
+// no separate password/TOTP factor is meaningful here since, as above, the
+// chain can't verify either without seeing them in the clear.
 message MsgDisableVault {
   string authority = 1;
-  string password = 2; // sensitive
-  string totp_code = 3;
 }
 
 message MsgDisableVaultResponse {}

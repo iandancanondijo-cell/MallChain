@@ -11,7 +11,10 @@ async function getUserBadgeInfo(address) {
     return {
       exists: true,
       badgeType: badge.badge_type || badge.badgeType || null,
-      issuedAt: badge.issued_at || badge.issuedAt || null,
+      // Chain returns this as issued_date (unix seconds), not issued_at —
+      // this always read null before, since neither queried field name
+      // ever matched what the module actually returns.
+      issuedAt: badge.issued_date || badge.issuedAt || null,
       source: 'chain',
       raw: badge,
     };

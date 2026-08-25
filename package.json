@@ -1,11 +1,16 @@
 {
-  "dependencies": {
-    "express": "^5.2.1",
-    "@cosmjs/proto-signing": "^0.30.7",
-    "@cosmjs/stargate": "^0.30.7",
-    "protobufjs": "^7.2.0"
-  },
+  "name": "mallchain",
+  "private": true,
   "scripts": {
     "send-mlc": "node scripts/send_mlcoin_msg.js"
-  }
+  },
+  "workspaces": [
+    "backend",
+    "mallchain-os-v14",
+    "packages/shared-ui",
+    "packages/shared-config",
+    "explorer/backend",
+    "e2e",
+    "scripts"
+  ]
 }

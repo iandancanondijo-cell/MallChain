@@ -3,6 +3,7 @@ const router = express.Router()
 const ctrl = require('../controllers/liquidityController')
 const LiquidityPoolActivity = require('../models/LiquidityPoolActivity')
 const auth = require('../middleware/auth')
+const { requireAdmin } = require('../middleware/adminAuth')
 
 // GET /api/liquidity/pools
 router.get('/pools', ctrl.getAllPools)
@@ -25,8 +26,9 @@ router.post('/remove', auth, ctrl.removeLiquidity)
 // GET /api/liquidity/position
 router.get('/position', ctrl.getUserPosition)
 
-// GET /api/liquidity/activity
-router.get('/activity', async (req, res) => {
+// GET /api/liquidity/activity — financial ledger detail (quote/wallet/amount
+// per stage); admin-only, matching every other admin-panel financial view.
+router.get('/activity', requireAdmin, async (req, res) => {
   try {
     const {
       flow,
@@ -34,6 +36,7 @@ router.get('/activity', async (req, res) => {
       saleId,
       withdrawalId,
       paymentId,
+      page = 0,
       limit = 100,
     } = req.query
 
@@ -45,12 +48,13 @@ router.get('/activity', async (req, res) => {
     if (paymentId) query.paymentId = paymentId
 
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500)
-    const items = await LiquidityPoolActivity.find(query)
-      .sort({ createdAt: -1 })
-      .limit(safeLimit)
-      .lean()
+    const skip = Math.max(Number(page) || 0, 0) * safeLimit
+    const [items, total] = await Promise.all([
+      LiquidityPoolActivity.find(query).sort({ createdAt: -1 }).skip(skip).limit(safeLimit).lean(),
+      LiquidityPoolActivity.countDocuments(query),
+    ])
 
-    return res.json({ ok: true, items, total: items.length })
+    return res.json({ ok: true, items, total, page: Number(page) || 0, limit: safeLimit })
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err) })
   }

@@ -7,7 +7,8 @@ import Sidebar from './components/Sidebar';
 import AdminSidebar from './components/AdminSidebar';
 import TopBar from './components/TopBar';
 import CommandPalette from './components/CommandPalette';
-import { ToastHost } from './components/ui';
+import { ToastHost, toast } from './components/ui';
+import { PinChallengeHost } from './components/PinChallenge';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { matchRoute, useHashRoute } from './router';
 import { store } from './store/store';
@@ -30,6 +31,18 @@ export default function App() {
     // Initialize auth state first, before any routing decisions
     const initializeAuth = async () => {
       try {
+        // Google OAuth (backend/src/controllers/authController.js's
+        // googleCallback) redirects back here as `${frontend}/?token=...` —
+        // pick that up before anything else so the token-driven restoration
+        // below (GET /api/auth/me) picks it up like any other stored token.
+        const oauthToken = new URLSearchParams(window.location.search).get('token');
+        if (oauthToken) {
+          authService.storeToken(oauthToken);
+          store.state.user.authed = true;
+          store.commit();
+          window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+        }
+
         // Cross-tab store synchronization (auth token + whole app state)
         storeSync.initialize();
         // Give storeSync a moment to restore token from localStorage
@@ -39,13 +52,14 @@ export default function App() {
         // login/register only set these at the moment of auth, so a reload
         // (or an admin ban/KYC decision since then) would otherwise show stale data.
         if (authService.getToken()) {
-          const res = await api.get<{ user?: { id: string; banned: boolean; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string } }>('/api/auth/me');
+          const res = await api.get<{ user?: { id: string; banned: boolean; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string; hasBadge?: boolean } }>('/api/auth/me');
           if (res.ok && res.data?.user) {
             const u = res.data.user;
             store.state.user.id = u.id;
             store.state.user.frozen = !!u.banned;
             store.state.user.kycLevel = u.kycLevel ?? 1;
             store.state.user.role = u.role || 'user';
+            store.state.user.hasBadge = Boolean(u.hasBadge);
             // Prefer a real name (set from KYC once submitted) over a manually
             // chosen username, over an email-derived fallback — never show a
             // fictitious placeholder identity.
@@ -55,7 +69,15 @@ export default function App() {
               store.state.user.avatarInitial = realName[0]?.toUpperCase() || store.state.user.avatarInitial;
             }
             store.commit();
-            if (socketManager.isConnected()) socketManager.subscribeUser(u.id);
+            // subscribeUser() records the intent even if the socket hasn't
+            // finished connecting yet, and the 'connect' handler applies it
+            // once it has (see socket.ts's pendingUserId) — the websocket
+            // handshake and this fetch genuinely race on every real page
+            // load, so a call gated on isConnected() here previously meant
+            // real-time notification push silently never activated for a
+            // normal session (confirmed live: "Connected" but
+            // "Subscriptions: 0" on every fresh dashboard load).
+            socketManager.subscribeUser(u.id);
           } else {
             // Token exists but the backend rejected/couldn't confirm it —
             // don't leave a stale "authed" flag with no real identity behind
@@ -97,6 +119,34 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep the account's server-side wallet link in sync whenever both an
+  // authed session and a wallet address are present — covers every path
+  // that sets st.wallet.address (signup's embedded wallet step, standalone
+  // create/import/switch in WalletFlow.tsx) from one place, rather than
+  // needing a call at each of those sites. Backend treats re-linking the
+  // same address as a no-op, so this is safe to fire on every change.
+  useEffect(() => {
+    if (st.user.authed && st.wallet.address) {
+      authService.linkWallet(st.wallet.address);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [st.user.authed, st.wallet.address]);
+
+  // One-time migration nudge: an account created before PIN-gating existed
+  // has its recovery phrase sitting in st.wallet.mnemonic in plaintext (see
+  // services/mnemonicAccess.ts) with no pinHash/pinEncryptedMnemonic set.
+  // Route them to Security Settings — its "Change PIN" flow already
+  // recognizes this exact case (hasPinSet === false + legacy mnemonic
+  // present) and re-encrypts it, then wipes the plaintext field.
+  useEffect(() => {
+    const needsMigration = !!st.wallet.mnemonic && !st.wallet.pinHash;
+    if (needsMigration && path !== '/security') {
+      toast('Secure your wallet — set a PIN to continue', false);
+      navigate('/security');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, st.wallet.mnemonic, st.wallet.pinHash]);
 
   // Auth guard: redirect unauthenticated users to landing, and authenticated
   // users away from landing. This is a cosmetic hash-correctness effect only —
@@ -166,6 +216,7 @@ export default function App() {
       </div>
       <CommandPalette navigate={navigate} isAdminRoute={isAdminRoute} />
       <ToastHost />
+      <PinChallengeHost />
     </div>
   );
 }

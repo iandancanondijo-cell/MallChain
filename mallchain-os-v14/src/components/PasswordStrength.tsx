@@ -23,7 +23,7 @@ export default function PasswordStrength({ password }: PasswordStrengthProps) {
     if (/\d/.test(password)) score++;
     
     // Has special character
-    if (/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) score++;
+    if (/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)) score++;
     
     return Math.min(score, 3);
   };
@@ -38,7 +38,7 @@ export default function PasswordStrength({ password }: PasswordStrengthProps) {
     { label: 'At least 8 characters', met: password.length >= 8 },
     { label: 'Contains uppercase (A-Z)', met: /[A-Z]/.test(password) },
     { label: 'Contains number (0-9)', met: /\d/.test(password) },
-    { label: 'Contains special character (!@#$...)', met: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password) },
+    { label: 'Contains special character (!@#$...)', met: /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password) },
   ];
 
   return (

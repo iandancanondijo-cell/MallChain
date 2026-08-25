@@ -1,8 +1,7 @@
 /* eslint-env node */
 /* global require, module, process */
-const crypto = require('crypto')
 const axios = require('axios')
-const { addLiquidityOnChain, toBaseUnits, getAddressFromMnemonic } = require('../services/dexTxBuilder')
+const { addLiquidityOnChain, removeLiquidityOnChain, toBaseUnits, getAddressFromMnemonic } = require('../services/dexTxBuilder')
 const { Console } = require('console')
 const { stdout, stderr } = require('process')
 const console = new Console(stdout, stderr)
@@ -369,6 +368,35 @@ async function removeLiquidity(req, res) {
     const amount0 = pool.reserve0 * shareRatio
     const amount1 = pool.reserve1 * shareRatio
 
+    // Burn the operator's real on-chain LP tokens for this pool and receive
+    // the underlying reserves back — this used to only mutate the in-memory
+    // ledger below and fabricate a txHash, claiming success without ever
+    // touching the chain (see dexTxBuilder.js's addLiquidityOnChain, which
+    // this mirrors: the operator custodies the real on-chain position;
+    // userPositions below is the internal per-user accounting on top of it).
+    const operatorMnemonic = process.env.OPERATOR_MNEMONIC
+    if (!operatorMnemonic) {
+      return res.status(500).json({ error: 'Missing OPERATOR_MNEMONIC for on-chain liquidity removal' })
+    }
+    const providerAddress = await getAddressFromMnemonic(operatorMnemonic)
+    const liquidityTokenAmount = toBaseUnits(lp, POOL_TOKEN0_DECIMALS)
+
+    let txResult
+    try {
+      txResult = await removeLiquidityOnChain({
+        mnemonic: operatorMnemonic,
+        providerAddress,
+        poolId,
+        liquidityTokens: {
+          denom: `liquidity-${poolId}`,
+          amount: liquidityTokenAmount,
+        },
+        memo: `remove liquidity pool ${pool.name} for ${userAddress}`,
+      })
+    } catch (err) {
+      return res.status(502).json({ error: 'Failed to remove liquidity on-chain', details: String(err && err.message ? err.message : err) })
+    }
+
     // Update pool reserves
     pool.reserve0 = Math.max(0, pool.reserve0 - amount0)
     pool.reserve1 = Math.max(0, pool.reserve1 - amount1)
@@ -381,8 +409,7 @@ async function removeLiquidity(req, res) {
 
     const shareOfPool = pool.totalLiquidity > 0 ? (((pool.userPositions[userAddress] || 0) / pool.totalLiquidity) * 100) : 0
 
-    // Emit transaction to blockchain (simulated — replace with real on-chain call)
-    const txHash = 'tx_' + crypto.randomBytes(8).toString('hex').toUpperCase()
+    const txHash = txResult.txHash
 
     return res.json({
       success: true,

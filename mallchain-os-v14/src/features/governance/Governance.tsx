@@ -5,6 +5,7 @@ import { governanceApi, type Proposal, type DepositParams } from '../../services
 import { castVote, submitProposal, GovernanceTxError, type VoteOption } from '../../services/governanceTx';
 import { delegate, DelegateTxError } from '../../services/stakingDelegateTx';
 import { validatorsApi, type ChainValidator } from '../../services/validatorsApi';
+import { requestMnemonic } from '../../services/mnemonicAccess';
 
 const VOTE_OPTIONS: { label: string; value: VoteOption }[] = [
   { label: 'Yes', value: 'VOTE_OPTION_YES' },
@@ -88,10 +89,12 @@ export default function Governance() {
 
   const vote = async (option: VoteOption) => {
     if (!sel) return;
-    if (!st.wallet.mnemonic || !address) return toast('Wallet not connected', false);
+    if (!st.wallet.pinEncryptedMnemonic || !address) return toast('Wallet not connected', false);
+    const mnemonic = await requestMnemonic();
+    if (!mnemonic) return;
     setVoting(option);
     try {
-      const result = await castVote({ mnemonic: st.wallet.mnemonic, fromAddress: address, proposalId: sel.id, option });
+      const result = await castVote({ mnemonic, fromAddress: address, proposalId: sel.id, option });
       toast(`Vote cast — tx ${result.txHash.slice(0, 10)}…`);
       setSel((cur) => (cur ? { ...cur, userVote: { voted: true, option } } : cur));
       load();
@@ -103,14 +106,16 @@ export default function Governance() {
   };
 
   const doDelegate = async () => {
-    if (!st.wallet.mnemonic || !address) return toast('Wallet not connected', false);
+    if (!st.wallet.pinEncryptedMnemonic || !address) return toast('Wallet not connected', false);
     if (!validator) return toast('No validator available to delegate to', false);
     const amt = Number(delegateAmount);
     if (!amt || amt <= 0) return toast('Enter a valid amount', false);
+    const mnemonic = await requestMnemonic();
+    if (!mnemonic) return;
     setDelegating(true);
     try {
       const result = await delegate({
-        mnemonic: st.wallet.mnemonic,
+        mnemonic,
         fromAddress: address,
         validatorAddress: validator.operatorAddress,
         amount: toBaseUnits(amt),
@@ -128,14 +133,16 @@ export default function Governance() {
   };
 
   const doSubmitProposal = async () => {
-    if (!st.wallet.mnemonic || !address) return toast('Wallet not connected', false);
+    if (!st.wallet.pinEncryptedMnemonic || !address) return toast('Wallet not connected', false);
     if (!npTitle.trim() || !npSummary.trim()) return toast('Title and summary are required', false);
     const amt = Number(npDeposit);
     if (!amt || amt <= 0) return toast('Enter a valid deposit amount', false);
+    const mnemonic = await requestMnemonic();
+    if (!mnemonic) return;
     setSubmitting(true);
     try {
       const result = await submitProposal({
-        mnemonic: st.wallet.mnemonic,
+        mnemonic,
         fromAddress: address,
         title: npTitle.trim(),
         summary: npSummary.trim(),

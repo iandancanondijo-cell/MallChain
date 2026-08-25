@@ -25,6 +25,17 @@
  */
 
 const Joi = require('joi');
+const sanitizeHtml = require('sanitize-html');
+
+// DOMPurify was the first choice here, but it needs a real DOM (via jsdom)
+// to operate against, and jsdom's html-encoding-sniffer -> @exodus/bytes
+// dependency ships ESM-only syntax Jest's default CJS transform can't
+// parse — and the lighter linkedom-as-DOM alternative silently no-ops
+// (verified live: DOMPurify against a linkedom window let a <script> tag
+// straight through untouched, which is worse than no sanitizer at all).
+// sanitize-html needs no DOM, is pure-JS, and produces identical output to
+// the working jsdom+DOMPurify combination for every case tested.
+const SANITIZE_HTML_OPTS = { allowedTags: [], allowedAttributes: {} };
 
 /**
  * Task 8.6: Auth validation schemas
@@ -346,8 +357,9 @@ function preventNoSQLInjection(req, res, next) {
  * XSS attack example in form input:
  * <input value="<script>alert('xss')</script>">
  * 
- * This middleware removes angle brackets that could break out of HTML context
- * Note: This is a basic sanitizer. For production, use DOMPurify or similar library
+ * Backed by sanitize-html rather than a hand-rolled character-strip regex
+ * — see sanitize()'s inline comment for why that mattered beyond just XSS
+ * coverage, and why sanitize-html specifically (not DOMPurify+jsdom).
  */
 // Fields that must reach the controller byte-for-byte: credentials and
 // opaque binary/base64 payloads. Stripping HTML-context characters from a
@@ -365,10 +377,13 @@ function sanitizeInputs(req, res, next) {
   const sanitize = (value, key) => {
     if (typeof value === 'string') {
       if (key && SANITIZE_SKIP_FIELDS.has(key)) return value;
-      // Remove characters that could inject or break out of HTML/JS context
-      return value
-        .replace(/[<>()"'/]/g, '')
-        .trim();
+      // sanitize-html (allowedTags/allowedAttributes: {}) strips real
+      // markup — <script>, event-handler attributes, etc. — while leaving
+      // plain punctuation (', /, (, )) untouched, unlike the previous
+      // character-strip approach this replaced (see SANITIZE_SKIP_FIELDS'
+      // comment: that regex silently corrupted any password containing
+      // those characters, hashing a different string than the user typed).
+      return sanitizeHtml(value, SANITIZE_HTML_OPTS).trim();
     } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
       // Recursively sanitize object properties
       const sanitized = {};

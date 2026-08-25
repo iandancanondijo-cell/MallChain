@@ -56,8 +56,11 @@ const chainPrefix = process.env.CHAIN_PREFIX || process.env.COSMOS_PREFIX || 'ma
 const baseDenom = process.env.CHAIN_BASE_DENOM || 'stake';
 const gasPrice = process.env.GAS_PRICE || `0.01${baseDenom}`;
 
-// Validate MONGO_URI format early
-const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/marketplace';
+// In production, an unset MONGO_URI must fail fast (matching every other
+// required() secret) rather than silently falling back to a localhost
+// instance that doesn't exist in a real deployment — dev/test keep the
+// convenience default.
+const mongoUri = required('MONGO_URI', process.env.MONGO_URI) || 'mongodb://localhost:27017/marketplace';
 validateMongoUri(mongoUri);
 
 const config = {
@@ -133,6 +136,11 @@ const config = {
           `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/buy/payout/callback`,
         process.env.PAYMENT_WEBHOOK_SECRET
       ),
+      badgeCallbackUrl: appendWebhookToken(
+        process.env.BADGE_CALLBACK_URL ||
+          `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/badge/mpesa/callback`,
+        process.env.PAYMENT_WEBHOOK_SECRET
+      ),
       b2cInitiatorName: process.env.B2C_INITIATOR_NAME || 'testapi',
       securityCredential: process.env.SECURITY_CREDENTIAL || '',
       commandId: process.env.COMMAND_ID || 'BusinessPayment',
@@ -147,12 +155,44 @@ const config = {
       'PASSKEY',
       'CALLBACK_URL',
       'PAYOUT_CALLBACK_URL',
+      'BADGE_CALLBACK_URL',
       'B2C_INITIATOR_NAME',
       'SECURITY_CREDENTIAL',
       'COMMAND_ID',
       'ENABLE_WITHDRAWAL_AUTO_PAYOUT',
       'CASHOUT_RECEIVER_ADDRESS',
     ],
+  },
+
+  // Best-effort — see emailService.js/smsService.js's isConfigured() guards.
+  // Unlike payment.safaricom, neither is production-required: a badge
+  // notification failing to send shouldn't take down the API, unlike a
+  // failed M-Pesa payment.
+  email: {
+    smtp: {
+      host: process.env.SMTP_HOST || '',
+      port: Number(process.env.SMTP_PORT || 587),
+      user: process.env.SMTP_USER || '',
+      pass: process.env.SMTP_PASS || '',
+      from: process.env.SMTP_FROM || 'noreply@mallchain.local',
+      secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true',
+    },
+  },
+
+  sms: {
+    africastalking: {
+      apiKey: process.env.AFRICASTALKING_API_KEY || '',
+      username: process.env.AFRICASTALKING_USERNAME || '',
+      senderId: process.env.AFRICASTALKING_SENDER_ID || '',
+      apiBaseUrl: process.env.AFRICASTALKING_API_BASE_URL || 'https://api.africastalking.com',
+    },
+  },
+
+  badge: {
+    // How many consecutive active days (see utils/activityTracker.js) the
+    // monthly snapshot (jobs/badgeSnapshot.js) requires to earn a badge.
+    streakRequiredDays: Number(process.env.BADGE_STREAK_REQUIRED_DAYS || 7),
+    purchasePriceKes: Number(process.env.BADGE_PURCHASE_PRICE_KES || 17),
   },
 };
 
@@ -221,7 +261,10 @@ function validateRuntimeSecrets() {
   // C9: Require mnemonics in production
   if (isProduction) {
     required('OPERATOR_MNEMONIC', config.secrets.operatorMnemonic);
-    required('FAUCET_MNEMONIC', config.secrets.faucetMnemonic);
+    // No FAUCET_MNEMONIC requirement — the faucet is hard-disabled in
+    // production (see services/faucetService.js's isFaucetEnabled()), so
+    // requiring a funded hot-wallet key for a feature that can't run would
+    // just be a pointless extra secret to provision and protect.
 
     // Without this, /api/buy/mpesa/callback and /api/buy/payout/callback
     // accept unauthenticated requests that mark a fiat purchase "confirmed"

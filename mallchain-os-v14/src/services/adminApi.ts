@@ -83,6 +83,30 @@ export interface AdminSubmission {
   created_at: string;
 }
 
+export interface AdminBadgePurchase {
+  _id: string;
+  quoteId: string;
+  walletAddress: string;
+  phone: string;
+  fiatAmount: number;
+  currency: string;
+  status: 'pending' | 'payment_initiated' | 'confirmed' | 'processing' | 'issued' | 'failed';
+  mpesaRef?: string;
+  badgeTxHash?: string;
+  reason?: string;
+  createdAt: string;
+}
+
+export interface AdminBadgeIssuance {
+  _id: string;
+  userId?: string;
+  walletAddress: string;
+  method: 'streak' | 'purchase' | 'admin_manual';
+  badgeType: string;
+  txHash?: string;
+  issuedAt: string;
+}
+
 export interface AuditLogEntry {
   _id: string;
   action: string;
@@ -90,6 +114,100 @@ export interface AuditLogEntry {
   details: unknown;
   outcome: string;
   createdAt: string;
+}
+
+export interface LiquidityActivityItem {
+  _id: string;
+  flow: 'buy' | 'withdraw' | 'reconciliation' | 'mallpoints_convert';
+  stage: string;
+  status: 'pending' | 'success' | 'failed' | 'info';
+  poolId?: number;
+  quoteId?: string;
+  paymentId?: string;
+  withdrawalId?: string;
+  saleId?: string;
+  payoutRef?: string;
+  walletAddress?: string;
+  phone?: string;
+  currency?: string;
+  amountMlcns?: number;
+  fiatAmount?: number;
+  lpTokens?: number;
+  creditTxHash?: string;
+  liquidityTxHash?: string;
+  sellTxHash?: string;
+  createdAt: string;
+}
+
+export interface ReconciliationItem {
+  _id: string;
+  purchaseId: string;
+  quoteId?: string;
+  creditTxHash: string;
+  walletAddress: string;
+  mlcnsAmount: number;
+  fiatAmount: number;
+  reason?: string;
+  status: 'detected' | 'compensating' | 'pending_manual' | 'resolved';
+  compensationTx?: string;
+  createdAt: string;
+  resolvedAt?: string;
+}
+
+export interface AdminWithdrawalRequest {
+  _id: string;
+  withdrawalId: string;
+  walletAddress: string;
+  phone: string;
+  amountMlcns: number;
+  amountKes: number;
+  currency?: string;
+  status: 'pending_review' | 'payout_initiated' | 'completed' | 'failed';
+  payoutProvider?: string;
+  payoutRef?: string;
+  settlementMode?: 'review' | 'signed_sell';
+  saleId?: string;
+  sellTxHash?: string;
+  burnTxHash?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface BurnPolicyEntry {
+  _id: string;
+  activity: 'marketplace_purchase' | 'wallet_transfer' | 'cash_out' | 'validator_penalty' | 'lost_recovery';
+  burnPercentage: number;
+  description?: string;
+  enabled: boolean;
+}
+
+export interface DynamicBurnThresholdEntry {
+  _id: string;
+  activity: 'cash_out' | 'marketplace_purchase' | 'wallet_transfer';
+  supplyThreshold: number;
+  burnPercentage: number;
+  order: number;
+  enabled: boolean;
+}
+
+export interface TreasuryLedgerEntry {
+  _id: string;
+  txHash?: string;
+  activity: 'inflow_cash_out' | 'outflow_reward' | 'outflow_payout' | 'burn' | 'reconciliation';
+  amount: number;
+  direction: 'inflow' | 'outflow' | 'burn';
+  relatedSaleId?: string;
+  relatedQuoteId?: string;
+  description?: string;
+  balance?: number;
+  createdAt: string;
+}
+
+export interface TreasuryMetricTotal {
+  activity: string;
+  direction: string;
+  totalAmount: number;
+  count: number;
 }
 
 class AdminApi {
@@ -163,6 +281,77 @@ class AdminApi {
 
   async getAuditLog(limit = 50): Promise<ApiResult<{ logs: AuditLogEntry[] }>> {
     return api.get('/api/admin/audit', { limit });
+  }
+
+  async listBadgePurchases(status?: string): Promise<ApiResult<{ purchases: AdminBadgePurchase[]; total: number }>> {
+    return api.get('/api/admin/badges/purchases', status ? { status } : undefined);
+  }
+
+  async listBadgeIssuances(method?: string): Promise<ApiResult<{ issuances: AdminBadgeIssuance[]; total: number }>> {
+    return api.get('/api/admin/badges/issuances', method ? { method } : undefined);
+  }
+
+  async grantBadge(walletAddress: string): Promise<ApiResult<{ txHash: string }>> {
+    return api.post('/api/admin/badges/grant', { walletAddress });
+  }
+
+  async voidBadgePurchase(quoteId: string, reason?: string): Promise<ApiResult<{ purchase: AdminBadgePurchase }>> {
+    return api.post(`/api/admin/badges/purchases/${encodeURIComponent(quoteId)}/void`, { reason });
+  }
+
+  async listLiquidityActivity(params?: { flow?: string; limit?: number }): Promise<ApiResult<{ items: LiquidityActivityItem[]; total: number }>> {
+    const query: Record<string, string | number> = {};
+    if (params?.flow) query.flow = params.flow;
+    if (params?.limit) query.limit = params.limit;
+    return api.get('/api/liquidity/activity', query);
+  }
+
+  async listReconciliationItems(status?: string): Promise<ApiResult<{ items: ReconciliationItem[]; total: number }>> {
+    return api.get('/api/admin/reconciliation/items', status ? { status } : undefined);
+  }
+
+  async runReconciliation(): Promise<ApiResult<{ result: unknown }>> {
+    return api.post('/api/admin/reconciliation/run', {});
+  }
+
+  async listWithdrawals(status?: string): Promise<ApiResult<{ withdrawals: AdminWithdrawalRequest[]; total: number }>> {
+    return api.get('/api/admin/withdrawals', status ? { status } : undefined);
+  }
+
+  async listBurnPolicies(): Promise<ApiResult<{ policies: BurnPolicyEntry[] }>> {
+    return api.get('/api/admin/treasury/policies');
+  }
+
+  async saveBurnPolicy(payload: { activity: string; burnPercentage: number; description?: string; enabled?: boolean }): Promise<ApiResult<{ policy: BurnPolicyEntry }>> {
+    return api.post('/api/admin/treasury/policies', payload);
+  }
+
+  async deleteBurnPolicy(activity: string): Promise<ApiResult<{ deleted: boolean }>> {
+    return api.del(`/api/admin/treasury/policies/${encodeURIComponent(activity)}`);
+  }
+
+  async listDynamicThresholds(): Promise<ApiResult<{ thresholds: DynamicBurnThresholdEntry[] }>> {
+    return api.get('/api/admin/treasury/dynamic-thresholds');
+  }
+
+  async saveDynamicThreshold(payload: { activity: string; supplyThreshold: number; burnPercentage: number; order?: number; enabled?: boolean }): Promise<ApiResult<{ threshold: DynamicBurnThresholdEntry }>> {
+    return api.post('/api/admin/treasury/dynamic-thresholds', payload);
+  }
+
+  async deleteDynamicThreshold(id: string): Promise<ApiResult<{ deleted: boolean }>> {
+    return api.del(`/api/admin/treasury/dynamic-thresholds/${encodeURIComponent(id)}`);
+  }
+
+  async getTreasuryLedger(params?: { activity?: string; direction?: string; limit?: number }): Promise<ApiResult<{ entries: TreasuryLedgerEntry[] }>> {
+    const query: Record<string, string | number> = {};
+    if (params?.activity) query.activity = params.activity;
+    if (params?.direction) query.direction = params.direction;
+    if (params?.limit) query.limit = params.limit;
+    return api.get('/api/admin/treasury/ledger', query);
+  }
+
+  async getTreasuryMetrics(): Promise<ApiResult<{ totals: TreasuryMetricTotal[] }>> {
+    return api.get('/api/admin/treasury/metrics');
   }
 }
 

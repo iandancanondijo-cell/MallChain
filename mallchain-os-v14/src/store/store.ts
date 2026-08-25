@@ -66,6 +66,7 @@ export interface AppState {
     frozen: boolean;
     kycLevel: number;
     role: 'user' | 'admin' | 'superadmin';
+    hasBadge: boolean;
   };
   balances: Balance;
   txs: Tx[];
@@ -86,12 +87,21 @@ export interface AppState {
     address: string;
     accountId: string;
     chainId: string;
+    /**
+     * Legacy field — new wallets never write a plaintext mnemonic here at
+     * all (see WalletFlow.tsx's mandatory PIN-setup step and
+     * services/mnemonicAccess.ts). Only ever non-empty for an account
+     * created before PIN-gating existed; App.tsx's boot effect detects that
+     * and routes to Security Settings to migrate it into pinEncryptedMnemonic,
+     * then clears this field. Never read this directly for signing —
+     * use requestMnemonic() instead.
+     */
     mnemonic: string;
     createdAt: number;
     requests: Array<{ id: string; amount: number; note: string; status: 'pending' | 'paid'; ts: number }>;
-    /** bcrypt hash of the account security PIN; empty string if no PIN has been set yet. */
+    /** bcrypt hash of the wallet PIN; empty string if no PIN has been set yet (only possible pre-migration). */
     pinHash: string;
-    /** Mnemonic encrypted with the current PIN (services/security.ts encryptMnemonic) — what PrivateKeyExport decrypts. */
+    /** The real, canonical mnemonic storage — PIN-encrypted (services/security.ts encryptMnemonic). Decrypted on demand via requestMnemonic(), never held in plaintext in the store. */
     pinEncryptedMnemonic: string;
   };
   marketplace: {
@@ -278,6 +288,7 @@ function emptyState(): AppState {
       frozen: false,
       kycLevel: 1,
       role: 'user',
+      hasBadge: false,
     },
     balances: { MALL: 0, MLPTS: 0, USD_M: 0, KES: 0, EUR: 0, GBP: 0 },
     txs: [],

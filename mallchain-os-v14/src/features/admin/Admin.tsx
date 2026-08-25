@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { store } from '../../store/store';
-import { useStoreVersion, fmtNum, StatusChip, Modal, toast } from '../../components/ui';
+import { useStoreVersion, fmtNum, fmtMoney, StatusChip, Modal, toast } from '../../components/ui';
 import {
   adminApi,
   type CurrentUser,
@@ -11,10 +11,19 @@ import {
   type AdminCampaign,
   type AdminSubmission,
   type AuditLogEntry,
+  type AdminBadgePurchase,
+  type AdminBadgeIssuance,
+  type LiquidityActivityItem,
+  type ReconciliationItem,
+  type AdminWithdrawalRequest,
+  type BurnPolicyEntry,
+  type DynamicBurnThresholdEntry,
+  type TreasuryLedgerEntry,
+  type TreasuryMetricTotal,
 } from '../../services/adminApi';
 import { kycApi } from '../../services/kycApi';
 
-type Tab = 'dashboard' | 'users' | 'kyc' | 'validators' | 'mining' | 'audit' | 'local';
+type Tab = 'dashboard' | 'users' | 'kyc' | 'validators' | 'mining' | 'badges' | 'liquidity' | 'reconciliation' | 'withdrawals' | 'treasury' | 'audit' | 'local';
 
 /**
  * Admin Control Center — real backend (backend/src/routes/adminPanel.js),
@@ -62,6 +71,11 @@ export default function Admin() {
         <button className={tab === 'kyc' ? 'on' : ''} onClick={() => setTab('kyc')}>KYC Review</button>
         <button className={tab === 'validators' ? 'on' : ''} onClick={() => setTab('validators')}>Validator Applications</button>
         <button className={tab === 'mining' ? 'on' : ''} onClick={() => setTab('mining')}>Mining</button>
+        <button className={tab === 'badges' ? 'on' : ''} onClick={() => setTab('badges')}>Badges</button>
+        <button className={tab === 'liquidity' ? 'on' : ''} onClick={() => setTab('liquidity')}>Liquidity Activity</button>
+        <button className={tab === 'reconciliation' ? 'on' : ''} onClick={() => setTab('reconciliation')}>Reconciliation</button>
+        <button className={tab === 'withdrawals' ? 'on' : ''} onClick={() => setTab('withdrawals')}>Withdrawals</button>
+        <button className={tab === 'treasury' ? 'on' : ''} onClick={() => setTab('treasury')}>Treasury</button>
         <button className={tab === 'audit' ? 'on' : ''} onClick={() => setTab('audit')}>Audit Log</button>
         <button className={tab === 'local' ? 'on' : ''} onClick={() => setTab('local')}>Local Banners</button>
       </div>
@@ -71,6 +85,11 @@ export default function Admin() {
       {tab === 'kyc' && <KycReviewTab />}
       {tab === 'validators' && <ValidatorApplicationsTab />}
       {tab === 'mining' && <MiningTab meId={me.id} />}
+      {tab === 'badges' && <BadgesTab />}
+      {tab === 'liquidity' && <LiquidityActivityTab />}
+      {tab === 'reconciliation' && <ReconciliationTab />}
+      {tab === 'withdrawals' && <WithdrawalsTab />}
+      {tab === 'treasury' && <TreasuryTab />}
       {tab === 'audit' && <AuditTab />}
       {tab === 'local' && <LocalBannersTab />}
     </div>
@@ -406,6 +425,403 @@ function MiningTab({ meId }: { meId: string }) {
           <div className="modal-actions"><button className="btn btn-ghost" onClick={() => setCreateOpen(false)}>Cancel</button><button className="btn btn-primary" onClick={createCampaign}>Create</button></div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+function BadgesTab() {
+  const [purchases, setPurchases] = useState<AdminBadgePurchase[] | null>(null);
+  const [issuances, setIssuances] = useState<AdminBadgeIssuance[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [grantAddress, setGrantAddress] = useState('');
+  const [granting, setGranting] = useState(false);
+  const [voidTarget, setVoidTarget] = useState<AdminBadgePurchase | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+
+  const load = useCallback(async () => {
+    setError(null);
+    const [purchaseRes, issuanceRes] = await Promise.all([adminApi.listBadgePurchases(), adminApi.listBadgeIssuances()]);
+    if (purchaseRes.ok && purchaseRes.data) setPurchases(purchaseRes.data.purchases);
+    else setError(purchaseRes.error || 'Failed to load badge purchases');
+    if (issuanceRes.ok && issuanceRes.data) setIssuances(issuanceRes.data.issuances);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const grant = async () => {
+    if (!grantAddress.trim()) return toast('Wallet address is required', false);
+    setGranting(true);
+    const res = await adminApi.grantBadge(grantAddress.trim());
+    setGranting(false);
+    if (res.ok) {
+      toast('Badge granted');
+      setGrantAddress('');
+      load();
+    } else {
+      toast(res.error || 'Grant failed', false);
+    }
+  };
+
+  const doVoid = async () => {
+    if (!voidTarget) return;
+    const res = await adminApi.voidBadgePurchase(voidTarget.quoteId, voidReason);
+    if (res.ok) { toast('Purchase voided'); load(); } else toast(res.error || 'Void failed', false);
+    setVoidTarget(null);
+    setVoidReason('');
+  };
+
+  return (
+    <div>
+      {error && <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}><div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div></div>}
+
+      <div className="card mb">
+        <div className="sec-title"><h2>Grant badge manually</h2></div>
+        <div className="tiny muted mb">
+          For support cases (a missed streak due to a tracking gap, a goodwill gesture, etc). Issues on-chain via the
+          same path as the streak snapshot and paid purchases.
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <input className="input" style={{ flex: 1 }} placeholder="mall1…" value={grantAddress} onChange={(e) => setGrantAddress(e.target.value)} disabled={granting} />
+          <button className="btn btn-primary btn-sm" onClick={grant} disabled={granting}>{granting && <span className="spin" />} Grant</button>
+        </div>
+      </div>
+
+      <div className="card mb">
+        <div className="sec-title"><h2>Issuances</h2></div>
+        {issuances?.length === 0 && <div className="empty-state"><div className="es-ico">🏅</div><div className="es-t">No badges issued yet</div></div>}
+        {(issuances || []).map((i) => (
+          <div key={i._id} className="list-row">
+            <div className="grow">
+              <div className="t mono" style={{ fontSize: 12.5 }}>{i.walletAddress}</div>
+              <div className="m">{i.badgeType} · issued {new Date(i.issuedAt).toLocaleString()}{i.txHash && <> · {i.txHash.slice(0, 12)}…</>}</div>
+            </div>
+            <StatusChip status={i.method} />
+          </div>
+        ))}
+      </div>
+
+      <div className="card">
+        <div className="sec-title"><h2>Purchases</h2></div>
+        {purchases?.length === 0 && <div className="empty-state"><div className="es-ico">💳</div><div className="es-t">No purchases yet</div></div>}
+        {(purchases || []).map((p) => (
+          <div key={p._id} className="list-row">
+            <div className="grow">
+              <div className="t mono" style={{ fontSize: 12.5 }}>{p.walletAddress}</div>
+              <div className="m">{p.phone} · KSh {p.fiatAmount} · {new Date(p.createdAt).toLocaleString()}{p.mpesaRef && <> · ref {p.mpesaRef}</>}</div>
+            </div>
+            <StatusChip status={p.status} />
+            {p.status !== 'issued' && (
+              <button className="btn btn-danger btn-sm" style={{ marginLeft: 6 }} onClick={() => setVoidTarget(p)}>Void</button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {voidTarget && (
+        <Modal title="Void badge purchase" onClose={() => setVoidTarget(null)}>
+          <p style={{ fontSize: 13.5, color: 'var(--txt-2)' }}>
+            Void purchase <b className="mono">{voidTarget.quoteId}</b> for <b className="mono">{voidTarget.walletAddress}</b>?
+            This marks it failed — it does not affect any on-chain badge, and only applies before issuance.
+          </p>
+          <div className="field mb">
+            <label>Reason</label>
+            <input className="input" value={voidReason} onChange={(e) => setVoidReason(e.target.value)} placeholder="Refund requested, duplicate quote, etc." autoFocus />
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={() => setVoidTarget(null)}>Cancel</button>
+            <button className="btn btn-danger" onClick={doVoid}>Confirm void</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Liquidity Activity — the LiquidityPoolActivity ledger recorded through
+ * buy/sell/withdraw/payout callbacks (see routes/liquidity.js#/activity).
+ * Read-only: this is a monitoring feed, not an action queue.
+ */
+function LiquidityActivityTab() {
+  const [items, setItems] = useState<LiquidityActivityItem[] | null>(null);
+  const [flow, setFlow] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    adminApi.listLiquidityActivity({ flow: flow || undefined, limit: 200 }).then((res) => {
+      if (res.ok && res.data) setItems(res.data.items);
+      else setError(res.error || 'Failed to load liquidity activity');
+    });
+  }, [flow]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div>
+      <div className="mc-subnav" style={{ marginBottom: 12 }}>
+        {['', 'buy', 'withdraw', 'reconciliation', 'mallpoints_convert'].map((f) => (
+          <button key={f || 'all'} className={flow === f ? 'on' : ''} onClick={() => setFlow(f)}>{f || 'All'}</button>
+        ))}
+      </div>
+      {error && <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}><div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div></div>}
+      <div className="card">
+        {items?.length === 0 && <div className="empty-state"><div className="es-ico">💧</div><div className="es-t">No liquidity activity yet</div></div>}
+        {(items || []).map((it) => (
+          <div key={it._id} className="list-row">
+            <div className="grow">
+              <div className="t">{it.flow} · {it.stage}</div>
+              <div className="m">
+                {it.walletAddress || '—'} · {fmtNum(it.amountMlcns || 0)} MLCNS
+                {it.fiatAmount ? ` · ${fmtMoney(it.fiatAmount, it.currency || 'KES')}` : ''}
+                {' · '}{new Date(it.createdAt).toLocaleString()}
+              </div>
+            </div>
+            <StatusChip status={it.status} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Reconciliation Queue — pool-add failures after a credited purchase (see
+ * models/LiquidityReconciliation.js), plus a manual trigger for the job
+ * that detects and compensates them (services/reconciliationService.js).
+ */
+function ReconciliationTab() {
+  const [items, setItems] = useState<ReconciliationItem[] | null>(null);
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+
+  const load = useCallback(() => {
+    adminApi.listReconciliationItems(status || undefined).then((res) => {
+      if (res.ok && res.data) setItems(res.data.items);
+      else setError(res.error || 'Failed to load reconciliation items');
+    });
+  }, [status]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const runNow = async () => {
+    setRunning(true);
+    try {
+      const res = await adminApi.runReconciliation();
+      if (res.ok) { toast('Reconciliation job triggered', true); load(); }
+      else toast(res.error || 'Failed to trigger reconciliation', false);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="mc-subnav" style={{ marginBottom: 12, justifyContent: 'space-between', display: 'flex' }}>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {['', 'detected', 'compensating', 'pending_manual', 'resolved'].map((s) => (
+            <button key={s || 'all'} className={status === s ? 'on' : ''} onClick={() => setStatus(s)}>{s || 'All'}</button>
+          ))}
+        </div>
+        <button className="btn btn-secondary btn-sm" onClick={runNow} disabled={running}>{running ? 'Running…' : 'Run reconciliation now'}</button>
+      </div>
+      {error && <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}><div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div></div>}
+      <div className="card">
+        {items?.length === 0 && <div className="empty-state"><div className="es-ico">🧮</div><div className="es-t">Nothing to reconcile</div></div>}
+        {(items || []).map((it) => (
+          <div key={it._id} className="list-row">
+            <div className="grow">
+              <div className="t">{it.walletAddress}</div>
+              <div className="m">
+                {fmtNum(it.mlcnsAmount)} MLCNS / {fmtMoney(it.fiatAmount, 'KES')} · {it.reason || 'liquidity add failed after credit'}
+                {' · '}{new Date(it.createdAt).toLocaleString()}
+              </div>
+            </div>
+            <StatusChip status={it.status} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Withdrawals — cash-out requests from routes/buy.js's sell flow (models/WithdrawalRequest.js). */
+function WithdrawalsTab() {
+  const [items, setItems] = useState<AdminWithdrawalRequest[] | null>(null);
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    adminApi.listWithdrawals(status || undefined).then((res) => {
+      if (res.ok && res.data) setItems(res.data.withdrawals);
+      else setError(res.error || 'Failed to load withdrawals');
+    });
+  }, [status]);
+
+  return (
+    <div>
+      <div className="mc-subnav" style={{ marginBottom: 12 }}>
+        {['', 'pending_review', 'payout_initiated', 'completed', 'failed'].map((s) => (
+          <button key={s || 'all'} className={status === s ? 'on' : ''} onClick={() => setStatus(s)}>{s || 'All'}</button>
+        ))}
+      </div>
+      {error && <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}><div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div></div>}
+      <div className="card">
+        {items?.length === 0 && <div className="empty-state"><div className="es-ico">💸</div><div className="es-t">No withdrawal requests</div></div>}
+        {(items || []).map((w) => (
+          <div key={w._id} className="list-row">
+            <div className="grow">
+              <div className="t">{w.walletAddress} · {w.phone}</div>
+              <div className="m">
+                {fmtNum(w.amountMlcns)} MLCNS → {fmtMoney(w.amountKes, w.currency || 'KES')}
+                {w.payoutRef ? ` · ref ${w.payoutRef}` : ''}
+                {' · '}{new Date(w.createdAt).toLocaleString()}
+              </div>
+            </div>
+            <StatusChip status={w.status} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Treasury — burn policies, dynamic supply-based thresholds, the ledger,
+ * and aggregate metrics (routes/adminPanel.js#treasury/*). Policies and
+ * thresholds are upserted by (activity[, supplyThreshold]), matching the
+ * backend's own upsert key.
+ */
+function TreasuryTab() {
+  const [policies, setPolicies] = useState<BurnPolicyEntry[] | null>(null);
+  const [thresholds, setThresholds] = useState<DynamicBurnThresholdEntry[] | null>(null);
+  const [ledger, setLedger] = useState<TreasuryLedgerEntry[] | null>(null);
+  const [metrics, setMetrics] = useState<TreasuryMetricTotal[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [newPolicy, setNewPolicy] = useState({ activity: 'cash_out', burnPercentage: 0, description: '' });
+  const [newThreshold, setNewThreshold] = useState({ activity: 'cash_out', supplyThreshold: 0, burnPercentage: 0 });
+
+  const load = useCallback(() => {
+    Promise.all([
+      adminApi.listBurnPolicies(),
+      adminApi.listDynamicThresholds(),
+      adminApi.getTreasuryLedger({ limit: 100 }),
+      adminApi.getTreasuryMetrics(),
+    ]).then(([p, t, l, m]) => {
+      if (p.ok && p.data) setPolicies(p.data.policies);
+      if (t.ok && t.data) setThresholds(t.data.thresholds);
+      if (l.ok && l.data) setLedger(l.data.entries);
+      if (m.ok && m.data) setMetrics(m.data.totals);
+      if (!p.ok) setError(p.error || 'Failed to load treasury data');
+    });
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const savePolicy = async () => {
+    const res = await adminApi.saveBurnPolicy(newPolicy);
+    if (res.ok) { toast('Burn policy saved', true); load(); }
+    else toast(res.error || 'Failed to save policy', false);
+  };
+
+  const removePolicy = async (activity: string) => {
+    const res = await adminApi.deleteBurnPolicy(activity);
+    if (res.ok) { toast('Burn policy removed', true); load(); }
+    else toast(res.error || 'Failed to remove policy', false);
+  };
+
+  const saveThreshold = async () => {
+    const res = await adminApi.saveDynamicThreshold(newThreshold);
+    if (res.ok) { toast('Dynamic threshold saved', true); load(); }
+    else toast(res.error || 'Failed to save threshold', false);
+  };
+
+  const removeThreshold = async (id: string) => {
+    const res = await adminApi.deleteDynamicThreshold(id);
+    if (res.ok) { toast('Threshold removed', true); load(); }
+    else toast(res.error || 'Failed to remove threshold', false);
+  };
+
+  return (
+    <div>
+      {error && <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}><div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div></div>}
+
+      {metrics && metrics.length > 0 && (
+        <div className="stat-grid mb">
+          {metrics.map((m) => (
+            <div key={`${m.activity}-${m.direction}`} className="card">
+              <div className="card-label">{m.activity} · {m.direction}</div>
+              <div className="card-value">{fmtNum(m.totalAmount)}</div>
+              <div className="card-sub">{m.count} entries</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="card mb">
+        <h3 style={{ marginTop: 0 }}>Burn Policies</h3>
+        {(policies || []).map((p) => (
+          <div key={p._id} className="list-row">
+            <div className="grow">
+              <div className="t">{p.activity}</div>
+              <div className="m">{p.burnPercentage}% · {p.description || 'no description'}</div>
+            </div>
+            <StatusChip status={p.enabled ? 'active' : 'disabled'} />
+            <button className="btn btn-ghost btn-sm" onClick={() => removePolicy(p.activity)}>Remove</button>
+          </div>
+        ))}
+        <div className="list-row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <select className="input" value={newPolicy.activity} onChange={(e) => setNewPolicy((s) => ({ ...s, activity: e.target.value }))}>
+            {['marketplace_purchase', 'wallet_transfer', 'cash_out', 'validator_penalty', 'lost_recovery'].map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <input className="input" type="number" min={0} max={100} placeholder="Burn %" value={newPolicy.burnPercentage}
+            onChange={(e) => setNewPolicy((s) => ({ ...s, burnPercentage: Number(e.target.value) }))} style={{ width: 90 }} />
+          <input className="input" placeholder="Description" value={newPolicy.description}
+            onChange={(e) => setNewPolicy((s) => ({ ...s, description: e.target.value }))} style={{ flex: 1, minWidth: 160 }} />
+          <button className="btn btn-primary btn-sm" onClick={savePolicy}>Save</button>
+        </div>
+      </div>
+
+      <div className="card mb">
+        <h3 style={{ marginTop: 0 }}>Dynamic Burn Thresholds</h3>
+        {(thresholds || []).map((t) => (
+          <div key={t._id} className="list-row">
+            <div className="grow">
+              <div className="t">{t.activity} · supply ≥ {fmtNum(t.supplyThreshold)}</div>
+              <div className="m">{t.burnPercentage}% burn</div>
+            </div>
+            <StatusChip status={t.enabled ? 'active' : 'disabled'} />
+            <button className="btn btn-ghost btn-sm" onClick={() => removeThreshold(t._id)}>Remove</button>
+          </div>
+        ))}
+        <div className="list-row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <select className="input" value={newThreshold.activity} onChange={(e) => setNewThreshold((s) => ({ ...s, activity: e.target.value }))}>
+            {['cash_out', 'marketplace_purchase', 'wallet_transfer'].map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <input className="input" type="number" placeholder="Supply threshold" value={newThreshold.supplyThreshold}
+            onChange={(e) => setNewThreshold((s) => ({ ...s, supplyThreshold: Number(e.target.value) }))} style={{ width: 160 }} />
+          <input className="input" type="number" min={0} max={100} placeholder="Burn %" value={newThreshold.burnPercentage}
+            onChange={(e) => setNewThreshold((s) => ({ ...s, burnPercentage: Number(e.target.value) }))} style={{ width: 90 }} />
+          <button className="btn btn-primary btn-sm" onClick={saveThreshold}>Save</button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Ledger</h3>
+        {(ledger || []).length === 0 && <div className="empty-state"><div className="es-ico">📒</div><div className="es-t">No ledger entries yet</div></div>}
+        {(ledger || []).map((l) => (
+          <div key={l._id} className="list-row">
+            <div className="grow">
+              <div className="t">{l.activity}</div>
+              <div className="m">{l.description || '—'} · {new Date(l.createdAt).toLocaleString()}</div>
+            </div>
+            <div className="t">{l.direction === 'outflow' ? '−' : '+'}{fmtNum(l.amount)}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

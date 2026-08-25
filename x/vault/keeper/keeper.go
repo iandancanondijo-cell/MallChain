@@ -2,20 +2,29 @@ package keeper
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"strconv"
-	"time"
 
 	corestore "cosmossdk.io/core/store"
 	storetypes "cosmossdk.io/store/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"marketplace/x/vault/crypto"
 	"marketplace/x/vault/types"
+)
+
+// Minimum Argon2id parameters the keeper will accept from a client-submitted
+// MsgSetupVault. A weak choice here only weakens the submitting owner's own
+// vault (nothing else in the chain depends on it), but rejecting clearly
+// degenerate values still catches a broken/malicious client before it locks
+// a real ciphertext behind a KDF cheap enough to brute-force offline —
+// against a blob that's sitting in public chain state.
+const (
+	minArgon2Time    = 1
+	minArgon2Memory  = 19 * 1024 // ~19 MiB, OWASP's Argon2id floor
+	minArgon2Threads = 1
+	minArgon2KeyLen  = 16
 )
 
 type Keeper struct {
@@ -31,6 +40,14 @@ func NewKeeper(storeService corestore.KVStoreService, cdc codec.Codec) *Keeper {
 func (k Keeper) kvStore(ctx context.Context) (corestore.KVStore, error) {
 	s := k.storeService.OpenKVStore(ctx)
 	return s, nil
+}
+
+// GetVaultBlob reads owner's vault blob from KV. Returns (nil, nil) if the
+// owner has no vault. Exported for the gRPC query server — reads are plain
+// RPC, never broadcast or recorded in chain history, so serving the
+// ciphertext blob here for client-side decryption is safe.
+func (k Keeper) GetVaultBlob(ctx context.Context, owner string) (*types.VaultBlob, error) {
+	return k.getVault(ctx, owner)
 }
 
 // getVault reads owner's vault blob (JSON) from KV and unmarshals it
@@ -66,59 +83,69 @@ func (k Keeper) setVault(ctx context.Context, owner string, vb *types.VaultBlob)
 	return s.Set(types.VaultKeyFor(owner), b)
 }
 
-// SetupVault initializes salt/params and TOTP secret for owner's vault and
-// returns a provisioning URI. Fails if owner already has a vault — without
-// this check, any address could call SetupVault again and destroy a
-// previously confirmed vault's encrypted key material.
-func (k Keeper) SetupVault(ctx context.Context, owner, password, accountName, issuer string) (string, error) {
+func validateArgon2Params(time, memory uint32, threads uint8, keyLen uint32) error {
+	if time < minArgon2Time || memory < minArgon2Memory || threads < minArgon2Threads || keyLen < minArgon2KeyLen {
+		return errors.New("argon2 parameters below minimum security floor")
+	}
+	return nil
+}
+
+func (k Keeper) emitEvent(ctx context.Context, eventType, owner string) {
+	sdk.UnwrapSDKContext(ctx).EventManager().EmitEvent(sdk.NewEvent(
+		eventType,
+		sdk.NewAttribute(types.AttributeKeyOwner, owner),
+	))
+}
+
+// SetupVault stores the KDF parameters and an already-encrypted TOTP secret
+// for owner's vault. Everything sensitive here (salt, params, ciphertext)
+// was already produced client-side — see tx.proto for why the chain must
+// never receive a password or the plaintext TOTP secret. Fails if owner
+// already has a vault, so a repeat call can't destroy previously confirmed
+// key material.
+func (k Keeper) SetupVault(ctx context.Context, owner, salt string, params types.Argon2Params, nonceTOTP, encryptedTOTPSecret string) error {
 	existing, err := k.getVault(ctx, owner)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if existing != nil {
-		return "", errors.New("vault already exists for this account")
+		return errors.New("vault already exists for this account")
 	}
-
-	// generate salt
-	salt, err := crypto.GenerateSalt(16)
-	if err != nil {
-		return "", err
+	if _, err := base64.StdEncoding.DecodeString(salt); err != nil {
+		return errors.New("invalid salt encoding")
 	}
-	params := crypto.DefaultParams()
-	// derive key
-	key := crypto.DeriveKey(password, salt, params)
-
-	// generate TOTP secret and provisioning URI
-	secret, uri, err := crypto.GenerateTOTPSecret(accountName, issuer)
-	if err != nil {
-		return "", err
+	if _, err := base64.StdEncoding.DecodeString(nonceTOTP); err != nil {
+		return errors.New("invalid TOTP nonce encoding")
 	}
-	// encrypt TOTP secret with derived key
-	nonce, ct, err := crypto.Encrypt([]byte(secret), key)
-	if err != nil {
-		return "", err
+	if _, err := base64.StdEncoding.DecodeString(encryptedTOTPSecret); err != nil {
+		return errors.New("invalid encrypted TOTP secret encoding")
+	}
+	if err := validateArgon2Params(params.Time, params.Memory, params.Threads, params.KeyLen); err != nil {
+		return err
 	}
 
 	vb := &types.VaultBlob{
-		Salt:                base64.StdEncoding.EncodeToString(salt),
-		Params:              types.Argon2Params{Time: params.Time, Memory: params.Memory, Threads: params.Threads, KeyLen: params.KeyLen},
-		NonceTOTP:           base64.StdEncoding.EncodeToString(nonce),
-		Ciphertext:          "", // private key not yet provided
-		EncryptedTOTPSecret: base64.StdEncoding.EncodeToString(ct),
+		Salt:                salt,
+		Params:              params,
+		NonceTOTP:           nonceTOTP,
+		EncryptedTOTPSecret: encryptedTOTPSecret,
 		KDFVersion:          "argon2id_v1",
-		FailedAttempts:      0,
-		LockedUntilUnix:     0,
-		PublicKey:           "",
 	}
 
 	if err := k.setVault(ctx, owner, vb); err != nil {
-		return "", err
+		return err
 	}
-	return uri, nil
+	k.emitEvent(ctx, types.EventTypeVaultSetup, owner)
+	return nil
 }
 
-// ConfirmVault stores the encrypted private key after verifying an initial TOTP code
-func (k Keeper) ConfirmVault(ctx context.Context, owner, password, totpCode string, privKey []byte) error {
+// ConfirmVault finalizes owner's vault by storing the client-encrypted
+// ed25519 private key and its (non-sensitive) public key. The client only
+// calls this after decrypting its own just-submitted TOTP secret locally
+// and confirming the user saved a working authenticator entry — the chain
+// has no way to verify that itself without the plaintext secret, so it
+// isn't asked to.
+func (k Keeper) ConfirmVault(ctx context.Context, owner, noncePriv, ciphertext, publicKey string) error {
 	vb, err := k.getVault(ctx, owner)
 	if err != nil {
 		return err
@@ -126,194 +153,56 @@ func (k Keeper) ConfirmVault(ctx context.Context, owner, password, totpCode stri
 	if vb == nil {
 		return errors.New("vault not initialized")
 	}
-	// derive key
-	salt, err := base64.StdEncoding.DecodeString(vb.Salt)
-	if err != nil {
-		return errors.New("invalid vault salt encoding")
+	if vb.Ciphertext != "" {
+		return errors.New("vault already confirmed")
 	}
-	params := crypto.Argon2Params{Time: vb.Params.Time, Memory: vb.Params.Memory, Threads: vb.Params.Threads, KeyLen: vb.Params.KeyLen}
-	key := crypto.DeriveKey(password, salt, crypto.Argon2Params{Time: params.Time, Memory: params.Memory, Threads: params.Threads, KeyLen: params.KeyLen})
-
-	// decrypt TOTP secret (use dedicated nonce)
-	ct, err := base64.StdEncoding.DecodeString(vb.EncryptedTOTPSecret)
-	if err != nil {
-		return errors.New("invalid TOTP secret encoding")
+	if _, err := base64.StdEncoding.DecodeString(noncePriv); err != nil {
+		return errors.New("invalid private-key nonce encoding")
 	}
-	nonceTOTP, err := base64.StdEncoding.DecodeString(vb.NonceTOTP)
-	if err != nil {
-		return errors.New("invalid TOTP nonce encoding")
+	if _, err := base64.StdEncoding.DecodeString(ciphertext); err != nil {
+		return errors.New("invalid ciphertext encoding")
 	}
-	secretBytes, err := crypto.Decrypt(nonceTOTP, ct, key)
+	pubBytes, err := base64.StdEncoding.DecodeString(publicKey)
 	if err != nil {
-		return err
+		return errors.New("invalid public key encoding")
 	}
-	secret := string(secretBytes)
-	// verify TOTP
-	if !crypto.VerifyTOTPCode(secret, totpCode) {
-		return errors.New("invalid totp code")
+	if len(pubBytes) != 32 { // ed25519.PublicKeySize
+		return errors.New("public key must be an ed25519 public key")
 	}
 
-	// encrypt private key with derived key
-	n2, c2, err := crypto.Encrypt(privKey, key)
-	if err != nil {
-		return err
-	}
-	// compute public key for ed25519
-	if len(privKey) != ed25519.PrivateKeySize {
-		return errors.New("private key must be ed25519 private key bytes")
-	}
-	pub := ed25519.PrivateKey(privKey).Public().(ed25519.PublicKey)
+	vb.NoncePriv = noncePriv
+	vb.Ciphertext = ciphertext
+	vb.PublicKey = publicKey
 
-	vb.NoncePriv = base64.StdEncoding.EncodeToString(n2)
-	vb.Ciphertext = base64.StdEncoding.EncodeToString(c2)
-	vb.PublicKey = base64.StdEncoding.EncodeToString(pub)
-
-	return k.setVault(ctx, owner, vb)
-}
-
-// emitUnlockFailed emits vault_unlock_failed (and vault_locked, once the
-// lockout threshold is crossed) so a burst of failed unlock attempts against
-// a custody vault — a brute-force signal — is visible to any chain event
-// listener instead of only being reflected in KV state nothing observes.
-func (k Keeper) emitUnlockFailed(sdkCtx sdk.Context, owner string, vb *types.VaultBlob, reason string) {
-	sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
-		types.EventTypeVaultUnlockFailed,
-		sdk.NewAttribute(types.AttributeKeyOwner, owner),
-		sdk.NewAttribute(types.AttributeKeyReason, reason),
-		sdk.NewAttribute(types.AttributeKeyFailedAttempts, strconv.Itoa(vb.FailedAttempts)),
-	))
-	if vb.LockedUntilUnix > 0 {
-		sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
-			types.EventTypeVaultLocked,
-			sdk.NewAttribute(types.AttributeKeyOwner, owner),
-			sdk.NewAttribute(types.AttributeKeyLockedUntil, strconv.FormatInt(vb.LockedUntilUnix, 10)),
-		))
-	}
-}
-
-// UnlockAndSign verifies password+TOTP, decrypts private key in-memory, signs message and returns signature.
-func (k Keeper) UnlockAndSign(ctx context.Context, owner, password, totpCode string, message []byte) ([]byte, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	vb, err := k.getVault(ctx, owner)
-	if err != nil {
-		return nil, err
-	}
-	if vb == nil {
-		return nil, errors.New("vault not initialized")
-	}
-	// check locked
-	if vb.LockedUntilUnix > sdkCtx.BlockTime().Unix() {
-		sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
-			types.EventTypeVaultUnlockRejected,
-			sdk.NewAttribute(types.AttributeKeyOwner, owner),
-			sdk.NewAttribute(types.AttributeKeyLockedUntil, strconv.FormatInt(vb.LockedUntilUnix, 10)),
-		))
-		return nil, errors.New("vault locked due to failed attempts")
-	}
-	salt, err := base64.StdEncoding.DecodeString(vb.Salt)
-	if err != nil {
-		return nil, errors.New("invalid vault salt encoding")
-	}
-	// Use stored vault params instead of defaults
-	params := crypto.Argon2Params{Time: vb.Params.Time, Memory: vb.Params.Memory, Threads: vb.Params.Threads, KeyLen: vb.Params.KeyLen}
-	key := crypto.DeriveKey(password, salt, params)
-
-	// decrypt TOTP secret (use dedicated nonce)
-	ctT, err := base64.StdEncoding.DecodeString(vb.EncryptedTOTPSecret)
-	if err != nil {
-		return nil, errors.New("invalid TOTP secret encoding")
-	}
-	nonceT, err := base64.StdEncoding.DecodeString(vb.NonceTOTP)
-	if err != nil {
-		return nil, errors.New("invalid TOTP nonce encoding")
-	}
-	secretBytes, err := crypto.Decrypt(nonceT, ctT, key)
-	if err != nil {
-		vb.FailedAttempts++
-		if err := k.setVault(ctx, owner, vb); err != nil {
-			sdkCtx.Logger().Error("Failed to update vault failed attempts after decryption error", "error", err)
-		}
-		k.emitUnlockFailed(sdkCtx, owner, vb, "decryption_error")
-		return nil, errors.New("invalid credentials")
-	}
-	if !crypto.VerifyTOTPCode(string(secretBytes), totpCode) {
-		vb.FailedAttempts++
-		if vb.FailedAttempts >= 5 {
-			vb.LockedUntilUnix = sdkCtx.BlockTime().Add(5 * time.Minute).Unix()
-		}
-
-		if err := k.setVault(ctx, owner, vb); err != nil {
-			sdkCtx.Logger().Error("Failed to update vault failed attempts after invalid TOTP", "error", err)
-		}
-		k.emitUnlockFailed(sdkCtx, owner, vb, "invalid_totp")
-		return nil, errors.New("invalid totp code")
-	}
-
-	// decrypt private key (use dedicated nonce)
-	ctPriv, err := base64.StdEncoding.DecodeString(vb.Ciphertext)
-	if err != nil {
-		return nil, errors.New("invalid private key ciphertext encoding")
-	}
-	noncePriv, err := base64.StdEncoding.DecodeString(vb.NoncePriv)
-	if err != nil {
-		return nil, errors.New("invalid private key nonce encoding")
-	}
-	privBytes, err := crypto.Decrypt(noncePriv, ctPriv, key)
-	if err != nil {
-		return nil, err
-	}
-	if len(privBytes) != ed25519.PrivateKeySize {
-		return nil, errors.New("stored private key has invalid length")
-	}
-	sig := ed25519.Sign(ed25519.PrivateKey(privBytes), message)
-
-	// reset failed attempts on success
-	vb.FailedAttempts = 0
-	vb.LockedUntilUnix = 0
 	if err := k.setVault(ctx, owner, vb); err != nil {
-		sdkCtx.Logger().Error("Failed to reset vault failed attempts on success", "error", err)
+		return err
 	}
-
-	return sig, nil
+	k.emitEvent(ctx, types.EventTypeVaultConfirmed, owner)
+	return nil
 }
 
-// DisableVault removes owner's vault record
-func (k Keeper) DisableVault(ctx context.Context, owner, password, totpCode string) error {
+// DisableVault deletes owner's vault record. Authorization is the normal
+// Cosmos Msg signer check (msg.GetSigners() requires owner's own signature)
+// — there's no additional password/TOTP factor to check here since, as
+// with setup/confirm, the chain can't verify either without seeing them in
+// the clear.
+func (k Keeper) DisableVault(ctx context.Context, owner string) error {
 	vb, err := k.getVault(ctx, owner)
 	if err != nil {
 		return err
 	}
 	if vb == nil {
 		return errors.New("vault not initialized")
-	}
-	// verify password+totp as in UnlockAndSign but simpler: attempt to decrypt TOTP
-	salt, err := base64.StdEncoding.DecodeString(vb.Salt)
-	if err != nil {
-		return errors.New("invalid vault salt encoding")
-	}
-	// Use stored vault params instead of defaults
-	params := crypto.Argon2Params{Time: vb.Params.Time, Memory: vb.Params.Memory, Threads: vb.Params.Threads, KeyLen: vb.Params.KeyLen}
-	key := crypto.DeriveKey(password, salt, params)
-	ctT, err := base64.StdEncoding.DecodeString(vb.EncryptedTOTPSecret)
-	if err != nil {
-		return errors.New("invalid TOTP secret encoding")
-	}
-	nonceT, err := base64.StdEncoding.DecodeString(vb.NonceTOTP)
-	if err != nil {
-		return errors.New("invalid TOTP nonce encoding")
-	}
-	secretBytes, err := crypto.Decrypt(nonceT, ctT, key)
-	if err != nil {
-		return errors.New("invalid credentials")
-	}
-	if !crypto.VerifyTOTPCode(string(secretBytes), totpCode) {
-		return errors.New("invalid credentials")
 	}
 	s, err := k.kvStore(ctx)
 	if err != nil {
 		return err
 	}
-	return s.Delete(types.VaultKeyFor(owner))
+	if err := s.Delete(types.VaultKeyFor(owner)); err != nil {
+		return err
+	}
+	k.emitEvent(ctx, types.EventTypeVaultDisabled, owner)
+	return nil
 }
 
 func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) error {

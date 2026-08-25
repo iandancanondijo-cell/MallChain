@@ -65,6 +65,35 @@ const backendErrorsTotal = new promClient.Counter({
   registers: [register],
 });
 
+// Socket.IO error counter — socket errors used to only reach a console log,
+// invisible to the same alerting/dashboards every other error path feeds.
+const socketErrorsTotal = new promClient.Counter({
+  name: 'socket_errors_total',
+  help: 'Total number of Socket.IO connection errors',
+  registers: [register],
+});
+
+// Socket.IO room-subscription rejections — counts attempts blocked by the
+// per-socket room cap (see index.js's joinRoomWithCap), a signal for
+// runaway/abusive subscription behavior worth alerting on separately from
+// ordinary auth/validation rejections.
+const socketRoomCapRejectionsTotal = new promClient.Counter({
+  name: 'socket_room_cap_rejections_total',
+  help: 'Total number of room-subscription attempts rejected by the per-socket room cap',
+  registers: [register],
+});
+
+// Liquidity pool activity lifecycle — one increment per stage transition
+// recorded in LiquidityPoolActivity (buy/withdraw/reconciliation/mallpoints
+// flows), so buy success rate / payout latency / conversion failures are
+// visible on dashboards instead of only queryable from Mongo after the fact.
+const liquidityActivityTotal = new promClient.Counter({
+  name: 'liquidity_activity_total',
+  help: 'Total number of LiquidityPoolActivity records by flow/stage/status',
+  labelNames: ['flow', 'stage', 'status'],
+  registers: [register],
+});
+
 // Middleware to track HTTP requests
 function metricsMiddleware(req, res, next) {
   const start = Date.now();
@@ -94,4 +123,7 @@ module.exports = {
   transactionsProcessedTotal,
   paymentFailuresTotal,
   backendErrorsTotal,
+  socketErrorsTotal,
+  socketRoomCapRejectionsTotal,
+  liquidityActivityTotal,
 };

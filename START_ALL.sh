@@ -41,6 +41,19 @@ if [[ ! -x "$BINARY" ]]; then
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
+# STEP 1.5: Clean stale atomic-write temp files left behind by a crashed
+# CometBFT process (write-file-atomic-* in config/), and recreate
+# priv_validator_state.json if a prior crash deleted it mid-write.
+# ──────────────────────────────────────────────────────────────────────────────
+rm -f "${CHAIN_HOME}"/config/write-file-atomic-*
+VAL_STATE="${CHAIN_HOME}/data/priv_validator_state.json"
+if [[ ! -f "$VAL_STATE" ]]; then
+    echo "⚠️  priv_validator_state.json missing. Recreating default state..."
+    mkdir -p "${CHAIN_HOME}/data"
+    printf '{\n  "height": "0",\n  "round": 0,\n  "step": 0\n}\n' > "$VAL_STATE"
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
 # STEP 2: Validate genesis integrity — repair without touching wallets
 # ──────────────────────────────────────────────────────────────────────────────
 echo "Validating genesis..."

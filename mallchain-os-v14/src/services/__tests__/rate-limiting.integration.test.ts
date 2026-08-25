@@ -563,7 +563,7 @@ describe('Task 14.4: Rate Limiting Integration Tests', () => {
       rateLimitSimulator.enable();
 
       const endpoint = '/api/market';
-      let attempt = 1;
+      const attempt = 1;
 
       // Mock for tracking attempts
       global.fetch = vi.fn(async (url: string) => {

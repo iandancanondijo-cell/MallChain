@@ -9,6 +9,7 @@ import {
   ValidatorCreateTxError,
   type GeneratedConsensusKey,
 } from '../../services/validatorCreateTx';
+import { requestMnemonic } from '../../services/mnemonicAccess';
 
 const STAKE_DECIMALS = 6;
 const toBaseUnits = (display: string) => Math.floor(Number(display || '0') * 10 ** STAKE_DECIMALS).toString();
@@ -71,11 +72,13 @@ export default function ValidatorsProfile() {
 
   const activate = async () => {
     if (!application || !genKey || !address) return;
-    if (!st.wallet.mnemonic) return toast('Wallet not connected', false);
+    if (!st.wallet.pinEncryptedMnemonic) return toast('Wallet not connected', false);
+    const mnemonic = await requestMnemonic();
+    if (!mnemonic) return;
     setActivating(true);
     try {
       const result = await createValidatorSelfBond({
-        mnemonic: st.wallet.mnemonic,
+        mnemonic,
         fromAddress: address,
         moniker: application.moniker,
         website: application.website || '',

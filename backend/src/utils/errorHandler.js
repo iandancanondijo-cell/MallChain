@@ -164,15 +164,24 @@ function errorHandler() {
   return (err, req, res, next) => {
     let error = err
 
-    // Convert unknown errors to AppError
+    // Convert unknown errors to AppError. A generic thrown error can still
+    // carry a real HTTP status (e.g. body-parser's PayloadTooLargeError sets
+    // status/statusCode to 413) — preserve it instead of forcing every
+    // non-AppError to 500, which would turn a legitimate 4xx into a
+    // misleading 500 the moment a route not already using AppError directly
+    // hits this handler.
     if (!(err instanceof AppError)) {
+      const isProduction = process.env.NODE_ENV === 'production'
       error = new AppError(
         ErrorCodes.INTERNAL_ERROR,
-        err.message,
-        500,
-        {
-          originalError: err.message?.substring(0, 100),
-        }
+        // A raw driver/library error message can contain connection
+        // strings, file paths, or field values (e.g. a Mongo duplicate-key
+        // error echoes the offending document). Never forward that to the
+        // client in production — the full message still reaches the log
+        // call below either way.
+        isProduction ? MessageMap[ErrorCodes.INTERNAL_ERROR] || 'Internal server error' : err.message,
+        err.statusCode || err.status || 500,
+        isProduction ? {} : { originalError: err.message?.substring(0, 100) }
       )
     }
 

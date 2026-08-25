@@ -1,11 +1,10 @@
 /**
  * Security Service
  * Handles PIN hashing/verification, mnemonic encryption/decryption, and biometric operations
- * Uses bcryptjs for PIN security and crypto-js for mnemonic encryption
+ * Uses bcryptjs for PIN hashing and the Web Crypto API (PBKDF2 + AES-GCM) for mnemonic encryption
  */
 
 import bcrypt from 'bcryptjs';
-import CryptoJS from 'crypto-js';
 
 /**
  * Type definitions for security operations
@@ -39,7 +38,37 @@ export interface DecryptionResult {
 const PIN_SALT_ROUNDS = 10;
 const PIN_MIN_LENGTH = 4;
 const PIN_MAX_LENGTH = 8;
-const ENCRYPTION_ALGORITHM = 'AES';
+// PBKDF2 iterations for PIN-based key derivation. OWASP recommends >=100k
+// for PBKDF2-SHA256; this used to be 100 (a hardcoded, non-random salt made
+// it worse — every user shared the same salt, so a single precomputed table
+// covered every account). Matches the iteration count WalletFlow.tsx's own
+// vault encryption already used.
+const PBKDF2_ITERATIONS = 250_000;
+
+function bufToB64(buf: ArrayBuffer | Uint8Array): string {
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+function b64ToBuf(b64: string): Uint8Array {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function deriveAesKey(pin: string, salt: Uint8Array): Promise<CryptoKey> {
+  const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), { name: 'PBKDF2' }, false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: salt as BufferSource, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
 
 /**
  * Validate PIN format
@@ -173,18 +202,20 @@ export async function encryptMnemonic(mnemonic: string, pin: string): Promise<En
       };
     }
 
-    // Use PIN as encryption key (stretched for security)
-    const key = CryptoJS.PBKDF2(pin, 'mallchain_salt_v1', {
-      keySize: 256 / 32,
-      iterations: 100,
-    }).toString();
-
-    // Encrypt mnemonic
-    const encrypted = CryptoJS.AES.encrypt(mnemonic, key).toString();
+    // Fresh random salt + IV every call (unlike the old hardcoded
+    // 'mallchain_salt_v1' shared by every user/every encryption) via
+    // AES-GCM, which also authenticates the ciphertext instead of just
+    // encrypting it. Encoded as saltB64.ivB64.cipherB64 so the single
+    // `encrypted` string this function has always returned still round-trips
+    // through decryptMnemonic below.
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveAesKey(pin, salt);
+    const cipherBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(mnemonic));
 
     return {
       success: true,
-      encrypted,
+      encrypted: `${bufToB64(salt)}.${bufToB64(iv)}.${bufToB64(cipherBuf)}`,
     };
   } catch (error) {
     console.error('[Security] Error encrypting mnemonic:', error);
@@ -210,26 +241,35 @@ export async function decryptMnemonic(encrypted: string, pin: string): Promise<D
       };
     }
 
-    // Use PIN as decryption key (same derivation as encryption)
-    const key = CryptoJS.PBKDF2(pin, 'mallchain_salt_v1', {
-      keySize: 256 / 32,
-      iterations: 100,
-    }).toString();
-
-    // Decrypt mnemonic
-    const decrypted = CryptoJS.AES.decrypt(encrypted, key).toString(CryptoJS.enc.Utf8);
-
-    if (!decrypted) {
+    const parts = encrypted.split('.');
+    if (parts.length !== 3) {
       return {
         success: false,
         error: 'Failed to decrypt mnemonic. Verify PIN is correct.',
       };
     }
+    const [saltB64, ivB64, cipherB64] = parts;
+    const key = await deriveAesKey(pin, b64ToBuf(saltB64));
 
-    return {
-      success: true,
-      decrypted,
-    };
+    try {
+      const plainBuf = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: b64ToBuf(ivB64) as BufferSource },
+        key,
+        b64ToBuf(cipherB64) as BufferSource
+      );
+      return {
+        success: true,
+        decrypted: new TextDecoder().decode(plainBuf),
+      };
+    } catch {
+      // AES-GCM's authentication tag check fails (throws) on a wrong PIN or
+      // tampered ciphertext — this is the expected "wrong PIN" path, not an
+      // unexpected error.
+      return {
+        success: false,
+        error: 'Failed to decrypt mnemonic. Verify PIN is correct.',
+      };
+    }
   } catch (error) {
     console.error('[Security] Error decrypting mnemonic:', error);
     return {
@@ -245,9 +285,10 @@ export async function decryptMnemonic(encrypted: string, pin: string): Promise<D
  */
 export function generateBackupCode(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const randomBytes = crypto.getRandomValues(new Uint8Array(8));
   let code = '';
   for (let i = 0; i < 8; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += chars.charAt(randomBytes[i] % chars.length);
   }
   return code;
 }
@@ -286,7 +327,9 @@ export async function verifyBackupCode(code: string, hash: string): Promise<bool
  * @returns Unique session token
  */
 export function generateSessionToken(): string {
-  return `session_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+  const randomBytes = crypto.getRandomValues(new Uint8Array(16));
+  const randomHex = Array.from(randomBytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `session_${Date.now()}_${randomHex}`;
 }
 
 /**

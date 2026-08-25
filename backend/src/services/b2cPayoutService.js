@@ -115,7 +115,7 @@ async function initiateB2CPayout({ sellerPhone, mlcnsAmount, saleId }) {
 
 async function handlePayoutCallback(callbackData) {
   const B2CPayout = require('../models/B2CPayout');
-  const MallcoinSale = require('../models/MalicoinSale');
+  const MallcoinSale = require('../models/MallcoinSale');
   const WithdrawalRequest = require('../models/WithdrawalRequest');
   const { recordWithdrawLiquidityActivity } = require('./liquidityActivityService');
   const result = callbackData?.Result || {};

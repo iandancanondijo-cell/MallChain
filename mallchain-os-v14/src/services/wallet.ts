@@ -50,12 +50,14 @@ export interface MnemonicValidationResult {
 }
 
 /**
- * Generate a new 12-word BIP39 mnemonic
- * @returns 12-word mnemonic string
+ * Generate a new BIP39 mnemonic, entirely client-side — the phrase never
+ * transits the network, unlike the old POST /api/wallet/generate-mnemonic.
+ * @param wordCount - 12 (128 bits) or 24 (256 bits, matching the signup flow's convention)
+ * @returns mnemonic string
  */
-export function generateNewMnemonic(): string {
+export function generateNewMnemonic(wordCount: 12 | 24 = 12): string {
   try {
-    return generateMnemonic(128); // 128 bits = 12 words
+    return generateMnemonic(wordCount === 24 ? 256 : 128);
   } catch (error) {
     console.error('[Wallet] Error generating mnemonic:', error);
     throw new Error('Failed to generate mnemonic. Please try again.');

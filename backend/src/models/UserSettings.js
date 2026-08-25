@@ -22,6 +22,7 @@ const UserSettingsSchema = new Schema({
       governance: { type: Boolean, default: true },
       marketing: { type: Boolean, default: false },
       security: { type: Boolean, default: true },
+      badgeAlerts: { type: Boolean, default: true },
     },
     push: {
       transactions: { type: Boolean, default: true },
@@ -29,6 +30,15 @@ const UserSettingsSchema = new Schema({
       governance: { type: Boolean, default: false },
       marketing: { type: Boolean, default: false },
       security: { type: Boolean, default: true },
+      badgeAlerts: { type: Boolean, default: true },
+    },
+    sms: {
+      transactions: { type: Boolean, default: false },
+      campaigns: { type: Boolean, default: false },
+      governance: { type: Boolean, default: false },
+      marketing: { type: Boolean, default: false },
+      security: { type: Boolean, default: false },
+      badgeAlerts: { type: Boolean, default: true },
     },
     frequency: { type: String, default: 'realtime' },
   },

@@ -3,6 +3,7 @@ package marketplace.badge.v1;
 
 import "amino/amino.proto";
 import "gogoproto/gogo.proto";
+import "cosmos_proto/cosmos.proto";
 
 option go_package = "github.com/tmp/marketplace/x/badge/types";
 
@@ -10,4 +11,12 @@ option go_package = "github.com/tmp/marketplace/x/badge/types";
 message Params {
   option (amino.name) = "marketplace/x/badge/Params";
   option (gogoproto.equal) = true;
+
+  // badge_issuer is the only address MsgIssueBadge will accept as `creator`.
+  // Empty means issuance is disabled (no address can issue badges) until a
+  // governance MsgUpdateParams sets one. Deliberately separate from the
+  // module's `authority` (which defaults to the gov module account and has
+  // no private key) so a regular operator hot-wallet can issue badges
+  // routinely without a governance vote per badge.
+  string badge_issuer = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
 }

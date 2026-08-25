@@ -9,8 +9,8 @@ import (
 
 	"cosmossdk.io/collections"
 	errorsmod "cosmossdk.io/errors"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"cosmossdk.io/math"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 func (k msgServer) TransferMallcoin(ctx context.Context, msg *types.MsgTransferMallcoin) (*types.MsgTransferMallcoinResponse, error) {
@@ -56,7 +56,7 @@ func (k msgServer) TransferMallcoin(ctx context.Context, msg *types.MsgTransferM
 	// Fee rate: 0.0097% = 0.000097
 	// Fee = amount * 0.000097 (minimum 1 base unit to ensure fee always applies)
 	// Scaled to avoid floating point: fee = amount * 97 / 10000000 (0.0097%)
-	feeRate := math.NewInt(97)   // basis points: 97e-6 = 0.0097%
+	feeRate := math.NewInt(97)        // basis points: 97e-6 = 0.0097%
 	feeDenom := math.NewInt(10000000) // 10 million for scaling
 	fee := amount.Mul(feeRate).Quo(feeDenom)
 	if fee.IsZero() && !amount.IsZero() {

@@ -16,6 +16,7 @@ jest.mock('../services/faucetService', () => ({
 }));
 
 const { creditMlcns, getFaucetStatus, fundGas } = require('../services/faucetService');
+const { errorHandler } = require('../utils/errorHandler');
 const faucetRoutes = require('../routes/faucet');
 
 describe('faucet routes', () => {
@@ -25,6 +26,10 @@ describe('faucet routes', () => {
     app = express();
     app.use(express.json());
     app.use('/api/faucet', faucetRoutes);
+    // Matches index.js's global error-handling middleware — faucetController.js
+    // now throws AppError/asyncHandler-caught errors instead of calling
+    // res.status().json() directly.
+    app.use(errorHandler());
   });
 
   // Note: /mlcns and /fund-gas share one rate limiter (10 req/min per IP —
@@ -52,7 +57,7 @@ describe('faucet routes', () => {
       const res = await request(app).get('/api/faucet/status');
 
       expect(res.status).toBe(500);
-      expect(res.body).toEqual({ error: 'redis unavailable' });
+      expect(res.body.error.message).toBe('redis unavailable');
     });
   });
 
@@ -61,7 +66,7 @@ describe('faucet routes', () => {
       const res = await request(app).post('/api/faucet/mlcns').send({ amountMlcns: 100 });
 
       expect(res.status).toBe(400);
-      expect(res.body).toEqual({ error: 'address is required' });
+      expect(res.body.error.message).toBe('address is required');
       expect(creditMlcns).not.toHaveBeenCalled();
     });
 
@@ -91,7 +96,7 @@ describe('faucet routes', () => {
         .send({ address: 'mall1recipient' });
 
       expect(res.status).toBe(429);
-      expect(res.body.error).toBe('Please wait before requesting again');
+      expect(res.body.error.message).toBe('Please wait before requesting again');
     });
 
     test('falls back to 500 and includes rawLog when the chain rejects the tx', async () => {
@@ -104,7 +109,8 @@ describe('faucet routes', () => {
         .send({ address: 'mall1recipient' });
 
       expect(res.status).toBe(500);
-      expect(res.body).toEqual({ error: 'out of gas', log: 'execute wasm contract failed: out of gas' });
+      expect(res.body.error.message).toBe('out of gas');
+      expect(res.body.error.details.log).toBe('execute wasm contract failed: out of gas');
     });
   });
 
@@ -113,7 +119,7 @@ describe('faucet routes', () => {
       const res = await request(app).post('/api/faucet/fund-gas').send({});
 
       expect(res.status).toBe(400);
-      expect(res.body).toEqual({ error: 'address is required' });
+      expect(res.body.error.message).toBe('address is required');
       expect(fundGas).not.toHaveBeenCalled();
     });
 
@@ -139,7 +145,7 @@ describe('faucet routes', () => {
         .send({ address: 'mall1recipient' });
 
       expect(res.status).toBe(403);
-      expect(res.body).toEqual({ error: 'faucet disabled' });
+      expect(res.body.error.message).toBe('faucet disabled');
     });
   });
 });

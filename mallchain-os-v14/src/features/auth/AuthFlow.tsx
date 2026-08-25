@@ -6,6 +6,9 @@ import { api } from '../../services/api';
 import { kycApi } from '../../services/kycApi';
 import { authService } from '../../services/auth';
 import { handleApiError } from '../../services/errorHandler';
+import { socketManager } from '../../services/socket';
+import { generateNewMnemonic, deriveAddressFromMnemonic } from '../../services/wallet';
+import { config, chain } from '../../services/config';
 import { useWizard } from '../../hooks/useWizard';
 import WalletFlow from '../wallet/WalletFlow';
 import { Mail, Lock, Eye, EyeOff, ArrowRight, Check, AlertTriangle, Sparkles, Shield, Zap, Globe, Upload, FileText, User, MapPin, Phone, Calendar, CreditCard, AlertCircle, ChevronRight, ChevronLeft } from 'lucide-react';
@@ -164,22 +167,15 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
     watchlist: false
   });
 
-  // Fetch mnemonic from backend when needed
+  // Generate the mnemonic entirely client-side — it never transits the
+  // network this way, unlike the old POST /api/wallet/generate-mnemonic.
   useEffect(() => {
-    const fetchMnemonic = async () => {
+    if (step === 1 && !mnemonic) {
       try {
-        const res = await api.post<{ success: boolean; mnemonic: string }>('/api/wallet/generate-mnemonic', {});
-        if (res.ok && res.data?.success) {
-          setMnemonic(res.data.mnemonic);
-        }
+        setMnemonic(generateNewMnemonic(24));
       } catch (err) {
         console.error('Failed to generate mnemonic:', err);
       }
-    };
-
-    // Only fetch when we're on wallet creation step (step 1) and don't have a mnemonic yet
-    if (step === 1 && !mnemonic) {
-      fetchMnemonic();
     }
   }, [step, mnemonic]);
 
@@ -203,28 +199,23 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         return;
       }
 
-      // Call backend to create wallet
-      const res = await api.post<{ success: boolean; address: string; accountId: string; chainId: string }>('/api/wallet/create', { mnemonic: mnemonicPhrase });
-      
-      if (res.ok && res.data?.success) {
-        setWalletAddress(res.data.address);
-        st.wallet.address = res.data.address;
-        st.wallet.accountId = res.data.accountId;
-        st.wallet.chainId = res.data.chainId;
-        st.wallet.mnemonic = mnemonicPhrase; // Store encrypted in production
-        st.wallet.createdAt = Date.now(); // Record wallet creation time
-        store.commit();
-        toast(`Wallet created — ${res.data.address.slice(0, 8)}...${res.data.address.slice(-6)}`);
-        setBusy(false);
-        setStep(2); // Go to security setup
-      } else {
-        setErr(res.error || 'Failed to create wallet');
-        setBusy(false);
-      }
+      // Derive the wallet address entirely client-side — the mnemonic never
+      // leaves the browser this way, unlike the old POST /api/wallet/create.
+      const info = await deriveAddressFromMnemonic(mnemonicPhrase);
+      setWalletAddress(info.address);
+      st.wallet.address = info.address;
+      st.wallet.accountId = info.address;
+      st.wallet.chainId = chain.chainId;
+      st.wallet.mnemonic = mnemonicPhrase; // Store encrypted in production
+      st.wallet.createdAt = Date.now(); // Record wallet creation time
+      store.commit();
+      toast(`Wallet created — ${info.address.slice(0, 8)}...${info.address.slice(-6)}`);
+      setBusy(false);
+      setStep(2); // Go to security setup
     } catch (err) {
       setErr('Failed to create wallet');
-      handleApiError({ ok: false, error: 'Wallet creation failed', code: 500 } as any, 
-        { action: 'creating wallet', endpoint: '/api/wallet/create' }, 
+      handleApiError({ ok: false, error: 'Wallet creation failed', code: 500 } as any,
+        { action: 'creating wallet', endpoint: 'client-side derivation' },
         false
       );
       setBusy(false);
@@ -323,6 +314,18 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
           role: u?.role || 'user',
         };
         store.commit();
+        // App.tsx's own subscribeUser() call only runs once, at boot — for
+        // a real signup/login within an already-open tab (no reload), that
+        // effect already ran and finished before this token existed, so it
+        // never fires again on its own. Without this, real-time
+        // notification push (badges, governance, etc.) would silently never
+        // activate for anyone who doesn't hard-refresh after signing up.
+        // reauth() first — the socket connected anonymously (no token yet)
+        // when App.tsx booted, and the backend's io.use() JWT middleware
+        // only reads the token at connection time, so subscribeUser() below
+        // would otherwise be rejected as unauthenticated.
+        socketManager.reauth();
+        if (u?.id) socketManager.subscribeUser(u.id);
         toast('Account created successfully!');
         setBusy(false);
         kyc.goTo('personal'); // Start KYC process
@@ -381,6 +384,12 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
           role: u?.role || 'user',
         };
         store.commit();
+        // See the matching comment in the signup branch above — App.tsx's
+        // boot-time subscribeUser() call has already run and won't fire
+        // again for a login that happens within an already-open tab, and
+        // reauth() is needed so the socket carries this session's token.
+        socketManager.reauth();
+        if (u?.id) socketManager.subscribeUser(u.id);
         toast('Welcome back to Mallchain!');
         setBusy(false);
         // Admin/superadmin credentials go straight to the admin control
@@ -1304,32 +1313,35 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
           </span>
           <div style={{ flex: 1, height: 1, background: 'var(--border-soft)' }} />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-          {[
-            { icon: Globe, name: 'Google', color: '#4285F4' },
-            { icon: Shield, name: 'Apple', color: '#000' },
-            { icon: Zap, name: 'GitHub', color: '#333' }
-          ].map((provider) => (
-            <button
-              key={provider.name}
-              onClick={() => toast(`${provider.name} login (demo)`)}
-              style={{
-                padding: 12,
-                background: 'var(--bg-2)',
-                border: '1px solid var(--border)',
-                borderRadius: 10,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.2s'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--gold)'}
-              onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
-            >
-              <provider.icon size={20} style={{ color: provider.color }} />
-            </button>
-          ))}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+          {/* Apple/GitHub removed — there's no backend OAuth support for
+              either (only Google has a real passport strategy wired up in
+              backend/src/routes/auth.js), so those buttons only ever showed
+              a "(demo)" toast. A button that can't do anything is worse than
+              no button. */}
+          <button
+            onClick={() => {
+              const ref = referralCode.trim();
+              window.location.href = `${config.apiBaseUrl}/api/auth/google${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`;
+            }}
+            style={{
+              padding: 12,
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 10,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--gold)'}
+            onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
+          >
+            <Globe size={20} style={{ color: '#4285F4' }} />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Continue with Google</span>
+          </button>
         </div>
       </motion.div>
 

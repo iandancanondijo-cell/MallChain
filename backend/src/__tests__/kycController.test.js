@@ -18,6 +18,15 @@ const KYC = require('../models/kyc');
 const User = require('../models/user');
 const kycCtrl = require('../controllers/kycController');
 
+// kycController.js's exports are now asyncHandler-wrapped (see errorHandler.js):
+// error paths throw AppError instead of calling res.status().json() directly,
+// and asyncHandler's rejection handler calls next(err) rather than replying
+// itself. This test file calls controllers directly (no Express app/router),
+// so error-path assertions need a next mock instead of res.status/json.
+function mockNext() {
+  return jest.fn();
+}
+
 function mockRes() {
   return {
     status: jest.fn().mockReturnThis(),
@@ -58,9 +67,9 @@ describe('kycController', () => {
     test('rejects when no file was uploaded', async () => {
       const req = { file: undefined };
       const res = mockRes();
-      await kycCtrl.uploadDocument(req, res);
-      expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith({ error: 'No document uploaded' });
+      const next = mockNext();
+      await kycCtrl.uploadDocument(req, res, next);
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400, message: 'No document uploaded' }));
     });
 
     test('returns the stored filename as documentRef', async () => {
@@ -76,16 +85,18 @@ describe('kycController', () => {
       KYC.findById.mockResolvedValue(null);
       const req = { params: { kycId: 'nope' }, user: { id: 'u1' } };
       const res = mockRes();
-      await kycCtrl.getDocument(req, res);
-      expect(res.status).toHaveBeenCalledWith(404);
+      const next = mockNext();
+      await kycCtrl.getDocument(req, res, next);
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 404 }));
     });
 
     test('forbids a caller who is neither the owner nor an admin', async () => {
       KYC.findById.mockResolvedValue({ userId: 'owner1', idDocumentUrl: 'owner1-1-id.png' });
       const req = { params: { kycId: 'k1' }, user: { id: 'stranger', role: 'user' } };
       const res = mockRes();
-      await kycCtrl.getDocument(req, res);
-      expect(res.status).toHaveBeenCalledWith(403);
+      const next = mockNext();
+      await kycCtrl.getDocument(req, res, next);
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 403 }));
       expect(res.sendFile).not.toHaveBeenCalled();
     });
 
@@ -93,8 +104,9 @@ describe('kycController', () => {
       KYC.findById.mockResolvedValue({ userId: 'owner1', idDocumentUrl: null });
       const req = { params: { kycId: 'k1' }, user: { id: 'owner1' } };
       const res = mockRes();
-      await kycCtrl.getDocument(req, res);
-      expect(res.status).toHaveBeenCalledWith(404);
+      const next = mockNext();
+      await kycCtrl.getDocument(req, res, next);
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 404 }));
     });
 
     test('lets the owner stream their own document', async () => {
@@ -134,8 +146,9 @@ describe('kycController', () => {
     test('401s when unauthenticated', async () => {
       const req = { user: undefined, body: validKycBody() };
       const res = mockRes();
-      await kycCtrl.submitKYC(req, res);
-      expect(res.status).toHaveBeenCalledWith(401);
+      const next = mockNext();
+      await kycCtrl.submitKYC(req, res, next);
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 401 }));
       expect(KYC.create).not.toHaveBeenCalled();
     });
 
@@ -145,8 +158,9 @@ describe('kycController', () => {
         body: validKycBody({ idDocumentUrl: 'someoneElse-111-id.png' }),
       };
       const res = mockRes();
-      await kycCtrl.submitKYC(req, res);
-      expect(res.status).toHaveBeenCalledWith(403);
+      const next = mockNext();
+      await kycCtrl.submitKYC(req, res, next);
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 403 }));
       expect(KYC.create).not.toHaveBeenCalled();
     });
 
@@ -154,8 +168,9 @@ describe('kycController', () => {
       KYC.findOne.mockResolvedValue({ _id: 'existing', status: 'pending' });
       const req = { user: { id: 'u1' }, body: validKycBody() };
       const res = mockRes();
-      await kycCtrl.submitKYC(req, res);
-      expect(res.status).toHaveBeenCalledWith(400);
+      const next = mockNext();
+      await kycCtrl.submitKYC(req, res, next);
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }));
       expect(KYC.create).not.toHaveBeenCalled();
     });
 
@@ -208,8 +223,10 @@ describe('kycController', () => {
       KYC.create.mockRejectedValue(new Error('db down'));
       const req = { user: { id: 'u1' }, body: validKycBody() };
       const res = mockRes();
-      await kycCtrl.submitKYC(req, res);
-      expect(res.status).toHaveBeenCalledWith(500);
+      const next = mockNext();
+      await kycCtrl.submitKYC(req, res, next);
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 500, message: 'Failed to submit KYC' }));
+      expect(next.mock.calls[0][0].message).not.toContain('db down');
     });
   });
 
@@ -217,8 +234,9 @@ describe('kycController', () => {
     test('401s when unauthenticated', async () => {
       const req = { user: undefined, body: {} };
       const res = mockRes();
-      await kycCtrl.runAMLCheck(req, res);
-      expect(res.status).toHaveBeenCalledWith(401);
+      const next = mockNext();
+      await kycCtrl.runAMLCheck(req, res, next);
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 401 }));
     });
 
     test('upserts the risk profile without altering KYC status', async () => {
@@ -247,8 +265,9 @@ describe('kycController', () => {
     test('401s when unauthenticated', async () => {
       const req = { user: undefined };
       const res = mockRes();
-      await kycCtrl.getKYCStatus(req, res);
-      expect(res.status).toHaveBeenCalledWith(401);
+      const next = mockNext();
+      await kycCtrl.getKYCStatus(req, res, next);
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 401 }));
     });
 
     test('reports not_submitted when no KYC record exists', async () => {

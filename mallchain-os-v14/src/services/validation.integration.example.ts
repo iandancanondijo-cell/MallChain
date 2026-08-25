@@ -124,8 +124,7 @@ export class PasswordFieldController {
     const strength = calculatePasswordStrength(password);
     this.strength = strength;
 
-    // Generate display info
-    const { getStrengthStars, getStrengthColor } = require('./validation');
+    // Generate display info (getStrengthStars/getStrengthColor imported above)
 
     return {
       strength,

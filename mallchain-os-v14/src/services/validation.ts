@@ -53,7 +53,7 @@ const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z0-9-]+$/;
 const PASSWORD_UPPERCASE = /[A-Z]/;
 const PASSWORD_LOWERCASE = /[a-z]/;
 const PASSWORD_NUMBER = /\d/;
-const PASSWORD_SYMBOL = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/;
+const PASSWORD_SYMBOL = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/;
 
 // Task 4.4: PIN pattern - 4-8 digits
 const PIN_PATTERN = /^\d{4,8}$/;

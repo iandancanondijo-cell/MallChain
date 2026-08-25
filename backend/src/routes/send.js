@@ -4,7 +4,14 @@ const sendCtrl = require('../controllers/sendController');
 const { validate, schemas } = require('../middleware/validation');
 const { preventNoSQLInjection, sanitizeInputs, limitPayloadSize, validateQuery } = require('../middleware/inputValidation');
 const { asyncHandler } = require('../utils/errorHandler');
+const { createUserLimiter } = require('../middleware/rateLimiter');
 const Joi = require('joi');
+
+// Keyed by the signing wallet address (from req.body.from), not just IP —
+// these broadcast routes run with no auth middleware (client signs, backend
+// just relays), so IP alone is bypassable by rotating source IPs against
+// one wallet. Same budget as the old limiters.financial (20/15min).
+const financialLimiter = createUserLimiter({ windowMs: 15 * 60 * 1000, max: 20, message: { error: 'rate_limit_exceeded', message: 'Too many financial operations. Please try again later.' } });
 
 // Task 8.6: Apply input validation to send routes to prevent NoSQL injection and XSS
 // Query parameter validation schemas
@@ -30,16 +37,18 @@ const addressParamSchema = Joi.object({
 });
 
 // Send mallcoins from one wallet to another
-router.post('/mallcoins', 
+router.post('/mallcoins',
+  financialLimiter,
   limitPayloadSize(0.5),
   preventNoSQLInjection,
   sanitizeInputs,
-  validate(schemas.transfer), 
+  validate(schemas.transfer),
   asyncHandler(sendCtrl.sendMallcoins)
 );
 
 // Pay for something using mallcoins
-router.post('/payment', 
+router.post('/payment',
+  financialLimiter,
   limitPayloadSize(0.5),
   preventNoSQLInjection,
   sanitizeInputs,
@@ -80,7 +89,8 @@ router.get('/mlcns/validate/:address',
   asyncHandler(sendCtrl.validateMlcnsRecipient)
 );
 
-router.post('/mlcns/transfer', 
+router.post('/mlcns/transfer',
+  financialLimiter,
   limitPayloadSize(0.5),
   preventNoSQLInjection,
   sanitizeInputs,

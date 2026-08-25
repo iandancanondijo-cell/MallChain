@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package marketplace.dex.v1;
+
+import "gogoproto/gogo.proto";
+import "cosmos/base/v1beta1/coin.proto";
+import "cosmos_proto/cosmos.proto";
+
+option go_package = "marketplace/x/dex/types";
+
+// Pool represents a liquidity pool
+message Pool {
+  // id defines the unique id of the pool.
+  uint64 id = 1;
+
+  // token_a_denom is the denomination of token A.
+  string token_a_denom = 2;
+
+  // token_b_denom is the denomination of token B.
+  string token_b_denom = 3;
+
+  // token_a_reserve is the current reserve of token A.
+  cosmos.base.v1beta1.Coin token_a_reserve = 4 [(gogoproto.nullable) = false];
+
+  // token_b_reserve is the current reserve of token B.
+  cosmos.base.v1beta1.Coin token_b_reserve = 5 [(gogoproto.nullable) = false];
+
+  // total_liquidity is the total liquidity tokens minted for this pool.
+  cosmos.base.v1beta1.Coin total_liquidity = 6 [(gogoproto.nullable) = false];
+
+  // fee is the swap fee (e.g., 0.003 for 0.3%).
+  string fee = 7;
+
+  // creator is the address that created the pool.
+  string creator = 8 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+}
+
+// Params defines the parameters for the dex module
+message Params {
+  // default_fee is the default swap fee for new pools.
+  string default_fee = 1;
+
+  // min_liquidity is the minimum liquidity required to create a pool.
+  uint64 min_liquidity = 2;
+
+  // max_fee is the maximum allowed swap fee.
+  string max_fee = 3;
+
+  // min_fee is the minimum allowed swap fee.
+  string min_fee = 4;
+
+  // max_pool_drain_percent is the maximum percentage of a pool's reserves that can be drained in a single transaction.
+  uint32 max_pool_drain_percent = 5;
+}
+
+// GenesisState defines the dex module's genesis state.
+message GenesisState {
+  // params defines the parameters of the module.
+  Params params = 1 [(gogoproto.nullable) = false];
+
+  // pools defines all the pools present at genesis.
+  repeated Pool pools = 2 [(gogoproto.nullable) = false];
+
+  // next_pool_id is the next available pool ID.
+  uint64 next_pool_id = 3;
+}

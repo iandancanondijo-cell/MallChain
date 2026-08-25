@@ -47,6 +47,7 @@ import Settings from './features/settings/Settings';
 import Profile from './features/profile/Profile';
 import Contracts from './features/contracts/Contracts';
 import DevHub from './features/devhub/DevHub';
+import SearchResults from './features/search/SearchResults';
 
 /* routes: specific-before-generic */
 export interface RouteDef {
@@ -108,7 +109,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/notifications', render: () => <NotificationsView /> },
   { path: '/analytics', render: () => <AnalyticsView /> },
   { path: '/help', render: () => <Help /> },
-  { path: '/search', render: (n) => <Dashboard navigate={n} /> },
+  { path: '/search', render: (n) => <SearchResults navigate={n} /> },
   { path: '/activity', render: (n) => <Dashboard navigate={n} /> },
 ];
 

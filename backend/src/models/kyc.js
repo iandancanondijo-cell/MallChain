@@ -35,7 +35,11 @@ const KYCSchema = new Schema({
     sanctions: { type: Boolean, default: false },
     pep: { type: Boolean, default: false },
     adverseMedia: { type: Boolean, default: false },
-    watchlist: { type: Boolean, default: false }
+    watchlist: { type: Boolean, default: false },
+    // 'mock' until a real provider is configured (services/amlProvider.js) —
+    // provider/raw form the audit trail of which screening actually ran.
+    provider: { type: String, default: 'mock' },
+    raw: { type: Schema.Types.Mixed, default: null }
   },
   
   // Status

@@ -9,6 +9,7 @@ const TaskSubmission = require('../models/TaskSubmission');
 const LiquidityReconciliation = require('../models/LiquidityReconciliation');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/adminAuth');
+const { invalidateCachedUser } = require('../middleware/authCache');
 const { BurnPolicy, DynamicBurnThreshold } = require('../models/BurnPolicy');
 const TreasuryLedger = require('../models/TreasuryLedger');
 const { notify } = require('../services/notify');
@@ -16,11 +17,17 @@ const MaintenanceMode = require('../models/MaintenanceMode');
 const { invalidateCache: invalidateMaintenanceCache } = require('../middleware/maintenanceMode');
 const Campaign = require('../models/Campaign');
 const WalletTransaction = require('../models/WalletTransaction');
+const BadgePurchase = require('../models/BadgePurchase');
+const BadgeIssuance = require('../models/BadgeIssuance');
+const { getUserBadgeInfo } = require('../services/badgeService');
+const { issueBadgeFromMnemonic } = require('../services/badgeTxBuilder');
+const { notifyUser } = require('../services/notify');
+const { limiters } = require('../middleware/rateLimiter');
 
-const MAINTENANCE_SCOPES = ['send', 'withdraw', 'buy', 'payment', 'marketplace', 'staking', 'vault'];
+const MAINTENANCE_SCOPES = ['send', 'withdraw', 'buy', 'payment', 'marketplace', 'staking', 'vault', 'key-vault', 'badge', 'dex'];
 
 // ============ BOOTSTRAP: Create first admin (only works when no admins exist) ============
-router.post('/bootstrap', async (req, res) => {
+router.post('/bootstrap', limiters.strict, async (req, res) => {
   try {
     const adminExists = await User.findOne({ role: { $in: ['admin', 'superadmin'] } });
     if (adminExists) {
@@ -153,7 +160,7 @@ router.get('/users/:id', async (req, res) => {
   }
 });
 
-router.put('/users/:id/role', requireSuperAdmin, async (req, res) => {
+router.put('/users/:id/role', requireSuperAdmin, limiters.strict, async (req, res) => {
   try {
     const { role } = req.body;
     if (!['user', 'admin', 'superadmin'].includes(role)) {
@@ -171,6 +178,7 @@ router.put('/users/:id/role', requireSuperAdmin, async (req, res) => {
     }
 
     const user = await User.findByIdAndUpdate(req.params.id, { $set: { role } }, { new: true }).select('-password');
+    await invalidateCachedUser(req.params.id);
 
     await auditLog('user_role_change', req.user, { targetUserId: req.params.id, newRole: role });
     notify(user._id, { kind: 'system', title: 'Account role updated', body: `Your account role is now ${role}` });
@@ -180,7 +188,7 @@ router.put('/users/:id/role', requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.put('/users/:id/ban', async (req, res) => {
+router.put('/users/:id/ban', limiters.strict, async (req, res) => {
   try {
     const { banned, reason } = req.body;
     const update = { banned: !!banned };
@@ -189,6 +197,7 @@ router.put('/users/:id/ban', async (req, res) => {
 
     const user = await User.findByIdAndUpdate(req.params.id, { $set: update }, { new: true }).select('-password');
     if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
+    await invalidateCachedUser(req.params.id);
 
     await auditLog('user_ban', req.user, { targetUserId: req.params.id, banned: !!banned, reason });
     notify(user._id, {
@@ -202,10 +211,11 @@ router.put('/users/:id/ban', async (req, res) => {
   }
 });
 
-router.delete('/users/:id', requireSuperAdmin, async (req, res) => {
+router.delete('/users/:id', requireSuperAdmin, limiters.strict, async (req, res) => {
   try {
     const user = await User.findByIdAndDelete(req.params.id).select('-password');
     if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
+    await invalidateCachedUser(req.params.id);
 
     await auditLog('user_delete', req.user, { targetUserId: req.params.id, email: user.email });
     return res.json({ ok: true, user });
@@ -235,7 +245,7 @@ router.get('/validators/applications', async (req, res) => {
   }
 });
 
-router.post('/validators/applications/:id/review', async (req, res) => {
+router.post('/validators/applications/:id/review', limiters.strict, async (req, res) => {
   try {
     const { action, notes } = req.body;
     if (!['approved', 'rejected'].includes(action)) {
@@ -292,7 +302,7 @@ router.get('/kyc/pending', async (req, res) => {
   }
 });
 
-router.post('/kyc/:id/review', async (req, res) => {
+router.post('/kyc/:id/review', limiters.strict, async (req, res) => {
   try {
     const { action, notes } = req.body;
     if (!['approved', 'rejected'].includes(action)) {
@@ -329,7 +339,7 @@ router.get('/treasury/policies', async (_req, res) => {
   }
 });
 
-router.post('/treasury/policies', async (req, res) => {
+router.post('/treasury/policies', limiters.strict, async (req, res) => {
   try {
     const { activity, burnPercentage, description, enabled } = req.body;
     if (!activity || typeof burnPercentage !== 'number') {
@@ -347,7 +357,7 @@ router.post('/treasury/policies', async (req, res) => {
   }
 });
 
-router.delete('/treasury/policies/:activity', async (req, res) => {
+router.delete('/treasury/policies/:activity', limiters.strict, async (req, res) => {
   try {
     const result = await BurnPolicy.deleteOne({ activity: req.params.activity });
     await auditLog('treasury_policy_delete', req.user, { activity: req.params.activity });
@@ -366,7 +376,7 @@ router.get('/treasury/dynamic-thresholds', async (_req, res) => {
   }
 });
 
-router.post('/treasury/dynamic-thresholds', async (req, res) => {
+router.post('/treasury/dynamic-thresholds', limiters.strict, async (req, res) => {
   try {
     const { activity, supplyThreshold, burnPercentage, order, enabled } = req.body;
     if (!activity || typeof supplyThreshold !== 'number' || typeof burnPercentage !== 'number') {
@@ -384,7 +394,7 @@ router.post('/treasury/dynamic-thresholds', async (req, res) => {
   }
 });
 
-router.delete('/treasury/dynamic-thresholds/:id', async (req, res) => {
+router.delete('/treasury/dynamic-thresholds/:id', limiters.strict, async (req, res) => {
   try {
     const result = await DynamicBurnThreshold.deleteOne({ _id: req.params.id });
     await auditLog('treasury_threshold_delete', req.user, { id: req.params.id });
@@ -459,7 +469,7 @@ router.get('/mining/submissions/pending', async (req, res) => {
   }
 });
 
-router.post('/mining/submissions/:id/approve', async (req, res) => {
+router.post('/mining/submissions/:id/approve', limiters.strict, async (req, res) => {
   try {
     const { rewardAmount } = req.body || {};
     const sub = await TaskSubmission.findById(req.params.id).lean();
@@ -492,7 +502,7 @@ router.post('/mining/submissions/:id/approve', async (req, res) => {
   }
 });
 
-router.post('/mining/submissions/:id/reject', async (req, res) => {
+router.post('/mining/submissions/:id/reject', limiters.strict, async (req, res) => {
   try {
     const { note } = req.body || {};
     const row = await TaskSubmission.findByIdAndUpdate(
@@ -508,7 +518,7 @@ router.post('/mining/submissions/:id/reject', async (req, res) => {
   }
 });
 
-router.put('/mining/campaigns/:id', async (req, res) => {
+router.put('/mining/campaigns/:id', limiters.strict, async (req, res) => {
   try {
     const row = await Campaign.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true }).lean();
     if (!row) return res.status(404).json({ ok: false, error: 'campaign not found' });
@@ -546,21 +556,25 @@ router.get('/governance/stats', async (_req, res) => {
 // ============ AUDIT LOG ============
 router.get('/audit', async (req, res) => {
   try {
-    const { action, actor, limit = 100 } = req.query;
+    const { action, actor, page = 0, limit = 100 } = req.query;
     const query = {};
     if (action) query.action = action;
     if (actor) query.actor = { $regex: actor, $options: 'i' };
 
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 1000);
-    const logs = await AuditLog.find(query).sort({ createdAt: -1 }).limit(safeLimit).lean();
-    return res.json({ ok: true, logs });
+    const skip = Math.max(Number(page) || 0, 0) * safeLimit;
+    const [logs, total] = await Promise.all([
+      AuditLog.find(query).sort({ createdAt: -1 }).skip(skip).limit(safeLimit).lean(),
+      AuditLog.countDocuments(query),
+    ]);
+    return res.json({ ok: true, logs, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 // ============ SYSTEM OPERATIONS ============
-router.post('/reconcile', async (req, res) => {
+router.post('/reconcile', limiters.strict, async (req, res) => {
   try {
     const liquidityController = require('../controllers/liquidityController');
     const mallcoinService = require('../services/mallcoinService');
@@ -580,7 +594,7 @@ router.post('/reconcile', async (req, res) => {
   }
 });
 
-router.post('/reconciliation/run', async (req, res) => {
+router.post('/reconciliation/run', limiters.strict, async (req, res) => {
   try {
     const { runReconciliationJob } = require('../services/reconciliationService');
     const result = await runReconciliationJob();
@@ -593,17 +607,18 @@ router.post('/reconciliation/run', async (req, res) => {
 
 router.get('/reconciliation/items', async (req, res) => {
   try {
-    const { status, limit = 100 } = req.query;
+    const { status, page = 0, limit = 100 } = req.query;
     const query = {};
     if (status) query.status = status;
 
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
-    const items = await LiquidityReconciliation.find(query)
-      .sort({ createdAt: -1 })
-      .limit(safeLimit)
-      .lean();
+    const skip = Math.max(Number(page) || 0, 0) * safeLimit;
+    const [items, total] = await Promise.all([
+      LiquidityReconciliation.find(query).sort({ createdAt: -1 }).skip(skip).limit(safeLimit).lean(),
+      LiquidityReconciliation.countDocuments(query),
+    ]);
 
-    return res.json({ ok: true, items, total: items.length });
+    return res.json({ ok: true, items, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err) });
   }
@@ -611,19 +626,132 @@ router.get('/reconciliation/items', async (req, res) => {
 
 router.get('/withdrawals', async (req, res) => {
   try {
-    const { status, limit = 100 } = req.query;
+    const { status, page = 0, limit = 100 } = req.query;
     const query = {};
     if (status) query.status = status;
 
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
-    const withdrawals = await WithdrawalRequest.find(query)
-      .sort({ createdAt: -1 })
-      .limit(safeLimit)
-      .lean();
+    const skip = Math.max(Number(page) || 0, 0) * safeLimit;
+    const [withdrawals, total] = await Promise.all([
+      WithdrawalRequest.find(query).sort({ createdAt: -1 }).skip(skip).limit(safeLimit).lean(),
+      WithdrawalRequest.countDocuments(query),
+    ]);
 
-    return res.json({ ok: true, withdrawals, total: withdrawals.length });
+    return res.json({ ok: true, withdrawals, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// ============ BADGES ============
+router.get('/badges/purchases', async (req, res) => {
+  try {
+    const { status, page = 0, limit = 50 } = req.query;
+    const query = {};
+    if (status) query.status = status;
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const skip = Math.max(Number(page) || 0, 0) * safeLimit;
+
+    const [purchases, total] = await Promise.all([
+      BadgePurchase.find(query).sort({ createdAt: -1 }).skip(skip).limit(safeLimit).lean(),
+      BadgePurchase.countDocuments(query),
+    ]);
+
+    return res.json({ ok: true, purchases, total });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/badges/issuances', async (req, res) => {
+  try {
+    const { method, page = 0, limit = 50 } = req.query;
+    const query = {};
+    if (method) query.method = method;
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const skip = Math.max(Number(page) || 0, 0) * safeLimit;
+
+    const [issuances, total] = await Promise.all([
+      BadgeIssuance.find(query).sort({ issuedAt: -1 }).skip(skip).limit(safeLimit).lean(),
+      BadgeIssuance.countDocuments(query),
+    ]);
+
+    return res.json({ ok: true, issuances, total });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Manual grant for support cases (streak missed due to a tracking gap, goodwill
+// gesture, etc). Reuses the same on-chain issuance path as the streak snapshot
+// and the paid-purchase flow, just recorded with method 'admin_manual'.
+router.post('/badges/grant', limiters.strict, async (req, res) => {
+  try {
+    const { walletAddress } = req.body || {};
+    if (!walletAddress) return res.status(400).json({ ok: false, error: 'walletAddress is required' });
+
+    const existing = await getUserBadgeInfo(walletAddress);
+    if (existing.exists) {
+      return res.status(409).json({ ok: false, error: 'This wallet already has a badge' });
+    }
+
+    const operatorMnemonic = process.env.OPERATOR_MNEMONIC;
+    if (!operatorMnemonic) {
+      return res.status(503).json({ ok: false, error: 'Badge issuance is not configured yet' });
+    }
+
+    const result = await issueBadgeFromMnemonic({
+      mnemonic: operatorMnemonic,
+      recipient: walletAddress,
+      badgeType: 'gold',
+    });
+
+    const user = await User.findOne({ walletAddress }).lean();
+    await BadgeIssuance.create({
+      userId: user?._id,
+      walletAddress,
+      method: 'admin_manual',
+      badgeType: 'gold',
+      txHash: result.txHash,
+    });
+
+    if (user) {
+      await notifyUser(user, {
+        kind: 'badge',
+        title: 'You were granted a badge',
+        body: 'An admin granted you a Mallchain badge — you can now convert Mallpoints to Mallcoin every month on the 15th.',
+      });
+    }
+
+    await auditLog('badge_admin_grant', req.user, { walletAddress, txHash: result.txHash });
+    return res.json({ ok: true, txHash: result.txHash });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Off-chain support action only (mark a purchase as void/refunded) — there is
+// no on-chain "revoke badge" message, so this can't undo an already-issued
+// badge, only stop a purchase short of issuance.
+router.post('/badges/purchases/:quoteId/void', limiters.strict, async (req, res) => {
+  try {
+    const { reason } = req.body || {};
+    const purchase = await BadgePurchase.findOne({ quoteId: req.params.quoteId });
+    if (!purchase) return res.status(404).json({ ok: false, error: 'purchase not found' });
+    if (purchase.status === 'issued') {
+      return res.status(400).json({ ok: false, error: 'This purchase already issued a badge and cannot be voided' });
+    }
+
+    purchase.status = 'failed';
+    purchase.reason = reason || 'Voided by admin';
+    await purchase.save();
+
+    await auditLog('badge_purchase_void', req.user, { quoteId: req.params.quoteId, reason });
+    return res.json({ ok: true, purchase: purchase.toObject() });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -647,7 +775,7 @@ router.get('/maintenance', async (_req, res) => {
   }
 });
 
-router.post('/maintenance', requireSuperAdmin, async (req, res) => {
+router.post('/maintenance', requireSuperAdmin, limiters.strict, async (req, res) => {
   try {
     const { global, scope, paused, reason } = req.body || {};
 

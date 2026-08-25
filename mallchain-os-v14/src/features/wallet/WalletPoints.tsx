@@ -3,6 +3,7 @@ import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, toast } from '../../components/ui';
 import { mallpointsApi, type MallpointsBalance } from '../../services/mallpointsApi';
 import { buyApi } from '../../services/buyApi';
+import { requestMnemonic } from '../../services/mnemonicAccess';
 
 /** Mallpoints balance + convert-to-Mallcoin (real API, gated by the on-chain conversion window). */
 export default function WalletPoints() {
@@ -40,13 +41,15 @@ export default function WalletPoints() {
 
   const doConvert = async () => {
     if (!address) return;
-    if (!st.wallet.mnemonic) {
+    if (!st.wallet.pinEncryptedMnemonic) {
       toast('Unlock your wallet to sign this conversion');
       return;
     }
+    const mnemonic = await requestMnemonic();
+    if (!mnemonic) return;
     setConverting(true);
     try {
-      const result = await mallpointsApi.convert(address, st.wallet.mnemonic);
+      const result = await mallpointsApi.convert(address, mnemonic);
       if (result.ok && result.data) {
         toast(`Converted ${fmtNum(result.data.convertedPoints)} Mallpoints → ${fmtNum(result.data.mallcoins)} Mallcoin`);
       } else {

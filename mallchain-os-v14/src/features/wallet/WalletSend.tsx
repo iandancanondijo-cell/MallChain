@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { sendMallcoinTransfer, MallcoinTxError } from '../../services/mallcoinTx';
 import { isValidMallAddress } from '../../services/wallet';
 import { faucetApi } from '../../services/faucetApi';
+import { requestMnemonic } from '../../services/mnemonicAccess';
 import { useWizard } from '../../hooks/useWizard';
 
 const SEND_STEPS = ['recipient', 'review', 'authorize', 'broadcast'] as const;
@@ -45,9 +46,6 @@ export default function WalletSend() {
   const [busy, setBusy] = useState(false);
   const [txHash, setTxHash] = useState('');
 
-  const mnemonicWords = useMemo(() => (st.wallet.mnemonic ? st.wallet.mnemonic.trim().split(/\s+/) : []), [st.wallet.mnemonic]);
-  // Pick once per mount so it doesn't shift between the "sign" and "authorize" steps.
-  const [wordIdx] = useState(() => 1 + Math.floor(Math.random() * (mnemonicWords.length || 1)));
   const [gasError, setGasError] = useState(false);
 
   const validAddr = isValidMallAddress(addr);
@@ -62,25 +60,21 @@ export default function WalletSend() {
     wizard.next();
   };
 
-  const authorize = async (word: string) => {
-    const expected = mnemonicWords[wordIdx - 1];
-    if (!expected || word.trim().toLowerCase() !== expected.toLowerCase()) {
-      setErr('Incorrect word — try again.');
+  const authorize = async () => {
+    if (!st.wallet.pinEncryptedMnemonic || !st.wallet.address) {
+      toast('No wallet loaded — import or create a wallet first', false);
       return;
     }
+
+    const mnemonic = await requestMnemonic();
+    if (!mnemonic) return;
 
     setBusy(true);
     setErr('');
     setGasError(false);
-
-    if (!st.wallet.mnemonic || !st.wallet.address) {
-      setBusy(false);
-      toast('No wallet loaded — import or create a wallet first', false);
-      return;
-    }
     try {
       const result = await sendMallcoinTransfer({
-        mnemonic: st.wallet.mnemonic,
+        mnemonic,
         fromAddress: st.wallet.address,
         toAddress: addr,
         amountMlcns: parseFloat(amount),
@@ -186,11 +180,9 @@ export default function WalletSend() {
         )}
         {step === 'authorize' && (
           <>
-            <div className="sec-title"><h2>Authorize transaction</h2><span className="sub">sign with your recovery phrase</span></div>
+            <div className="sec-title"><h2>Authorize transaction</h2><span className="sub">sign with your wallet PIN</span></div>
             <div className="card" style={{ background: 'var(--bg-2)', textAlign: 'center', padding: 16 }}>
-              <div className="muted" style={{ fontSize: 12 }}>For your security, we ask for a single random word — never the full phrase.</div>
-              <div style={{ fontSize: 22, fontWeight: 800, margin: '10px 0', color: 'var(--gold)' }}>Enter word #{wordIdx}</div>
-              <input className="input" style={{ textAlign: 'center', maxWidth: 220, margin: '0 auto' }} placeholder="your recovery word" onKeyDown={(e) => e.key === 'Enter' && authorize((e.target as HTMLInputElement).value)} />
+              <div className="muted" style={{ fontSize: 12 }}>You'll be asked for your PIN to unlock your recovery phrase and sign this transaction.</div>
             </div>
             {err && <div style={{ color: 'var(--red-2)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
             {gasError && (
@@ -206,7 +198,7 @@ export default function WalletSend() {
             )}
             <div className="modal-actions">
               <button className="btn btn-ghost" onClick={() => wizard.back()}>← Back</button>
-              <button className="btn btn-primary" disabled={busy} onClick={() => authorize((document.querySelector('.input[placeholder="your recovery word"]') as HTMLInputElement)?.value || '')}>
+              <button className="btn btn-primary" disabled={busy} onClick={authorize}>
                 {busy && <span className="spin" />} Authorize & broadcast
               </button>
             </div>

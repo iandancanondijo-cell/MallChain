@@ -12,12 +12,17 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import Marketplace from './Marketplace';
 import { store } from '../../store/store';
 import { createEscrow } from '../../services/marketplaceTx';
+import { requestMnemonic } from '../../services/mnemonicAccess';
 
 vi.mock('../../services/marketplaceTx', () => ({
   createEscrow: vi.fn(),
   releaseFunds: vi.fn(),
   openDispute: vi.fn(),
   MarketplaceTxError: class MarketplaceTxError extends Error {},
+}));
+
+vi.mock('../../services/mnemonicAccess', () => ({
+  requestMnemonic: vi.fn(),
 }));
 
 const BUYER_ADDRESS = 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg';
@@ -27,8 +32,10 @@ describe('Marketplace checkout', () => {
   beforeEach(() => {
     store.reset();
     vi.mocked(createEscrow).mockReset();
+    vi.mocked(requestMnemonic).mockReset();
+    vi.mocked(requestMnemonic).mockResolvedValue(MNEMONIC);
     store.state.wallet.address = BUYER_ADDRESS;
-    store.state.wallet.mnemonic = MNEMONIC;
+    store.state.wallet.pinEncryptedMnemonic = 'encrypted-blob';
     store.commit();
   });
 
@@ -62,7 +69,7 @@ describe('Marketplace checkout', () => {
 
   test('checkout is blocked with a clear message when no wallet is loaded', async () => {
     store.state.wallet.address = '';
-    store.state.wallet.mnemonic = '';
+    store.state.wallet.pinEncryptedMnemonic = '';
     store.commit();
 
     render(<Marketplace navigate={() => {}} />);

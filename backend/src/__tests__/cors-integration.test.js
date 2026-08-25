@@ -310,6 +310,10 @@ describe('CORS Integration Tests (Task 3.3)', () => {
       process.env.FRONTEND_URL = 'https://app.example.com';
       process.env.CORS_ORIGINS = '';
       process.env.NODE_ENV = 'production';
+      // Production mode now fails fast on a missing MONGO_URI (matching every
+      // other required() secret) instead of silently defaulting to a
+      // localhost instance that wouldn't exist in a real deployment.
+      process.env.MONGO_URI = 'mongodb://localhost:27017/marketplace-test';
       
       ({ config, getAllowedOrigins } = require('../config'));
       

@@ -322,7 +322,7 @@ describe('StoreSync', () => {
       
       // Start with a token expiring in 2 seconds
       const nearFutureExp = Math.floor(Date.now() / 1000) + 2;
-      let token = createMockToken({
+      const token = createMockToken({
         userId: '123',
         username: 'testuser',
         exp: nearFutureExp,

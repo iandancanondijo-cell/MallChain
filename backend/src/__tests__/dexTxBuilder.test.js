@@ -7,14 +7,16 @@ const { SigningStargateClient, calculateFee } = require('@cosmjs/stargate');
 // resolution can't parse, which auto-mocking would otherwise trigger.
 jest.mock('@cosmjs/proto-signing', () => ({
   DirectSecp256k1HdWallet: { fromMnemonic: jest.fn() },
+  Registry: jest.fn().mockImplementation(function Registry(types) { this.types = types; }),
 }));
 jest.mock('@cosmjs/stargate', () => ({
   SigningStargateClient: { connectWithSigner: jest.fn() },
   GasPrice: { fromString: jest.fn(() => ({})) },
   calculateFee: jest.fn(() => ({ amount: [{ denom: 'stake', amount: '1000' }], gas: '250000' })),
+  defaultRegistryTypes: [],
 }));
 
-const { toBaseUnits, getAddressFromMnemonic, addLiquidityOnChain } = require('../services/dexTxBuilder');
+const { toBaseUnits, getAddressFromMnemonic, addLiquidityOnChain, removeLiquidityOnChain } = require('../services/dexTxBuilder');
 
 describe('toBaseUnits', () => {
   test('converts a display amount to base units using the given decimals', () => {
@@ -130,6 +132,69 @@ describe('addLiquidityOnChain', () => {
 
     expect(result.success).toBe(true);
     expect(calculateFee).toHaveBeenCalledWith(Math.min(Math.ceil(250000 * 1.3), 800000), expect.any(Object));
+  });
+});
+
+describe('removeLiquidityOnChain', () => {
+  const fakeWallet = { getAccounts: jest.fn().mockResolvedValue([{ address: 'mall1provider' }]) };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    DirectSecp256k1HdWallet.fromMnemonic = jest.fn().mockResolvedValue(fakeWallet);
+  });
+
+  test('requires a mnemonic', async () => {
+    await expect(removeLiquidityOnChain({})).rejects.toThrow('Missing mnemonic for liquidity provider');
+  });
+
+  test('requires a poolId', async () => {
+    await expect(removeLiquidityOnChain({ mnemonic: 'm' })).rejects.toThrow('Missing poolId');
+  });
+
+  test('requires liquidityTokens with denom and amount', async () => {
+    await expect(
+      removeLiquidityOnChain({ mnemonic: 'm', poolId: 1 })
+    ).rejects.toThrow('liquidityTokens must include denom and amount');
+  });
+
+  test('signs and broadcasts a well-formed liquidity removal, returning the real tx result', async () => {
+    const client = {
+      simulate: jest.fn().mockResolvedValue(200000),
+      signAndBroadcast: jest.fn().mockResolvedValue({
+        code: 0,
+        transactionHash: 'HASHREMOVE',
+        height: 43,
+        gasUsed: 180000,
+        events: [],
+      }),
+    };
+    SigningStargateClient.connectWithSigner.mockResolvedValue(client);
+
+    const result = await removeLiquidityOnChain({
+      mnemonic: 'm',
+      poolId: 1,
+      liquidityTokens: { denom: 'liquidity-1', amount: '50' },
+    });
+
+    expect(result).toMatchObject({ success: true, txHash: 'HASHREMOVE', height: 43 });
+    expect(client.signAndBroadcast).toHaveBeenCalledWith(
+      'mall1provider',
+      expect.arrayContaining([expect.objectContaining({ typeUrl: '/marketplace.dex.v1.MsgRemoveLiquidity' })]),
+      expect.any(Object),
+      ''
+    );
+  });
+
+  test('throws with the chain rawLog when the broadcast tx fails', async () => {
+    const client = {
+      simulate: jest.fn().mockResolvedValue(200000),
+      signAndBroadcast: jest.fn().mockResolvedValue({ code: 5, rawLog: 'insufficient liquidity tokens' }),
+    };
+    SigningStargateClient.connectWithSigner.mockResolvedValue(client);
+
+    await expect(
+      removeLiquidityOnChain({ mnemonic: 'm', poolId: 1, liquidityTokens: { denom: 'liquidity-1', amount: '50' } })
+    ).rejects.toThrow('insufficient liquidity tokens');
   });
 });
 

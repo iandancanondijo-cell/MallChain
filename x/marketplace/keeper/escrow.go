@@ -20,8 +20,9 @@ type Keeper struct {
 	cdc          codec.Codec
 	bankKeeper   types.BankKeeper
 
-	Schema  collections.Schema
-	Escrows collections.Map[string, types.Escrow]
+	Schema    collections.Schema
+	Escrows   collections.Map[string, types.Escrow]
+	EscrowSeq collections.Sequence
 }
 
 func NewKeeper(
@@ -36,6 +37,7 @@ func NewKeeper(
 		cdc:          cdc,
 		bankKeeper:   bankKeeper,
 		Escrows:      collections.NewMap(sb, []byte(types.EscrowStateKey), "escrows", collections.StringKey, codec.CollValue[types.Escrow](cdc)),
+		EscrowSeq:    collections.NewSequence(sb, collections.NewPrefix(types.EscrowSeqKey), "escrow_seq"),
 	}
 
 	schema, err := sb.Build()
@@ -88,8 +90,17 @@ func (k Keeper) CreateEscrow(sdkCtx sdk.Context, buyer, seller, amount, denom, d
 		DisputeWindow: int64(disputeWindowSeconds),
 	}
 
-	// Generate unique escrow ID using block height and timestamp to avoid collisions
-	escrowID := fmt.Sprintf("%s-%d-%d", buyer, sdkCtx.BlockHeight(), sdkCtx.BlockTime().UnixNano())
+	// Block height + BlockTime() alone can collide: BlockTime() returns the
+	// same value for every tx within one block, so two escrows created by
+	// the same buyer in the same block previously produced identical IDs
+	// and the second Escrows.Set silently overwrote the first. A monotonic
+	// on-chain sequence can't collide regardless of how many escrows land
+	// in the same block.
+	seq, err := k.EscrowSeq.Next(sdkCtx)
+	if err != nil {
+		return "", err
+	}
+	escrowID := fmt.Sprintf("%s-%d-%d-%d", buyer, sdkCtx.BlockHeight(), sdkCtx.BlockTime().UnixNano(), seq)
 	escrow.Id = escrowID
 
 	if err := k.Escrows.Set(sdkCtx, escrowID, escrow); err != nil {
@@ -275,9 +286,18 @@ func (k Keeper) GetAllEscrows(sdkCtx sdk.Context) ([]types.Escrow, error) {
 }
 
 func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) error {
+	for _, escrow := range genState.Escrows {
+		if err := k.Escrows.Set(ctx, escrow.Id, escrow); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func (k Keeper) ExportGenesis(ctx context.Context) (types.GenesisState, error) {
-	return types.GenesisState{}, nil
+	escrows, err := k.GetAllEscrows(sdk.UnwrapSDKContext(ctx))
+	if err != nil {
+		return types.GenesisState{}, err
+	}
+	return types.GenesisState{Escrows: escrows}, nil
 }

@@ -79,7 +79,7 @@ describe('Input Validation Middleware', () => {
   });
 
   describe('XSS Sanitization', () => {
-    test('Removes angle brackets from strings', () => {
+    test('Strips real markup (script tags and their content) from strings', () => {
       const req = {
         body: {
           username: 'test<script>alert("xss")</script>',
@@ -91,11 +91,11 @@ describe('Input Validation Middleware', () => {
 
       sanitizeInputs(req, res, next);
 
-      expect(req.body.username).toBe('testscriptalertxssscript');
+      expect(req.body.username).toBe('test');
       expect(next).toHaveBeenCalled();
     });
 
-    test('Sanitizes nested objects', () => {
+    test('Sanitizes nested objects, keeping inner text of stripped tags', () => {
       const req = {
         body: {
           user: {
@@ -109,7 +109,37 @@ describe('Input Validation Middleware', () => {
 
       sanitizeInputs(req, res, next);
 
-      expect(req.body.user.name).toBe('TestbUserb');
+      expect(req.body.user.name).toBe('TestUser');
+      expect(next).toHaveBeenCalled();
+    });
+
+    test('Preserves plain punctuation that is not part of real markup (unlike the old character-strip approach)', () => {
+      const req = {
+        body: {
+          bio: "O'Brien's (favorite) band: AC/DC",
+        }
+      };
+      const res = {};
+      const next = jest.fn();
+
+      sanitizeInputs(req, res, next);
+
+      expect(req.body.bio).toBe("O'Brien's (favorite) band: AC/DC");
+      expect(next).toHaveBeenCalled();
+    });
+
+    test('Strips an event-handler-bearing tag entirely', () => {
+      const req = {
+        body: {
+          bio: '<img src=x onerror=alert(1)>hello',
+        }
+      };
+      const res = {};
+      const next = jest.fn();
+
+      sanitizeInputs(req, res, next);
+
+      expect(req.body.bio).toBe('hello');
       expect(next).toHaveBeenCalled();
     });
   });

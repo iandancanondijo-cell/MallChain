@@ -22,12 +22,17 @@ import { socketManager, WalletData, BlockData, MarketEvent, PriceData } from '..
  * Mock Socket.IO client to avoid network calls in tests
  */
 vi.mock('socket.io-client', () => {
+  // vi.mock factories are hoisted above other imports, so a top-level
+  // `import { EventEmitter } from 'events'` referenced in here throws
+  // "Cannot access '...' before initialization" (TDZ) — require() at call
+  // time sidesteps that entirely.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const EventEmitter = require('events').EventEmitter;
-  
+
   class MockSocket extends EventEmitter {
     public connected = false;
     public id = 'mock-socket-id-123';
-    private listeners: Record<string, Function[]> = {};
+    private listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
 
     constructor() {
       super();
@@ -67,7 +72,7 @@ vi.mock('socket.io-client', () => {
       this.emit('disconnect', 'client disconnect');
     }
 
-    on(eventName: string, callback: Function) {
+    on(eventName: string, callback: (...args: unknown[]) => void) {
       if (!this.listeners[eventName]) {
         this.listeners[eventName] = [];
       }
@@ -75,7 +80,7 @@ vi.mock('socket.io-client', () => {
       return super.on(eventName, callback);
     }
 
-    off(eventName: string, callback: Function) {
+    off(eventName: string, callback: (...args: unknown[]) => void) {
       if (this.listeners[eventName]) {
         const index = this.listeners[eventName].indexOf(callback);
         if (index > -1) {

@@ -2,10 +2,12 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
-import { api } from '../../services/api';
 import { handleApiError } from '../../services/errorHandler';
 import { useWizard } from '../../hooks/useWizard';
-import { validateMnemonicPhrase } from '../../services/wallet';
+import { validateMnemonicPhrase, generateNewMnemonic, deriveAddressFromMnemonic } from '../../services/wallet';
+import { chain } from '../../services/config';
+import { hashPin, encryptMnemonic as encryptMnemonicWithPin } from '../../services/security';
+import PINInput from '../../components/PINInput';
 import { Shield, Lock, Download, Copy, Eye, EyeOff, RefreshCw, ChevronRight, Check, AlertTriangle, Key, Wallet, ArrowLeft } from 'lucide-react';
 
 /**
@@ -34,6 +36,7 @@ const FLOW_STEPS = [
   'create-seed',
   'create-confirm',
   'create-secure',
+  'set-pin',
   'connect-method',
   'connect-retrieve',
   'connect-import',
@@ -107,6 +110,15 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   const [selectedVaultIndex, setSelectedVaultIndex] = useState(0);
   const [retrievedSeed, setRetrievedSeed] = useState<string[] | null>(null);
 
+  // Holds the plaintext mnemonic + derived address between "wallet created/
+  // imported/retrieved" and "PIN set" — never written to the durable store
+  // (unlike the old st.wallet.mnemonic, which persisted the phrase in
+  // localStorage in plaintext indefinitely). Cleared the moment the PIN
+  // step finishes encrypting it into st.wallet.pinEncryptedMnemonic.
+  const [pendingWallet, setPendingWallet] = useState<{ mnemonic: string; address: string } | null>(null);
+  const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -135,20 +147,16 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   const generateMnemonic = async () => {
     setLoading(true);
     try {
-      const res = await api.post<{ success: boolean; mnemonic: string }>('/api/wallet/generate-mnemonic', {});
-      if (res.ok && res.data?.success) {
-        const words = res.data.mnemonic.split(' ');
-        setSeedWords(words);
-        const address = await deriveAddress(words);
-        if (address) {
-          setWalletAddress(address);
-        } else {
-          // Don't fabricate an address — the real one is assigned when the
-          // wallet is actually created (handleCreateWallet), which makes its
-          // own backend call and surfaces its own error if that fails too.
-          setWalletAddress('');
-        }
-      }
+      // Generated and derived entirely client-side now — the phrase never
+      // transits the network this way, unlike the old POST /api/wallet/generate-mnemonic
+      // + POST /api/wallet/validate round-trip. deriveAddressFromMnemonic uses
+      // the exact same DirectSecp256k1HdWallet + "mall"-prefix derivation the
+      // backend used, so addresses are identical, just computed locally.
+      const mnemonic = generateNewMnemonic(24);
+      const words = mnemonic.split(' ');
+      setSeedWords(words);
+      const address = await deriveAddress(words);
+      setWalletAddress(address || '');
     } catch (err) {
       setError('Failed to generate mnemonic');
     }
@@ -156,18 +164,13 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   };
 
   const deriveAddress = async (words: string[]): Promise<string | null> => {
-    // Use backend to derive address from mnemonic. No client-side fallback —
-    // a fabricated address must never be shown as if it were real, since the
-    // backend never actually derived or validated it.
     try {
-      const res = await api.post<{ success: boolean; address: string }>('/api/wallet/validate', { mnemonic: words.join(' ') });
-      if (res.ok && res.data?.address) {
-        return res.data.address;
-      }
+      const info = await deriveAddressFromMnemonic(words.join(' '));
+      return info.address;
     } catch (err) {
       console.error('Failed to derive address:', err);
+      return null;
     }
-    return null;
   };
 
   const getPasswordStrength = (pwd: string): number => {
@@ -337,24 +340,13 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     
     setLoading(true);
     try {
-      const res = await api.post<{ success: boolean; address: string; accountId: string; chainId: string }>('/api/wallet/create', { mnemonic: seedWords.join(' ') });
-      
-      if (res.ok && res.data?.success) {
-        st.wallet.address = res.data.address;
-        st.wallet.accountId = res.data.accountId;
-        st.wallet.chainId = res.data.chainId;
-        st.wallet.mnemonic = seedWords.join(' ');
-        st.wallet.createdAt = Date.now();
-        store.commit();
-        setWalletAddress(res.data.address);
-        goTo('success');
-      } else {
-        setError(res.error || 'Failed to create wallet');
-      }
+      const info = await deriveAddressFromMnemonic(seedWords.join(' '));
+      setPendingWallet({ mnemonic: seedWords.join(' '), address: info.address });
+      goTo('set-pin');
     } catch (err) {
       setError('Failed to create wallet');
       handleApiError({ ok: false, error: 'Wallet creation failed', code: 500 } as any,
-        { action: 'creating wallet', endpoint: '/api/wallet/create' },
+        { action: 'creating wallet', endpoint: 'client-side derivation' },
         false
       );
     }
@@ -375,34 +367,23 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     const words = importPhrase.trim().toLowerCase().split(/\s+/).filter(Boolean);
     setLoading(true);
     try {
-      const res = await api.post<{ success: boolean; address: string; accountId: string; chainId: string }>('/api/wallet/create', { mnemonic: words.join(' ') });
-      
-      if (res.ok && res.data?.success) {
-        const address = res.data.address;
-        // Optionally store encrypted
-        if (importPassword) {
-          const enc = await encryptMnemonic(words.join(' '), importPassword);
-          const entry: VaultEntry = {
-            address,
-            ...enc,
-            savedAt: Date.now()
-          };
-          const newVault = [...vault.filter(v => v.address !== address), entry];
-          setVault(newVault);
-          localStorage.setItem('mallchain_vault', JSON.stringify(newVault));
-        }
-        
-        st.wallet.address = res.data.address;
-        st.wallet.accountId = res.data.accountId;
-        st.wallet.chainId = res.data.chainId;
-        st.wallet.mnemonic = words.join(' ');
-        st.wallet.createdAt = Date.now();
-        store.commit();
-        setWalletAddress(res.data.address);
-        goTo('success');
-      } else {
-        setError(res.error || 'Failed to import wallet');
+      const info = await deriveAddressFromMnemonic(words.join(' '));
+      const address = info.address;
+      // Optionally store encrypted
+      if (importPassword) {
+        const enc = await encryptMnemonic(words.join(' '), importPassword);
+        const entry: VaultEntry = {
+          address,
+          ...enc,
+          savedAt: Date.now()
+        };
+        const newVault = [...vault.filter(v => v.address !== address), entry];
+        setVault(newVault);
+        localStorage.setItem('mallchain_vault', JSON.stringify(newVault));
       }
+
+      setPendingWallet({ mnemonic: words.join(' '), address });
+      goTo('set-pin');
     } catch (err) {
       setError('Failed to import wallet');
     }
@@ -428,22 +409,60 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     
     setLoading(true);
     try {
-      const res = await api.post<{ success: boolean; address: string; accountId: string; chainId: string }>('/api/wallet/create', { mnemonic: retrievedSeed.join(' ') });
-      
-      if (res.ok && res.data?.success) {
-        st.wallet.address = res.data.address;
-        st.wallet.accountId = res.data.accountId;
-        st.wallet.chainId = res.data.chainId;
-        st.wallet.mnemonic = retrievedSeed.join(' ');
-        st.wallet.createdAt = Date.now();
-        store.commit();
-        setWalletAddress(res.data.address);
-        goTo('success');
-      } else {
-        setError(res.error || 'Failed to restore wallet');
-      }
+      const info = await deriveAddressFromMnemonic(retrievedSeed.join(' '));
+      setPendingWallet({ mnemonic: retrievedSeed.join(' '), address: info.address });
+      goTo('set-pin');
     } catch (err) {
       setError('Failed to restore wallet');
+    }
+    setLoading(false);
+  };
+
+  const handleSetPin = async () => {
+    if (!pendingWallet) return;
+    if (pin.length < 4 || pin.length > 8 || !/^\d+$/.test(pin)) {
+      setError('PIN must be 4-8 digits');
+      return;
+    }
+    if (pin !== confirmPin) {
+      setError('PINs do not match');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const hashResult = await hashPin(pin);
+      if (!hashResult.success || !hashResult.hash) {
+        setError(hashResult.error || 'Failed to set PIN');
+        setLoading(false);
+        return;
+      }
+      const encryptResult = await encryptMnemonicWithPin(pendingWallet.mnemonic, pin);
+      if (!encryptResult.success || !encryptResult.encrypted) {
+        setError(encryptResult.error || 'Failed to secure wallet');
+        setLoading(false);
+        return;
+      }
+
+      // Only the PIN-encrypted phrase and its hash are ever persisted —
+      // the plaintext in pendingWallet is discarded below, never written to
+      // the durable store. Every signing action from here on goes through
+      // services/mnemonicAccess.ts's requestMnemonic() PIN challenge.
+      st.wallet.address = pendingWallet.address;
+      st.wallet.accountId = pendingWallet.address;
+      st.wallet.chainId = chain.chainId;
+      st.wallet.pinHash = hashResult.hash;
+      st.wallet.pinEncryptedMnemonic = encryptResult.encrypted;
+      st.wallet.createdAt = Date.now();
+      store.commit();
+
+      setWalletAddress(pendingWallet.address);
+      setPendingWallet(null);
+      setPin('');
+      setConfirmPin('');
+      goTo('success');
+    } catch (err) {
+      setError('Failed to secure wallet');
     }
     setLoading(false);
   };
@@ -1181,6 +1200,60 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     </motion.div>
   );
 
+  const renderSetPin = () => (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
+      <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 700, color: 'var(--gold)', letterSpacing: 1, textTransform: 'uppercase' }}>
+        Final step
+      </div>
+      <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Set a PIN</h1>
+      <p style={{ color: 'var(--txt-3)', fontSize: 14, marginBottom: 24 }}>
+        Your PIN unlocks your recovery phrase whenever you send, stake, vote, or make a purchase — it's never stored
+        on this device in plain text, only this PIN can unlock it.
+      </p>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+            4-8 digit PIN
+          </label>
+          <PINInput value={pin} onChange={setPin} />
+        </div>
+        <div>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+            Confirm PIN
+          </label>
+          <PINInput value={confirmPin} onChange={setConfirmPin} />
+        </div>
+
+        {error && (
+          <div style={{ color: 'var(--red)', fontSize: 13, padding: 12, background: 'var(--red-dim)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertTriangle size={16} />
+            {error}
+          </div>
+        )}
+
+        <button
+          onClick={handleSetPin}
+          disabled={loading || pin.length < 4 || confirmPin.length < 4}
+          style={{
+            width: '100%',
+            padding: 14,
+            background: 'var(--gold)',
+            border: 'none',
+            borderRadius: 12,
+            color: 'var(--gold-ink)',
+            fontSize: 14,
+            fontWeight: 700,
+            cursor: loading ? 'not-allowed' : 'pointer',
+            opacity: loading ? 0.5 : 1
+          }}
+        >
+          {loading ? 'Securing wallet...' : 'Secure my wallet'}
+        </button>
+      </div>
+    </motion.div>
+  );
+
   const renderConnectMethod = () => (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
       <button
@@ -1667,6 +1740,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
         {step === 'create-seed' && renderCreateSeed()}
         {step === 'create-confirm' && renderCreateConfirm()}
         {step === 'create-secure' && renderCreateSecure()}
+        {step === 'set-pin' && renderSetPin()}
         {step === 'connect-method' && renderConnectMethod()}
         {step === 'connect-retrieve' && renderConnectRetrieve()}
         {step === 'connect-import' && renderConnectImport()}

@@ -74,7 +74,7 @@ export function handleApiError(
   });
 
   // Determine user-friendly message
-  let userMessage = getUserFriendlyMessage(result.error, result.code);
+  const userMessage = getUserFriendlyMessage(result.error, result.code);
 
   // Add context about what failed
   const contextMsg = action ? ` (${action})` : '';

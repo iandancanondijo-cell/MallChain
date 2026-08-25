@@ -1,99 +1,15 @@
-const { DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
-const bip39 = require('bip39');
 const mallcoinService = require('../services/mallcoinService');
 const MallPointAccount = require('../models/MallPointAccount');
 const { getChainUserPoints, mergePoints } = require('../services/mallpointsService');
 
-const CHAIN_ID = process.env.CHAIN_ID || 'mallchain-1';
-
-/**
- * POST /api/wallet/create
- * Creates a new wallet from mnemonic and optionally funds it from faucet
- */
-async function createWallet(req, res) {
-  try {
-    const { mnemonic, userId } = req.body;
-
-    if (!mnemonic) {
-      return res.status(400).json({ error: 'Mnemonic is required' });
-    }
-
-    // Generate wallet from mnemonic
-    const wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
-      prefix: 'mall'
-    });
-
-    const [firstAccount] = await wallet.getAccounts();
-    const address = firstAccount.address;
-
-    // Deriving the address is a pure local crypto operation and doesn't
-    // require a live chain connection. This used to also open a
-    // SigningStargateClient to CHAIN_RPC here, but the client was never
-    // used (no tx is signed/broadcast in this handler) — it only made the
-    // endpoint fail with a 500 whenever the chain node was briefly
-    // unreachable, even though wallet creation itself had already
-    // succeeded.
-
-    res.json({
-      success: true,
-      address,
-      accountId: firstAccount.address,
-      chainId: CHAIN_ID
-    });
-  } catch (err) {
-    console.error('[Wallet Creation] Error:', err.message);
-    res.status(500).json({ error: 'Failed to create wallet', details: err.message });
-  }
-}
-
-/**
- * POST /api/wallet/validate
- * Validates a mnemonic phrase
- */
-async function validateMnemonic(req, res) {
-  try {
-    const { mnemonic } = req.body;
-
-    if (!mnemonic) {
-      return res.status(400).json({ error: 'Mnemonic is required' });
-    }
-
-    // Try to create wallet from mnemonic to validate
-    const wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
-      prefix: 'mall'
-    });
-
-    const [firstAccount] = await wallet.getAccounts();
-
-    res.json({
-      valid: true,
-      address: firstAccount.address
-    });
-  } catch (err) {
-    res.status(400).json({ 
-      valid: false, 
-      error: 'Invalid mnemonic phrase' 
-    });
-  }
-}
-
-/**
- * POST /api/wallet/generate-mnemonic
- * Generates a new BIP39 mnemonic phrase (24 words for enhanced security)
- */
-async function generateMnemonic(req, res) {
-  try {
-    // Generate 24-word mnemonic (256 bits) for enhanced security
-    const mnemonic = bip39.generateMnemonic(256);
-    res.json({
-      success: true,
-      mnemonic
-    });
-  } catch (err) {
-    console.error('[Wallet Creation] Error generating mnemonic:', err.message);
-    res.status(500).json({ error: 'Failed to generate mnemonic', details: err.message });
-  }
-}
+// createWallet/validateMnemonic/generateMnemonic used to live here, taking a
+// plaintext mnemonic over the wire from an unauthenticated endpoint just to
+// run a pure local crypto derivation the frontend could do (and now does)
+// itself — see mallchain-os-v14/src/services/wallet.ts
+// (deriveAddressFromMnemonic/generateNewMnemonic), which uses the exact same
+// DirectSecp256k1HdWallet + "mall"-prefix derivation, so addresses match
+// byte-for-byte. Removed entirely rather than just gated behind auth: a real
+// user's seed phrase should never transit the network at all.
 
 /**
  * GET /api/wallet/:address
@@ -152,8 +68,5 @@ async function getWalletBalance(req, res) {
 }
 
 module.exports = {
-  createWallet,
-  validateMnemonic,
-  generateMnemonic,
   getWalletBalance
 };

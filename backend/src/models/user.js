@@ -18,6 +18,12 @@ const UserSchema = new Schema({
   phone: { type: String },
   creator_level: { type: Number, default: 0 },
 
+  // The on-chain wallet this account has linked (see POST /api/auth/link-wallet).
+  // Wallets are otherwise purely client-side/self-custodied — this is the
+  // only place a login identity is associated with an address, needed so
+  // the badge snapshot job knows which address to issue a badge to.
+  walletAddress: { type: String, index: true, sparse: true },
+
   // Balances
   mlpts_balance: { type: Number, default: 0 },
   mallcoin_balance: { type: Number, default: 0 },

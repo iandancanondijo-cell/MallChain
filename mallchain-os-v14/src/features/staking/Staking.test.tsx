@@ -10,6 +10,7 @@ import Staking from './Staking';
 import { store } from '../../store/store';
 import { stakingApi, type StakingSummary } from '../../services/stakingApi';
 import { stakeMlcns, unstake } from '../../services/stakingTx';
+import { requestMnemonic } from '../../services/mnemonicAccess';
 
 vi.mock('../../services/stakingApi', () => ({
   stakingApi: { getSummary: vi.fn() },
@@ -19,6 +20,10 @@ vi.mock('../../services/stakingTx', () => ({
   stakeMlcns: vi.fn(),
   unstake: vi.fn(),
   StakingTxError: class StakingTxError extends Error {},
+}));
+
+vi.mock('../../services/mnemonicAccess', () => ({
+  requestMnemonic: vi.fn(),
 }));
 
 const ADDRESS = 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg';
@@ -42,9 +47,11 @@ describe('Staking', () => {
     vi.mocked(stakingApi.getSummary).mockReset();
     vi.mocked(stakeMlcns).mockReset();
     vi.mocked(unstake).mockReset();
+    vi.mocked(requestMnemonic).mockReset();
+    vi.mocked(requestMnemonic).mockResolvedValue(MNEMONIC);
 
     store.state.wallet.address = ADDRESS;
-    store.state.wallet.mnemonic = MNEMONIC;
+    store.state.wallet.pinEncryptedMnemonic = 'encrypted-blob';
     store.state.balances.MALL = 500;
     store.commit();
   });

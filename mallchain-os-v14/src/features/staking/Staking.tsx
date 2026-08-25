@@ -3,6 +3,7 @@ import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, toast } from '../../components/ui';
 import { stakingApi, type StakingSummary } from '../../services/stakingApi';
 import { stakeMlcns, unstake, StakingTxError } from '../../services/stakingTx';
+import { requestMnemonic } from '../../services/mnemonicAccess';
 
 /** Staking — real MsgStake/MsgUnstake against x/mlcoin (backend/src/routes/staking.js). */
 export default function Staking() {
@@ -34,10 +35,12 @@ export default function Staking() {
   const delegate = async () => {
     const a = parseFloat(amt);
     if (!a || a <= 0 || a > st.balances.MALL) return toast('Invalid amount or insufficient balance', false);
-    if (!st.wallet.mnemonic || !address) return toast('Wallet not connected', false);
+    if (!st.wallet.pinEncryptedMnemonic || !address) return toast('Wallet not connected', false);
+    const mnemonic = await requestMnemonic();
+    if (!mnemonic) return;
     setBusy(true);
     try {
-      const result = await stakeMlcns({ mnemonic: st.wallet.mnemonic, fromAddress: address, amountMlcns: a });
+      const result = await stakeMlcns({ mnemonic, fromAddress: address, amountMlcns: a });
       toast(`Staked ${a} MLCNS — tx ${result.txHash.slice(0, 10)}…`);
       setAmt('');
       load();
@@ -49,10 +52,12 @@ export default function Staking() {
   };
 
   const doUnstake = async (stakeId: string) => {
-    if (!st.wallet.mnemonic || !address) return toast('Wallet not connected', false);
+    if (!st.wallet.pinEncryptedMnemonic || !address) return toast('Wallet not connected', false);
+    const mnemonic = await requestMnemonic();
+    if (!mnemonic) return;
     setUnstakingId(stakeId);
     try {
-      const result = await unstake({ mnemonic: st.wallet.mnemonic, fromAddress: address, stakeId });
+      const result = await unstake({ mnemonic, fromAddress: address, stakeId });
       toast(`Unstaked — principal + rewards paid out (tx ${result.txHash.slice(0, 10)}…)`);
       load();
     } catch (e) {

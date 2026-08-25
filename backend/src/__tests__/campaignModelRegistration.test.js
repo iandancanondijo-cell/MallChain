@@ -30,9 +30,13 @@ describe('Campaign model registration', () => {
     jest.mock('../middleware/adminAuth', () => ({ requireAdmin: (req, res, next) => next(), requireSuperAdmin: (req, res, next) => next() }));
     jest.mock('../models/BurnPolicy', () => ({ BurnPolicy: {}, DynamicBurnThreshold: {} }));
     jest.mock('../models/TreasuryLedger', () => ({}));
-    jest.mock('../services/notify', () => ({ notify: jest.fn() }));
+    jest.mock('../services/notify', () => ({ notify: jest.fn(), notifyUser: jest.fn() }));
     jest.mock('../models/MaintenanceMode', () => ({}));
     jest.mock('../middleware/maintenanceMode', () => ({ invalidateCache: jest.fn() }));
+    jest.mock('../models/BadgePurchase', () => ({}));
+    jest.mock('../models/BadgeIssuance', () => ({}));
+    jest.mock('../services/badgeService', () => ({ getUserBadgeInfo: jest.fn() }));
+    jest.mock('../services/badgeTxBuilder', () => ({ issueBadgeFromMnemonic: jest.fn() }));
 
     // adminPanel.js first — this is the real require order in index.js.
     require('../routes/adminPanel');

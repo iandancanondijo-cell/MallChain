@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, fmtNum, StatusChip, toast } from '../../components/ui';
 import { minesApi, type MinesCampaign, type MinesProfile, type RewardRatesTable } from '../../services/minesApi';
-import { PlatformIcon, PLATFORM_ICONS } from './platformIcons';
+import { PlatformIcon, PlatformBadge, PLATFORM_BRAND } from './platformIcons';
 
 /**
  * My Campaigns — bring a content link + description, pick a platform/
@@ -11,6 +11,11 @@ import { PlatformIcon, PLATFORM_ICONS } from './platformIcons';
  * creator's own Mallpoints balance at creation time (backend/src/routes/
  * mines.js: POST /campaigns/create), and participants only get paid once a
  * reviewer-vote approves their submission — see MinesDiscover.tsx.
+ *
+ * Creation is a 2-step flow: pick a platform first (real brand marks, one
+ * tap), then fill in the campaign's details against that platform's real
+ * activity rates — rather than one long form with every field, including
+ * platform, in a single flat list.
  */
 export default function MinesMyCampaigns() {
   useStoreVersion();
@@ -59,7 +64,7 @@ export default function MinesMyCampaigns() {
       )}
 
       {rates && profile && (
-        <CreateCampaignForm rates={rates} balance={profile.mlpts_balance} onCreated={load} />
+        <CreateCampaignWizard rates={rates} balance={profile.mlpts_balance} onCreated={load} />
       )}
 
       {!loading && campaigns?.length === 0 && (
@@ -86,7 +91,12 @@ export default function MinesMyCampaigns() {
   );
 }
 
-function CreateCampaignForm({
+const PLATFORM_ORDER = [
+  'tiktok', 'instagram', 'youtube', 'whatsapp', 'telegram', 'facebook', 'threads', 'x',
+  'snapchat', 'reddit', 'discord', 'linkedin', 'pinterest', 'twitch', 'spotify', 'medium',
+];
+
+function CreateCampaignWizard({
   rates,
   balance,
   onCreated,
@@ -95,27 +105,89 @@ function CreateCampaignForm({
   balance: number;
   onCreated: () => void;
 }) {
-  const platformKeys = useMemo(
-    () => Object.keys(rates.platforms).filter((k) => PLATFORM_ICONS[k]),
-    [rates]
+  const platformKeys = PLATFORM_ORDER.filter((k) => rates.platforms[k] && PLATFORM_BRAND[k]);
+  const [platform, setPlatform] = useState<string | null>(null);
+
+  // Step 1: platform picker.
+  if (!platform) {
+    return (
+      <div className="card mb">
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: 'var(--txt-3)', textTransform: 'uppercase', marginBottom: 12 }}>Step 1 · Choose a platform</div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+            gap: 12,
+          }}
+        >
+          {platformKeys.map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setPlatform(k)}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 8,
+                padding: '14px 8px',
+                background: 'var(--bg-2)',
+                border: '1px solid var(--border)',
+                borderRadius: 12,
+                cursor: 'pointer',
+                color: 'var(--txt)',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--gold)')}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+            >
+              <PlatformBadge platform={k} size={44} />
+              <span style={{ fontSize: 12, fontWeight: 600, textAlign: 'center' }}>{rates.platforms[k].label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <CampaignDetailsStep
+      platform={platform}
+      rates={rates}
+      balance={balance}
+      onBack={() => setPlatform(null)}
+      onCreated={() => {
+        setPlatform(null);
+        onCreated();
+      }}
+    />
   );
-  const [platform, setPlatform] = useState(platformKeys[0] || '');
-  const [activity, setActivity] = useState('');
+}
+
+function CampaignDetailsStep({
+  platform,
+  rates,
+  balance,
+  onBack,
+  onCreated,
+}: {
+  platform: string;
+  rates: RewardRatesTable;
+  balance: number;
+  onBack: () => void;
+  onCreated: () => void;
+}) {
+  const activities = Object.keys(rates.platforms[platform]?.activities || {});
+  const [activity, setActivity] = useState(activities[0] || '');
   const [contentLink, setContentLink] = useState('');
   const [description, setDescription] = useState('');
   const [directive, setDirective] = useState('');
   const [multiplier, setMultiplier] = useState(1);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [budget, setBudget] = useState('50');
   const [busy, setBusy] = useState(false);
 
-  const activities = platform ? Object.keys(rates.platforms[platform]?.activities || {}) : [];
-
-  useEffect(() => {
-    if (activities.length && !activities.includes(activity)) setActivity(activities[0]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [platform]);
-
-  const activityDef = platform && activity ? rates.platforms[platform]?.activities[activity] : null;
+  const brand = PLATFORM_BRAND[platform];
+  const activityDef = activity ? rates.platforms[platform]?.activities[activity] : null;
   const baseRate = activityDef ? (activityDef.rate ?? ((activityDef.min! + activityDef.max!) / 2)) : 0;
   const clampedMultiplier = Math.min(rates.maxMultiplier, Math.max(rates.minMultiplier, multiplier || 1));
   const previewRate = Math.round(baseRate * clampedMultiplier * 10000) / 10000;
@@ -123,8 +195,8 @@ function CreateCampaignForm({
   const maxCompletions = previewRate > 0 ? Math.floor(budgetNum / previewRate) : 0;
 
   const submit = async () => {
-    if (!platform || !activity) {
-      toast('Choose a platform and activity', false);
+    if (!activity) {
+      toast('Choose an activity', false);
       return;
     }
     if (!contentLink.trim()) {
@@ -154,10 +226,6 @@ function CreateCampaignForm({
 
     if (res.ok) {
       toast(`Campaign live — ${previewRate} MLPTS per completion`);
-      setContentLink('');
-      setDescription('');
-      setDirective('');
-      setBudget('50');
       onCreated();
     } else {
       toast(res.error || 'Failed to create campaign', false);
@@ -165,95 +233,125 @@ function CreateCampaignForm({
   };
 
   return (
-    <div className="card mb" style={{ maxWidth: 560 }}>
-      <div className="field">
-        <label>Platform</label>
-        <div className="filter-row" style={{ flexWrap: 'wrap', gap: 6 }}>
-          {platformKeys.map((k) => (
-            <button
-              key={k}
-              type="button"
-              className={`btn btn-sm ${platform === k ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => setPlatform(k)}
-              disabled={busy}
-              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-            >
-              <PlatformIcon platform={k} size={14} /> {rates.platforms[k].label}
-            </button>
-          ))}
+    <div className="grid-2 mb">
+      <div className="card">
+        <div className="row" style={{ alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <PlatformBadge platform={platform} size={36} />
+          <div className="grow">
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: 'var(--txt-3)', textTransform: 'uppercase' }}>Step 2 · Campaign details</div>
+            <div style={{ fontWeight: 700 }}>{brand?.label}</div>
+          </div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onBack} disabled={busy}>
+            ← Change platform
+          </button>
+        </div>
+
+        <div className="field">
+          <label>What should count as a completion?</label>
+          <select className="input" value={activity} onChange={(e) => setActivity(e.target.value)} disabled={busy}>
+            {activities.map((a) => (
+              <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="field">
+          <label>Content link</label>
+          <input
+            className="input"
+            value={contentLink}
+            onChange={(e) => setContentLink(e.target.value)}
+            placeholder="https://…"
+            disabled={busy}
+          />
+        </div>
+
+        <div className="field">
+          <label>Description</label>
+          <textarea
+            className="input"
+            rows={2}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What is this campaign about?"
+            disabled={busy}
+          />
+        </div>
+
+        <div className="field">
+          <label>Directive (instructions for participants)</label>
+          <textarea
+            className="input"
+            rows={2}
+            value={directive}
+            onChange={(e) => setDirective(e.target.value)}
+            placeholder="Exactly what should someone do? e.g. Follow the page and comment 'done'"
+            disabled={busy}
+          />
+        </div>
+
+        <div className="field">
+          <label>Mallpoints you'd like to spend</label>
+          <input className="input" type="number" min="0" value={budget} onChange={(e) => setBudget(e.target.value)} disabled={busy} />
+          <div className="hint">Your balance: {fmtNum(balance)} MLPTS</div>
+        </div>
+
+        <button className="btn btn-primary btn-block" onClick={submit} disabled={busy} style={{ marginTop: 8 }}>
+          {busy && <span className="spin" />} Launch campaign
+        </button>
+      </div>
+
+      <div>
+        <div className="card mb">
+          <div className="sec-title"><h2>Outcome</h2></div>
+          <div style={{ fontSize: 22, fontWeight: 800 }}>
+            <span className="gold">{fmtNum(previewRate)}</span> <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--txt-3)' }}>MLPTS / completion</span>
+          </div>
+          <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>
+            Funds ~<b style={{ color: 'var(--txt)' }}>{maxCompletions}</b> completion{maxCompletions === 1 ? '' : 's'} from a {fmtNum(budgetNum)} MLPTS budget
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            style={{ marginTop: 12, padding: '2px 0' }}
+            onClick={() => setShowAdvanced((v) => !v)}
+          >
+            {showAdvanced ? '− Hide' : '+ Adjust'} reward boost
+          </button>
+          {showAdvanced && (
+            <div style={{ marginTop: 8 }}>
+              <input
+                className="input"
+                type="number"
+                min={rates.minMultiplier}
+                max={rates.maxMultiplier}
+                step="0.1"
+                value={multiplier}
+                onChange={(e) => setMultiplier(parseFloat(e.target.value))}
+                disabled={busy}
+              />
+              <div className="hint">
+                Boost multiplier ({rates.minMultiplier}x – {rates.maxMultiplier}x) · base rate {fmtNum(baseRate)} MLPTS × {clampedMultiplier}x
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="sec-title"><h2>What participants will see</h2></div>
+          <div className="row" style={{ alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <PlatformBadge platform={platform} size={28} />
+            <b>{brand?.label}</b>
+            <span className="chip gold" style={{ marginLeft: 'auto' }}>{fmtNum(previewRate)} MLPTS</span>
+          </div>
+          <div className="tiny" style={{ color: 'var(--txt-2)' }}>{description.trim() || 'Your campaign description will appear here.'}</div>
+          {directive.trim() && <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>Directive: {directive.trim()}</div>}
+          {contentLink.trim() && (
+            <div className="tiny mt" style={{ color: 'var(--cyan)', wordBreak: 'break-all' }}>{contentLink.trim()}</div>
+          )}
         </div>
       </div>
-
-      <div className="field">
-        <label>Activity</label>
-        <select className="input" value={activity} onChange={(e) => setActivity(e.target.value)} disabled={busy}>
-          {activities.map((a) => (
-            <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="field">
-        <label>Content link</label>
-        <input
-          className="input"
-          value={contentLink}
-          onChange={(e) => setContentLink(e.target.value)}
-          placeholder="https://…"
-          disabled={busy}
-        />
-      </div>
-
-      <div className="field">
-        <label>Description</label>
-        <textarea
-          className="input"
-          rows={2}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="What is this campaign about?"
-          disabled={busy}
-        />
-      </div>
-
-      <div className="field">
-        <label>Directive (instructions for participants)</label>
-        <textarea
-          className="input"
-          rows={2}
-          value={directive}
-          onChange={(e) => setDirective(e.target.value)}
-          placeholder="Exactly what should someone do? e.g. Follow the page and comment 'done'"
-          disabled={busy}
-        />
-      </div>
-
-      <div className="field">
-        <label>Multiplier ({rates.minMultiplier}x – {rates.maxMultiplier}x)</label>
-        <input
-          className="input"
-          type="number"
-          min={rates.minMultiplier}
-          max={rates.maxMultiplier}
-          step="0.1"
-          value={multiplier}
-          onChange={(e) => setMultiplier(parseFloat(e.target.value))}
-          disabled={busy}
-        />
-        <div className="hint">Base rate {fmtNum(baseRate)} MLPTS × {clampedMultiplier}x = <b className="gold">{fmtNum(previewRate)} MLPTS</b> per completion</div>
-      </div>
-
-      <div className="field">
-        <label>Total Mallpoints budget</label>
-        <input className="input" type="number" min="0" value={budget} onChange={(e) => setBudget(e.target.value)} disabled={busy} />
-        <div className="hint">
-          Your balance: {fmtNum(balance)} MLPTS · funds ~{maxCompletions} completion{maxCompletions === 1 ? '' : 's'} at this rate
-        </div>
-      </div>
-
-      <button className="btn btn-primary btn-block" onClick={submit} disabled={busy}>
-        {busy && <span className="spin" />} Launch campaign
-      </button>
     </div>
   );
 }

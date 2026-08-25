@@ -12,6 +12,7 @@ const (
 	EscrowStateKey      = "escrow/state/"
 	EscrowReleasePrefix = "escrow/release/"
 	EscrowDisputePrefix = "escrow/dispute/"
+	EscrowSeqKey        = 2
 
 	// Escrow status
 	StatusPending  = "pending"

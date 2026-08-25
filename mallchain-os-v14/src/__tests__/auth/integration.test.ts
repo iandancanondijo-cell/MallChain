@@ -108,7 +108,7 @@ describe('Auth Integration', () => {
 
     it('should store PIN attempts in localStorage for lockout tracking', () => {
       // First attempt
-      let attempts = { count: 1, lockedUntil: null };
+      const attempts = { count: 1, lockedUntil: null };
       localStorage.setItem('pin_attempts', JSON.stringify(attempts));
 
       // Second attempt

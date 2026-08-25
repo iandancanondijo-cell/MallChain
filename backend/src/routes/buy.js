@@ -2,8 +2,8 @@
 /* global require, module, process */
 const express = require('express');
 const router = express.Router();
-const MallcoinPurchase = require('../models/MalicoinPurchase');
-const MallcoinSale = require('../models/MalicoinSale');
+const MallcoinPurchase = require('../models/MallcoinPurchase');
+const MallcoinSale = require('../models/MallcoinSale');
 const { addLiquidityToPool } = require('../controllers/liquidityController');
 const { validate, schemas } = require('../middleware/validation');
 const axios = require('axios');
@@ -22,6 +22,8 @@ const { getMarketPrice } = require('../services/mallcoinService');
 const { createBlockchainBreaker } = require('../utils/circuitBreaker');
 const { getBuyGateStatus, requireDirectBuyUnlocked } = require('../services/buyGateService');
 const { checkSellLiquidity } = require('../services/sellGateService');
+const verifyWebhookToken = require('../middleware/verifyWebhookToken');
+const { limiters } = require('../middleware/rateLimiter');
 const {
   recordBuyLiquidityActivity,
   recordWithdrawLiquidityActivity,
@@ -292,23 +294,6 @@ router.get('/config', async (_req, res) => {
   });
 });
 
-// Safaricom can't sign its webhook payloads, so authentication relies on a
-// shared-secret token baked into the callback URL registered with them (see
-// config's appendWebhookToken). If PAYMENT_WEBHOOK_SECRET isn't configured
-// this is a no-op (matches dev/test where the secret is never required).
-function verifyWebhookToken(req, res, next) {
-  const secret = process.env.PAYMENT_WEBHOOK_SECRET;
-  if (!secret) return next();
-
-  const provided = String(req.query.token || '');
-  const expected = Buffer.from(secret);
-  const actual = Buffer.from(provided);
-  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
-    return res.status(401).json({ error: 'invalid webhook token' });
-  }
-  return next();
-}
-
 function getMpesaCallbackData(data) {
   const callback = data?.Body?.stkCallback || {};
   return {
@@ -473,7 +458,7 @@ async function handleReservedCredit({ quoteId, walletAddress, creditMlcns }) {
 }
 
 // Reserve a quote for Mallcoin purchase
-router.post('/reserve', requireDirectBuyUnlocked(), validate(schemas.buyReserve), async (req, res) => {
+router.post('/reserve', limiters.financial, requireDirectBuyUnlocked(), validate(schemas.buyReserve), async (req, res) => {
   try {
     const { amount, fiat, currency, walletAddress, phone } = req.validatedBody;
 
@@ -512,7 +497,7 @@ router.post('/reserve', requireDirectBuyUnlocked(), validate(schemas.buyReserve)
 });
 
 // Initiate M-Pesa STK push
-router.post('/mpesa', requireDirectBuyUnlocked(), validate(schemas.buyMpesaInitiate), async (req, res) => {
+router.post('/mpesa', limiters.financial, requireDirectBuyUnlocked(), validate(schemas.buyMpesaInitiate), async (req, res) => {
   try {
     const { quoteId, phone, amount, description } = req.validatedBody;
 
@@ -571,7 +556,7 @@ router.post('/mpesa/callback', verifyWebhookToken, validate(schemas.mpesaCallbac
 // Buying Mallcoins increases supply by transferring MLCNS from the faucet/operator account.
 // When the purchase includes fiat, the same workflow can also inject the corresponding KES/MLCN pair into the liquidity pool.
 // A future sell implementation should likewise adjust supply and liquidity when Mallcoins are redeemed.
-router.post('/credit', validate(schemas.buyCredit), async (req, res) => {
+router.post('/credit', limiters.financial, validate(schemas.buyCredit), async (req, res) => {
   try {
     const { quoteId, walletAddress } = req.validatedBody;
     const { creditMlcns } = require('../services/faucetService');
@@ -605,7 +590,7 @@ router.post('/payout/callback', verifyWebhookToken, validate(schemas.payoutCallb
 });
 
 // Sell Mallcoins: accept client-signed txBytes that transfer MLCNS from seller to operator
-router.post('/sell', validate(schemas.sell), async (req, res) => {
+router.post('/sell', limiters.financial, validate(schemas.sell), async (req, res) => {
   try {
     const { sellerAddress, amount, txBytes, phone } = req.validatedBody;
 

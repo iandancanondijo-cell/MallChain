@@ -30,11 +30,20 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 
+// MsgSetupVault registers the KDF parameters and an already-encrypted TOTP
+// secret for `authority`'s vault. The client generates the TOTP secret and
+// its own salt locally, derives the Argon2id key from the user's password
+// in-browser, encrypts the secret with it, and submits only the resulting
+// ciphertext here.
 type MsgSetupVault struct {
-	Authority string `protobuf:"bytes,1,opt,name=authority,proto3,casttype=string" json:"authority,omitempty" yaml:"authority"`
-	Password  string `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
-	Account   string `protobuf:"bytes,3,opt,name=account,proto3" json:"account,omitempty"`
-	Issuer    string `protobuf:"bytes,4,opt,name=issuer,proto3" json:"issuer,omitempty"`
+	Authority           string `protobuf:"bytes,1,opt,name=authority,proto3,casttype=string" json:"authority,omitempty" yaml:"authority"`
+	Salt                string `protobuf:"bytes,2,opt,name=salt,proto3" json:"salt,omitempty"`
+	KdfTime             uint32 `protobuf:"varint,3,opt,name=kdf_time,json=kdfTime,proto3" json:"kdf_time,omitempty"`
+	KdfMemory           uint32 `protobuf:"varint,4,opt,name=kdf_memory,json=kdfMemory,proto3" json:"kdf_memory,omitempty"`
+	KdfThreads          uint32 `protobuf:"varint,5,opt,name=kdf_threads,json=kdfThreads,proto3" json:"kdf_threads,omitempty"`
+	KdfKeyLen           uint32 `protobuf:"varint,6,opt,name=kdf_key_len,json=kdfKeyLen,proto3" json:"kdf_key_len,omitempty"`
+	NonceTotp           string `protobuf:"bytes,7,opt,name=nonce_totp,json=nonceTotp,proto3" json:"nonce_totp,omitempty"`
+	EncryptedTotpSecret string `protobuf:"bytes,8,opt,name=encrypted_totp_secret,json=encryptedTotpSecret,proto3" json:"encrypted_totp_secret,omitempty"`
 }
 
 func (m *MsgSetupVault) Reset()         { *m = MsgSetupVault{} }
@@ -77,29 +86,56 @@ func (m *MsgSetupVault) GetAuthority() string {
 	return ""
 }
 
-func (m *MsgSetupVault) GetPassword() string {
+func (m *MsgSetupVault) GetSalt() string {
 	if m != nil {
-		return m.Password
+		return m.Salt
 	}
 	return ""
 }
 
-func (m *MsgSetupVault) GetAccount() string {
+func (m *MsgSetupVault) GetKdfTime() uint32 {
 	if m != nil {
-		return m.Account
+		return m.KdfTime
+	}
+	return 0
+}
+
+func (m *MsgSetupVault) GetKdfMemory() uint32 {
+	if m != nil {
+		return m.KdfMemory
+	}
+	return 0
+}
+
+func (m *MsgSetupVault) GetKdfThreads() uint32 {
+	if m != nil {
+		return m.KdfThreads
+	}
+	return 0
+}
+
+func (m *MsgSetupVault) GetKdfKeyLen() uint32 {
+	if m != nil {
+		return m.KdfKeyLen
+	}
+	return 0
+}
+
+func (m *MsgSetupVault) GetNonceTotp() string {
+	if m != nil {
+		return m.NonceTotp
 	}
 	return ""
 }
 
-func (m *MsgSetupVault) GetIssuer() string {
+func (m *MsgSetupVault) GetEncryptedTotpSecret() string {
 	if m != nil {
-		return m.Issuer
+		return m.EncryptedTotpSecret
 	}
 	return ""
 }
 
 type MsgSetupVaultResponse struct {
-	ProvisioningUri string `protobuf:"bytes,1,opt,name=provisioning_uri,json=provisioningUri,proto3" json:"provisioning_uri,omitempty"`
 }
 
 func (m *MsgSetupVaultResponse) Reset()         { *m = MsgSetupVaultResponse{} }
@@ -135,18 +171,15 @@ func (m *MsgSetupVaultResponse) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_MsgSetupVaultResponse proto.InternalMessageInfo
 
-func (m *MsgSetupVaultResponse) GetProvisioningUri() string {
-	if m != nil {
-		return m.ProvisioningUri
-	}
-	return ""
-}
-
+// MsgConfirmVault finalizes a vault by storing the client-encrypted ed25519
+// signing key, once the client has verified locally (by decrypting its own
+// just-submitted TOTP secret and checking a live code) that the user saved
+// their authenticator entry correctly.
 type MsgConfirmVault struct {
-	Authority string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
-	Password  string `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
-	TotpCode  string `protobuf:"bytes,3,opt,name=totp_code,json=totpCode,proto3" json:"totp_code,omitempty"`
-	PrivKey   []byte `protobuf:"bytes,4,opt,name=priv_key,json=privKey,proto3" json:"priv_key,omitempty"`
+	Authority  string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	NoncePriv  string `protobuf:"bytes,2,opt,name=nonce_priv,json=noncePriv,proto3" json:"nonce_priv,omitempty"`
+	Ciphertext string `protobuf:"bytes,3,opt,name=ciphertext,proto3" json:"ciphertext,omitempty"`
+	PublicKey  string `protobuf:"bytes,4,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
 }
 
 func (m *MsgConfirmVault) Reset()         { *m = MsgConfirmVault{} }
@@ -189,25 +222,25 @@ func (m *MsgConfirmVault) GetAuthority() string {
 	return ""
 }
 
-func (m *MsgConfirmVault) GetPassword() string {
+func (m *MsgConfirmVault) GetNoncePriv() string {
 	if m != nil {
-		return m.Password
+		return m.NoncePriv
 	}
 	return ""
 }
 
-func (m *MsgConfirmVault) GetTotpCode() string {
+func (m *MsgConfirmVault) GetCiphertext() string {
 	if m != nil {
-		return m.TotpCode
+		return m.Ciphertext
 	}
 	return ""
 }
 
-func (m *MsgConfirmVault) GetPrivKey() []byte {
+func (m *MsgConfirmVault) GetPublicKey() string {
 	if m != nil {
-		return m.PrivKey
+		return m.PublicKey
 	}
-	return nil
+	return ""
 }
 
 type MsgConfirmVaultResponse struct {
@@ -246,129 +279,19 @@ func (m *MsgConfirmVaultResponse) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_MsgConfirmVaultResponse proto.InternalMessageInfo
 
-type MsgUnlockAndSign struct {
-	Authority string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
-	Password  string `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
-	TotpCode  string `protobuf:"bytes,3,opt,name=totp_code,json=totpCode,proto3" json:"totp_code,omitempty"`
-	Message   []byte `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
-}
-
-func (m *MsgUnlockAndSign) Reset()         { *m = MsgUnlockAndSign{} }
-func (m *MsgUnlockAndSign) String() string { return proto.CompactTextString(m) }
-func (*MsgUnlockAndSign) ProtoMessage()    {}
-func (*MsgUnlockAndSign) Descriptor() ([]byte, []int) {
-	return fileDescriptor_62733f43e31364a6, []int{4}
-}
-func (m *MsgUnlockAndSign) XXX_Unmarshal(b []byte) error {
-	return m.Unmarshal(b)
-}
-func (m *MsgUnlockAndSign) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	if deterministic {
-		return xxx_messageInfo_MsgUnlockAndSign.Marshal(b, m, deterministic)
-	} else {
-		b = b[:cap(b)]
-		n, err := m.MarshalToSizedBuffer(b)
-		if err != nil {
-			return nil, err
-		}
-		return b[:n], nil
-	}
-}
-func (m *MsgUnlockAndSign) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_MsgUnlockAndSign.Merge(m, src)
-}
-func (m *MsgUnlockAndSign) XXX_Size() int {
-	return m.Size()
-}
-func (m *MsgUnlockAndSign) XXX_DiscardUnknown() {
-	xxx_messageInfo_MsgUnlockAndSign.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_MsgUnlockAndSign proto.InternalMessageInfo
-
-func (m *MsgUnlockAndSign) GetAuthority() string {
-	if m != nil {
-		return m.Authority
-	}
-	return ""
-}
-
-func (m *MsgUnlockAndSign) GetPassword() string {
-	if m != nil {
-		return m.Password
-	}
-	return ""
-}
-
-func (m *MsgUnlockAndSign) GetTotpCode() string {
-	if m != nil {
-		return m.TotpCode
-	}
-	return ""
-}
-
-func (m *MsgUnlockAndSign) GetMessage() []byte {
-	if m != nil {
-		return m.Message
-	}
-	return nil
-}
-
-type MsgUnlockAndSignResponse struct {
-	Signature []byte `protobuf:"bytes,1,opt,name=signature,proto3" json:"signature,omitempty"`
-}
-
-func (m *MsgUnlockAndSignResponse) Reset()         { *m = MsgUnlockAndSignResponse{} }
-func (m *MsgUnlockAndSignResponse) String() string { return proto.CompactTextString(m) }
-func (*MsgUnlockAndSignResponse) ProtoMessage()    {}
-func (*MsgUnlockAndSignResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_62733f43e31364a6, []int{5}
-}
-func (m *MsgUnlockAndSignResponse) XXX_Unmarshal(b []byte) error {
-	return m.Unmarshal(b)
-}
-func (m *MsgUnlockAndSignResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	if deterministic {
-		return xxx_messageInfo_MsgUnlockAndSignResponse.Marshal(b, m, deterministic)
-	} else {
-		b = b[:cap(b)]
-		n, err := m.MarshalToSizedBuffer(b)
-		if err != nil {
-			return nil, err
-		}
-		return b[:n], nil
-	}
-}
-func (m *MsgUnlockAndSignResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_MsgUnlockAndSignResponse.Merge(m, src)
-}
-func (m *MsgUnlockAndSignResponse) XXX_Size() int {
-	return m.Size()
-}
-func (m *MsgUnlockAndSignResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_MsgUnlockAndSignResponse.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_MsgUnlockAndSignResponse proto.InternalMessageInfo
-
-func (m *MsgUnlockAndSignResponse) GetSignature() []byte {
-	if m != nil {
-		return m.Signature
-	}
-	return nil
-}
-
+// MsgDisableVault deletes `authority`'s vault record. Authorization is the
+// normal Cosmos Msg signer check (only the account itself can sign this) —
+// no separate password/TOTP factor is meaningful here since, as above, the
+// chain can't verify either without seeing them in the clear.
 type MsgDisableVault struct {
 	Authority string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
-	Password  string `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
-	TotpCode  string `protobuf:"bytes,3,opt,name=totp_code,json=totpCode,proto3" json:"totp_code,omitempty"`
 }
 
 func (m *MsgDisableVault) Reset()         { *m = MsgDisableVault{} }
 func (m *MsgDisableVault) String() string { return proto.CompactTextString(m) }
 func (*MsgDisableVault) ProtoMessage()    {}
 func (*MsgDisableVault) Descriptor() ([]byte, []int) {
-	return fileDescriptor_62733f43e31364a6, []int{6}
+	return fileDescriptor_62733f43e31364a6, []int{4}
 }
 func (m *MsgDisableVault) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -404,20 +327,6 @@ func (m *MsgDisableVault) GetAuthority() string {
 	return ""
 }
 
-func (m *MsgDisableVault) GetPassword() string {
-	if m != nil {
-		return m.Password
-	}
-	return ""
-}
-
-func (m *MsgDisableVault) GetTotpCode() string {
-	if m != nil {
-		return m.TotpCode
-	}
-	return ""
-}
-
 type MsgDisableVaultResponse struct {
 }
 
@@ -425,7 +334,7 @@ func (m *MsgDisableVaultResponse) Reset()         { *m = MsgDisableVaultResponse
 func (m *MsgDisableVaultResponse) String() string { return proto.CompactTextString(m) }
 func (*MsgDisableVaultResponse) ProtoMessage()    {}
 func (*MsgDisableVaultResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_62733f43e31364a6, []int{7}
+	return fileDescriptor_62733f43e31364a6, []int{5}
 }
 func (m *MsgDisableVaultResponse) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -459,8 +368,6 @@ func init() {
 	proto.RegisterType((*MsgSetupVaultResponse)(nil), "marketplace.vault.v1.MsgSetupVaultResponse")
 	proto.RegisterType((*MsgConfirmVault)(nil), "marketplace.vault.v1.MsgConfirmVault")
 	proto.RegisterType((*MsgConfirmVaultResponse)(nil), "marketplace.vault.v1.MsgConfirmVaultResponse")
-	proto.RegisterType((*MsgUnlockAndSign)(nil), "marketplace.vault.v1.MsgUnlockAndSign")
-	proto.RegisterType((*MsgUnlockAndSignResponse)(nil), "marketplace.vault.v1.MsgUnlockAndSignResponse")
 	proto.RegisterType((*MsgDisableVault)(nil), "marketplace.vault.v1.MsgDisableVault")
 	proto.RegisterType((*MsgDisableVaultResponse)(nil), "marketplace.vault.v1.MsgDisableVaultResponse")
 }
@@ -468,42 +375,42 @@ func init() {
 func init() { proto.RegisterFile("marketplace/vault/v1/tx.proto", fileDescriptor_62733f43e31364a6) }
 
 var fileDescriptor_62733f43e31364a6 = []byte{
-	// 549 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xb4, 0x54, 0xbf, 0x6f, 0xd3, 0x40,
-	0x14, 0x8e, 0x09, 0xe4, 0xc7, 0x53, 0xaa, 0x46, 0x56, 0xa1, 0x8e, 0x29, 0x2e, 0x32, 0x02, 0x15,
-	0x10, 0xb6, 0x0a, 0x0b, 0x42, 0x2c, 0xa4, 0x6c, 0x28, 0x8b, 0xab, 0x32, 0xb0, 0x04, 0xc7, 0xb9,
-	0x5e, 0x4e, 0x89, 0x7d, 0xd6, 0xbd, 0x73, 0xa8, 0x37, 0x24, 0xfe, 0x01, 0x76, 0xfe, 0x02, 0x36,
-	0xfe, 0x0c, 0xc6, 0x8e, 0x4c, 0x15, 0x4a, 0x06, 0x76, 0x46, 0x26, 0xe4, 0x1f, 0x49, 0xed, 0xd2,
-	0xa0, 0x2c, 0xdd, 0xfc, 0xdd, 0xf7, 0xbd, 0xbb, 0xef, 0x7b, 0xf7, 0x7c, 0x70, 0xc7, 0x77, 0xc5,
-	0x98, 0xc8, 0x70, 0xe2, 0x7a, 0xc4, 0x9e, 0xba, 0xd1, 0x44, 0xda, 0xd3, 0x7d, 0x5b, 0x9e, 0x58,
-	0xa1, 0xe0, 0x92, 0xab, 0x5b, 0x05, 0xda, 0x4a, 0x69, 0x6b, 0xba, 0xaf, 0x6f, 0x51, 0x4e, 0x79,
-	0x2a, 0xb0, 0x93, 0xaf, 0x4c, 0xab, 0x6f, 0x7b, 0x1c, 0x7d, 0x8e, 0xb6, 0x8f, 0x34, 0xd9, 0xc3,
-	0x47, 0x9a, 0x13, 0x9d, 0x8c, 0xe8, 0x67, 0x15, 0x19, 0xc8, 0x28, 0xf3, 0x8b, 0x02, 0x1b, 0x3d,
-	0xa4, 0x87, 0x44, 0x46, 0xe1, 0xdb, 0x64, 0x7b, 0xf5, 0x25, 0x34, 0xdd, 0x48, 0x8e, 0xb8, 0x60,
-	0x32, 0xd6, 0x94, 0xbb, 0xca, 0x5e, 0xb3, 0x6b, 0xfc, 0x3e, 0xdb, 0x6d, 0xc7, 0xae, 0x3f, 0x79,
-	0x61, 0x2e, 0x29, 0xf3, 0xcf, 0xd9, 0x6e, 0x0d, 0xa5, 0x60, 0x01, 0x75, 0xce, 0x0b, 0x54, 0x1d,
-	0x1a, 0xa1, 0x8b, 0xf8, 0x81, 0x8b, 0xa1, 0x76, 0x2d, 0x29, 0x76, 0x96, 0x58, 0xd5, 0xa0, 0xee,
-	0x7a, 0x1e, 0x8f, 0x02, 0xa9, 0x55, 0x53, 0x6a, 0x01, 0xd5, 0x5b, 0x50, 0x63, 0x88, 0x11, 0x11,
-	0xda, 0xf5, 0x94, 0xc8, 0x91, 0xd9, 0x85, 0x9b, 0x25, 0x73, 0x0e, 0xc1, 0x90, 0x07, 0x48, 0xd4,
-	0x87, 0xd0, 0x0e, 0x05, 0x9f, 0x32, 0x64, 0x3c, 0x60, 0x01, 0xed, 0x47, 0x82, 0x65, 0x5e, 0x9d,
-	0xcd, 0xe2, 0xfa, 0x91, 0x60, 0xe6, 0x27, 0x05, 0x36, 0x7b, 0x48, 0x0f, 0x78, 0x70, 0xcc, 0x84,
-	0x9f, 0x65, 0xdc, 0xf9, 0x27, 0xe3, 0xba, 0x19, 0x6e, 0x43, 0x53, 0x72, 0x19, 0xf6, 0x3d, 0x3e,
-	0x24, 0x79, 0x8a, 0x46, 0xb2, 0x70, 0xc0, 0x87, 0x44, 0xed, 0x40, 0x23, 0x14, 0x6c, 0xda, 0x1f,
-	0x93, 0x38, 0x0d, 0xd2, 0x72, 0xea, 0x09, 0x7e, 0x43, 0x62, 0xb3, 0x03, 0xdb, 0x17, 0x4c, 0x2c,
-	0xb2, 0x24, 0x06, 0xdb, 0x3d, 0xa4, 0x47, 0xc1, 0x84, 0x7b, 0xe3, 0x57, 0xc1, 0xf0, 0x90, 0xd1,
-	0xe0, 0xaa, 0x1c, 0x6a, 0x50, 0xf7, 0x09, 0xa2, 0x4b, 0xc9, 0xc2, 0x60, 0x0e, 0xcd, 0xe7, 0xa0,
-	0x5d, 0x34, 0xb1, 0xec, 0xf6, 0x0e, 0x34, 0x91, 0xd1, 0xc0, 0x95, 0x91, 0x20, 0xa9, 0x99, 0x96,
-	0x73, 0xbe, 0x60, 0x8e, 0xd2, 0xfe, 0xbe, 0x66, 0xe8, 0x0e, 0x26, 0xe4, 0x2a, 0xfb, 0x9b, 0x37,
-	0xb1, 0x78, 0xd2, 0xc2, 0xe2, 0xd3, 0xaf, 0x55, 0xa8, 0xf6, 0x90, 0xaa, 0xef, 0x01, 0x0a, 0xb3,
-	0x7c, 0xcf, 0xba, 0xec, 0xf7, 0xb1, 0x4a, 0x33, 0xa5, 0x3f, 0x5e, 0x43, 0xb4, 0xbc, 0xac, 0x8a,
-	0x7a, 0x0c, 0xad, 0xd2, 0x2c, 0xdd, 0x5f, 0x59, 0x5e, 0x94, 0xe9, 0x4f, 0xd6, 0x92, 0x15, 0xce,
-	0x61, 0xb0, 0x51, 0x1e, 0x89, 0x07, 0x2b, 0x77, 0x28, 0xe9, 0x74, 0x6b, 0x3d, 0x5d, 0x39, 0x52,
-	0xe9, 0xfa, 0x56, 0x47, 0x2a, 0xca, 0xfe, 0x13, 0xe9, 0xb2, 0x2b, 0x32, 0x2b, 0xfa, 0x8d, 0x8f,
-	0xbf, 0xbe, 0x3d, 0x52, 0xba, 0xdd, 0xef, 0x33, 0x43, 0x39, 0x9d, 0x19, 0xca, 0xcf, 0x99, 0xa1,
-	0x7c, 0x9e, 0x1b, 0x95, 0xd3, 0xb9, 0x51, 0xf9, 0x31, 0x37, 0x2a, 0xef, 0xf6, 0x28, 0x93, 0xa3,
-	0x68, 0x60, 0x79, 0xdc, 0xb7, 0xa5, 0x1f, 0xda, 0xc5, 0xb7, 0xf1, 0x24, 0x7f, 0x1d, 0x65, 0x1c,
-	0x12, 0x1c, 0xd4, 0xd2, 0xe7, 0xeb, 0xd9, 0xdf, 0x00, 0x00, 0x00, 0xff, 0xff, 0x4d, 0xfe, 0xe1,
-	0xf0, 0x3f, 0x05, 0x00, 0x00,
+	// 550 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x8c, 0x54, 0x3d, 0x6f, 0xd3, 0x40,
+	0x18, 0x8e, 0xd3, 0x36, 0xad, 0x0f, 0x2a, 0xd0, 0xd1, 0x2a, 0x4e, 0x44, 0x9d, 0xca, 0x08, 0x29,
+	0x02, 0x61, 0xab, 0x65, 0x43, 0x4c, 0x81, 0xad, 0x44, 0x42, 0x6e, 0xc4, 0xc0, 0x12, 0x1c, 0xe7,
+	0x8d, 0x73, 0x8a, 0xcf, 0x77, 0xba, 0xbb, 0x44, 0xf1, 0xc6, 0x1f, 0x40, 0xe2, 0x9f, 0xc0, 0x2f,
+	0x60, 0x66, 0xec, 0xc8, 0x54, 0xa1, 0x64, 0x60, 0x67, 0x64, 0x42, 0x3e, 0x07, 0xe3, 0x40, 0x5b,
+	0x65, 0xbb, 0xbc, 0xcf, 0xc7, 0xfb, 0xe4, 0xd1, 0xf9, 0xd0, 0x11, 0x0d, 0xc4, 0x04, 0x14, 0x8f,
+	0x83, 0x10, 0xbc, 0x59, 0x30, 0x8d, 0x95, 0x37, 0x3b, 0xf1, 0xd4, 0xdc, 0xe5, 0x82, 0x29, 0x86,
+	0x0f, 0x4a, 0xb0, 0xab, 0x61, 0x77, 0x76, 0xd2, 0x3c, 0x88, 0x58, 0xc4, 0x34, 0xc1, 0xcb, 0x4e,
+	0x39, 0xb7, 0x59, 0x0f, 0x99, 0xa4, 0x4c, 0x7a, 0x54, 0x46, 0x99, 0x07, 0x95, 0xd1, 0x0a, 0x68,
+	0xe4, 0x40, 0x3f, 0x57, 0xe4, 0x3f, 0x72, 0xc8, 0xf9, 0x54, 0x45, 0xfb, 0x5d, 0x19, 0x9d, 0x83,
+	0x9a, 0xf2, 0x37, 0x99, 0x3d, 0x7e, 0x8e, 0xcc, 0x60, 0xaa, 0xc6, 0x4c, 0x10, 0x95, 0x5a, 0xc6,
+	0xb1, 0xd1, 0x36, 0x3b, 0xf6, 0xcf, 0xcb, 0xd6, 0xdd, 0x34, 0xa0, 0xf1, 0x33, 0xa7, 0x80, 0x9c,
+	0x5f, 0x97, 0xad, 0x9a, 0x54, 0x82, 0x24, 0x91, 0xff, 0x57, 0x80, 0x31, 0xda, 0x96, 0x41, 0xac,
+	0xac, 0x6a, 0x26, 0xf4, 0xf5, 0x19, 0x37, 0xd0, 0xde, 0x64, 0x38, 0xea, 0x2b, 0x42, 0xc1, 0xda,
+	0x3a, 0x36, 0xda, 0xfb, 0xfe, 0xee, 0x64, 0x38, 0xea, 0x11, 0x0a, 0xf8, 0x08, 0xa1, 0x0c, 0xa2,
+	0x40, 0x99, 0x48, 0xad, 0x6d, 0x0d, 0x9a, 0x93, 0xe1, 0xa8, 0xab, 0x07, 0xb8, 0x85, 0x6e, 0x69,
+	0xe5, 0x58, 0x40, 0x30, 0x94, 0xd6, 0x8e, 0xc6, 0x33, 0x45, 0x2f, 0x9f, 0x60, 0x3b, 0x27, 0x4c,
+	0x20, 0xed, 0xc7, 0x90, 0x58, 0xb5, 0xc2, 0xe0, 0x0c, 0xd2, 0x57, 0x90, 0x64, 0xfe, 0x09, 0x4b,
+	0x42, 0xe8, 0x2b, 0xa6, 0xb8, 0xb5, 0xab, 0x43, 0x99, 0x7a, 0xd2, 0x63, 0x8a, 0xe3, 0x53, 0x74,
+	0x08, 0x49, 0x28, 0x52, 0xae, 0x60, 0xa8, 0x29, 0x7d, 0x09, 0xa1, 0x00, 0x65, 0xed, 0x69, 0xe6,
+	0xbd, 0x02, 0xcc, 0xd8, 0xe7, 0x1a, 0x72, 0xea, 0xe8, 0x70, 0xad, 0x30, 0x1f, 0x24, 0x67, 0x89,
+	0x04, 0xe7, 0x83, 0x81, 0xee, 0x74, 0x65, 0xf4, 0x82, 0x25, 0x23, 0x22, 0x68, 0x5e, 0xe6, 0xfd,
+	0xff, 0xca, 0x2c, 0x97, 0x55, 0xa4, 0xe3, 0x82, 0xcc, 0x56, 0x95, 0xe5, 0xe9, 0x5e, 0x0b, 0x32,
+	0xc3, 0x36, 0x42, 0x21, 0xe1, 0x63, 0x10, 0x0a, 0xe6, 0x4a, 0x37, 0x67, 0xfa, 0xa5, 0x49, 0x26,
+	0xe7, 0xd3, 0x41, 0x4c, 0xc2, 0xec, 0xff, 0xeb, 0xf2, 0x4c, 0xdf, 0xcc, 0x27, 0x67, 0x90, 0x3a,
+	0x0d, 0x54, 0xff, 0x27, 0x4e, 0x11, 0xd5, 0xd3, 0x49, 0x5f, 0x12, 0x19, 0x0c, 0x62, 0xd8, 0x20,
+	0xe9, 0xca, 0xab, 0x2c, 0xf8, 0xe3, 0x75, 0xfa, 0xa5, 0x8a, 0xb6, 0xba, 0x32, 0xc2, 0xef, 0x10,
+	0x2a, 0xdd, 0xa2, 0x07, 0xee, 0x55, 0x17, 0xd7, 0x5d, 0x6b, 0xae, 0xf9, 0x78, 0x03, 0x52, 0x91,
+	0xb9, 0x82, 0x47, 0xe8, 0xf6, 0x5a, 0xb9, 0x0f, 0xaf, 0x95, 0x97, 0x69, 0xcd, 0x27, 0x1b, 0xd1,
+	0xd6, 0xf7, 0xac, 0x55, 0x73, 0xfd, 0x9e, 0x32, 0xed, 0x86, 0x3d, 0x57, 0xf5, 0xe6, 0x54, 0x9a,
+	0x3b, 0xef, 0x7f, 0x7c, 0x7e, 0x64, 0x74, 0x3a, 0x5f, 0x17, 0xb6, 0x71, 0xb1, 0xb0, 0x8d, 0xef,
+	0x0b, 0xdb, 0xf8, 0xb8, 0xb4, 0x2b, 0x17, 0x4b, 0xbb, 0xf2, 0x6d, 0x69, 0x57, 0xde, 0xb6, 0x23,
+	0xa2, 0xc6, 0xd3, 0x81, 0x1b, 0x32, 0xea, 0x29, 0xca, 0xbd, 0xf2, 0x53, 0x31, 0x5f, 0x3d, 0x16,
+	0x2a, 0xe5, 0x20, 0x07, 0x35, 0xfd, 0x35, 0x3f, 0xfd, 0x1d, 0x00, 0x00, 0xff, 0xff, 0x21, 0xc4,
+	0x2c, 0x63, 0x4e, 0x04, 0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -520,7 +427,6 @@ const _ = grpc.SupportPackageIsVersion4
 type MsgClient interface {
 	SetupVault(ctx context.Context, in *MsgSetupVault, opts ...grpc.CallOption) (*MsgSetupVaultResponse, error)
 	ConfirmVault(ctx context.Context, in *MsgConfirmVault, opts ...grpc.CallOption) (*MsgConfirmVaultResponse, error)
-	UnlockAndSign(ctx context.Context, in *MsgUnlockAndSign, opts ...grpc.CallOption) (*MsgUnlockAndSignResponse, error)
 	DisableVault(ctx context.Context, in *MsgDisableVault, opts ...grpc.CallOption) (*MsgDisableVaultResponse, error)
 }
 
@@ -550,15 +456,6 @@ func (c *msgClient) ConfirmVault(ctx context.Context, in *MsgConfirmVault, opts 
 	return out, nil
 }
 
-func (c *msgClient) UnlockAndSign(ctx context.Context, in *MsgUnlockAndSign, opts ...grpc.CallOption) (*MsgUnlockAndSignResponse, error) {
-	out := new(MsgUnlockAndSignResponse)
-	err := c.cc.Invoke(ctx, "/marketplace.vault.v1.Msg/UnlockAndSign", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *msgClient) DisableVault(ctx context.Context, in *MsgDisableVault, opts ...grpc.CallOption) (*MsgDisableVaultResponse, error) {
 	out := new(MsgDisableVaultResponse)
 	err := c.cc.Invoke(ctx, "/marketplace.vault.v1.Msg/DisableVault", in, out, opts...)
@@ -572,7 +469,6 @@ func (c *msgClient) DisableVault(ctx context.Context, in *MsgDisableVault, opts 
 type MsgServer interface {
 	SetupVault(context.Context, *MsgSetupVault) (*MsgSetupVaultResponse, error)
 	ConfirmVault(context.Context, *MsgConfirmVault) (*MsgConfirmVaultResponse, error)
-	UnlockAndSign(context.Context, *MsgUnlockAndSign) (*MsgUnlockAndSignResponse, error)
 	DisableVault(context.Context, *MsgDisableVault) (*MsgDisableVaultResponse, error)
 }
 
@@ -585,9 +481,6 @@ func (*UnimplementedMsgServer) SetupVault(ctx context.Context, req *MsgSetupVaul
 }
 func (*UnimplementedMsgServer) ConfirmVault(ctx context.Context, req *MsgConfirmVault) (*MsgConfirmVaultResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ConfirmVault not implemented")
-}
-func (*UnimplementedMsgServer) UnlockAndSign(ctx context.Context, req *MsgUnlockAndSign) (*MsgUnlockAndSignResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method UnlockAndSign not implemented")
 }
 func (*UnimplementedMsgServer) DisableVault(ctx context.Context, req *MsgDisableVault) (*MsgDisableVaultResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DisableVault not implemented")
@@ -633,24 +526,6 @@ func _Msg_ConfirmVault_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_UnlockAndSign_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgUnlockAndSign)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MsgServer).UnlockAndSign(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/marketplace.vault.v1.Msg/UnlockAndSign",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).UnlockAndSign(ctx, req.(*MsgUnlockAndSign))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Msg_DisableVault_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MsgDisableVault)
 	if err := dec(in); err != nil {
@@ -683,10 +558,6 @@ var _Msg_serviceDesc = grpc.ServiceDesc{
 			Handler:    _Msg_ConfirmVault_Handler,
 		},
 		{
-			MethodName: "UnlockAndSign",
-			Handler:    _Msg_UnlockAndSign_Handler,
-		},
-		{
 			MethodName: "DisableVault",
 			Handler:    _Msg_DisableVault_Handler,
 		},
@@ -715,24 +586,44 @@ func (m *MsgSetupVault) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if len(m.Issuer) > 0 {
-		i -= len(m.Issuer)
-		copy(dAtA[i:], m.Issuer)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.Issuer)))
+	if len(m.EncryptedTotpSecret) > 0 {
+		i -= len(m.EncryptedTotpSecret)
+		copy(dAtA[i:], m.EncryptedTotpSecret)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EncryptedTotpSecret)))
 		i--
-		dAtA[i] = 0x22
+		dAtA[i] = 0x42
 	}
-	if len(m.Account) > 0 {
-		i -= len(m.Account)
-		copy(dAtA[i:], m.Account)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.Account)))
+	if len(m.NonceTotp) > 0 {
+		i -= len(m.NonceTotp)
+		copy(dAtA[i:], m.NonceTotp)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.NonceTotp)))
 		i--
-		dAtA[i] = 0x1a
+		dAtA[i] = 0x3a
 	}
-	if len(m.Password) > 0 {
-		i -= len(m.Password)
-		copy(dAtA[i:], m.Password)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.Password)))
+	if m.KdfKeyLen != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.KdfKeyLen))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.KdfThreads != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.KdfThreads))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.KdfMemory != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.KdfMemory))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.KdfTime != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.KdfTime))
+		i--
+		dAtA[i] = 0x18
+	}
+	if len(m.Salt) > 0 {
+		i -= len(m.Salt)
+		copy(dAtA[i:], m.Salt)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Salt)))
 		i--
 		dAtA[i] = 0x12
 	}
@@ -766,13 +657,6 @@ func (m *MsgSetupVaultResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if len(m.ProvisioningUri) > 0 {
-		i -= len(m.ProvisioningUri)
-		copy(dAtA[i:], m.ProvisioningUri)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.ProvisioningUri)))
-		i--
-		dAtA[i] = 0xa
-	}
 	return len(dAtA) - i, nil
 }
 
@@ -796,24 +680,24 @@ func (m *MsgConfirmVault) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if len(m.PrivKey) > 0 {
-		i -= len(m.PrivKey)
-		copy(dAtA[i:], m.PrivKey)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.PrivKey)))
+	if len(m.PublicKey) > 0 {
+		i -= len(m.PublicKey)
+		copy(dAtA[i:], m.PublicKey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.PublicKey)))
 		i--
 		dAtA[i] = 0x22
 	}
-	if len(m.TotpCode) > 0 {
-		i -= len(m.TotpCode)
-		copy(dAtA[i:], m.TotpCode)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.TotpCode)))
+	if len(m.Ciphertext) > 0 {
+		i -= len(m.Ciphertext)
+		copy(dAtA[i:], m.Ciphertext)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Ciphertext)))
 		i--
 		dAtA[i] = 0x1a
 	}
-	if len(m.Password) > 0 {
-		i -= len(m.Password)
-		copy(dAtA[i:], m.Password)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.Password)))
+	if len(m.NoncePriv) > 0 {
+		i -= len(m.NoncePriv)
+		copy(dAtA[i:], m.NoncePriv)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.NoncePriv)))
 		i--
 		dAtA[i] = 0x12
 	}
@@ -850,87 +734,6 @@ func (m *MsgConfirmVaultResponse) MarshalToSizedBuffer(dAtA []byte) (int, error)
 	return len(dAtA) - i, nil
 }
 
-func (m *MsgUnlockAndSign) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *MsgUnlockAndSign) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *MsgUnlockAndSign) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	if len(m.Message) > 0 {
-		i -= len(m.Message)
-		copy(dAtA[i:], m.Message)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.Message)))
-		i--
-		dAtA[i] = 0x22
-	}
-	if len(m.TotpCode) > 0 {
-		i -= len(m.TotpCode)
-		copy(dAtA[i:], m.TotpCode)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.TotpCode)))
-		i--
-		dAtA[i] = 0x1a
-	}
-	if len(m.Password) > 0 {
-		i -= len(m.Password)
-		copy(dAtA[i:], m.Password)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.Password)))
-		i--
-		dAtA[i] = 0x12
-	}
-	if len(m.Authority) > 0 {
-		i -= len(m.Authority)
-		copy(dAtA[i:], m.Authority)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
-		i--
-		dAtA[i] = 0xa
-	}
-	return len(dAtA) - i, nil
-}
-
-func (m *MsgUnlockAndSignResponse) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *MsgUnlockAndSignResponse) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *MsgUnlockAndSignResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	if len(m.Signature) > 0 {
-		i -= len(m.Signature)
-		copy(dAtA[i:], m.Signature)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.Signature)))
-		i--
-		dAtA[i] = 0xa
-	}
-	return len(dAtA) - i, nil
-}
-
 func (m *MsgDisableVault) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -951,20 +754,6 @@ func (m *MsgDisableVault) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if len(m.TotpCode) > 0 {
-		i -= len(m.TotpCode)
-		copy(dAtA[i:], m.TotpCode)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.TotpCode)))
-		i--
-		dAtA[i] = 0x1a
-	}
-	if len(m.Password) > 0 {
-		i -= len(m.Password)
-		copy(dAtA[i:], m.Password)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.Password)))
-		i--
-		dAtA[i] = 0x12
-	}
 	if len(m.Authority) > 0 {
 		i -= len(m.Authority)
 		copy(dAtA[i:], m.Authority)
@@ -1019,15 +808,27 @@ func (m *MsgSetupVault) Size() (n int) {
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
-	l = len(m.Password)
+	l = len(m.Salt)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
-	l = len(m.Account)
+	if m.KdfTime != 0 {
+		n += 1 + sovTx(uint64(m.KdfTime))
+	}
+	if m.KdfMemory != 0 {
+		n += 1 + sovTx(uint64(m.KdfMemory))
+	}
+	if m.KdfThreads != 0 {
+		n += 1 + sovTx(uint64(m.KdfThreads))
+	}
+	if m.KdfKeyLen != 0 {
+		n += 1 + sovTx(uint64(m.KdfKeyLen))
+	}
+	l = len(m.NonceTotp)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
-	l = len(m.Issuer)
+	l = len(m.EncryptedTotpSecret)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
@@ -1040,10 +841,6 @@ func (m *MsgSetupVaultResponse) Size() (n int) {
 	}
 	var l int
 	_ = l
-	l = len(m.ProvisioningUri)
-	if l > 0 {
-		n += 1 + l + sovTx(uint64(l))
-	}
 	return n
 }
 
@@ -1057,15 +854,15 @@ func (m *MsgConfirmVault) Size() (n int) {
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
-	l = len(m.Password)
+	l = len(m.NoncePriv)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
-	l = len(m.TotpCode)
+	l = len(m.Ciphertext)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
-	l = len(m.PrivKey)
+	l = len(m.PublicKey)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
@@ -1081,44 +878,6 @@ func (m *MsgConfirmVaultResponse) Size() (n int) {
 	return n
 }
 
-func (m *MsgUnlockAndSign) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	l = len(m.Authority)
-	if l > 0 {
-		n += 1 + l + sovTx(uint64(l))
-	}
-	l = len(m.Password)
-	if l > 0 {
-		n += 1 + l + sovTx(uint64(l))
-	}
-	l = len(m.TotpCode)
-	if l > 0 {
-		n += 1 + l + sovTx(uint64(l))
-	}
-	l = len(m.Message)
-	if l > 0 {
-		n += 1 + l + sovTx(uint64(l))
-	}
-	return n
-}
-
-func (m *MsgUnlockAndSignResponse) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	l = len(m.Signature)
-	if l > 0 {
-		n += 1 + l + sovTx(uint64(l))
-	}
-	return n
-}
-
 func (m *MsgDisableVault) Size() (n int) {
 	if m == nil {
 		return 0
@@ -1126,14 +885,6 @@ func (m *MsgDisableVault) Size() (n int) {
 	var l int
 	_ = l
 	l = len(m.Authority)
-	if l > 0 {
-		n += 1 + l + sovTx(uint64(l))
-	}
-	l = len(m.Password)
-	if l > 0 {
-		n += 1 + l + sovTx(uint64(l))
-	}
-	l = len(m.TotpCode)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
@@ -1218,7 +969,7 @@ func (m *MsgSetupVault) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Password", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Salt", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1246,13 +997,13 @@ func (m *MsgSetupVault) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Password = string(dAtA[iNdEx:postIndex])
+			m.Salt = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Account", wireType)
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field KdfTime", wireType)
 			}
-			var stringLen uint64
+			m.KdfTime = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowTx
@@ -1262,27 +1013,71 @@ func (m *MsgSetupVault) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
+				m.KdfTime |= uint32(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthTx
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthTx
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Account = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
 		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field KdfMemory", wireType)
+			}
+			m.KdfMemory = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.KdfMemory |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field KdfThreads", wireType)
+			}
+			m.KdfThreads = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.KdfThreads |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field KdfKeyLen", wireType)
+			}
+			m.KdfKeyLen = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.KdfKeyLen |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Issuer", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field NonceTotp", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1310,7 +1105,39 @@ func (m *MsgSetupVault) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Issuer = string(dAtA[iNdEx:postIndex])
+			m.NonceTotp = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EncryptedTotpSecret", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EncryptedTotpSecret = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -1362,38 +1189,6 @@ func (m *MsgSetupVaultResponse) Unmarshal(dAtA []byte) error {
 			return fmt.Errorf("proto: MsgSetupVaultResponse: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ProvisioningUri", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowTx
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthTx
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthTx
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.ProvisioningUri = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipTx(dAtA[iNdEx:])
@@ -1478,7 +1273,7 @@ func (m *MsgConfirmVault) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Password", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field NoncePriv", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1506,11 +1301,11 @@ func (m *MsgConfirmVault) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Password = string(dAtA[iNdEx:postIndex])
+			m.NoncePriv = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field TotpCode", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Ciphertext", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -1538,13 +1333,13 @@ func (m *MsgConfirmVault) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.TotpCode = string(dAtA[iNdEx:postIndex])
+			m.Ciphertext = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 4:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field PrivKey", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field PublicKey", wireType)
 			}
-			var byteLen int
+			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowTx
@@ -1554,25 +1349,23 @@ func (m *MsgConfirmVault) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				byteLen |= int(b&0x7F) << shift
+				stringLen |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
-			if byteLen < 0 {
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
 				return ErrInvalidLengthTx
 			}
-			postIndex := iNdEx + byteLen
+			postIndex := iNdEx + intStringLen
 			if postIndex < 0 {
 				return ErrInvalidLengthTx
 			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.PrivKey = append(m.PrivKey[:0], dAtA[iNdEx:postIndex]...)
-			if m.PrivKey == nil {
-				m.PrivKey = []byte{}
-			}
+			m.PublicKey = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -1624,270 +1417,6 @@ func (m *MsgConfirmVaultResponse) Unmarshal(dAtA []byte) error {
 			return fmt.Errorf("proto: MsgConfirmVaultResponse: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
-		default:
-			iNdEx = preIndex
-			skippy, err := skipTx(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthTx
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *MsgUnlockAndSign) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowTx
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: MsgUnlockAndSign: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: MsgUnlockAndSign: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowTx
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthTx
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthTx
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Authority = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Password", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowTx
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthTx
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthTx
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Password = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field TotpCode", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowTx
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthTx
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthTx
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.TotpCode = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 4:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Message", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowTx
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthTx
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex < 0 {
-				return ErrInvalidLengthTx
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Message = append(m.Message[:0], dAtA[iNdEx:postIndex]...)
-			if m.Message == nil {
-				m.Message = []byte{}
-			}
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipTx(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthTx
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *MsgUnlockAndSignResponse) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowTx
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: MsgUnlockAndSignResponse: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: MsgUnlockAndSignResponse: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Signature", wireType)
-			}
-			var byteLen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowTx
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				byteLen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if byteLen < 0 {
-				return ErrInvalidLengthTx
-			}
-			postIndex := iNdEx + byteLen
-			if postIndex < 0 {
-				return ErrInvalidLengthTx
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Signature = append(m.Signature[:0], dAtA[iNdEx:postIndex]...)
-			if m.Signature == nil {
-				m.Signature = []byte{}
-			}
-			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipTx(dAtA[iNdEx:])
@@ -1969,70 +1498,6 @@ func (m *MsgDisableVault) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.Authority = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Password", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowTx
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthTx
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthTx
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Password = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field TotpCode", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowTx
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthTx
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthTx
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.TotpCode = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

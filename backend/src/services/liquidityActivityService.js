@@ -1,6 +1,7 @@
 /* eslint-env node */
 /* global require, module */
 const LiquidityPoolActivity = require('../models/LiquidityPoolActivity');
+const { liquidityActivityTotal } = require('../utils/metrics');
 
 function compactObject(value) {
   return Object.fromEntries(
@@ -37,7 +38,9 @@ async function recordLiquidityActivity(entry) {
     recordedAt: entry.recordedAt || new Date(),
   });
 
-  return LiquidityPoolActivity.create(payload);
+  const created = await LiquidityPoolActivity.create(payload);
+  liquidityActivityTotal.inc({ flow: payload.flow, stage: payload.stage, status: payload.status });
+  return created;
 }
 
 async function recordBuyLiquidityActivity(stage, purchase, overrides = {}) {

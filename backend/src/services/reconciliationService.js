@@ -4,7 +4,7 @@ const { Console } = require('console');
 const { stdout, stderr } = require('process');
 const console = new Console(stdout, stderr);
 
-const MallcoinPurchase = require('../models/MalicoinPurchase');
+const MallcoinPurchase = require('../models/MallcoinPurchase');
 const LiquidityReconciliation = require('../models/LiquidityReconciliation');
 const logger = require('../utils/logger');
 

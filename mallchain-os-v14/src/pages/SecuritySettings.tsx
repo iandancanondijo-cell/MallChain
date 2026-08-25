@@ -12,11 +12,14 @@
  */
 
 import React, { useState } from 'react';
+import QRCode from 'qrcode';
 import { store, type Activity } from '../store/store';
 import { useStoreVersion, toast } from '../components/ui';
-import { verifyPin, hashPin, encryptMnemonic } from '../services/security';
+import { verifyPin, hashPin, encryptMnemonic, decryptMnemonic } from '../services/security';
 import { authService } from '../services/auth';
 import { settingsApi, type UserSettingsData } from '../services/settingsApi';
+import { requestMnemonic } from '../services/mnemonicAccess';
+import { getStatus, setupKeyRecovery, confirmKeyRecovery, testRecovery, disableKeyRecovery } from '../services/vaultRecovery';
 import PrivateKeyExport from '../components/PrivateKeyExport';
 import '../styles/security-settings.css';
 
@@ -69,6 +72,125 @@ export function SecuritySettings() {
     });
   }, []);
 
+  // Encrypted Key Backup (x/vault): password+TOTP-gated on-chain recovery
+  // of a dedicated ed25519 key, separate from the login 2FA managed on the
+  // Profile page. See services/vaultRecovery.ts.
+  type VaultStatus = 'loading' | 'none' | 'pending' | 'active';
+  const [vaultStatus, setVaultStatus] = useState<VaultStatus>('loading');
+  const [vaultModal, setVaultModal] = useState<null | 'setup' | 'confirm' | 'test' | 'disable'>(null);
+  const [vaultPassword, setVaultPassword] = useState('');
+  const [vaultCode, setVaultCode] = useState('');
+  const [vaultQr, setVaultQr] = useState<{ secret: string; dataUrl: string } | null>(null);
+  const [vaultBusy, setVaultBusy] = useState(false);
+  const [vaultError, setVaultError] = useState<string | null>(null);
+  const [vaultTestResult, setVaultTestResult] = useState<string | null>(null);
+
+  const refreshVaultStatus = React.useCallback(async () => {
+    if (!st.wallet.address) {
+      setVaultStatus('none');
+      return;
+    }
+    try {
+      const blob = await getStatus(st.wallet.address);
+      setVaultStatus(!blob.found ? 'none' : blob.ciphertext ? 'active' : 'pending');
+    } catch {
+      setVaultStatus('none');
+    }
+  }, [st.wallet.address]);
+
+  React.useEffect(() => {
+    refreshVaultStatus();
+  }, [refreshVaultStatus]);
+
+  const openVaultModal = (modal: 'setup' | 'confirm' | 'test' | 'disable') => {
+    setVaultPassword('');
+    setVaultCode('');
+    setVaultError(null);
+    setVaultTestResult(null);
+    if (modal === 'setup') setVaultQr(null);
+    setVaultModal(modal);
+  };
+
+  const submitVaultSetup = async () => {
+    setVaultBusy(true);
+    setVaultError(null);
+    try {
+      const mnemonic = await requestMnemonic();
+      if (!mnemonic) {
+        setVaultBusy(false);
+        return;
+      }
+      const { uri, secret } = await setupKeyRecovery({
+        mnemonic,
+        address: st.wallet.address,
+        password: vaultPassword,
+        accountName: st.wallet.address,
+        issuer: 'Mallchain',
+      });
+      const dataUrl = await QRCode.toDataURL(uri, { width: 220, margin: 1 });
+      setVaultQr({ secret, dataUrl });
+      toast('Vault registered on-chain — scan the code, then confirm below', true);
+    } catch (e) {
+      setVaultError(e instanceof Error ? e.message : 'Setup failed');
+    } finally {
+      setVaultBusy(false);
+    }
+  };
+
+  const submitVaultConfirm = async () => {
+    setVaultBusy(true);
+    setVaultError(null);
+    try {
+      const mnemonic = await requestMnemonic();
+      if (!mnemonic) {
+        setVaultBusy(false);
+        return;
+      }
+      await confirmKeyRecovery({ mnemonic, address: st.wallet.address, password: vaultPassword, code: vaultCode });
+      toast('Encrypted key backup confirmed', true);
+      setVaultModal(null);
+      refreshVaultStatus();
+    } catch (e) {
+      setVaultError(e instanceof Error ? e.message : 'Confirmation failed');
+    } finally {
+      setVaultBusy(false);
+    }
+  };
+
+  const submitVaultTest = async () => {
+    setVaultBusy(true);
+    setVaultError(null);
+    setVaultTestResult(null);
+    try {
+      const result = await testRecovery({ address: st.wallet.address, password: vaultPassword, code: vaultCode });
+      setVaultTestResult(result.ok ? 'Recovery works — this password and code correctly recover your backed-up key.' : result.reason);
+    } catch (e) {
+      setVaultError(e instanceof Error ? e.message : 'Test failed');
+    } finally {
+      setVaultBusy(false);
+    }
+  };
+
+  const submitVaultDisable = async () => {
+    setVaultBusy(true);
+    setVaultError(null);
+    try {
+      const mnemonic = await requestMnemonic();
+      if (!mnemonic) {
+        setVaultBusy(false);
+        return;
+      }
+      await disableKeyRecovery({ mnemonic, address: st.wallet.address });
+      toast('Encrypted key backup disabled', true);
+      setVaultModal(null);
+      refreshVaultStatus();
+    } catch (e) {
+      setVaultError(e instanceof Error ? e.message : 'Disable failed');
+    } finally {
+      setVaultBusy(false);
+    }
+  };
+
   // Task 11.2-11.3: Change PIN — verifies the current PIN against the stored
   // hash (skipped on first-time setup, when no PIN has been set yet), then
   // hashes and persists the new one AND re-encrypts the wallet mnemonic with
@@ -103,15 +225,29 @@ export function SecuritySettings() {
         return;
       }
 
+      // Recover the plaintext phrase to re-encrypt it under the new PIN —
+      // the durable store never holds it in plaintext (see
+      // services/mnemonicAccess.ts). st.wallet.mnemonic is only ever
+      // non-empty for an account created before PIN-gating existed, mid
+      // one-time migration (App.tsx's boot effect routes it here).
+      let mnemonic: string | null = null;
       if (hasPinSet) {
         const verifyResult = await verifyPin(state.oldPin, st.wallet.pinHash);
         if (!verifyResult.success || !verifyResult.valid) {
           setState(prev => ({ ...prev, pinError: 'Current PIN is incorrect', pinLoading: false }));
           return;
         }
+        const decryptResult = await decryptMnemonic(st.wallet.pinEncryptedMnemonic, state.oldPin);
+        if (!decryptResult.success || !decryptResult.decrypted) {
+          setState(prev => ({ ...prev, pinError: decryptResult.error || 'Failed to unlock wallet with current PIN', pinLoading: false }));
+          return;
+        }
+        mnemonic = decryptResult.decrypted;
+      } else if (st.wallet.mnemonic) {
+        mnemonic = st.wallet.mnemonic;
       }
 
-      if (!st.wallet.mnemonic) {
+      if (!mnemonic) {
         setState(prev => ({ ...prev, pinError: 'No wallet found to secure with a PIN', pinLoading: false }));
         return;
       }
@@ -122,7 +258,7 @@ export function SecuritySettings() {
         return;
       }
 
-      const encryptResult = await encryptMnemonic(st.wallet.mnemonic, state.newPin);
+      const encryptResult = await encryptMnemonic(mnemonic, state.newPin);
       if (!encryptResult.success || !encryptResult.encrypted) {
         setState(prev => ({ ...prev, pinError: encryptResult.error || 'Failed to secure wallet with new PIN', pinLoading: false }));
         return;
@@ -130,6 +266,9 @@ export function SecuritySettings() {
 
       st.wallet.pinHash = hashResult.hash;
       st.wallet.pinEncryptedMnemonic = encryptResult.encrypted;
+      // Clears the legacy plaintext field once it's safely re-encrypted —
+      // a no-op for the normal "change PIN" path, where it's already empty.
+      st.wallet.mnemonic = '';
       store.commit();
 
       setState(prev => ({
@@ -264,6 +403,41 @@ export function SecuritySettings() {
         </div>
       </section>
 
+      {/* Section 3b: Encrypted Key Backup — on-chain cross-device recovery (x/vault), separate from login 2FA above */}
+      <section className="settings-section">
+        <div className="section-header">
+          <h2>Encrypted Key Backup</h2>
+          <span className={`section-status ${vaultStatus === 'active' ? 'available' : ''}`}>
+            {vaultStatus === 'loading' ? 'Checking…' : vaultStatus === 'active' ? '✓ Active' : vaultStatus === 'pending' ? 'Setup started' : 'Not set up'}
+          </span>
+        </div>
+
+        <div className="settings-card">
+          <div className="setting-item">
+            <div className="setting-info">
+              <h3>Recover your wallet from any device</h3>
+              <p>
+                Backs up an encrypted recovery key on-chain, protected by a password and an
+                authenticator app code you choose here. Neither ever leaves this browser — the
+                chain only ever stores ciphertext.
+              </p>
+            </div>
+            {vaultStatus === 'none' && (
+              <button className="btn btn-primary btn-sm" onClick={() => openVaultModal('setup')}>Set up</button>
+            )}
+            {vaultStatus === 'pending' && (
+              <button className="btn btn-primary btn-sm" onClick={() => openVaultModal('confirm')}>Finish setup</button>
+            )}
+            {vaultStatus === 'active' && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => openVaultModal('test')}>Test recovery</button>
+                <button className="btn btn-danger btn-sm" onClick={() => openVaultModal('disable')}>Disable</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
       {/* Section 4: Session Settings */}
       <section className="settings-section">
         <div className="section-header">
@@ -376,6 +550,27 @@ export function SecuritySettings() {
           encryptedMnemonic={st.wallet.pinEncryptedMnemonic}
           walletAddress={st.wallet.address || ''}
           onClose={() => setState(prev => ({ ...prev, showPrivateKeyExport: false }))}
+        />
+      )}
+
+      {/* Encrypted Key Backup modals (x/vault setup/confirm/test/disable) */}
+      {vaultModal && (
+        <KeyVaultModal
+          mode={vaultModal}
+          password={vaultPassword}
+          code={vaultCode}
+          qr={vaultQr}
+          busy={vaultBusy}
+          error={vaultError}
+          testResult={vaultTestResult}
+          onPasswordChange={setVaultPassword}
+          onCodeChange={setVaultCode}
+          onSetupSubmit={submitVaultSetup}
+          onConfirmSubmit={submitVaultConfirm}
+          onTestSubmit={submitVaultTest}
+          onDisableSubmit={submitVaultDisable}
+          onProceedToConfirm={() => openVaultModal('confirm')}
+          onClose={() => setVaultModal(null)}
         />
       )}
     </div>
@@ -550,6 +745,166 @@ function SignOutModal({ onConfirm, onCancel }: SignOutModalProps) {
             Sign Out All Devices
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Encrypted Key Backup modal — covers all four x/vault actions (setup,
+ * confirm, test recovery, disable) as one component since they share the
+ * same password/code inputs and only differ in which step is showing.
+ */
+interface KeyVaultModalProps {
+  mode: 'setup' | 'confirm' | 'test' | 'disable';
+  password: string;
+  code: string;
+  qr: { secret: string; dataUrl: string } | null;
+  busy: boolean;
+  error: string | null;
+  testResult: string | null;
+  onPasswordChange: (v: string) => void;
+  onCodeChange: (v: string) => void;
+  onSetupSubmit: () => void;
+  onConfirmSubmit: () => void;
+  onTestSubmit: () => void;
+  onDisableSubmit: () => void;
+  onProceedToConfirm: () => void;
+  onClose: () => void;
+}
+
+function KeyVaultModal({
+  mode,
+  password,
+  code,
+  qr,
+  busy,
+  error,
+  testResult,
+  onPasswordChange,
+  onCodeChange,
+  onSetupSubmit,
+  onConfirmSubmit,
+  onTestSubmit,
+  onDisableSubmit,
+  onProceedToConfirm,
+  onClose,
+}: KeyVaultModalProps) {
+  const titles: Record<KeyVaultModalProps['mode'], string> = {
+    setup: 'Set up encrypted key backup',
+    confirm: 'Finish setting up key backup',
+    test: 'Test key recovery',
+    disable: 'Disable encrypted key backup',
+  };
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal modal-md">
+        <h3>{titles[mode]}</h3>
+
+        {error && <div className="error-message">{error}</div>}
+
+        {mode === 'setup' && !qr && (
+          <>
+            <p className="tiny mb">
+              Choose a password for this backup. Anyone who has both it and your authenticator
+              code can recover your key, so pick something strong and unique — it is never sent
+              anywhere in plain text.
+            </p>
+            <div className="form-group">
+              <label>Backup password</label>
+              <input
+                type="password"
+                placeholder="At least 8 characters"
+                value={password}
+                onChange={e => onPasswordChange(e.target.value)}
+                disabled={busy}
+                autoFocus
+              />
+            </div>
+            <div className="modal-buttons">
+              <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+              <button className="btn btn-primary" onClick={onSetupSubmit} disabled={busy || password.length < 8}>
+                {busy ? 'Setting up...' : 'Continue'}
+              </button>
+            </div>
+          </>
+        )}
+
+        {mode === 'setup' && qr && (
+          <>
+            <p className="tiny mb">Scan this into an authenticator app (Google Authenticator, Authy, 1Password, etc.):</p>
+            <div style={{ textAlign: 'center', marginBottom: 12 }}>
+              <img src={qr.dataUrl} alt="Authenticator QR code" width={220} height={220} />
+            </div>
+            <div className="card" style={{ padding: 12, marginBottom: 12, fontFamily: 'monospace', fontSize: 13, wordBreak: 'break-all' }}>
+              {qr.secret}
+            </div>
+            <div className="modal-buttons">
+              <button className="btn btn-secondary" onClick={onClose}>Close</button>
+              <button className="btn btn-primary" onClick={onProceedToConfirm}>I've saved it — continue</button>
+            </div>
+          </>
+        )}
+
+        {mode === 'confirm' && (
+          <>
+            <p className="tiny mb">Enter your backup password and the current code from your authenticator app.</p>
+            <div className="form-group">
+              <label>Backup password</label>
+              <input type="password" value={password} onChange={e => onPasswordChange(e.target.value)} disabled={busy} autoFocus />
+            </div>
+            <div className="form-group">
+              <label>Authenticator code</label>
+              <input inputMode="numeric" placeholder="123456" value={code} onChange={e => onCodeChange(e.target.value)} disabled={busy} />
+            </div>
+            <div className="modal-buttons">
+              <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+              <button className="btn btn-primary" onClick={onConfirmSubmit} disabled={busy || !password || !code}>
+                {busy ? 'Confirming...' : 'Confirm'}
+              </button>
+            </div>
+          </>
+        )}
+
+        {mode === 'test' && (
+          <>
+            <p className="tiny mb">
+              Checks that this password and code actually recover your backed-up key — the same
+              thing a recovery on a new device would do. Nothing is changed on-chain.
+            </p>
+            <div className="form-group">
+              <label>Backup password</label>
+              <input type="password" value={password} onChange={e => onPasswordChange(e.target.value)} disabled={busy} autoFocus />
+            </div>
+            <div className="form-group">
+              <label>Authenticator code</label>
+              <input inputMode="numeric" placeholder="123456" value={code} onChange={e => onCodeChange(e.target.value)} disabled={busy} />
+            </div>
+            {testResult && <div className="tiny mb">{testResult}</div>}
+            <div className="modal-buttons">
+              <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Close</button>
+              <button className="btn btn-primary" onClick={onTestSubmit} disabled={busy || !password || !code}>
+                {busy ? 'Testing...' : 'Test'}
+              </button>
+            </div>
+          </>
+        )}
+
+        {mode === 'disable' && (
+          <>
+            <p className="warning-text">
+              This deletes your on-chain encrypted backup. You will no longer be able to recover
+              this key from another device.
+            </p>
+            <div className="modal-buttons">
+              <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+              <button className="btn btn-danger" onClick={onDisableSubmit} disabled={busy}>
+                {busy ? 'Disabling...' : 'Disable backup'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

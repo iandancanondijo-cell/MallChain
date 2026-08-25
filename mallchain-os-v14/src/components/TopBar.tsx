@@ -8,13 +8,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Search, Bell, SlidersHorizontal, ShieldAlert, Wrench } from 'lucide-react';
 import { store } from '../store/store';
-import { useStoreVersion, fmtNum, toast } from './ui';
+import { useStoreVersion, fmtNum, toast, BadgeCheckmark } from './ui';
 import { config } from '../services/config';
 import { COMMON_CURRENCIES } from '../services/locale';
 import { useSupportedCurrencies } from '../services/currency';
 import SocketStatus from './SocketStatus';
 import { notificationsApi, type AppNotification } from '../services/notificationsApi';
 import { socketManager } from '../services/socket';
+import { t } from '../services/i18n';
 const LANGS = ['EN', 'FR', 'ES', 'SW'];
 const ACCENTS = ['gold', 'cyan', 'purple', 'emerald'];
 
@@ -75,18 +76,18 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
     <header className="topbar">
       {isAdminRoute && (
         <span className="chip red" style={{ fontWeight: 800, letterSpacing: 0.5, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <ShieldAlert size={13} /> ADMIN MODE
+          <ShieldAlert size={13} /> {t('ADMIN MODE')}
         </span>
       )}
       {st.admin.flags.maintenance && (
         <span className="chip red" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Wrench size={13} /> Maintenance mode — new transactions blocked
+          <Wrench size={13} /> {t('Maintenance mode — new transactions blocked')}
         </span>
       )}
       {!isAdminRoute && (
         <div className="tb-search">
           <Search size={15} />
-          <input placeholder="Search campaigns, blocks, txs, validators…  (Ctrl+K)" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={search} />
+          <input placeholder={t('Search campaigns, blocks, txs, validators…  (Ctrl+K)')} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={search} />
         </div>
       )}
       {!isAdminRoute && (
@@ -101,25 +102,25 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
           user shell with no route back short of hand-editing the URL. */}
       {!isAdminRoute && (st.user.role === 'admin' || st.user.role === 'superadmin') && (
         <span className="chip red" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => navigate('/admin')} title="Go to the admin control center">
-          <ShieldAlert size={13} /> Admin panel
+          <ShieldAlert size={13} /> {t('Admin panel')}
         </span>
       )}
       <SocketStatus />
       {!isAdminRoute && (
-        <div className="tb-icon" title="Preferences" onClick={() => setOpen(open === 'prefs' ? null : 'prefs')}>
+        <div className="tb-icon" title={t('Preferences')} onClick={() => setOpen(open === 'prefs' ? null : 'prefs')}>
           <SlidersHorizontal size={16} />
         </div>
       )}
-      <div className="tb-icon" title="Notifications" onClick={() => setOpen(open === 'notif' ? null : 'notif')}>
+      <div className="tb-icon" title={t('Notifications')} onClick={() => setOpen(open === 'notif' ? null : 'notif')}>
         <Bell size={16} />
         {unread > 0 && <span className="tb-badge">{unread}</span>}
       </div>
       {open === 'prefs' && !isAdminRoute && (
         <div className="panel" style={{ right: 90 }}>
-          <div className="panel-head"><span className="grow">Preferences</span></div>
+          <div className="panel-head"><span className="grow">{t('Preferences')}</span></div>
           <div style={{ padding: '12px 14px' }}>
             <div className="field">
-              <label>Currency</label>
+              <label>{t('Currency')}</label>
               <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
                 {COMMON_CURRENCIES.map((c) => (
                   <button key={c} className={'btn btn-ghost btn-sm' + (st.prefs.currency === c ? ' gold' : '')} onClick={() => { st.prefs.currency = c as never; store.commit(); toastLocal('Currency → ' + c); }}>
@@ -134,7 +135,7 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
                   value={COMMON_CURRENCIES.includes(st.prefs.currency) ? '' : st.prefs.currency}
                   onChange={(e) => { if (!e.target.value) return; st.prefs.currency = e.target.value as never; store.commit(); toastLocal('Currency → ' + e.target.value); }}
                 >
-                  <option value="">More currencies…</option>
+                  <option value="">{t('More currencies…')}</option>
                   {allCurrencies.map((c) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
@@ -142,7 +143,7 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
               )}
             </div>
             <div className="field">
-              <label>Language</label>
+              <label>{t('Language')}</label>
               <div className="row" style={{ gap: 6 }}>
                 {LANGS.map((l) => (
                   <button key={l} className={'btn btn-ghost btn-sm' + (st.prefs.lang === l ? ' gold' : '')} onClick={() => { st.prefs.lang = l as never; store.commit(); toastLocal('Language → ' + l); }}>
@@ -152,7 +153,7 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
               </div>
             </div>
             <div className="field">
-              <label>Theme accent</label>
+              <label>{t('Theme accent')}</label>
               <div className="row" style={{ gap: 6 }}>
                 {ACCENTS.map((a) => (
                   <button key={a} className={'btn btn-ghost btn-sm' + (st.prefs.accent === a ? ' gold' : '')} onClick={() => applyAccent(a)}>
@@ -162,7 +163,7 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
               </div>
             </div>
             <div className="field">
-              <label>Network</label>
+              <label>{t('Network')}</label>
               <span className="chip gold">{config.network}</span>
             </div>
           </div>
@@ -171,12 +172,12 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
       {open === 'notif' && (
         <div className="panel">
           <div className="panel-head">
-            <span className="grow">Notifications</span>
-            <span className="chip" style={{ cursor: 'pointer' }} onClick={() => setNf(nf === 'all' ? 'unread' : 'all')}>{nf === 'all' ? 'All' : 'Unread'}</span>
-            <span className="chip gold" style={{ cursor: 'pointer' }} onClick={markAllRead}>Mark all read</span>
+            <span className="grow">{t('Notifications')}</span>
+            <span className="chip" style={{ cursor: 'pointer' }} onClick={() => setNf(nf === 'all' ? 'unread' : 'all')}>{nf === 'all' ? t('All') : t('Unread')}</span>
+            <span className="chip gold" style={{ cursor: 'pointer' }} onClick={markAllRead}>{t('Mark all read')}</span>
           </div>
           <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-            {notifs.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--txt-3)', fontSize: 12.5 }}>No notifications yet</div>}
+            {notifs.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--txt-3)', fontSize: 12.5 }}>{t('No notifications yet')}</div>}
             {notifs.map((n) => (
               <div key={n._id} className={'panel-item' + (n.read ? '' : ' unread')}>
                 <div className="grow">
@@ -193,8 +194,8 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
       <div className="tb-user" onClick={isAdminRoute ? undefined : () => navigate('/profile')} style={isAdminRoute ? { cursor: 'default' } : undefined}>
         <div className="avatar">{st.user.avatarInitial || 'C'}</div>
         <div style={{ lineHeight: 1.2 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 800 }}>{st.user.name || st.user.email?.split('@')[0] || 'Guest'}</div>
-          <div style={{ fontSize: 10.5, color: 'var(--txt-3)' }}>{st.user.frozen ? '❄ Frozen' : st.settings.network}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 800 }}>{st.user.name || st.user.email?.split('@')[0] || t('Guest')}{st.user.hasBadge && <BadgeCheckmark />}</div>
+          <div style={{ fontSize: 10.5, color: 'var(--txt-3)' }}>{st.user.frozen ? `❄ ${t('Frozen')}` : st.settings.network}</div>
         </div>
       </div>
     </header>

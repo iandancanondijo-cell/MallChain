@@ -11,12 +11,15 @@ const helmet = require('helmet');
 const { config, getAllowedOrigins, validateRuntimeSecrets } = require('./config');
 const passport = require('passport');
 const session = require('express-session');
-const { createLimiter } = require('./middleware/rateLimiter')
+const jwt = require('jsonwebtoken');
+const User = require('./models/user');
+const Conversation = require('./models/Conversation');
+const { createLimiter, limiters } = require('./middleware/rateLimiter')
 const apiKeyAuth = require('./middleware/apiKeyAuth')
 const { errorHandler } = require('./utils/errorHandler')
 const logger = require('./utils/logger')
 const correlationId = require('./middleware/correlationId')
-const { metricsMiddleware, register } = require('./utils/metrics')
+const { metricsMiddleware, register, socketErrorsTotal, socketRoomCapRejectionsTotal } = require('./utils/metrics')
 const { initCacheService } = require('./services/cacheService')
 const { maintenanceGuard } = require('./middleware/maintenanceMode')
 const { computeBlockStaleness } = require('./utils/chainHealth')
@@ -41,6 +44,8 @@ const notificationsRoutes = require('./routes/notifications');
 const paymentRoutes = require('./routes/payment');
 const buyRoutes = require('./routes/buy');
 const stakingRoutes = require('./routes/staking');
+const keyVaultRoutes = require('./routes/keyVault');
+const dexRoutes = require('./routes/dex');
 const validatorsRoutes = require('./routes/validators');
 const onchainRoutes = require('./routes/onchain');
 const historyRoutes = require('./routes/history');
@@ -51,12 +56,15 @@ const devhubRoutes = require('./routes/devhub');
 const settingsRoutes = require('./routes/settings');
 const rewardsRoutes = require('./routes/rewards');
 const addressMapRoutes = require('./routes/addressMap');
+const searchRoutes = require('./routes/search');
 const axios = require('axios');
 
 const http = require('http')
 const net = require('net')
 const { Server } = require('socket.io')
-const csurf = require('csurf')
+// csurf itself is deprecated/unmaintained; @dr.pogodin/csurf is an
+// actively-maintained fork with an identical API, so this is a drop-in swap.
+const csurf = require('@dr.pogodin/csurf')
 
 // Real-time services
 const { startBlockListener } = require('../services/blockListener');
@@ -192,8 +200,15 @@ app.use((req, res, next) => {
 });
 
 // Passport for OAuth (Google)
+// Session cookies are signed with SESSION_SECRET — mounting this middleware
+// with the 'dev-secret' fallback it used to have would let anyone forge a
+// session cookie, so refuse to start rather than silently run insecurely.
+if (!SESSION_SECRET) {
+  logger.error('SESSION_SECRET is not configured; refusing to start session middleware with an insecure default.');
+  process.exit(1);
+}
 app.use(session({
-  secret: SESSION_SECRET || 'dev-secret',
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -364,9 +379,13 @@ const messagingRoutes = require('./routes/messaging');
 app.use('/api/messaging', messagingRoutes);
 app.use('/api/payment', maintenanceGuard('payment'), paymentRoutes);
 app.use('/api/buy', maintenanceGuard('buy'), buyRoutes);
+const badgeRoutes = require('./routes/badge');
+app.use('/api/badge', maintenanceGuard('badge'), badgeRoutes);
 const withdrawRoutes = require('./routes/withdraw');
 app.use('/api/withdraw', maintenanceGuard('withdraw'), withdrawRoutes);
 app.use('/api/staking', maintenanceGuard('staking'), stakingRoutes);
+app.use('/api/key-vault', maintenanceGuard('key-vault'), keyVaultRoutes);
+app.use('/api/dex', maintenanceGuard('dex'), dexRoutes);
 app.use('/api/validators', validatorsRoutes);
 app.use('/api/onchain', onchainRoutes);
 app.use('/api/history', historyRoutes);
@@ -404,6 +423,7 @@ app.use('/api/devhub', devhubRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/rewards', rewardsRoutes);
 app.use('/api/address', addressMapRoutes);
+app.use('/api/search', limiters.standard, searchRoutes);
 
 // Global error handling middleware
 app.use(errorHandler())
@@ -517,7 +537,49 @@ const io = new Server(server, {
 
 global.io = io
 
+// Decodes a JWT if the client sent one (socket.handshake.auth.token) and
+// attaches the user id to socket.data.userId — non-blocking, so anonymous
+// connections still work for the genuinely public feeds (market/price/
+// blocks). Per-room subscription handlers below are what actually enforce
+// ownership for anything wallet/user/conversation-specific; previously they
+// only validated that the requested id/address was well-formed, not that
+// the connecting socket had any right to it — any client that knew (or
+// guessed a format-valid) address/id could subscribe to another account's
+// balance updates, notifications, or private messages.
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET)
+      socket.data.userId = decoded.userId || decoded.id
+    } catch (err) {
+      logger.warn('Socket JWT verification failed', { socketId: socket.id, error: err.message })
+    }
+  }
+  next()
+})
+
 // Task 5.1: Main connection handler for new Socket.IO clients
+// Per-socket cap on total joined rooms, across every subscription type
+// (wallet/market/price/blocks/user/conversation). Wallet subscriptions are
+// already limited to one (the caller's own address) by the ownership check
+// below, but per-conversation subscriptions have no such natural ceiling —
+// a socket left open across many chat threads could otherwise accumulate
+// rooms indefinitely.
+const MAX_ROOMS_PER_SOCKET = 20
+
+function joinRoomWithCap(socket, room) {
+  if (socket.rooms.has(room)) return true // already joined, not a new room
+  if (socket.rooms.size >= MAX_ROOMS_PER_SOCKET) {
+    socketRoomCapRejectionsTotal.inc()
+    logger.warn('Socket room cap exceeded', { socketId: socket.id, room, roomCount: socket.rooms.size })
+    socket.emit('error', { message: 'Too many active subscriptions on this connection' })
+    return false
+  }
+  socket.join(room)
+  return true
+}
+
 io.on('connection', socket => {
   logger.info('Socket connected', { socketId: socket.id })
 
@@ -530,7 +592,7 @@ io.on('connection', socket => {
 
   // Task 5.3: Handle wallet subscription requests
   // Clients emit 'subscribe:wallet' with their address to receive balance updates
-  socket.on('subscribe:wallet', (address) => {
+  socket.on('subscribe:wallet', async (address) => {
     // Task 8.7: Validate wallet address before allowing subscription
     // Prevents malformed subscriptions from filling server memory or causing errors
     if (!address || typeof address !== 'string') {
@@ -549,9 +611,23 @@ io.on('connection', socket => {
       return
     }
 
+    // Ownership check: a valid-looking address alone used to be enough to
+    // join the room and receive that wallet's live balance updates.
+    if (!socket.data.userId) {
+      logger.warn('Unauthenticated wallet subscription attempt', { socketId: socket.id, address })
+      socket.emit('error', { message: 'Sign in required to subscribe to wallet updates' })
+      return
+    }
+    const owner = await User.findById(socket.data.userId).select('walletAddress')
+    if (!owner || owner.walletAddress !== address) {
+      logger.warn('Wallet subscription address mismatch', { socketId: socket.id, userId: socket.data.userId, address })
+      socket.emit('error', { message: 'You can only subscribe to your own wallet' })
+      return
+    }
+
     // Add socket to named room
     // Socket.IO automatically handles room broadcast (e.g., io.to('wallet:address').emit())
-    socket.join(`wallet:${address}`)
+    if (!joinRoomWithCap(socket, `wallet:${address}`)) return
     logger.info('Socket subscribed to wallet', { socketId: socket.id, address })
 
     // Task 5.6: Send cached wallet data if available
@@ -587,7 +663,7 @@ io.on('connection', socket => {
   // Task 5.5: Market feed subscription
   // All clients subscribe to single "market:feed" room for market-wide updates
   socket.on('subscribe:market', () => {
-    socket.join('market:feed')
+    if (!joinRoomWithCap(socket, 'market:feed')) return
     // Send recent market events to new subscriber
     socket.emit('market:feed', marketFeed.getRecentEvents(50))
   })
@@ -595,7 +671,7 @@ io.on('connection', socket => {
   // Task 5.5: Price updates subscription
   // All clients subscribe to "price:updates" room for price data
   socket.on('subscribe:price', () => {
-    socket.join('price:updates')
+    if (!joinRoomWithCap(socket, 'price:updates')) return
     // Send current market prices to new subscriber
     socket.emit('price:current', priceEngine.getMarketData())
   })
@@ -603,7 +679,7 @@ io.on('connection', socket => {
   // Task 5.5: Live blocks subscription
   // All clients subscribe to "blocks:live" room for new blockchain blocks
   socket.on('subscribe:blocks', () => {
-    socket.join('blocks:live')
+    if (!joinRoomWithCap(socket, 'blocks:live')) return
     logger.info('Socket subscribed to block updates', { socketId: socket.id })
   })
 
@@ -615,7 +691,14 @@ io.on('connection', socket => {
       logger.warn('Invalid user subscription attempt', { socketId: socket.id, userId })
       return
     }
-    socket.join(`user:${userId}`)
+    // A well-formed Mongo id was previously enough to join another
+    // account's notification room — this only allows subscribing to your
+    // own, verified via the JWT decoded in io.use() above.
+    if (!socket.data.userId || socket.data.userId !== userId) {
+      logger.warn('User subscription id mismatch', { socketId: socket.id, authedUserId: socket.data.userId, requestedUserId: userId })
+      return
+    }
+    if (!joinRoomWithCap(socket, `user:${userId}`)) return
     logger.info('Socket subscribed to user notifications', { socketId: socket.id, userId })
   })
 
@@ -626,12 +709,23 @@ io.on('connection', socket => {
 
   // Per-conversation messaging subscription — joined while a chat thread is
   // open so both participants receive 'message:new' pushes in real time.
-  socket.on('subscribe:conversation', (conversationId) => {
+  socket.on('subscribe:conversation', async (conversationId) => {
     if (!conversationId || typeof conversationId !== 'string' || !/^[0-9a-fA-F]{24}$/.test(conversationId)) {
       logger.warn('Invalid conversation subscription attempt', { socketId: socket.id, conversationId })
       return
     }
-    socket.join(`conversation:${conversationId}`)
+    // A well-formed conversation id used to be enough to receive both
+    // participants' live messages — now requires actually being one of them.
+    if (!socket.data.userId) {
+      logger.warn('Unauthenticated conversation subscription attempt', { socketId: socket.id, conversationId })
+      return
+    }
+    const convo = await Conversation.findOne({ _id: conversationId, participants: socket.data.userId }).select('_id')
+    if (!convo) {
+      logger.warn('Conversation subscription denied — not a participant', { socketId: socket.id, userId: socket.data.userId, conversationId })
+      return
+    }
+    if (!joinRoomWithCap(socket, `conversation:${conversationId}`)) return
     logger.info('Socket subscribed to conversation', { socketId: socket.id, conversationId })
   })
 
@@ -649,6 +743,7 @@ io.on('connection', socket => {
   // Handle socket errors
   // Logs errors for debugging connection issues
   socket.on('error', (error) => {
+    socketErrorsTotal.inc()
     logger.error('Socket error', { socketId: socket.id, error })
   })
 })
@@ -667,6 +762,12 @@ io.on('connection', socket => {
     priceEngine.resetDailyVolume()
     logger.info('Daily volume reset')
   }, 24 * 60 * 60 * 1000)
+
+  // Monthly badge snapshot (14th of each month, see jobs/badgeSnapshot.js).
+  // Not Redis-gated like startBackgroundWorkers() above — it's a plain
+  // node-cron schedule, and the streak check it depends on already
+  // degrades gracefully (reads as "no badge") when Redis is unavailable.
+  require('./jobs/badgeSnapshot').start();
 
   // Cleanup on shutdown
   process.on('SIGINT', () => {

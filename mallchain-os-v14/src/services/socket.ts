@@ -41,6 +41,7 @@
 
 import { io, Socket } from 'socket.io-client';
 import { config } from './config';
+import { authService } from './auth';
 
 /**
  * Wallet data structure received from socket events
@@ -136,10 +137,19 @@ class SocketManager {
   // Set of active subscriptions (e.g., "wallet:mall1abc...", "market:feed")
   // Used to re-subscribe after reconnection
   private subscriptions = new Set<string>();
+
+  // The logged-in user's id, remembered independently of connection state.
+  // subscribeUser() used to no-op entirely (and never record anything) when
+  // called before the socket finished connecting — on a normal page load
+  // the auth fetch and the websocket handshake race, so this silently and
+  // permanently skipped real-time notification delivery for that session
+  // (confirmed live: socket showed "Connected" but 0 subscriptions).
+  // Recording the intent here lets the 'connect' handler self-heal it.
+  private pendingUserId: string | null = null;
   
   // Map of event name → array of listener callbacks
   // Allows multiple listeners for same event, cleanup functions return unsubscribe
-  private eventListeners = new Map<string, Function[]>();
+  private eventListeners = new Map<string, ((data: unknown) => void)[]>();
   
   // Reconnection exponential backoff state
   private reconnectAttempt = 0;
@@ -182,6 +192,11 @@ class SocketManager {
         reconnectionDelayMax: this.maxReconnectDelay,
         reconnectionAttempts: Infinity,
         transports: ['websocket', 'polling'],
+        // A function (not a static object) so the backend's io.use()
+        // middleware gets the *current* token on every (re)connect —
+        // including reconnects that happen long after this initial
+        // connect() call, when the token may not have existed yet.
+        auth: (cb) => cb({ token: authService.getToken() || undefined }),
       });
 
       // Task 5.1: Socket lifecycle management - connection
@@ -193,6 +208,11 @@ class SocketManager {
         
         // Task 5.8: Re-subscribe to all rooms on reconnection
         this.resubscribeAll();
+        // Re-apply the last-requested user subscription too — resubscribeAll()
+        // only replays rooms that were already recorded in `subscriptions`,
+        // which never happens for a subscribeUser() call that arrived before
+        // this connection existed (see pendingUserId's comment above).
+        if (this.pendingUserId) this.subscribeUser(this.pendingUserId);
       });
 
       // Task 5.1: Socket lifecycle management - disconnection
@@ -286,9 +306,15 @@ class SocketManager {
     return this.on('message:new', callback);
   }
 
-  /** Subscribe to live notifications for a specific (Mongo) user id. */
+  /**
+   * Subscribe to live notifications for a specific (Mongo) user id. Safe to
+   * call before the socket has finished connecting — the intent is always
+   * recorded, and the 'connect' handler retries it once actually connected.
+   */
   subscribeUser(userId: string): void {
-    if (!this.socket?.connected || !userId) return;
+    if (!userId) return;
+    this.pendingUserId = userId;
+    if (!this.socket?.connected) return;
     const room = `user:${userId}`;
     if (this.subscriptions.has(room)) return;
     this.socket.emit('subscribe:user', userId);
@@ -296,6 +322,7 @@ class SocketManager {
   }
 
   unsubscribeUser(userId: string): void {
+    if (this.pendingUserId === userId) this.pendingUserId = null;
     if (!this.socket?.connected || !userId) return;
     const room = `user:${userId}`;
     if (!this.subscriptions.has(room)) return;
@@ -456,13 +483,13 @@ class SocketManager {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, []);
     }
-    this.eventListeners.get(event)!.push(callback as Function);
+    this.eventListeners.get(event)!.push(callback as (data: unknown) => void);
 
     // Return cleanup function
     return () => {
       const listeners = this.eventListeners.get(event);
       if (listeners) {
-        const index = listeners.indexOf(callback as Function);
+        const index = listeners.indexOf(callback as (data: unknown) => void);
         if (index > -1) {
           listeners.splice(index, 1);
         }
@@ -527,6 +554,24 @@ class SocketManager {
     this.eventListeners.clear();
     this.isConnecting = false;
     this.reconnectAttempt = 0;
+  }
+
+  /**
+   * Forces a fresh connection so the backend's io.use() JWT middleware picks
+   * up a token that didn't exist yet at the original connect() call — the
+   * common case of logging in without a page reload, where the socket
+   * already connected anonymously first. Deliberately doesn't go through
+   * disconnect() (which clears `subscriptions`) — the 'connect' handler's
+   * resubscribeAll()/pendingUserId replay needs that bookkeeping intact to
+   * restore whatever rooms were joined before.
+   */
+  reauth(): void {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = null;
+    }
+    this.isConnecting = false;
+    this.connect();
   }
 
   /**

@@ -17,7 +17,14 @@ func TestGenesis(t *testing.T) {
 			DailyLimit:   66,
 			CurrentMonth: 50,
 			CurrentDay:   4,
-		}}
+		},
+		FeesAccumulated: types.FeesAccumulated{
+			TransactionFees:      100,
+			TradingFees:          50,
+			ConversionFees:       25,
+			LastDistributionTime: 123456,
+		},
+	}
 
 	f := initFixture(t)
 	err := f.keeper.InitGenesis(f.ctx, genesisState)
@@ -29,5 +36,5 @@ func TestGenesis(t *testing.T) {
 	require.EqualExportedValues(t, genesisState.Params, got.Params)
 	require.EqualExportedValues(t, genesisState.WalletBalanceMap, got.WalletBalanceMap)
 	require.EqualExportedValues(t, genesisState.EmissionState, got.EmissionState)
-
+	require.EqualExportedValues(t, genesisState.FeesAccumulated, got.FeesAccumulated)
 }

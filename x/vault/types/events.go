@@ -1,16 +1,12 @@
 package types
 
-// Vault security events. Emitted so failed-unlock/lockout activity — a
-// signal of a possible brute-force attempt against a custody vault — is
-// visible to any chain event listener/monitoring pipeline, not just
-// reflected silently in KV state that nothing observes.
+// Vault lifecycle events, so setup/confirm/disable activity is visible to
+// any chain event listener/monitoring pipeline rather than only reflected
+// silently in KV state.
 const (
-	EventTypeVaultUnlockFailed   = "vault_unlock_failed"
-	EventTypeVaultLocked         = "vault_locked"
-	EventTypeVaultUnlockRejected = "vault_unlock_rejected_locked"
+	EventTypeVaultSetup     = "vault_setup"
+	EventTypeVaultConfirmed = "vault_confirmed"
+	EventTypeVaultDisabled  = "vault_disabled"
 
-	AttributeKeyOwner          = "owner"
-	AttributeKeyFailedAttempts = "failed_attempts"
-	AttributeKeyLockedUntil    = "locked_until_unix"
-	AttributeKeyReason         = "reason"
+	AttributeKeyOwner = "owner"
 )

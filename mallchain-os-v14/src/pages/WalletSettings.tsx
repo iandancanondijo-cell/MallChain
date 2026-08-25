@@ -8,6 +8,7 @@ import QRCode from 'qrcode';
 import { store } from '../store/store';
 import { useStoreVersion, toast } from '../components/ui';
 import { formatAddressForDisplay } from '../services/wallet';
+import { requestMnemonic } from '../services/mnemonicAccess';
 import '../styles/wallet-settings.css';
 
 export function WalletSettings() {
@@ -35,13 +36,16 @@ export function WalletSettings() {
   const goToSecurity = () => { window.location.hash = '#/security'; };
 
   // Real backup content — same shape as WalletFlow.tsx's handleDownloadBackup,
-  // built from the actual stored mnemonic rather than a disabled placeholder.
-  const buildBackupContent = () =>
-    `Mallchain Wallet Backup\nAddress: ${walletAddress}\nRecovery phrase:\n${store.state.wallet.mnemonic}\n\nKeep this file private. Anyone with this phrase can access your wallet.`;
+  // built from the actual mnemonic (PIN-decrypted on demand — never stored
+  // in plaintext) rather than a disabled placeholder.
+  const buildBackupContent = (mnemonic: string) =>
+    `Mallchain Wallet Backup\nAddress: ${walletAddress}\nRecovery phrase:\n${mnemonic}\n\nKeep this file private. Anyone with this phrase can access your wallet.`;
 
-  const handleDownloadBackup = () => {
-    if (!store.state.wallet.mnemonic) { toast('No recovery phrase available for this wallet', false); return; }
-    const content = buildBackupContent();
+  const handleDownloadBackup = async () => {
+    if (!store.state.wallet.pinEncryptedMnemonic) { toast('No recovery phrase available for this wallet', false); return; }
+    const mnemonic = await requestMnemonic();
+    if (!mnemonic) return;
+    const content = buildBackupContent(mnemonic);
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -54,11 +58,13 @@ export function WalletSettings() {
     toast('Backup file downloaded');
   };
 
-  const handlePrintBackup = () => {
-    if (!store.state.wallet.mnemonic) { toast('No recovery phrase available for this wallet', false); return; }
+  const handlePrintBackup = async () => {
+    if (!store.state.wallet.pinEncryptedMnemonic) { toast('No recovery phrase available for this wallet', false); return; }
+    const mnemonic = await requestMnemonic();
+    if (!mnemonic) return;
     const win = window.open('', '_blank', 'width=600,height=600');
     if (!win) { toast('Pop-up blocked — allow pop-ups to print your backup', false); return; }
-    win.document.write(`<pre style="font: 14px monospace; white-space: pre-wrap; padding: 24px;">${buildBackupContent().replace(/</g, '&lt;')}</pre>`);
+    win.document.write(`<pre style="font: 14px monospace; white-space: pre-wrap; padding: 24px;">${buildBackupContent(mnemonic).replace(/</g, '&lt;')}</pre>`);
     win.document.close();
     win.focus();
     win.print();

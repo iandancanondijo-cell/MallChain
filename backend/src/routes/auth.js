@@ -93,6 +93,13 @@ router.post('/login-username',
 router.get('/me', authCtrl.me);
 
 /**
+ * POST /api/auth/link-wallet — associate the logged-in account with an
+ * on-chain address (see authController.js's linkWallet for the full
+ * rationale). Frontend calls this once after wallet creation/import.
+ */
+router.post('/link-wallet', authCtrl.linkWallet);
+
+/**
  * Task 4.1: Google OAuth routes
  * 
  * OAuth 2.0 authentication flow:
@@ -107,7 +114,14 @@ router.get('/me', authCtrl.me);
  * - Additional CSRF middleware not required for OAuth callbacks
  * - Passport handles secure code exchange with Google
  */
-router.get('/google', passport.authenticate('google', { scope: ['profile','email'] }));
+router.get('/google', (req, res, next) => {
+  // Carries the referral code through Google's redirect round-trip via the
+  // OAuth `state` param — the only field Google echoes back verbatim to the
+  // callback. Without this, a referral code in the URL when the user clicked
+  // "Continue with Google" was silently dropped (see googleCallback below).
+  const state = req.query.ref ? String(req.query.ref).trim().slice(0, 64) : undefined;
+  passport.authenticate('google', { scope: ['profile', 'email'], state })(req, res, next);
+});
 router.get('/google/callback', passport.authenticate('google', { session: false, failureRedirect: '/' }), authCtrl.googleCallback);
 
 module.exports = router;

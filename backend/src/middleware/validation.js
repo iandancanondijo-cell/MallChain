@@ -136,6 +136,38 @@ const buyCreditSchema = Joi.object({
   idempotencyKey: Joi.string().optional(),
 });
 
+// Badge purchase (KSh 17, see routes/badge.js) — unlike buyReserveSchema,
+// there's no user-chosen amount/fiat: the price is fixed server-side
+// (config.badge.purchasePriceKes), so the client only supplies who/where.
+const badgeReserveSchema = Joi.object({
+  walletAddress: addressSchema,
+  phone: Joi.string()
+    .pattern(/^254\d{9}$/)
+    .required()
+    .messages({
+      'string.pattern.base': 'Invalid phone number format (use 254XXXXXXXXX)',
+    }),
+});
+
+const badgeMpesaInitiateSchema = Joi.object({
+  quoteId: Joi.string().required(),
+  phone: Joi.string()
+    .pattern(/^254\d{9}$/)
+    .required()
+    .messages({
+      'string.pattern.base': 'Invalid phone number format (use 254XXXXXXXXX)',
+    }),
+});
+
+const badgeIssueSchema = Joi.object({
+  quoteId: Joi.string().required(),
+  walletAddress: addressSchema.optional(),
+});
+
+const badgeStatusParamSchema = Joi.object({
+  quoteId: Joi.string().required(),
+});
+
 // buy.js's POST /sell was previously validated against schemas.transfer
 // (from/to/amount/memo/txBytes) while the handler destructures
 // sellerAddress/amount/txBytes/phone from req.validatedBody — stripUnknown
@@ -219,6 +251,10 @@ module.exports = {
     buyReserve: buyReserveSchema,
     buyMpesaInitiate: buyMpesaInitiateSchema,
     buyCredit: buyCreditSchema,
+    badgeReserve: badgeReserveSchema,
+    badgeMpesaInitiate: badgeMpesaInitiateSchema,
+    badgeIssue: badgeIssueSchema,
+    badgeStatusParam: badgeStatusParamSchema,
     sell: sellSchema,
     faucetRequest: faucetRequestSchema,
     address: addressSchema,

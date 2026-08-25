@@ -62,6 +62,7 @@ function toPublicUser(user) {
     name: user.name || null,
     username: user.username || null,
     phone: user.phone || null,
+    walletAddress: user.walletAddress || null,
     role: user.role || 'user',
     creator_level: String(user.creator_level ?? 0),
     mlpts_balance: Number(user.mlpts_balance || 0),
@@ -224,10 +225,63 @@ exports.me = async (req, res) => {
     const userId = decoded.userId || decoded.id;
     const user = await User.findById(userId).select('-password')
     if (!user) return res.status(401).json({ error: 'user not found' })
-    return res.json({ user: toPublicUser(user) })
+
+    const publicUser = toPublicUser(user);
+    if (user.walletAddress) {
+      const { getUserBadgeInfo } = require('../services/badgeService');
+      const badge = await getUserBadgeInfo(user.walletAddress).catch(() => ({ exists: false }));
+      publicUser.hasBadge = Boolean(badge.exists);
+    } else {
+      publicUser.hasBadge = false;
+    }
+
+    return res.json({ user: publicUser })
   } catch (e) {
     return res.status(401).json({ error: 'invalid token' })
   }
+};
+
+/**
+ * POST /api/auth/link-wallet — associate this login with an on-chain
+ * address. The only place a userId<->address link is created; badges (and
+ * anything else keyed by address) can't otherwise be tied back to a login.
+ * Idempotent: re-linking the same address is a no-op; linking a different
+ * one overwrites (no verification of address ownership is done here, same
+ * trust model as wallet connection elsewhere in this app — see
+ * walletConnectionController.js's "derive locally, never send private keys"
+ * comment. This only affects which address gets streak-earned badges;
+ * it does not grant any spending/signing authority over that address).
+ */
+exports.linkWallet = async (req, res) => {
+  const auth = req.headers.authorization
+  if (!auth) return res.status(401).json({ error: 'missing token' })
+  const token = auth.split(' ')[1]
+  if (!token) return res.status(401).json({ error: 'bad auth header' })
+
+  let userId;
+  try {
+    const decoded = jwt.verify(token, getJwtSecret())
+    userId = decoded.userId || decoded.id;
+  } catch (e) {
+    return res.status(401).json({ error: 'invalid token' })
+  }
+
+  const { address } = req.body || {};
+  const bech32 = require('bech32');
+  let decoded;
+  try {
+    decoded = bech32.decode(String(address || ''));
+  } catch {
+    return res.status(400).json({ error: 'invalid address' });
+  }
+  if (decoded.prefix !== 'mall' || bech32.fromWords(decoded.words).length !== 20) {
+    return res.status(400).json({ error: 'invalid address' });
+  }
+
+  const user = await User.findByIdAndUpdate(userId, { walletAddress: address }, { new: true }).select('-password');
+  if (!user) return res.status(401).json({ error: 'user not found' });
+
+  return res.json({ ok: true, walletAddress: user.walletAddress });
 };
 
 exports.googleCallback = async (req, res) => {
@@ -237,13 +291,10 @@ exports.googleCallback = async (req, res) => {
   let user = await User.findOne({ googleId: profile.id });
   if (!user) {
     user = await User.create({ email, googleId: profile.id });
-    // The Google OAuth redirect flow doesn't currently carry a referral
-    // code through (no `state` param wired up), so this only fixes the
-    // half of the bug that's unconditionally true: without a real
-    // referralCode, nobody could ever successfully refer *using* this
-    // user's code — GET /api/referrals would show a code that looked
-    // real but matched no DB record.
-    await assignReferralCode(user, undefined);
+    // GET /google (routes/auth.js) echoes the referral code through as the
+    // OAuth `state` param — Google returns it verbatim on the callback.
+    const referralCode = typeof req.query.state === 'string' ? req.query.state : undefined;
+    await assignReferralCode(user, referralCode);
   }
   const token = signToken(user);
   // redirect to frontend with token

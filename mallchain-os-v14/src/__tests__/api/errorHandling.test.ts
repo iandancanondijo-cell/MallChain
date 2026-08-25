@@ -97,7 +97,7 @@ describe('Error Handling', () => {
       const cachedData = { balance: 1000 };
       mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
-      let result = cachedData; // Fallback to cache
+      const result = cachedData; // Fallback to cache
 
       expect(result.balance).toBe(1000);
     });
@@ -177,6 +177,7 @@ describe('Error Handling', () => {
     it('should redirect to login on 401', () => {
       const navigate = vi.fn();
 
+      // eslint-disable-next-line no-constant-condition -- stand-in for "on 401 response", not a real status check
       if (401) {
         navigate('/auth/login');
       }

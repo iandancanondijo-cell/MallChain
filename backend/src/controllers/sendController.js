@@ -129,17 +129,6 @@ exports.processPayment = async (req, res) => {
 
   const normalizedTxBytes = normalizeTxBytes(txBytes);
 
-  try {
-    const priceUrl = `${CHAIN_REST}/tmp/marketplace/mlcoin/v1/market/price`;
-    const priceResp = await axios.get(priceUrl, { timeout: 3000 });
-    const mp = priceResp.data?.market_price || {};
-    const buyPrice = Number(mp.buy_price || 0.6);
-    const amountMLCN = Number(amountKES) / buyPrice;
-    logger.debug('processPayment', 'Price fetched', { buyPrice, amountMLCN });
-  } catch (e) {
-    logger.warn('processPayment', 'Could not fetch price from chain', { error: e.message });
-  }
-
   const chainResp = await broadcastTx(normalizedTxBytes);
   const txHash = chainResp.tx_response?.txhash || chainResp.txhash;
   const code = chainResp.tx_response?.code || chainResp.code;

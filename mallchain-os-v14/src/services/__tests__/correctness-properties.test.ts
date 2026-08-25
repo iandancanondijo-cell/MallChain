@@ -414,7 +414,7 @@ describe('Correctness Properties Verification', () => {
       
       if (config.apiBaseUrl) {
         // Setup: Simulate various error types
-        let errorCount = 0;
+        const errorCount = 0;
         
         // Test: 401 Unauthorized
         global.fetch = vi.fn(async () => {

@@ -54,24 +54,45 @@ const limiters = {
 }
 
 /**
- * Create per-user rate limiter using IP address
+ * Rate limiter keyed by account identity (JWT user id, or — for this app's
+ * client-signs/backend-just-broadcasts financial routes, which run with no
+ * auth middleware at all, so req.user is never populated there — the
+ * wallet address the request is signing from). Falls back to IP only when
+ * neither is present (fully anonymous requests).
+ *
+ * Was previously prioritized IP first with user id as a "fallback" that
+ * req.ip (virtually always present) meant never actually happened — purely
+ * IP-based limiting is bypassable by rotating source IPs (proxy farms,
+ * botnets) against a single account/wallet, which this closes for the
+ * routes that key on it.
  */
+function accountKeyGenerator(req) {
+  const body = req.validatedBody || req.body || {}
+  return (
+    req.user?.id ||
+    body.from ||
+    body.fromAddress ||
+    body.buyerAddress ||
+    body.buyer ||
+    body.address ||
+    req.ip ||
+    req.headers['x-forwarded-for']?.split(',')[0]
+  )
+}
+
 function createUserLimiter(opts = {}) {
   return rateLimit(Object.assign({
     windowMs: opts.windowMs || 60 * 1000,
     max: opts.max || 30,
-    keyGenerator: (req) => {
-      // Use IP address as key, fallback to user ID if available
-      return req.ip || req.user?.id || req.headers['x-forwarded-for']?.split(',')[0]
-    },
+    keyGenerator: accountKeyGenerator,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'rate_limit_exceeded', message: 'Too many requests from your account. Please try again later.' }
   }, opts || {}))
 }
 
-module.exports = { 
-  createLimiter, 
+module.exports = {
+  createLimiter,
   limiters,
   createUserLimiter
 }

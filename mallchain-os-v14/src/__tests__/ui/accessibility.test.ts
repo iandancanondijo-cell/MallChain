@@ -244,7 +244,7 @@ describe('Accessibility', () => {
     });
 
     it('should not trap keyboard focus', () => {
-      let canEscape = true;
+      const canEscape = true;
       expect(canEscape).toBe(true);
     });
   });

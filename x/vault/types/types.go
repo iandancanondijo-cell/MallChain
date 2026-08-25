@@ -23,7 +23,13 @@ type Argon2Params struct {
 	KeyLen  uint32 `json:"key_len"`
 }
 
-// VaultBlob stores encrypted vault data as JSON in the KV store.
+// VaultBlob stores an owner's encrypted key-recovery data as JSON in the KV
+// store. Every field here is either non-sensitive metadata (salt, KDF
+// params) or ciphertext the client produced — the chain never derives a
+// key, verifies a password/TOTP code, or signs on the owner's behalf, so
+// there's no failed-attempt/lockout state to track here anymore (see
+// tx.proto for why: that verification used to happen in-keeper, which
+// required the password to travel through a public Msg to get here).
 type VaultBlob struct {
 	Salt                string       `json:"salt"`
 	Params              Argon2Params `json:"params"`
@@ -32,8 +38,6 @@ type VaultBlob struct {
 	Ciphertext          string       `json:"ciphertext"`            // base64
 	EncryptedTOTPSecret string       `json:"encrypted_totp_secret"` // base64
 	KDFVersion          string       `json:"kdf_version"`
-	FailedAttempts      int          `json:"failed_attempts"`
-	LockedUntilUnix     int64        `json:"locked_until_unix"`
 	PublicKey           string       `json:"public_key"` // base64
 }
 

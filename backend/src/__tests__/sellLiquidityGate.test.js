@@ -6,8 +6,8 @@ const express = require('express');
 // so a failed price fetch silently defaulting to 0 KES completely bypassed
 // the liquidity gate right when pool state is least trustworthy.
 
-jest.mock('../models/MalicoinPurchase', () => ({ create: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
-jest.mock('../models/MalicoinSale', () => ({ create: jest.fn() }));
+jest.mock('../models/MallcoinPurchase', () => ({ create: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
+jest.mock('../models/MallcoinSale', () => ({ create: jest.fn() }));
 jest.mock('../models/B2CPayout', () => ({ create: jest.fn() }));
 jest.mock('../models/WithdrawalRequest', () => ({ create: jest.fn() }));
 jest.mock('../models/LiquidityReconciliation', () => ({ create: jest.fn(), findOne: jest.fn() }));
@@ -52,7 +52,7 @@ jest.mock('../config', () => ({
   },
 }));
 
-const MallcoinSale = require('../models/MalicoinSale');
+const MallcoinSale = require('../models/MallcoinSale');
 const { checkSellLiquidity } = require('../services/sellGateService');
 const { getMarketPrice } = require('../services/mallcoinService');
 const buyRoutes = require('../routes/buy');

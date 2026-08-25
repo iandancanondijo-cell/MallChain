@@ -4,7 +4,7 @@
 // Safaricom-reported B2C failure via the callback, or an initiation-time
 // error) produced zero signal for any monitoring/alerting pipeline.
 jest.mock('../models/B2CPayout');
-jest.mock('../models/MalicoinSale');
+jest.mock('../models/MallcoinSale');
 jest.mock('../models/WithdrawalRequest');
 jest.mock('../services/liquidityActivityService', () => ({
   recordWithdrawLiquidityActivity: jest.fn().mockResolvedValue(undefined),
@@ -41,7 +41,7 @@ jest.mock('axios');
 
 const { paymentFailuresTotal } = require('../utils/metrics');
 const B2CPayout = require('../models/B2CPayout');
-const MallcoinSale = require('../models/MalicoinSale');
+const MallcoinSale = require('../models/MallcoinSale');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 
 const { initiateB2CPayout, handlePayoutCallback } = require('../services/b2cPayoutService');

@@ -33,9 +33,17 @@ redis.connect()
   });
 
 function isFaucetEnabled() {
+  // Hard-disabled in production, full stop — not an env var toggle. A free
+  // MALL/gas faucet requires a real funded hot wallet key sitting in server
+  // env vars with no HSM/KMS custody (see amlProvider.js-style decision
+  // elsewhere in this codebase: infra not available here, so the feature is
+  // simply off rather than shipped with weaker custody than everything
+  // else). FAUCET_ENABLED can still turn it off early in dev/staging, but
+  // can no longer turn it back on in production.
+  if (isProduction) return false;
   if (process.env.FAUCET_ENABLED === 'false') return false;
   if (process.env.FAUCET_ENABLED === 'true') return true;
-  return process.env.NODE_ENV !== 'production';
+  return true;
 }
 
 function getFaucetMnemonic() {

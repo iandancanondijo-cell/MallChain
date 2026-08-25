@@ -13,6 +13,7 @@ const WalletTransaction = require('../models/WalletTransaction');
 const { autoAssignReviewers } = require('../services/minesReviewService');
 const { PLATFORMS, DEFAULT_DAILY_CAP_MLPTS, getDailyCapMlpts } = require('../config/socialRewardRates');
 const { computeCampaignRate, clampMultiplier, MIN_CAMPAIGN_MULTIPLIER, MAX_CAMPAIGN_MULTIPLIER } = require('../services/rewardEngineService');
+const { markActiveToday } = require('../utils/activityTracker');
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -26,6 +27,7 @@ function verifyToken(req, res, next) {
   try {
     const payload = jwt.verify(auth.slice(7), getJwtSecret());
     req.userId = payload.userId || payload.id;
+    markActiveToday(req.userId); // fire-and-forget — feeds the badge streak, never blocks the request
     next();
   } catch (e) {
     return res.status(401).json({ ok: false, error: 'invalid token' });

@@ -32,4 +32,39 @@ async function notify(userId, { kind = 'system', title, body = '' } = {}) {
   }
 }
 
-module.exports = { notify };
+/**
+ * Fans a notification out across every channel the user has opted into for
+ * this `category` (see UserSettings.notifications.{email,push,sms}), always
+ * writing the in-app notification (existing `notify()`) regardless of
+ * preferences — that one's free and has no delivery cost to gate.
+ * `user` must have at least `_id`; `email`/`phone` are used if present.
+ * Never throws — each channel is independently best-effort.
+ */
+async function notifyUser(user, { kind = 'system', title, body = '', category = 'badgeAlerts' } = {}) {
+  if (!user?._id || !title) return;
+
+  await notify(user._id, { kind, title, body });
+
+  let prefs = null;
+  try {
+    const UserSettings = require('../models/UserSettings');
+    prefs = await UserSettings.findOne({ userId: user._id }).lean();
+  } catch (err) {
+    const logger = require('../utils/logger');
+    logger.warn('notify', 'failed to load notification preferences', { userId: user._id, error: err.message });
+  }
+
+  const emailEnabled = prefs?.notifications?.email?.[category] ?? true;
+  const smsEnabled = prefs?.notifications?.sms?.[category] ?? false;
+
+  if (emailEnabled && user.email) {
+    const { sendEmail } = require('./emailService');
+    await sendEmail(user.email, title, body);
+  }
+  if (smsEnabled && user.phone) {
+    const { sendSms } = require('./smsService');
+    await sendSms(user.phone, `${title} — ${body}`);
+  }
+}
+
+module.exports = { notify, notifyUser };

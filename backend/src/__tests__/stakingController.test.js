@@ -6,6 +6,7 @@ jest.mock('axios');
 jest.mock('../services/stakingService');
 
 const { getStakingSummary } = require('../services/stakingService');
+const { errorHandler } = require('../utils/errorHandler');
 const stakingRouter = require('../routes/staking');
 
 describe('staking routes', () => {
@@ -15,6 +16,10 @@ describe('staking routes', () => {
     app = express();
     app.use(express.json());
     app.use('/api/staking', stakingRouter);
+    // Matches index.js's global error-handling middleware — stakingController.js
+    // now throws AppError (see errorHandler.js) instead of calling res.status().json()
+    // directly, so this test app needs the same middleware the real app registers.
+    app.use(errorHandler());
   });
 
   beforeEach(() => {
@@ -46,7 +51,7 @@ describe('staking routes', () => {
       const res = await request(app).get('/api/staking/summary/mall1abc');
 
       expect(res.status).toBe(500);
-      expect(res.body).toEqual({ success: false, error: 'chain unreachable' });
+      expect(res.body.error.message).toBe('chain unreachable');
     });
 
     test('passes a MongoDB-operator-shaped address straight through as a plain string', async () => {
@@ -67,7 +72,7 @@ describe('staking routes', () => {
       const res = await request(app).post('/api/staking/broadcast').send({});
 
       expect(res.status).toBe(400);
-      expect(res.body).toEqual({ success: false, error: 'tx_bytes_required' });
+      expect(res.body.error.message).toBe('tx_bytes_required');
       expect(axios.post).not.toHaveBeenCalled();
     });
 
@@ -100,7 +105,7 @@ describe('staking routes', () => {
         .send({ txBytes: 'deadbeef' });
 
       expect(res.status).toBe(400);
-      expect(res.body).toMatchObject({ success: false, error: 'insufficient funds' });
+      expect(res.body.error.message).toBe('insufficient funds');
     });
 
     test('returns 500 when the broadcast request itself fails', async () => {
@@ -111,7 +116,7 @@ describe('staking routes', () => {
         .send({ txBytes: 'deadbeef' });
 
       expect(res.status).toBe(500);
-      expect(res.body).toEqual({ success: false, error: 'network error' });
+      expect(res.body.error.message).toBe('network error');
     });
 
     test('rejects a payload over the size limit', async () => {

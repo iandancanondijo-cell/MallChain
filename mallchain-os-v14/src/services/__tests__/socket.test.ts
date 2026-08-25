@@ -14,10 +14,10 @@ let mockSocket: any;
 const createMockSocket = () => ({
   connected: false,
   id: 'test-socket-' + Math.random(),
-  _listeners: new Map() as Map<string, Function[]>,
+  _listeners: new Map() as Map<string, ((...args: unknown[]) => void)[]>,
   _emits: [] as any[],
 
-  on(event: string, fn: Function) {
+  on(event: string, fn: (...args: unknown[]) => void) {
     const listeners = this._listeners.get(event) || [];
     listeners.push(fn);
     this._listeners.set(event, listeners);
@@ -42,18 +42,18 @@ const createMockSocket = () => ({
   __simulateConnect() {
     this.connected = true;
     const handlers = this._listeners.get('connect') || [];
-    handlers.forEach((h: Function) => h());
+    handlers.forEach((h: (...args: unknown[]) => void) => h());
   },
 
   __simulateDisconnect(reason: string) {
     this.connected = false;
     const handlers = this._listeners.get('disconnect') || [];
-    handlers.forEach((h: Function) => h(reason));
+    handlers.forEach((h: (...args: unknown[]) => void) => h(reason));
   },
 
   __simulateEvent(name: string, data: any) {
     const handlers = this._listeners.get(name) || [];
-    handlers.forEach((h: Function) => h(data));
+    handlers.forEach((h: (...args: unknown[]) => void) => h(data));
   },
 });
 

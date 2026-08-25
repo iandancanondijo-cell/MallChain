@@ -125,6 +125,13 @@
           "pub_key": null,
           "account_number": "4",
           "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall135r8z3n60htplllflc07t6wu8m6k3u76l58exj",
+          "pub_key": null,
+          "account_number": "5",
+          "sequence": "0"
         }
       ]
     },
@@ -132,7 +139,9 @@
       "authorization": []
     },
     "badge": {
-      "params": {},
+      "params": {
+        "badge_issuer": "mall135r8z3n60htplllflc07t6wu8m6k3u76l58exj"
+      },
       "user_badge_map": []
     },
     "bank": {
@@ -219,6 +228,15 @@
               "amount": "1000662617"
             }
           ]
+        },
+        {
+          "address": "mall135r8z3n60htplllflc07t6wu8m6k3u76l58exj",
+          "coins": [
+            {
+              "denom": "stake",
+              "amount": "100000000"
+            }
+          ]
         }
       ],
       "supply": [
@@ -228,7 +246,7 @@
         },
         {
           "denom": "stake",
-          "amount": "2400676141"
+          "amount": "2500676141"
         }
       ],
       "denom_metadata": [],

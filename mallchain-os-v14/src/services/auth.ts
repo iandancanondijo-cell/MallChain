@@ -13,6 +13,7 @@
  */
 
 import { store } from '../store/store';
+import { api } from './api';
 
 const TOKEN_KEY = 'token';
 
@@ -174,6 +175,26 @@ class AuthService {
       );
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * POST /api/auth/link-wallet — tells the backend which on-chain address
+   * this login owns. Nothing else ever sets User.walletAddress server-side,
+   * and both the account's `hasBadge` flag (GET /api/auth/me) and the
+   * monthly free-badge cron job key off that field — without this call,
+   * a user could earn or buy a real on-chain badge and it would never show
+   * up anywhere in their account (confirmed live: the badge existed on
+   * -chain, but /me kept reporting hasBadge:false because the account's
+   * walletAddress was never populated). Safe to call repeatedly — the
+   * backend treats re-linking the same address as a no-op.
+   */
+  async linkWallet(address: string): Promise<void> {
+    if (!address || !this.getToken()) return;
+    try {
+      await api.post('/api/auth/link-wallet', { address });
+    } catch (error) {
+      console.warn('[Auth] Failed to link wallet address:', (error as Error).message);
     }
   }
 

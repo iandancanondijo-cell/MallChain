@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { store, type AppState } from '../store/store';
 import { useStoreVersion } from './ui';
+import { t } from '../services/i18n';
 
 export interface NavEntry {
   label: string;
@@ -123,7 +124,7 @@ export default function Sidebar({ path, navigate }: { path: string; navigate: (p
       {GROUPS.map((g) => (
         <div key={g.title} className={'side-group' + (collapsed[g.title] ? ' collapsed' : '')}>
           <div className="side-group-title" onClick={() => setCollapsed((c) => ({ ...c, [g.title]: !c[g.title] }))}>
-            {g.title}
+            {t(g.title)}
             <span className="caret">▼</span>
           </div>
           <div className="side-item-wrap">
@@ -137,7 +138,7 @@ export default function Sidebar({ path, navigate }: { path: string; navigate: (p
                   onClick={() => navigate(it.path)}
                 >
                   <span className="ic"><Icon size={16} /></span>
-                  <span className="txt">{it.label}</span>
+                  <span className="txt">{t(it.label)}</span>
                   {badge > 0 && <span className="badge">{badge}</span>}
                 </div>
               );

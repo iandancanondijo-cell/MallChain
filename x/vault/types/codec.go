@@ -10,7 +10,6 @@ import (
 func RegisterCodec(cdc *codec.LegacyAmino) {
 	cdc.RegisterConcrete(&MsgSetupVault{}, "vault/SetupVault", nil)
 	cdc.RegisterConcrete(&MsgConfirmVault{}, "vault/ConfirmVault", nil)
-	cdc.RegisterConcrete(&MsgUnlockAndSign{}, "vault/UnlockAndSign", nil)
 	cdc.RegisterConcrete(&MsgDisableVault{}, "vault/DisableVault", nil)
 }
 
@@ -23,7 +22,6 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	registry.RegisterImplementations((*sdk.Msg)(nil),
 		&MsgSetupVault{},
 		&MsgConfirmVault{},
-		&MsgUnlockAndSign{},
 		&MsgDisableVault{},
 	)
 }

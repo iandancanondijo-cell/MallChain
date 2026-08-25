@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { store } from '../../store/store';
-import { useStoreVersion, toast, Modal } from '../../components/ui';
+import { useStoreVersion, toast, Modal, BadgeCheckmark } from '../../components/ui';
 import { minesApi, type MinesProfile } from '../../services/minesApi';
 import { settingsApi } from '../../services/settingsApi';
 import { kycApi, type KycStatusResponse } from '../../services/kycApi';
 import { api } from '../../services/api';
+import { badgeApi, type BadgeConfig, type BadgeQuote } from '../../services/badgeApi';
 
 const STATUS_LABEL: Record<KycStatusResponse['status'], string> = {
   not_submitted: 'Not submitted',
@@ -44,6 +45,9 @@ export default function Profile() {
   const [kyc, setKyc] = useState<KycStatusResponse | null>(null);
   const [docModal, setDocModal] = useState<{ blobUrl: string; loading: boolean } | null>(null);
 
+  const [badgeConfig, setBadgeConfig] = useState<BadgeConfig | null>(null);
+  const [buyBadgeOpen, setBuyBadgeOpen] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     const [profileRes, settingsRes, kycRes] = await Promise.all([minesApi.getProfile(), settingsApi.get(), kycApi.getStatus()]);
@@ -60,6 +64,10 @@ export default function Profile() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    badgeApi.getConfig().then((r) => { if (r.ok && r.data) setBadgeConfig(r.data); });
+  }, []);
 
   const save = async () => {
     if (!username.trim()) return toast('Username cannot be empty', false);
@@ -192,6 +200,21 @@ export default function Profile() {
             <div className="desc"><div className="t">Wallet</div><div className="m">Mallchain address</div></div>
             <span className="chip" style={{ color: st.wallet.address ? 'var(--green)' : 'var(--txt-3)' }}>{st.wallet.address ? '✓ Connected' : 'Not connected'}</span>
           </div>
+          <div className="flag-row" style={{ flex: '1 1 200px' }}>
+            <div className="desc"><div className="t">Mallchain badge</div><div className="m">7-day activity streak, or buy it</div></div>
+            {st.user.hasBadge ? (
+              <span className="chip" style={{ color: 'var(--green)', borderColor: 'var(--green)' }}>✓ Active</span>
+            ) : st.wallet.address ? (
+              <span className="row" style={{ gap: 8 }}>
+                <span className="chip" style={{ color: 'var(--txt-3)' }}>Not earned</span>
+                <button className="btn btn-primary btn-sm" onClick={() => setBuyBadgeOpen(true)}>
+                  Buy for KSh {badgeConfig?.priceKes ?? 17}
+                </button>
+              </span>
+            ) : (
+              <span className="chip" style={{ color: 'var(--txt-3)' }}>Connect a wallet to buy</span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -202,7 +225,7 @@ export default function Profile() {
             <div className="row mb">
               <div className="avatar" style={{ width: 56, height: 56, fontSize: 24 }}>{st.user.avatarInitial}</div>
               <div>
-                <div style={{ fontWeight: 800, fontSize: 15 }}>{st.user.name}</div>
+                <div style={{ fontWeight: 800, fontSize: 15 }}>{st.user.name}{st.user.hasBadge && <BadgeCheckmark />}</div>
                 <div className="tiny">{profile?.email}</div>
               </div>
             </div>
@@ -364,6 +387,165 @@ export default function Profile() {
           </button>
         </Modal>
       )}
+
+      {buyBadgeOpen && st.wallet.address && (
+        <BuyBadgeModal
+          walletAddress={st.wallet.address}
+          priceKes={badgeConfig?.priceKes ?? 17}
+          stkConfigured={badgeConfig?.providerMode === 'live'}
+          onClose={() => setBuyBadgeOpen(false)}
+          onIssued={() => {
+            st.user.hasBadge = true;
+            store.commit();
+            setBuyBadgeOpen(false);
+            toast('Badge purchased!');
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+type BuyBadgeStep = 'form' | 'awaiting_payment' | 'issuing' | 'done';
+
+function BuyBadgeModal({
+  walletAddress,
+  priceKes,
+  stkConfigured,
+  onClose,
+  onIssued,
+}: {
+  walletAddress: string;
+  priceKes: number;
+  stkConfigured: boolean;
+  onClose: () => void;
+  onIssued: () => void;
+}) {
+  const [phone, setPhone] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState<BuyBadgeStep>('form');
+  const [quote, setQuote] = useState<BadgeQuote | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval>>();
+
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const finishIssue = async (quoteId: string) => {
+    setStep('issuing');
+    const issueRes = await badgeApi.issue({ quoteId, walletAddress });
+    setBusy(false);
+    if (issueRes.ok && issueRes.data) {
+      setStep('done');
+      onIssued();
+    } else {
+      toast(issueRes.error || 'Badge issuance failed', false);
+      setStep('form');
+    }
+  };
+
+  const pollStatus = (quoteId: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      const res = await badgeApi.getStatus(quoteId);
+      if (!res.ok || !res.data) return;
+      setQuote(res.data);
+      if (res.data.status === 'confirmed') {
+        clearInterval(pollRef.current);
+        finishIssue(quoteId);
+      } else if (res.data.status === 'failed') {
+        clearInterval(pollRef.current);
+        toast(res.data.reason || 'Payment failed', false);
+        setStep('form');
+        setBusy(false);
+      }
+    }, 3000);
+  };
+
+  const submit = async () => {
+    if (!/^254\d{9}$/.test(phone)) {
+      toast('Enter phone as 254XXXXXXXXX', false);
+      return;
+    }
+
+    setBusy(true);
+    const reserveRes = await badgeApi.reserve({ walletAddress, phone });
+    if (!reserveRes.ok || !reserveRes.data) {
+      toast(reserveRes.error || 'Failed to reserve quote', false);
+      setBusy(false);
+      return;
+    }
+
+    const { quoteId } = reserveRes.data;
+
+    if (!stkConfigured) {
+      toast('Quote reserved, but M-Pesa STK push is not configured in this environment.', false);
+      setBusy(false);
+      return;
+    }
+
+    const mpesaRes = await badgeApi.initiateMpesa({ quoteId, phone });
+    if (!mpesaRes.ok || !mpesaRes.data) {
+      toast(mpesaRes.error || 'Failed to start M-Pesa payment', false);
+      setBusy(false);
+      return;
+    }
+
+    setStep('awaiting_payment');
+    toast('Check your phone for the M-Pesa prompt');
+    pollStatus(quoteId);
+  };
+
+  return (
+    <Modal title="Buy Mallchain badge" onClose={onClose}>
+      {step === 'form' && (
+        <>
+          <p className="tiny" style={{ marginBottom: 12 }}>
+            KSh {priceKes} via M-Pesa — issues a gold Mallchain badge to your wallet on-chain, unlocking the monthly
+            Mallpoints → Mallcoin conversion window.
+          </p>
+          <div className="field">
+            <label>M-Pesa phone number</label>
+            <input
+              className="input"
+              type="tel"
+              placeholder="254712345678"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              disabled={busy}
+              autoFocus
+            />
+          </div>
+          <button className="btn btn-primary btn-block" onClick={submit} disabled={busy}>
+            {busy && <span className="spin" />} Pay KSh {priceKes}
+          </button>
+        </>
+      )}
+
+      {step === 'awaiting_payment' && (
+        <div style={{ textAlign: 'center', padding: 20 }}>
+          <div style={{ fontSize: 40 }}>📲</div>
+          <h2 style={{ margin: '8px 0' }}>Check your phone</h2>
+          <div className="muted">Complete the M-Pesa prompt sent to <b>{phone}</b> for {priceKes} KES.</div>
+          {quote && <div className="mono" style={{ fontSize: 11, marginTop: 12, opacity: 0.6 }}>Quote {quote.quoteId}</div>}
+        </div>
+      )}
+
+      {step === 'issuing' && (
+        <div style={{ textAlign: 'center', padding: 20 }}>
+          <div className="spin" style={{ margin: '0 auto 12px' }} />
+          <h2 style={{ margin: '8px 0' }}>Payment confirmed</h2>
+          <div className="muted">Issuing your badge on-chain…</div>
+        </div>
+      )}
+
+      {step === 'done' && (
+        <div style={{ textAlign: 'center', padding: 20 }}>
+          <div style={{ fontSize: 40 }}>✓</div>
+          <h2 style={{ margin: '8px 0' }}>Badge issued!</h2>
+          <div className="modal-actions" style={{ justifyContent: 'center' }}>
+            <button className="btn btn-primary" onClick={onClose}>Done</button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }

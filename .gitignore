@@ -68,10 +68,20 @@ blockchain_working/config/gentx/
 .kilo/
 .kiro/
 .mines/
+.claude/
 
 # Blockchain data (large, regeneratable — never commit)
 blockchain_working/data/
 blockchain_working/config/write-file-atomic-*
+blockchain_working/config/*.bak
+blockchain_working/config/*.bak-*
+
+# Accidentally vendored Go toolchain source (not referenced by any build script)
+go-src/
+
+# Python cache
+__pycache__/
+*.pyc
 
 # Compiled binary
 marketplaced

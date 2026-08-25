@@ -1,41 +1,35 @@
 const { creditMlcns, getFaucetStatus, fundGas } = require('../services/faucetService');
+const { AppError, ErrorCodes, asyncHandler } = require('../utils/errorHandler');
 
-exports.status = async (_req, res) => {
-  try {
-    const status = await getFaucetStatus();
-    return res.json(status);
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
+exports.status = asyncHandler(async (_req, res) => {
+  const status = await getFaucetStatus();
+  return res.json(status);
+});
+
+exports.requestMlcns = asyncHandler(async (req, res) => {
+  const { address, amountMlcns } = req.body || {};
+  if (!address) {
+    throw new AppError(ErrorCodes.MISSING_REQUIRED_FIELD, 'address is required', 400);
   }
-};
-
-exports.requestMlcns = async (req, res) => {
   try {
-    const { address, amountMlcns } = req.body || {};
-    if (!address) {
-      return res.status(400).json({ error: 'address is required' });
-    }
+    // faucetService throws plain Errors with a real `.status` (429 cooldown,
+    // 503 unavailable, etc.) — errorHandler.js's global handler preserves
+    // that status instead of forcing every non-AppError to 500.
     const result = await creditMlcns(address, amountMlcns);
     return res.json(result);
   } catch (err) {
-    const status = err.status || 500;
-    return res.status(status).json({
-      error: err.message,
-      log: err.rawLog,
-    });
-  }
-};
-
-exports.fundGas = async (req, res) => {
-  try {
-    const { address } = req.body || {};
-    if (!address) {
-      return res.status(400).json({ error: 'address is required' });
+    if (err.rawLog) {
+      throw new AppError(ErrorCodes.INVALID_TRANSACTION, err.message, err.status || 500, { log: err.rawLog });
     }
-    const result = await fundGas(address);
-    return res.json(result);
-  } catch (err) {
-    const status = err.status || 500;
-    return res.status(status).json({ error: err.message });
+    throw err;
   }
-};
+});
+
+exports.fundGas = asyncHandler(async (req, res) => {
+  const { address } = req.body || {};
+  if (!address) {
+    throw new AppError(ErrorCodes.MISSING_REQUIRED_FIELD, 'address is required', 400);
+  }
+  const result = await fundGas(address);
+  return res.json(result);
+});

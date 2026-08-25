@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, fmtMoney, StatusChip, Stepper, Modal, toast } from '../../components/ui';
 import { createEscrow, releaseFunds, openDispute, MarketplaceTxError } from '../../services/marketplaceTx';
+import { requestMnemonic } from '../../services/mnemonicAccess';
 
 interface Product { id: string; name: string; seller: string; sellerAddress: string; price: number; rating: number; img: string; cat: string }
 
@@ -65,11 +66,14 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
   };
 
   const checkout = async () => {
-    if (!st.wallet.mnemonic || !st.wallet.address) {
+    if (!st.wallet.pinEncryptedMnemonic || !st.wallet.address) {
       toast('Set up your wallet before checking out');
       return;
     }
     if (st.marketplace.cart.length === 0) return;
+
+    const mnemonic = await requestMnemonic();
+    if (!mnemonic) return;
 
     setCheckingOut(true);
     try {
@@ -91,7 +95,7 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
         const description = items.map((p) => p.name).join(', ').slice(0, 200);
 
         const { escrowId, txHash } = await createEscrow({
-          mnemonic: st.wallet.mnemonic,
+          mnemonic,
           buyer: st.wallet.address,
           seller: sellerAddress,
           amount: toBaseUnits(total),
@@ -134,13 +138,15 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
     if (i === SHIP_FLOW.length - 2) {
       // Final step: confirming delivery is what actually releases escrow
       // funds to the seller — must be signed by the buyer.
-      if (!st.wallet.mnemonic || !st.wallet.address || !o.escrowId) {
+      if (!st.wallet.pinEncryptedMnemonic || !st.wallet.address || !o.escrowId) {
         toast('Wallet or escrow reference missing — cannot release funds');
         return;
       }
+      const releaseMnemonic = await requestMnemonic();
+      if (!releaseMnemonic) return;
       setBusyOrderId(id);
       try {
-        const { txHash } = await releaseFunds({ mnemonic: st.wallet.mnemonic, buyer: st.wallet.address, escrowId: o.escrowId });
+        const { txHash } = await releaseFunds({ mnemonic: releaseMnemonic, buyer: st.wallet.address, escrowId: o.escrowId });
         o.status = SHIP_FLOW[i + 1];
         o.releaseTxHash = txHash;
         store.commit();
@@ -160,13 +166,15 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
   const fileDispute = async (id: string) => {
     const o = st.marketplace.orders.find((x) => x.id === id);
     if (!o) return;
-    if (!st.wallet.mnemonic || !st.wallet.address || !o.escrowId) {
+    if (!st.wallet.pinEncryptedMnemonic || !st.wallet.address || !o.escrowId) {
       toast('Wallet or escrow reference missing — cannot open a dispute');
       return;
     }
+    const mnemonic = await requestMnemonic();
+    if (!mnemonic) return;
     setBusyOrderId(id);
     try {
-      await openDispute({ mnemonic: st.wallet.mnemonic, buyer: st.wallet.address, escrowId: o.escrowId });
+      await openDispute({ mnemonic, buyer: st.wallet.address, escrowId: o.escrowId });
       o.status = 'disputed';
       store.commit();
       toast('Dispute filed on-chain — the seller must agree to a refund, or funds release automatically once the dispute window passes');

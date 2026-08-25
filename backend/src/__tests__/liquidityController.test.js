@@ -66,6 +66,11 @@ describe('liquidity controller / routes', () => {
         height: 100,
         events: [],
       }),
+      removeLiquidityOnChain: jest.fn().mockResolvedValue({
+        txHash: 'TXHASH2',
+        height: 101,
+        events: [],
+      }),
     }));
     jest.doMock('../models/user', () => ({ findById: jest.fn() }));
 
@@ -293,6 +298,37 @@ describe('liquidity controller / routes', () => {
       expect(Number(res.body.amountReceived0)).toBeCloseTo(expectedAmount0, 4);
       expect(Number(res.body.amountReceived1)).toBeCloseTo(expectedAmount1, 4);
       expect(Number(res.body.remainingPosition)).toBeCloseTo(halfLp, 5);
+      // Previously this endpoint never touched the chain at all — it just
+      // fabricated a random txHash while mutating only the in-memory ledger
+      // below. Locks in that a real MsgRemoveLiquidity is now signed and
+      // broadcast (dexTxBuilder.js's removeLiquidityOnChain) and its real
+      // tx hash is what gets returned.
+      expect(res.body.txHash).toBe('TXHASH2');
+      expect(dexTxBuilder.removeLiquidityOnChain).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mnemonic: 'test operator mnemonic words',
+          providerAddress: 'mall1operator',
+          poolId: 2,
+          liquidityTokens: expect.objectContaining({ denom: 'liquidity-2' }),
+        })
+      );
+    });
+
+    test('502s with details when the on-chain removal fails', async () => {
+      dexTxBuilder.removeLiquidityOnChain.mockRejectedValueOnce(new Error('chain unreachable'));
+
+      await request(app)
+        .post('/api/liquidity/add')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ poolId: 2, amount0: 10, amount1: 20, userAddress: 'mall1user' });
+
+      const res = await request(app)
+        .post('/api/liquidity/remove')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ poolId: 2, lpTokens: 1, userAddress: 'mall1user' });
+
+      expect(res.status).toBe(502);
+      expect(res.body.error).toBe('Failed to remove liquidity on-chain');
     });
   });
 

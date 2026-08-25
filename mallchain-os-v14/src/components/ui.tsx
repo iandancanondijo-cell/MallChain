@@ -3,6 +3,7 @@
  * Chart (bar/line), Stepper, EmptyState, Spinner button helper.
  */
 import { useEffect, useState, type ReactNode } from 'react';
+import { BadgeCheck } from 'lucide-react';
 import { store } from '../store/store';
 
 /* ---------------- Modal ---------------- */
@@ -62,9 +63,9 @@ export function ToastHost() {
 /* ---------------- StatusChip ---------------- */
 export function StatusChip({ status }: { status: string | null | undefined }) {
   const cls = (s: string) =>
-    s === 'approved' || s === 'confirmed' || s === 'delivered' || s === 'passed' ? 'b-approved'
+    s === 'approved' || s === 'confirmed' || s === 'delivered' || s === 'passed' || s === 'success' || s === 'resolved' || s === 'completed' ? 'b-approved'
     : s === 'rejected' || s === 'failed' || s === 'defeated' || s === 'cancelled' ? 'b-rejected'
-    : s === 'active' || s === 'voting' || s === 'pending' || s === 'transit' ? 'b-pending'
+    : s === 'active' || s === 'voting' || s === 'pending' || s === 'transit' || s === 'pending_review' || s === 'payout_initiated' || s === 'detected' || s === 'compensating' || s === 'pending_manual' ? 'b-pending'
     : 'b-live';
   // Data from the backend isn't always guaranteed to have this field set
   // (e.g. a document written before a schema default existed) — a missing
@@ -72,6 +73,19 @@ export function StatusChip({ status }: { status: string | null | undefined }) {
   const safeStatus = status || 'unknown';
   const label = safeStatus.charAt(0).toUpperCase() + safeStatus.slice(1).replace(/-/g, ' ');
   return <span className={'mc-badge ' + cls(safeStatus)}>{label}</span>;
+}
+
+/* ---------------- BadgeCheckmark ---------------- */
+/** Gold checkmark shown next to a username — earned via the 7-day activity streak or bought for KSh 17. */
+export function BadgeCheckmark({ size = 14 }: { size?: number }) {
+  return (
+    <span
+      style={{ display: 'inline-block', verticalAlign: 'middle', marginLeft: 4, lineHeight: 0 }}
+      title="Mallchain badge — earned via a 7-day activity streak or purchase"
+    >
+      <BadgeCheck size={size} color="var(--gold)" />
+    </span>
+  );
 }
 
 /* ---------------- ScoreRing ---------------- */
