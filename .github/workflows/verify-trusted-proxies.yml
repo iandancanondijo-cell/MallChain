@@ -92,7 +92,7 @@ jobs:
           # delimiter pattern recommended by GitHub Actions docs for
           # arbitrary string values.
           {
-            echo 'value<<'
+            echo 'value<<EOF'
             printf '%s' "$FINAL"
             echo ''
             echo 'EOF'
@@ -132,7 +132,7 @@ jobs:
 
           if [ -s /tmp/mismatches.txt ]; then
             {
-              echo 'mismatches<<'
+              echo 'mismatches<<MISMATCH_EOF'
               cat /tmp/mismatches.txt
               echo 'MISMATCH_EOF'
             } >> "$GITHUB_OUTPUT"
@@ -142,7 +142,7 @@ jobs:
 
           if [ -s /tmp/warns.txt ]; then
             {
-              echo 'warns<<'
+              echo 'warns<<WARN_EOF'
               cat /tmp/warns.txt
               echo 'WARN_EOF'
             } >> "$GITHUB_OUTPUT"
@@ -152,7 +152,7 @@ jobs:
 
           if [ -s /tmp/all-issues.txt ]; then
             {
-              echo 'all_issues<<'
+              echo 'all_issues<<ALL_EOF'
               cat /tmp/all-issues.txt
               echo 'ALL_EOF'
             } >> "$GITHUB_OUTPUT"

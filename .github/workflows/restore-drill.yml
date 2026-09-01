@@ -16,7 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mongo:
-        image: mongo:7
+        # Matches docker-compose.yml's mongo:6.0 — drilling against a
+        # different major version than what's actually deployed would prove
+        # nothing about whether backup/restore works against prod.
+        image: mongo:6.0
         ports:
           - 27017:27017
         options: >-

@@ -38,14 +38,20 @@ data "aws_iam_policy_document" "github_actions_trust" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # Restricts to the main branch specifically — widen with a second
-    # condition value (e.g. "repo:${var.github_repo}:pull_request") only if
-    # a deploy workflow genuinely needs to run from PRs, which most
-    # shouldn't.
+    # Restricts to the main branch and version tags — exactly the two
+    # triggers deploy.yml actually deploys from (push-to-main -> staging,
+    # push-tag-v*.*.* -> production). A tag-triggered run's OIDC token has
+    # sub=...:ref:refs/tags/vX.Y.Z, not refs/heads/main, so both values are
+    # required or every production (tag) deploy gets AccessDenied here.
+    # Widen further (e.g. "repo:${var.github_repo}:pull_request") only if a
+    # deploy workflow genuinely needs to run from PRs, which most shouldn't.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:ref:refs/heads/main"]
+      values = [
+        "repo:${var.github_repo}:ref:refs/heads/main",
+        "repo:${var.github_repo}:ref:refs/tags/*",
+      ]
     }
   }
 }

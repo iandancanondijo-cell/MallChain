@@ -508,6 +508,7 @@ func New(
 	})
 
 	app.setupUpgradeHandlers()
+	app.setupUpgradeStoreLoaders()
 
 	if err := app.Load(loadLatest); err != nil {
 		panic(err)

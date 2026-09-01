@@ -118,6 +118,13 @@ jobs:
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITLEAKS_CONFIG: .gitleaks.toml
+          # gitleaks-action v2 requires a license for use on private
+          # repositories (it's free for public repos and for the plain
+          # gitleaks CLI either way — the paywall is specific to this
+          # wrapper action). If this repo is private, add a GITLEAKS_LICENSE
+          # repo secret (https://gitleaks.io/products.html) or this step
+          # fails outright; on a public repo this is a harmless no-op.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 
   vuln-scan:
     runs-on: ubuntu-latest
@@ -193,6 +200,15 @@ jobs:
       - name: Build marketplaced image
         run: docker build -t mallchain-marketplaced:ci .
 
+      - name: Build frontend image
+        # VITE_API_BASE_URL is inlined into the static JS at build time (see
+        # mallchain-os-v14/Dockerfile) — the real value only matters for an
+        # actual deploy, not this scan-only image, so a placeholder is fine.
+        run: |
+          docker build \
+            --build-arg VITE_API_BASE_URL=https://ci-placeholder.invalid \
+            -t mallchain-frontend:ci ./mallchain-os-v14
+
       - name: Scan backend image
         # Pinned tag was previously "0.24.0" (missing the "v" prefix) — that
         # ref does not exist in this repo (only "v0.24.0" does), so this was
@@ -211,6 +227,14 @@ jobs:
         uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # v0.24.0
         with:
           image-ref: mallchain-marketplaced:ci
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # v0.24.0
+        with:
+          image-ref: mallchain-frontend:ci
           severity: CRITICAL,HIGH
           exit-code: '1'
           ignore-unfixed: true

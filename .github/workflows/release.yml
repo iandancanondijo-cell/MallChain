@@ -31,6 +31,22 @@ jobs:
         # that repo at any time with no version bump or diff to review.
         uses: ignite/cli/actions/release/vars@c55cc2fe9630443fc9a5f033a332853d5ca7832b # v29.10.1
 
+      - name: Set up Go
+        # Pinned to the same version ci.yml and codeql.yml use, matching
+        # go.mod — without this, "go test"/"chain build" below fall back to
+        # whatever Go ubuntu-latest happens to ship, which can silently
+        # drift from what's actually tested/built elsewhere in this repo.
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.24.0' # matches go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
       - name: Install backend dependencies
         run: cd backend && npm ci
 

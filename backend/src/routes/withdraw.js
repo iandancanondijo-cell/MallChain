@@ -14,6 +14,7 @@ const schemas = require('../utils/validationSchemas');
 const idempotency = require('../middleware/idempotency');
 const { config } = require('../config');
 const { recordWithdrawLiquidityActivity } = require('../services/liquidityActivityService');
+const { requireAdmin } = require('../middleware/adminAuth');
 
 function autoPayoutEnabled() {
   return config.payment.safaricom.autoPayoutEnabled;
@@ -88,7 +89,16 @@ router.get('/config', async (_req, res) => {
 // real payout for the same withdrawal intent. Require an Idempotency-Key so
 // a retried request returns the cached first response instead of paying out
 // twice.
-router.post('/mpesa', idempotency({ required: true }), validateRequest(schemas.withdrawMpesaSchema), async (req, res) => {
+//
+// Unlike /api/buy/sell, this route has no way to prove the caller actually
+// controls `walletAddress` — there's no signed txBytes here, just a plain
+// body. It exists for staff to file a cash-out request on a customer's
+// behalf during manual review, not for a customer's browser to call
+// directly (the frontend never calls it). requireAdmin closes what was
+// otherwise an unauthenticated path to create fabricated withdrawal records
+// — and, if ENABLE_WITHDRAWAL_AUTO_PAYOUT is on, trigger a real Safaricom
+// payout to an attacker-supplied phone number for a self-declared amount.
+router.post('/mpesa', requireAdmin, idempotency({ required: true }), validateRequest(schemas.withdrawMpesaSchema), async (req, res) => {
   try {
     const { walletAddress, phone, amountMlcns, amountKes, currency } = req.validatedBody;
     const withdrawalId = crypto.randomBytes(12).toString('hex');

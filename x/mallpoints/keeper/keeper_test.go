@@ -116,6 +116,58 @@ func TestConvertToMallcoinIntegration(t *testing.T) {
 	require.Equal(t, uint64(4000), userPoints.Points)
 }
 
+// recordingMlcoinKeeper wraps mockMlcoinKeeper to capture what MintToWallet
+// was actually called with, so tests can assert the settled MLCNS amount —
+// not just the Mallpoints deducted. Pointer receivers so the recorded values
+// survive being passed into keeper.NewKeeper as an interface value.
+type recordingMlcoinKeeper struct {
+	mockMlcoinKeeper
+	mintedAddress string
+	mintedAmount  uint64
+	mintCalls     int
+}
+
+func (m *recordingMlcoinKeeper) MintToWallet(ctx context.Context, address string, amount uint64) error {
+	m.mintedAddress = address
+	m.mintedAmount = amount
+	m.mintCalls++
+	return nil
+}
+
+// TestConvertToMallcoinMintsCorrectMlcnsAmount guards against a regression
+// of the C4 fix (see x/mlcoin/types/params.go's DefaultMlptsPerMlcns doc
+// comment): the settled MLCNS credit must be points * ratioFixed / scale
+// (multiply), not points / ratioFixed (divide) or a hardcoded 1:1. At the
+// default ratio (3_200_000 / 1_000_000 = 3.2), converting 1000 MLPTS must
+// mint exactly 3200 MLCNS.
+func TestConvertToMallcoinMintsCorrectMlcnsAmount(t *testing.T) {
+	encCfg := moduletestutil.MakeTestEncodingConfig(module.AppModule{})
+	addressCodec := addresscodec.NewBech32Codec(sdk.GetConfig().GetBech32AccountAddrPrefix())
+	storeKey := storetypes.NewKVStoreKey(types.StoreKey)
+	storeService := runtime.NewKVStoreService(storeKey)
+	sdkCtx := testutil.DefaultContextWithDB(t, storeKey, storetypes.NewTransientStoreKey("transient_test")).Ctx
+	authority := authtypes.NewModuleAddress(types.GovModuleName)
+	badgeKeeper := mockBadgeKeeper{has: true}
+	mlcoinKeeper := &recordingMlcoinKeeper{}
+
+	k := keeper.NewKeeper(storeService, encCfg.Codec, addressCodec, authority, badgeKeeper, mlcoinKeeper)
+	if err := k.Params.Set(sdkCtx, types.DefaultParams()); err != nil {
+		t.Fatalf("failed to set params: %v", err)
+	}
+	srv := keeper.NewMsgServerImpl(k)
+	user := makeTestAddr(addressCodec, "mintamountuser")
+	_ = k.UserPoints.Set(sdkCtx, user, types.UserPoints{Address: user, Points: 5000})
+	sdkCtx = sdkCtx.WithBlockTime(time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC))
+	wrappedCtx := sdk.WrapSDKContext(sdkCtx)
+
+	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{Creator: user, Amount: 1000})
+	require.NoError(t, err)
+
+	require.Equal(t, 1, mlcoinKeeper.mintCalls)
+	require.Equal(t, user, mlcoinKeeper.mintedAddress)
+	require.Equal(t, uint64(3200), mlcoinKeeper.mintedAmount)
+}
+
 func TestConvertToMallcoinWindowClosed(t *testing.T) {
 	f := initFixture(t)
 	srv := keeper.NewMsgServerImpl(f.keeper)

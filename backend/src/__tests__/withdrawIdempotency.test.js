@@ -23,6 +23,13 @@ jest.mock('../models/IdempotencyKey', () => ({
   create: jest.fn(),
   findOneAndUpdate: jest.fn().mockResolvedValue(undefined),
 }));
+// POST /mpesa now requires an authenticated admin (see withdraw.js) since it
+// has no way to prove the caller controls walletAddress — stand in a fake
+// admin so these tests keep exercising idempotency, not auth.
+jest.mock('../middleware/adminAuth', () => ({
+  requireAdmin: (req, res, next) => { req.user = { _id: 'admin1', email: 'admin@x.com', role: 'admin' }; next(); },
+  requireSuperAdmin: (req, res, next) => next(),
+}));
 
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 const IdempotencyKey = require('../models/IdempotencyKey');

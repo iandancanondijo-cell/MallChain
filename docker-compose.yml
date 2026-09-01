@@ -59,6 +59,15 @@ services:
       - redis-data:/data
     ports:
       - "127.0.0.1:6379:6379"
+    # The official redis image ships no built-in HEALTHCHECK, unlike
+    # marketplaced/backend's own Dockerfiles — without this, backend's
+    # depends_on below can only ever wait for "started", not "actually
+    # accepting commands".
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   marketplaced:
     # First run only: the chain-data volume starts empty, and (deliberately —
@@ -97,9 +106,13 @@ services:
       mongo-init:
         condition: service_completed_successfully
       redis:
-        condition: service_started
+        condition: service_healthy
       marketplaced:
-        condition: service_started
+        # marketplaced's Dockerfile defines a HEALTHCHECK polling
+        # /status on the RPC port — waiting for "healthy" (not just
+        # "started") means backend doesn't start hammering a chain REST/RPC
+        # endpoint that's still initializing.
+        condition: service_healthy
 
   frontend:
     build:
@@ -113,7 +126,11 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - backend
+      backend:
+        # backend/Dockerfile defines a HEALTHCHECK on /api/health — wait for
+        # it to actually be serving requests, not just "container started",
+        # before the frontend (which calls it immediately on load) comes up.
+        condition: service_healthy
 
 volumes:
   mongo-data:

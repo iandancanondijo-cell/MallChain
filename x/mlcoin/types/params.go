@@ -17,7 +17,18 @@ var DefaultBurnWallet string = ""
 const DefaultMinStakeAmount uint64 = 18_250
 
 // DefaultMlptsPerMlcns is the default conversion ratio (fixed-point, 6 decimals)
-// between Mallpoints (MLPTS) and Mallcoin (MLCNS). 3_200_000 = 3.2 MLPTS per 1 MLCNS.
+// between Mallpoints (MLPTS) and Mallcoin (MLCNS).
+//
+// Despite the field name reading "MLPTS per MLCNS", the ratio is applied as
+// MLCNS *minted per MLPTS spent*: mintedMlcns = (pointsAmount * this) / MLPTSPerMlcnsScale.
+// 3_200_000 / 1_000_000 = 3.2, i.e. 1 MLPTS converts to 3.2 MLCNS — matching
+// the KES-pegged economics (1 MLPTS ~= 2 KES, 1 MLCNS ~= 0.625 KES).
+// See x/mallpoints/types/expected_keepers.go's MlcoinKeeper.GetConversionRatio
+// doc comment (source of truth) and
+// x/mallpoints/keeper/msg_server_convert_to_mallcoin.go's safeMulDiv call
+// (mintedAmount = points * ratioFixed / scale) for the actual formula.
+// Do NOT "fix" this to divide instead of multiply — that was tried before
+// and silently mass-under-mints MLCNS on every conversion.
 const DefaultMlptsPerMlcns uint64 = 3_200_000
 
 // MLPTSPerMlcnsScale is the denominator for the fixed-point ratio stored in
