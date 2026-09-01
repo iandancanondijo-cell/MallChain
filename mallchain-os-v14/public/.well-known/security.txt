@@ -1,0 +1,15 @@
+# Mallchain security disclosure policy — RFC 9116 (https://www.rfc-editor.org/rfc/rfc9116)
+# See also: SECURITY.md at the repository root.
+#
+# REPLACE the placeholders below with your real security contact and PGP
+# key before this goes live — a placeholder security.txt is a broken
+# promise to a researcher trying to report something real. Re-sign/update
+# the Expires date at least once a year (RFC 9116 requires it to be
+# present and treats an expired file as no longer valid).
+
+Contact: mailto:REPLACE_WITH_SECURITY_CONTACT@example.com
+Expires: 2027-08-27T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://REPLACE_WITH_YOUR_DOMAIN/.well-known/security.txt
+# Policy: https://REPLACE_WITH_YOUR_DOMAIN/security-policy
+# Acknowledgments: https://REPLACE_WITH_YOUR_DOMAIN/security-acknowledgments

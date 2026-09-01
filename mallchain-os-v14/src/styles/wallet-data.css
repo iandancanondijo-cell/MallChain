@@ -243,11 +243,6 @@
   outline-color: var(--cyan, #00d9ff);
 }
 
-/* ========== Animation Preferences ========== */
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
+/* Reduced-motion override now lives in styles/global.css (loaded on every
+   route via main.tsx, unlike this file which only loads via App.tsx) — one
+   canonical place instead of two copies that could drift. */

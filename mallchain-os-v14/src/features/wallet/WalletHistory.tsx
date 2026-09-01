@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, StatusChip, toast } from '../../components/ui';
 import { useTransactionData } from '../../hooks/useTransactionData';
@@ -17,8 +17,22 @@ export default function WalletHistory() {
   const st = store.state;
   const [type, setType] = useState('');
   const [status, setStatus] = useState('');
+  const [search, setSearch] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [page, setPage] = useState(1);
   const [selectedTxId, setSelectedTxId] = useState<string | null>(null);
+
+  // Debounce free-text search so every keystroke doesn't trigger a fetch.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, startDate, endDate]);
 
   // Task 13.5: Fetch real transactions with filters and pagination
   const { transactions, total, pageSize, hasMore, loading, error } = useTransactionData({
@@ -27,6 +41,9 @@ export default function WalletHistory() {
     pageSize: 20,
     type: type || undefined,
     status: status || undefined,
+    search: debouncedSearch || undefined,
+    startDate: startDate ? new Date(startDate).toISOString() : undefined,
+    endDate: endDate ? new Date(endDate).toISOString() : undefined,
   });
 
   const totalPages = Math.ceil(total / pageSize);
@@ -99,16 +116,15 @@ export default function WalletHistory() {
         </div>
       )}
 
-      {/* Task 13.8-13.9: Filters */}
-      <div className="filter-row">
+      {/* Task 13.8-13.9: Filters. Type is limited to send/receive — this
+          history endpoint reads generic bank-transfer events only, so it
+          can never actually classify a tx as swap/stake/reward/etc; Swap
+          and Staking each have their own dedicated history views. */}
+      <div className="filter-row" style={{ flexWrap: 'wrap', gap: 8 }}>
         <select className="input" value={type} onChange={(e) => { setType(e.target.value); setPage(1); }}>
           <option value="">All types</option>
           <option value="send">Send</option>
           <option value="receive">Receive</option>
-          <option value="swap">Swap</option>
-          <option value="stake">Stake</option>
-          <option value="reward">Reward</option>
-          <option value="penalty">Penalty</option>
         </select>
         <select className="input" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
           <option value="">All statuses</option>
@@ -116,9 +132,47 @@ export default function WalletHistory() {
           <option value="pending">Pending</option>
           <option value="failed">Failed</option>
         </select>
+        <input
+          className="input"
+          type="search"
+          placeholder="Search hash or address…"
+          aria-label="Search transactions by hash or address"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ minWidth: 200 }}
+        />
+        <label className="tiny muted" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          From
+          <input
+            className="input"
+            type="date"
+            aria-label="Start date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+        </label>
+        <label className="tiny muted" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          To
+          <input
+            className="input"
+            type="date"
+            aria-label="End date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
+        </label>
+        {(type || status || search || startDate || endDate) && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => { setType(''); setStatus(''); setSearch(''); setStartDate(''); setEndDate(''); }}
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
-      <div className="card">
+      <div className="card" aria-busy={loading && transactions.length === 0} aria-label={loading && transactions.length === 0 ? 'Loading transactions' : undefined}>
         {loading && transactions.length === 0 ? (
           <>
             {[1, 2, 3, 4, 5].map((i) => (

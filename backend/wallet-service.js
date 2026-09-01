@@ -14,6 +14,16 @@ const PORT = Number(process.env.WALLET_SERVICE_PORT || 4001)
 const HOST = process.env.WALLET_SERVICE_HOST || '127.0.0.1'
 const HRP = process.env.CHAIN_PREFIX || process.env.HRP || 'mall'
 
+// This service handles only public keys today (see the notice below), but a
+// misconfigured WALLET_SERVICE_HOST=0.0.0.0 in production has no upside and
+// every downside — refuse to start rather than silently exposing it beyond
+// localhost, so a future change that does touch key material inherits a
+// safe default instead of an already-open port.
+if (process.env.NODE_ENV === 'production' && HOST !== '127.0.0.1' && HOST !== 'localhost') {
+  console.error(`WALLET_SERVICE_HOST must be 127.0.0.1 in production (got "${HOST}"). Refusing to start.`)
+  process.exit(1)
+}
+
 app.use(cors())
 app.use(express.json({ limit: '100kb' }))
 

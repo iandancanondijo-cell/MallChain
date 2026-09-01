@@ -38,6 +38,13 @@ func (m mockMlcoinKeeper) MintToWallet(ctx context.Context, address string, amou
 }
 func (m mockMlcoinKeeper) WithMintingEnabled(ctx context.Context, fn func() error) error { return fn() }
 
+// GetConversionRatio matches the on-chain default ratio used by
+// x/mlcoin/types DefaultMlptsPerMlcns and MLPTSPerMlcnsScale so the test
+// fixture's settled amount matches the live Go/JS parity formula.
+func (m mockMlcoinKeeper) GetConversionRatio(ctx context.Context) (mlptsPerMlcns uint64, scale uint64) {
+	return 3_200_000, 1_000_000
+}
+
 func initFixture(t *testing.T) *fixture {
 	t.Helper()
 

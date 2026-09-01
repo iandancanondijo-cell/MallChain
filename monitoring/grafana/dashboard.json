@@ -1,0 +1,128 @@
+{
+  "title": "Mallchain Backend",
+  "uid": "mallchain-backend",
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "utc",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["mallchain", "backend"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "HTTP request rate by status class",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": "${datasource}",
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total[5m])) by (status_code)",
+          "legendFormat": "{{status_code}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "p50 / p95 / p99 request latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": "${datasource}",
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Backend errors by code",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": "${datasource}",
+      "targets": [
+        { "expr": "sum(rate(backend_errors_total[5m])) by (code)", "legendFormat": "{{code}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Payment failures by reason",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": "${datasource}",
+      "targets": [
+        { "expr": "sum(rate(payment_failures_total[15m])) by (reason)", "legendFormat": "{{reason}}" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Liquidity activity by flow / stage / status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": "${datasource}",
+      "targets": [
+        { "expr": "sum(rate(liquidity_activity_total[15m])) by (flow, stage, status)", "legendFormat": "{{flow}}/{{stage}}/{{status}}" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "On-chain tx queue job status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": "${datasource}",
+      "targets": [
+        { "expr": "sum(rate(marketplace_tx_job_status_total[10m])) by (status)", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Socket.IO errors & room-cap rejections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": "${datasource}",
+      "targets": [
+        { "expr": "sum(rate(socket_errors_total[5m]))", "legendFormat": "socket errors" },
+        { "expr": "sum(rate(socket_room_cap_rejections_total[5m]))", "legendFormat": "room-cap rejections" }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Process memory (RSS)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": "${datasource}",
+      "targets": [
+        { "expr": "process_resident_memory_bytes{job=\"mallchain-backend\"}", "legendFormat": "RSS" }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Blockchain operations by type / status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "datasource": "${datasource}",
+      "targets": [
+        { "expr": "sum(rate(blockchain_operations_total[5m])) by (operation, status)", "legendFormat": "{{operation}}/{{status}}" }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Transactions processed by status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "datasource": "${datasource}",
+      "targets": [
+        { "expr": "sum(rate(transactions_processed_total[5m])) by (status)", "legendFormat": "{{status}}" }
+      ]
+    }
+  ]
+}

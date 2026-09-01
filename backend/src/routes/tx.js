@@ -16,6 +16,15 @@ const historyQuerySchema = Joi.object({
   status: Joi.string()
     .valid('all', 'confirmed', 'pending', 'failed')
     .default('all'),
+  // This endpoint only ever derives 'send'/'receive' from a generic bank
+  // transfer event (see the from === address ternary below) — it has no
+  // way to see swap/stake/reward/etc, so 'all' is the only other valid value.
+  type: Joi.string()
+    .valid('all', 'send', 'receive')
+    .default('all'),
+  search: Joi.string().trim().max(128).allow('').optional(),
+  startDate: Joi.date().iso().optional(),
+  endDate: Joi.date().iso().optional(),
   page: Joi.string()
     .pattern(/^\d+$/)
     .default('1'),
@@ -34,6 +43,10 @@ router.get('/history',
     const {
       address,
       status = 'all',
+      type = 'all',
+      search = '',
+      startDate,
+      endDate,
       page = '1',
       limit = '20',
     } = req.validatedQuery;
@@ -98,7 +111,28 @@ router.get('/history',
       };
     });
 
-    const filtered = status === 'all' ? txs : txs.filter((t) => t.status === status);
+    // All filters are applied to the full merged set *before* pagination —
+    // total/page counts must reflect the filtered result, not the raw feed,
+    // or "page 1 of N" and Next/Previous would be paging through the wrong set.
+    const startMs = startDate ? new Date(startDate).getTime() : null;
+    const endMs = endDate ? new Date(endDate).getTime() : null;
+    const searchLower = search.toLowerCase();
+
+    const filtered = txs.filter((t) => {
+      if (status !== 'all' && t.status !== status) return false;
+      if (type !== 'all' && t.type !== type) return false;
+      if (startMs !== null || endMs !== null) {
+        const ts = new Date(t.timestamp).getTime();
+        if (Number.isNaN(ts)) return false;
+        if (startMs !== null && ts < startMs) return false;
+        if (endMs !== null && ts > endMs) return false;
+      }
+      if (searchLower) {
+        const haystack = `${t.hash} ${t.from} ${t.to}`.toLowerCase();
+        if (!haystack.includes(searchLower)) return false;
+      }
+      return true;
+    });
 
     // Apply manual pagination on the merged + filtered result
     const total = filtered.length;

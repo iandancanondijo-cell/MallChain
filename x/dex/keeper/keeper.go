@@ -17,23 +17,23 @@ import (
 
 type poolCodec struct{}
 
-func (poolCodec) Encode(value types.Pool) ([]byte, error) {
+func (poolCodec) Encode(value *types.Pool) ([]byte, error) {
 	return json.Marshal(value)
 }
-func (poolCodec) Decode(b []byte) (types.Pool, error) {
-	var v types.Pool
-	err := json.Unmarshal(b, &v)
+func (poolCodec) Decode(b []byte) (*types.Pool, error) {
+	v := &types.Pool{}
+	err := json.Unmarshal(b, v)
 	return v, err
 }
-func (poolCodec) EncodeJSON(value types.Pool) ([]byte, error) {
+func (poolCodec) EncodeJSON(value *types.Pool) ([]byte, error) {
 	return json.Marshal(value)
 }
-func (poolCodec) DecodeJSON(b []byte) (types.Pool, error) {
-	var v types.Pool
-	err := json.Unmarshal(b, &v)
+func (poolCodec) DecodeJSON(b []byte) (*types.Pool, error) {
+	v := &types.Pool{}
+	err := json.Unmarshal(b, v)
 	return v, err
 }
-func (poolCodec) Stringify(value types.Pool) string {
+func (poolCodec) Stringify(value *types.Pool) string {
 	bz, _ := json.Marshal(value)
 	return string(bz)
 }
@@ -43,23 +43,23 @@ func (poolCodec) ValueType() string {
 
 type paramsCodec struct{}
 
-func (paramsCodec) Encode(value types.Params) ([]byte, error) {
+func (paramsCodec) Encode(value *types.Params) ([]byte, error) {
 	return json.Marshal(value)
 }
-func (paramsCodec) Decode(b []byte) (types.Params, error) {
-	var v types.Params
-	err := json.Unmarshal(b, &v)
+func (paramsCodec) Decode(b []byte) (*types.Params, error) {
+	v := &types.Params{}
+	err := json.Unmarshal(b, v)
 	return v, err
 }
-func (paramsCodec) EncodeJSON(value types.Params) ([]byte, error) {
+func (paramsCodec) EncodeJSON(value *types.Params) ([]byte, error) {
 	return json.Marshal(value)
 }
-func (paramsCodec) DecodeJSON(b []byte) (types.Params, error) {
-	var v types.Params
-	err := json.Unmarshal(b, &v)
+func (paramsCodec) DecodeJSON(b []byte) (*types.Params, error) {
+	v := &types.Params{}
+	err := json.Unmarshal(b, v)
 	return v, err
 }
-func (paramsCodec) Stringify(value types.Params) string {
+func (paramsCodec) Stringify(value *types.Params) string {
 	bz, _ := json.Marshal(value)
 	return string(bz)
 }
@@ -73,9 +73,9 @@ type Keeper struct {
 	authority    string
 
 	Schema        collections.Schema
-	pools         collections.Map[uint64, types.Pool]
+	pools         collections.Map[uint64, *types.Pool]
 	poolLiquidity collections.Map[collections.Pair[uint64, []byte], sdk.Coin]
-	params        collections.Item[types.Params]
+	params        collections.Item[*types.Params]
 	nextPoolId    collections.Item[uint64]
 }
 
@@ -112,11 +112,11 @@ func (k Keeper) GetAuthority() string {
 	return k.authority
 }
 
-func (k Keeper) SetParams(ctx context.Context, params types.Params) error {
+func (k Keeper) SetParams(ctx context.Context, params *types.Params) error {
 	return k.params.Set(ctx, params)
 }
 
-func (k Keeper) GetParams(ctx context.Context) (types.Params, error) {
+func (k Keeper) GetParams(ctx context.Context) (*types.Params, error) {
 	return k.params.Get(ctx)
 }
 
@@ -186,17 +186,17 @@ func (k Keeper) CreatePool(ctx context.Context, creator sdk.AccAddress, tokenA, 
 	}
 
 	pool := types.Pool{
-		Id:            poolId,
-		TokenADenom:   tokenA.Denom,
-		TokenBDenom:   tokenB.Denom,
-		TokenAReserve: &tokenA,
-		TokenBReserve: &tokenB,
+		Id:             poolId,
+		TokenADenom:    tokenA.Denom,
+		TokenBDenom:    tokenB.Denom,
+		TokenAReserve:  &tokenA,
+		TokenBReserve:  &tokenB,
 		TotalLiquidity: &liquidityTokens,
-		Fee:           fee,
-		Creator:       creator.String(),
+		Fee:            fee,
+		Creator:        creator.String(),
 	}
 
-	if err := k.pools.Set(ctx, poolId, pool); err != nil {
+	if err := k.pools.Set(ctx, poolId, &pool); err != nil {
 		return 0, err
 	}
 
@@ -212,7 +212,7 @@ func (k Keeper) CreatePool(ctx context.Context, creator sdk.AccAddress, tokenA, 
 	return poolId, nil
 }
 
-func (k Keeper) validateFee(fee string, params types.Params) error {
+func (k Keeper) validateFee(fee string, params *types.Params) error {
 	minFee := math.LegacyMustNewDecFromStr(params.MinFee)
 	maxFee := math.LegacyMustNewDecFromStr(params.MaxFee)
 
@@ -453,13 +453,13 @@ func (k Keeper) calculateSwap(tokenIn, reserveIn, reserveOut sdk.Coin, fee strin
 	return sdk.NewCoin(reserveOut.Denom, amountOut.TruncateInt())
 }
 
-func (k Keeper) GetPool(ctx context.Context, poolId uint64) (types.Pool, error) {
+func (k Keeper) GetPool(ctx context.Context, poolId uint64) (*types.Pool, error) {
 	return k.pools.Get(ctx, poolId)
 }
 
-func (k Keeper) GetAllPools(ctx context.Context) ([]types.Pool, error) {
-	var pools []types.Pool
-	err := k.pools.Walk(ctx, nil, func(key uint64, value types.Pool) (bool, error) {
+func (k Keeper) GetAllPools(ctx context.Context) ([]*types.Pool, error) {
+	var pools []*types.Pool
+	err := k.pools.Walk(ctx, nil, func(key uint64, value *types.Pool) (bool, error) {
 		pools = append(pools, value)
 		return false, nil
 	})

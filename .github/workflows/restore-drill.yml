@@ -1,0 +1,60 @@
+name: Backup Restore Drill
+
+# D3: proves scripts/backup.sh + scripts/restore.sh actually round-trip data,
+# rather than trusting an untested backup script until the day it's needed
+# for a real incident. Chain-data backup/restore is exercised too when a
+# blockchain_working/ directory exists, but on a fresh runner there isn't
+# one — backup.sh already handles that (warns and skips), so this drill's
+# real coverage is the MongoDB half, which is the one every environment has.
+on:
+  schedule:
+    - cron: '30 4 * * 1' # weekly, Monday 04:30 UTC
+  workflow_dispatch: {}
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")' || mongo --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      MONGO_URI: mongodb://127.0.0.1:27017/restore_drill
+      BACKUP_ROOT: ${{ github.workspace }}/backup-drill
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install MongoDB Database Tools
+        run: |
+          curl -sSL -o /tmp/mongo-tools.deb https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2204-x86_64-100.9.4.deb
+          sudo apt-get install -y /tmp/mongo-tools.deb
+
+      - name: Seed a probe document
+        run: |
+          mongosh "$MONGO_URI" --eval 'db.restoreDrillProbe.insertOne({tag: "drill-probe", ts: new Date().toISOString()})'
+
+      - name: Run backup.sh
+        run: ./scripts/backup.sh drill
+
+      - name: Drop the database (simulate data loss)
+        run: mongosh "$MONGO_URI" --eval 'db.dropDatabase()'
+
+      - name: Run restore.sh
+        run: ./scripts/restore.sh drill --yes
+
+      - name: Verify the probe document survived the round trip
+        run: |
+          count=$(mongosh --quiet "$MONGO_URI" --eval 'db.restoreDrillProbe.countDocuments({tag: "drill-probe"})')
+          echo "restored probe document count: $count"
+          if [ "$count" -lt 1 ]; then
+            echo "::error::backup.sh/restore.sh did not round-trip the probe document — restore drill FAILED"
+            exit 1
+          fi

@@ -51,15 +51,13 @@ describe('stakingService.getStakingSummary', () => {
     expect(summary.active[0].stakedAmount).toBe(1);
   });
 
-  test('returns an empty summary when the chain request fails', async () => {
+  test('throws STAKING_DATA_UNAVAILABLE when the chain request fails so caller distinguishes empty from down-chain', async () => {
     axios.get.mockRejectedValue(new Error('ECONNREFUSED'));
 
-    const summary = await getStakingSummary('mall1ghi');
-
-    expect(summary.active).toEqual([]);
-    expect(summary.history).toEqual([]);
-    expect(summary.totalStaked).toBe(0);
-    expect(summary.totalRewardsClaimed).toBe(0);
+    await expect(getStakingSummary('mall1ghi')).rejects.toMatchObject({
+      code: 'STAKING_DATA_UNAVAILABLE',
+      status: 503,
+    });
   });
 
   test('returns an empty summary when there are no staking records', async () => {

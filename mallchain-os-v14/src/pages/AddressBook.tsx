@@ -12,17 +12,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { store } from '../store/store';
-import { useStoreVersion, toast } from '../components/ui';
+import { useStoreVersion, toast, Modal } from '../components/ui';
 import { formatAddressForDisplay, isValidMallAddress } from '../services/wallet';
+import { type AddressEntry, ADDRESS_BOOK_STORAGE_KEY, loadAddressBook as readAddressBook } from '../services/addressBookStore';
 import '../styles/address-book.css';
-
-interface AddressEntry {
-  id: string;
-  label: string;
-  address: string;
-  network: 'mainnet' | 'devnet' | 'testnet';
-  createdAt: number;
-}
 
 interface AddressBookState {
   addresses: AddressEntry[];
@@ -35,8 +28,6 @@ interface AddressBookState {
   formAddress: string;
   formNetwork: 'mainnet' | 'devnet' | 'testnet';
 }
-
-const STORAGE_KEY = 'mallchain_address_book';
 
 export function AddressBook() {
   useStoreVersion();
@@ -61,8 +52,7 @@ export function AddressBook() {
   const loadAddressBook = () => {
     try {
       setState(prev => ({ ...prev, loading: true, error: null }));
-      const saved = localStorage.getItem(STORAGE_KEY);
-      const addresses = saved ? JSON.parse(saved) : [];
+      const addresses = readAddressBook();
       setState(prev => ({
         ...prev,
         addresses,
@@ -80,7 +70,7 @@ export function AddressBook() {
 
   const saveAddressBook = (addresses: AddressEntry[]) => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(addresses));
+      localStorage.setItem(ADDRESS_BOOK_STORAGE_KEY, JSON.stringify(addresses));
     } catch (error) {
       console.error('[AddressBook] Error saving:', error);
       setState(prev => ({
@@ -413,69 +403,73 @@ function AddressModal({
   isLoading,
 }: AddressModalProps) {
   return (
-    <div className="modal-overlay">
-      <div className="modal modal-md">
-        <h3>{title}</h3>
-
-        <div className="form-group">
-          <label>Label (e.g., "My Trading Wallet")</label>
-          <input
-            type="text"
-            maxLength={50}
-            placeholder="Address label"
-            value={label}
-            onChange={e => onLabelChange(e.target.value)}
-            disabled={isLoading}
-          />
-          <small>{label.length}/50</small>
-        </div>
-
-        <div className="form-group">
-          <label>Wallet Address</label>
-          <input
-            type="text"
-            placeholder="Enter Solana address (44 characters)"
-            value={address}
-            onChange={e => onAddressChange(e.target.value.trim())}
-            disabled={isLoading}
-            spellCheck="false"
-          />
-          <small>Paste your Solana wallet address</small>
-        </div>
-
-        <div className="form-group">
-          <label>Network</label>
-          <select
-            value={network}
-            onChange={e =>
-              onNetworkChange(e.target.value as 'mainnet' | 'devnet' | 'testnet')
-            }
-            disabled={isLoading}
-          >
-            <option value="mainnet">Mainnet</option>
-            <option value="devnet">Devnet</option>
-            <option value="testnet">Testnet</option>
-          </select>
-        </div>
-
-        <div className="modal-buttons">
-          <button
-            className="btn btn-secondary"
-            onClick={onCancel}
-            disabled={isLoading}
-          >
-            Cancel
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={onSave}
-            disabled={isLoading || !label.trim() || !address.trim()}
-          >
-            {isLoading ? 'Saving...' : 'Save Address'}
-          </button>
-        </div>
+    <Modal title={title} onClose={onCancel}>
+      <div className="form-group">
+        <label htmlFor="address-book-label">Label (e.g., "My Trading Wallet")</label>
+        <input
+          id="address-book-label"
+          type="text"
+          maxLength={50}
+          placeholder="Address label"
+          value={label}
+          onChange={e => onLabelChange(e.target.value)}
+          disabled={isLoading}
+          autoComplete="off"
+          autoCapitalize="words"
+        />
+        <small>{label.length}/50</small>
       </div>
-    </div>
+
+      <div className="form-group">
+        <label htmlFor="address-book-address">Wallet Address</label>
+        <input
+          id="address-book-address"
+          type="text"
+          placeholder="mall1… (bech32 address)"
+          value={address}
+          onChange={e => onAddressChange(e.target.value.trim())}
+          disabled={isLoading}
+          spellCheck="false"
+          autoComplete="off"
+          autoCapitalize="off"
+          inputMode="text"
+        />
+        <small>Paste the recipient's Mallchain wallet address</small>
+      </div>
+
+      <div className="form-group">
+        <label htmlFor="address-book-network">Network</label>
+        <select
+          id="address-book-network"
+          value={network}
+          onChange={e =>
+            onNetworkChange(e.target.value as 'mainnet' | 'devnet' | 'testnet')
+          }
+          disabled={isLoading}
+        >
+          <option value="mainnet">Mainnet</option>
+          <option value="devnet">Devnet</option>
+          <option value="testnet">Testnet</option>
+        </select>
+      </div>
+
+      <div className="modal-buttons">
+        <button
+          className="btn btn-secondary"
+          onClick={onCancel}
+          disabled={isLoading}
+        >
+          Cancel
+        </button>
+        <button
+          className="btn btn-primary"
+          onClick={onSave}
+          disabled={isLoading || !label.trim() || !address.trim()}
+        >
+          {isLoading ? 'Saving...' : 'Save Address'}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

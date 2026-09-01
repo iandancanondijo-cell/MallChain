@@ -6,7 +6,11 @@ const console = new Console(stdout, stderr);
 
 const MallcoinPurchase = require('../models/MallcoinPurchase');
 const LiquidityReconciliation = require('../models/LiquidityReconciliation');
+const { addLiquidityToPool } = require('../controllers/liquidityController');
+const { recordBuyLiquidityActivity } = require('./liquidityActivityService');
 const logger = require('../utils/logger');
+
+const DEFAULT_POOL_ID = 2; // MLCN/KES — see routes/liquidity.js's SELL_POOL_ID convention
 
 // Scan for purchases with creditTxHash but liquidityError set
 async function detectFailedLiquidityAdds() {
@@ -42,7 +46,18 @@ async function detectFailedLiquidityAdds() {
   }
 }
 
-// Attempt to compensate by refunding the credited MLCNS (pull back to faucet)
+// Compensate a failed liquidity-add by retrying it.
+//
+// The failure being compensated for is the *operator's own* add-liquidity
+// transaction (routes/buy.js's applyLiquidityAfterCredit, funded and signed
+// entirely from OPERATOR_MNEMONIC — see liquidityController.js's
+// addLiquidityToPool) failing after the user's MLCNS credit had already
+// succeeded. The user legitimately owns that MLCNS; there is no user-signed
+// step to reverse, and — unlike this file's previous comment suggested —
+// the operator has no way to sign a "MsgTransfer from user to faucet" out
+// of a wallet whose private key it doesn't hold. So the correct
+// compensation is simply retrying the operator's own liquidity-add with the
+// same amounts, which the operator's mnemonic can legitimately (re-)sign.
 async function compensateFailedLiquidity(recon) {
   try {
     if (recon.status !== 'detected') {
@@ -53,9 +68,6 @@ async function compensateFailedLiquidity(recon) {
     recon.status = 'compensating';
     await recon.save();
 
-    // Pull back MLCNS from user wallet to faucet operator
-    // This is a reversal; in production, implement via MsgTransfer with from=userWallet, to=faucetAddress
-    // For now, log and mark as resolved without actual reversal (manual review needed)
     const redactedAddress = recon.walletAddress ? `${recon.walletAddress.slice(0, 6)}...${recon.walletAddress.slice(-4)}` : 'unknown';
     logger.info('[Reconciliation] Attempting compensation', {
       purchaseId: recon.purchaseId,
@@ -64,30 +76,64 @@ async function compensateFailedLiquidity(recon) {
       action: 'compensation_attempt'
     });
 
-    // TODO: implement actual on-chain reversal (e.g., MsgTransfer from user to faucet)
-    // const reverseTx = await transferMlcnsReverse(recon.walletAddress, recon.mlcnsAmount);
-    // recon.compensationTx = reverseTx.txHash;
+    const purchase = await MallcoinPurchase.findById(recon.purchaseId).catch(() => null);
+    const poolId = purchase?.liquidityPoolId || DEFAULT_POOL_ID;
 
-    // Mark as pending_manual — do NOT auto-resolve without a real on-chain reversal.
-    // Silently marking 'resolved' without a reversal is a financial integrity bug.
-    recon.status = 'pending_manual';
-    recon.resolvedAt = null;
-    logger.warn('[Reconciliation] Manual action required', {
+    const liquidityResult = await addLiquidityToPool({
+      poolId,
+      amount0: recon.mlcnsAmount,
+      amount1: recon.fiatAmount,
+      userAddress: recon.walletAddress,
+    });
+
+    recon.status = 'resolved';
+    recon.compensationTx = liquidityResult.txHash;
+    recon.resolvedAt = new Date();
+    await recon.save();
+
+    if (purchase) {
+      purchase.liquidityAdded = true;
+      purchase.lpTokens = Number(liquidityResult.lpTokens) || 0;
+      purchase.liquidityPoolId = poolId;
+      purchase.liquidityError = undefined;
+      await purchase.save();
+    }
+
+    await recordBuyLiquidityActivity(
+      'liquidity_add_reconciled',
+      purchase || { walletAddress: recon.walletAddress, amount: recon.mlcnsAmount, fiatAmount: recon.fiatAmount, quoteId: recon.quoteId },
+      {
+        status: 'success',
+        poolId,
+        liquidityTxHash: liquidityResult.txHash,
+        lpTokens: Number(liquidityResult.lpTokens) || 0,
+        note: 'Liquidity add retried and succeeded during reconciliation.',
+        metadata: { reconciliationId: recon._id.toString(), shareOfPool: liquidityResult.shareOfPool },
+      }
+    ).catch((activityErr) => logger.warn('[Reconciliation] Failed to record reconciled activity', { error: activityErr.message || activityErr }));
+
+    logger.info('[Reconciliation] Compensation succeeded — liquidity retried and added', {
+      purchaseId: recon.purchaseId,
       mlcnsAmount: recon.mlcnsAmount,
       walletAddress: redactedAddress,
-      purchaseId: recon.purchaseId,
-      action: 'manual_review_needed'
+      txHash: liquidityResult.txHash,
+      action: 'compensation_succeeded',
     });
-    await recon.save();
 
     return recon;
   } catch (err) {
+    // The retry itself failed (chain unreachable, OPERATOR_MNEMONIC missing,
+    // pool gone, etc.) — fall back to requiring a human rather than looping
+    // forever or silently marking this resolved without a real fix. The new
+    // failure reason is recorded since it may differ from the original.
     logger.error('[Reconciliation] Compensation failed', {
       purchaseId: recon.purchaseId,
       error: err.message || err,
       action: 'compensation_failed'
     });
-    recon.status = 'detected'; // reset to detected for retry
+    recon.status = 'pending_manual';
+    recon.reason = err.message || String(err);
+    recon.resolvedAt = null;
     await recon.save();
     return null;
   }

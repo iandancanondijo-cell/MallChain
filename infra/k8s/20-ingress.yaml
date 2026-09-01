@@ -1,0 +1,37 @@
+# Assumes an ingress-nginx controller and cert-manager are already installed
+# on the cluster (both cluster-level installs, not templated here) with a
+# ClusterIssuer named "letsencrypt-prod" already configured against a real
+# ACME account — that account/DNS setup is the one piece of TLS here that
+# needs a human, not this file.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mallchain
+  namespace: mallchain
+  annotations:
+    cert-manager.io/cluster-issuer: 'letsencrypt-prod'
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    nginx.ingress.kubernetes.io/proxy-body-size: '2m'
+    # STK push / payout callbacks are financial webhooks — keep the rate
+    # limit here generous but present as defense-in-depth alongside the
+    # app-level limiters (middleware/rateLimiter.js).
+    nginx.ingress.kubernetes.io/limit-rps: '50'
+spec:
+  tls:
+    - hosts: ['app.example.com', 'api.example.com'] # replace with real domains
+      secretName: mallchain-tls
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: frontend, port: { number: 8080 } }
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: backend, port: { number: 4000 } }

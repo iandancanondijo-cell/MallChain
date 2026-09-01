@@ -4,33 +4,42 @@ const {
   fundStakeFromMnemonic,
   fundStakeFromPrivateKey,
   transferAndFundGas,
+  isAccountNotFoundError,
 } = require('./mallcoinTxBuilder');
 const { DirectSecp256k1Wallet, DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
 const Redis = require('ioredis');
+const { redisTlsOptions } = require('../utils/redisTlsOptions');
 
-const redis = new Redis({
-  host: config.redis.host || '127.0.0.1',
-  port: config.redis.port || 6379,
-});
-
-redis.on('error', (err) => console.error('Redis client error:', err));
-
-// In production, require Redis for faucet operations
+const IS_TEST_ENV = process.env.NODE_ENV === 'test';
 const isProduction = process.env.NODE_ENV === 'production';
+
+let redis = null;
 let redisConnected = false;
 
-redis.connect()
-  .then(() => {
-    redisConnected = true;
-    console.log('Redis connected for faucet cooldown');
-  })
-  .catch(() => {
-    if (isProduction) {
-      console.error('Redis unavailable in production - faucet service disabled');
-    } else {
-      console.warn('Redis unavailable, faucet cooldown will be in-memory only (development mode)');
-    }
+if (!IS_TEST_ENV) {
+  redis = new Redis({
+    host: config.redis.host || '127.0.0.1',
+    port: config.redis.port || 6379,
+    lazyConnect: true,
+    retryStrategy: () => null,
+    ...redisTlsOptions(),
   });
+
+  redis.on('error', (err) => console.error('Redis client error:', err));
+
+  redis.connect()
+    .then(() => {
+      redisConnected = true;
+      console.log('Redis connected for faucet cooldown');
+    })
+    .catch(() => {
+      if (isProduction) {
+        console.error('Redis unavailable in production - faucet service disabled');
+      } else {
+        console.warn('Redis unavailable, faucet cooldown will be in-memory only (development mode)');
+      }
+    });
+}
 
 function isFaucetEnabled() {
   // Hard-disabled in production, full stop — not an env var toggle. A free
@@ -46,16 +55,21 @@ function isFaucetEnabled() {
   return true;
 }
 
-function getFaucetMnemonic() {
-  // Prefer explicit FAUCET_MNEMONIC. Using OPERATOR_MNEMONIC for faucet actions
-  // requires explicit opt-in to avoid accidental use of operator keys as faucet.
+async function getFaucetMnemonic() {
+  try {
+    const { getFaucetMnemonic: km } = require('../utils/keyManager');
+    const fromKm = await km();
+    if (fromKm) return fromKm;
+  } catch (_) {
+    /* Vault unreachable or unconfigured — fall through to legacy env selection. */
+  }
+
   if (process.env.FAUCET_MNEMONIC) return process.env.FAUCET_MNEMONIC;
   if (process.env.OPERATOR_MNEMONIC) {
     if (process.env.ALLOW_OPERATOR_MNEMONIC === 'true') {
       console.warn('Using OPERATOR_MNEMONIC for faucet operations (ALLOW_OPERATOR_MNEMONIC=true)');
       return process.env.OPERATOR_MNEMONIC;
     }
-    // Not allowed by default; do not return operator mnemonic silently
     return null;
   }
   if (process.env.TEST_MODE === 'true') return process.env.TREASURY_MNEMONIC || null;
@@ -81,7 +95,8 @@ async function getFundingAccount() {
     };
   }
 
-  const mnemonic = getFaucetMnemonic();
+  let mnemonic;
+  try { mnemonic = await getFaucetMnemonic(); } catch (_) { mnemonic = null; }
   if (!mnemonic) return null;
 
   const wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
@@ -93,6 +108,51 @@ async function getFundingAccount() {
     mnemonic,
     address: account.address,
   };
+}
+
+// C1: Faucet-unfunded not-ready error.
+//
+// Genesis repair (adding the faucet mnemonic's derived address to
+// auth.accounts + bank.balances) might not have been applied yet. Rather
+// than bubbling the raw Cosmos "account does not exist on chain" SDK error
+// as a 500 INTERNAL_ERROR, surface an HTTP 503 with a structured error
+// code so frontends can render "Faucet not ready — contact admin to fund
+// faucetAddress in genesis". This aligns with the project preference for
+// explicit not-ready states over simulated/mock data.
+function faucetUnfundedError(fundingAccount, underlyingMessage) {
+  const err = new Error(
+    `Faucet account has not been funded in genesis yet. Contact admin to add ${fundingAccount?.address || '(unknown)'} to auth.accounts with a bank.balances allocation for mlc+stake.`
+  );
+  err.status = 503;
+  err.code = 'faucet_unfunded';
+  err.faucetAddress = fundingAccount?.address || null;
+  if (underlyingMessage) err.underlying = underlyingMessage;
+  return err;
+}
+
+// Lightweight predicate that gates whether a faucet credit/fund operation
+// is safe to attempt. It first resolves the funding account address, then
+// asks the chain REST whether the wallet exists — if both resolve and the
+// wallet balance record shows `exists: false`, the not-ready error is
+// raised before we ever call into the Cosmos RPC (avoiding the ambiguous
+// "account not found" text altogether).
+async function guardFaucetFundedOrThrow(fundingAccount) {
+  if (!fundingAccount) return;
+  try {
+    const balance = await getWalletBalance(fundingAccount.address);
+    if (balance && balance.exists === false) {
+      throw faucetUnfundedError(fundingAccount, 'wallet_balance REST returned exists:false');
+    }
+  } catch (e) {
+    // If getWalletBalance already threw our structured error, re-raise it
+    // verbatim; otherwise wrap common "account-not-found" style messages.
+    if (e && e.code === 'faucet_unfunded') throw e;
+    if (isAccountNotFoundError(e)) throw faucetUnfundedError(fundingAccount, e.message);
+    // Any other failure (network, circuit open) passes through unchanged:
+    // surfacing the real root cause is better than wrongly claiming the
+    // faucet is unfunded when the chain is simply offline.
+    throw e;
+  }
 }
 
 const DEFAULT_MLCNS = Number(process.env.FAUCET_MLCNS_AMOUNT || 1000);
@@ -112,7 +172,6 @@ function checkCooldown(lastRequestTime, cooldownMs) {
 async function checkAddressCooldown(address) {
   const cooldownKey = `faucet_cooldown:${address}`;
 
-  // In production, require Redis
   if (isProduction && !redisConnected) {
     const err = new Error('Faucet service unavailable: Redis required in production');
     err.status = 503;
@@ -121,16 +180,18 @@ async function checkAddressCooldown(address) {
 
   let last = null;
   try {
-    const stored = await redis.get(cooldownKey);
-    last = stored ? parseInt(stored, 10) : null;
+    if (redis && typeof redis.get === 'function') {
+      const stored = await redis.get(cooldownKey);
+      last = stored ? parseInt(stored, 10) : null;
+    } else {
+      last = lastRequestByAddress.get(address) || null;
+    }
   } catch (redisErr) {
-    // In production, fail fast if Redis fails
     if (isProduction) {
       const err = new Error('Faucet service unavailable: Redis connection failed');
       err.status = 503;
       throw err;
     }
-    // Development mode: fallback to in-memory
     last = lastRequestByAddress.get(address) || null;
   }
 
@@ -161,22 +222,23 @@ function validateFaucetRequest({ walletAddress, amount } = {}) {
 
 async function setCooldown(address) {
   const cooldownKey = `faucet_cooldown:${address}`;
-  
-  // In production, require Redis
+
   if (isProduction && !redisConnected) {
     console.error('Cannot set cooldown: Redis unavailable in production');
     return;
   }
-  
+
   try {
-    await redis.setEx(cooldownKey, COOLDOWN_MS / 1000, Date.now().toString());
+    if (redis && typeof redis.setEx === 'function') {
+      await redis.setEx(cooldownKey, COOLDOWN_MS / 1000, Date.now().toString());
+    } else {
+      lastRequestByAddress.set(address, Date.now());
+    }
   } catch (redisErr) {
-    // In production, fail fast if Redis fails
     if (isProduction) {
       console.error('Cannot set cooldown: Redis connection failed');
       return;
     }
-    // Development mode: fallback to in-memory
     lastRequestByAddress.set(address, Date.now());
   }
 }
@@ -215,20 +277,36 @@ async function creditMlcns(address, amountMlcns = DEFAULT_MLCNS) {
 
   await checkAddressCooldown(address);
 
+  // C1: Faucet-account existence gate BEFORE any signature/broadcast.
+  // If the faucet mnemonic doesn't resolve to an account that exists on
+  // chain, raise the explicit 503 `faucet_unfunded` error instead of
+  // bubbling a generic Cosmos SDK "account does not exist on chain" 500.
+  await guardFaucetFundedOrThrow(fundingAccount);
+
   // transferAndFundGas signs both the MLCNS transfer and the stake-gas top-up
   // against one locally-tracked sequence number (see its doc comment) so the
   // second tx can't be rejected for racing the first tx's on-chain sequence
   // bump. Still two separate broadcasts, so a gas-funding failure can't roll
   // back an already-successful MLCNS transfer.
-  const { transfer, gasFunding } = await transferAndFundGas({
-    mnemonic: fundingAccount.source === 'private_key' ? undefined : fundingAccount.mnemonic,
-    privateKeyHex: fundingAccount.source === 'private_key' ? fundingAccount.privateKeyHex : undefined,
-    toAddress: address,
-    amountMlcns: amount,
-    amountStake: DEFAULT_STAKE,
-    memo: 'dev faucet MLCNS',
-    fundGas: process.env.FAUCET_FUND_GAS !== 'false',
-  });
+  let transfer, gasFunding;
+  try {
+    ({ transfer, gasFunding } = await transferAndFundGas({
+      mnemonic: fundingAccount.source === 'private_key' ? undefined : fundingAccount.mnemonic,
+      privateKeyHex: fundingAccount.source === 'private_key' ? fundingAccount.privateKeyHex : undefined,
+      toAddress: address,
+      amountMlcns: amount,
+      amountStake: DEFAULT_STAKE,
+      memo: 'dev faucet MLCNS',
+      fundGas: process.env.FAUCET_FUND_GAS !== 'false',
+    }));
+  } catch (e) {
+    // Defense-in-depth: if the guard above races with a new genesis export
+    // or an account-reset during development, reclassify the underlying
+    // SDK error to `faucet_unfunded` so the controller can still render
+    // the explicit not-ready card instead of INTERNAL_ERROR.
+    if (isAccountNotFoundError(e)) throw faucetUnfundedError(fundingAccount, e.message);
+    throw e;
+  }
 
   await setCooldown(address);
 
@@ -245,7 +323,8 @@ async function creditMlcns(address, amountMlcns = DEFAULT_MLCNS) {
 
 async function getFaucetStatus() {
   const privateKeyHex = getFaucetPrivateKeyHex();
-  const mnemonic = getFaucetMnemonic();
+  let mnemonic;
+  try { mnemonic = await getFaucetMnemonic(); } catch (_) { mnemonic = null; }
   let faucetBalance = null;
   let faucetAddress = null;
   let source = null;
@@ -280,6 +359,7 @@ async function getFaucetStatus() {
     configured: Boolean(privateKeyHex || mnemonic),
     faucetAddress,
     faucetBalance,
+    funded: Boolean(faucetBalance && faucetBalance.exists && faucetBalance.balance !== '0'),
     source,
     defaultMlcns: DEFAULT_MLCNS,
     defaultStake: DEFAULT_STAKE,
@@ -314,18 +394,28 @@ async function fundGas(address) {
 
   await checkAddressCooldown(address);
 
-  const result =
-    fundingAccount.source === 'private_key'
-      ? await fundStakeFromPrivateKey({
-          privateKeyHex: fundingAccount.privateKeyHex,
-          toAddress: address,
-          amountStake: DEFAULT_STAKE,
-        })
-      : await fundStakeFromMnemonic({
-          mnemonic: fundingAccount.mnemonic,
-          toAddress: address,
-          amountStake: DEFAULT_STAKE,
-        });
+  // C1: same faucet-unfunded gate used in creditMlcns — fail early with
+  // explicit 503 instead of the SDK's raw not-found error.
+  await guardFaucetFundedOrThrow(fundingAccount);
+
+  let result;
+  try {
+    result =
+      fundingAccount.source === 'private_key'
+        ? await fundStakeFromPrivateKey({
+            privateKeyHex: fundingAccount.privateKeyHex,
+            toAddress: address,
+            amountStake: DEFAULT_STAKE,
+          })
+        : await fundStakeFromMnemonic({
+            mnemonic: fundingAccount.mnemonic,
+            toAddress: address,
+            amountStake: DEFAULT_STAKE,
+          });
+  } catch (e) {
+    if (isAccountNotFoundError(e)) throw faucetUnfundedError(fundingAccount, e.message);
+    throw e;
+  }
 
   await setCooldown(address);
 

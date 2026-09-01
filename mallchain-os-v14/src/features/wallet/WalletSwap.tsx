@@ -11,9 +11,11 @@ import { useStoreVersion, toast } from '../../components/ui';
 import { requestMnemonic } from '../../services/mnemonicAccess';
 import { listPools, estimateSwap, type DexPool } from '../../services/dexApi';
 import { swap, DexTxError } from '../../services/dexTx';
+import { Tooltip } from '../../components/Tooltip';
 
 const DECIMALS = 6;
-const SLIPPAGE_BPS = 100; // 1% tolerance on the estimated output
+const SLIPPAGE_PRESETS_BPS = [10, 50, 100]; // 0.1% / 0.5% / 1%
+const DEFAULT_SLIPPAGE_BPS = 100;
 
 function toBaseUnits(amount: string): string {
   const n = parseFloat(amount);
@@ -41,6 +43,8 @@ export default function WalletSwap() {
   const [swapping, setSwapping] = useState(false);
   const [err, setErr] = useState('');
   const [txHash, setTxHash] = useState('');
+  const [slippageBps, setSlippageBps] = useState(DEFAULT_SLIPPAGE_BPS);
+  const [customSlippage, setCustomSlippage] = useState('');
 
   useEffect(() => {
     listPools().then(setPools).catch((e) => setLoadError(e instanceof Error ? e.message : 'Failed to load pools'));
@@ -53,6 +57,22 @@ export default function WalletSwap() {
   const pool = pools?.find((p) => p.id === poolId) || null;
   const denomIn = pool ? (direction === 'AtoB' ? pool.tokenADenom : pool.tokenBDenom) : '';
   const denomOut = pool ? (direction === 'AtoB' ? pool.tokenBDenom : pool.tokenADenom) : '';
+  const reserveIn = pool ? Number((direction === 'AtoB' ? pool.tokenAReserve : pool.tokenBReserve).amount) : 0;
+  const reserveOut = pool ? Number((direction === 'AtoB' ? pool.tokenBReserve : pool.tokenAReserve).amount) : 0;
+
+  const priceImpactPct = (() => {
+    if (!estimate || reserveIn <= 0 || reserveOut <= 0) return null;
+    const amountInBase = Number(toBaseUnits(amountIn));
+    if (amountInBase <= 0) return null;
+    const spotPrice = reserveOut / reserveIn;
+    const executionPrice = Number(estimate.tokenOut) / amountInBase;
+    if (!Number.isFinite(spotPrice) || !Number.isFinite(executionPrice) || spotPrice <= 0) return null;
+    return Math.max(0, (1 - executionPrice / spotPrice) * 100);
+  })();
+
+  const effectiveSlippageBps = customSlippage
+    ? Math.round(Math.max(0, Math.min(5000, parseFloat(customSlippage) || 0)) * 100)
+    : slippageBps;
 
   useEffect(() => {
     setEstimate(null);
@@ -88,7 +108,7 @@ export default function WalletSwap() {
       const mnemonic = await requestMnemonic();
       if (!mnemonic) { setSwapping(false); return; }
 
-      const minTokenOut = Math.floor(Number(estimate.tokenOut) * (10000 - SLIPPAGE_BPS) / 10000).toString();
+      const minTokenOut = Math.floor(Number(estimate.tokenOut) * (10000 - effectiveSlippageBps) / 10000).toString();
 
       const result = await swap({
         mnemonic,
@@ -174,12 +194,60 @@ export default function WalletSwap() {
               <input className="input" inputMode="decimal" placeholder="0.00" value={amountIn} onChange={(e) => setAmountIn(e.target.value)} disabled={swapping} />
             </div>
 
+            <div className="field mb">
+              <label>
+                Slippage tolerance
+                <Tooltip text="The most the price can move against you between quote and execution before the swap is cancelled. A higher tolerance is less likely to fail but may fill at a worse rate." />
+              </label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                {SLIPPAGE_PRESETS_BPS.map((bps) => (
+                  <button
+                    key={bps}
+                    type="button"
+                    className={`btn btn-sm ${!customSlippage && slippageBps === bps ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => { setSlippageBps(bps); setCustomSlippage(''); }}
+                  >
+                    {(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%
+                  </button>
+                ))}
+                <input
+                  className="input"
+                  style={{ width: 90 }}
+                  inputMode="decimal"
+                  placeholder="Custom %"
+                  aria-label="Custom slippage tolerance percent"
+                  value={customSlippage}
+                  onChange={(e) => setCustomSlippage(e.target.value)}
+                />
+              </div>
+            </div>
+
             <div className="card" style={{ padding: 12, marginBottom: 12 }}>
               <div className="tiny">You receive (est.)</div>
               <div style={{ fontSize: 20, fontWeight: 600 }}>
                 {estimating ? '…' : estimate ? `${fromBaseUnits(estimate.tokenOut)} ${denomOut}` : '—'}
               </div>
-              {estimate && <div className="tiny muted">Fee: {fromBaseUnits(estimate.fee)} {denomIn} · min received (1% slippage): {fromBaseUnits(Math.floor(Number(estimate.tokenOut) * (10000 - SLIPPAGE_BPS) / 10000).toString())} {denomOut}</div>}
+              {estimate && (
+                <div className="tiny muted">
+                  Fee: {fromBaseUnits(estimate.fee)} {denomIn} · min received ({(effectiveSlippageBps / 100).toFixed(2)}% slippage): {fromBaseUnits(Math.floor(Number(estimate.tokenOut) * (10000 - effectiveSlippageBps) / 10000).toString())} {denomOut}
+                </div>
+              )}
+              {priceImpactPct !== null && (
+                <div
+                  className="tiny"
+                  style={{
+                    marginTop: 6,
+                    color: priceImpactPct >= 10 ? 'var(--red)' : priceImpactPct >= 3 ? 'var(--gold-2)' : undefined,
+                    fontWeight: priceImpactPct >= 3 ? 600 : undefined,
+                  }}
+                >
+                  Price impact
+                  <Tooltip text="How much this swap's size moves the pool's price away from the current spot rate. Larger trades relative to pool depth cause bigger impact." />
+                  : {priceImpactPct.toFixed(2)}%
+                  {priceImpactPct >= 10 && ' — very high impact, you may receive significantly less than expected'}
+                  {priceImpactPct >= 3 && priceImpactPct < 10 && ' — high impact for this pool'}
+                </div>
+              )}
             </div>
 
             {err && <div className="error-message mb">{err}</div>}

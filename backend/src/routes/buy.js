@@ -8,10 +8,8 @@ const { addLiquidityToPool } = require('../controllers/liquidityController');
 const { validate, schemas } = require('../middleware/validation');
 const axios = require('axios');
 const crypto = require('crypto');
-const { Console } = require('console');
-const { stdout, stderr } = require('process');
 const { Buffer } = require('buffer');
-const console = new Console(stdout, stderr);
+const logger = require('../utils/logger');
 const { initiateB2CPayout } = require('../services/b2cPayoutService');
 const B2CPayout = require('../models/B2CPayout');
 const { executeSellBurnWorkflow } = require("../services/sellBurnService");
@@ -19,11 +17,21 @@ const { config } = require('../config');
 const LiquidityReconciliation = require('../models/LiquidityReconciliation');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 const { getMarketPrice } = require('../services/mallcoinService');
-const { createBlockchainBreaker } = require('../utils/circuitBreaker');
+const { createBlockchainBreaker, createPaymentBackoff } = require('../utils/circuitBreaker');
+const { processMpesaCallback } = require('../services/mpesaCallbackService');
+const { enqueueFailedCallback } = require('../mallwallet/queue/paymentCallbackQueue');
 const { getBuyGateStatus, requireDirectBuyUnlocked } = require('../services/buyGateService');
 const { checkSellLiquidity } = require('../services/sellGateService');
+const User = require('../models/user');
+const WithdrawalAmlReview = require('../models/WithdrawalAmlReview');
+const { checkMinimumWithdrawal } = require('../services/withdrawalMinimumService');
+const { checkWeeklyWithdrawalLimit, WEEKLY_WITHDRAWAL_LIMIT } = require('../services/withdrawalRateLimitService');
+const { requireApprovedAmlReview, checkAndFlagStructuring, AML_WITHDRAWAL_THRESHOLD_KES } = require('../services/withdrawalAmlGateService');
+const { holdForLiquidity } = require('../services/withdrawalLiquidityQueueService');
+const { executeSellSettlement } = require('../services/sellExecutionService');
 const verifyWebhookToken = require('../middleware/verifyWebhookToken');
 const { limiters } = require('../middleware/rateLimiter');
+const idempotency = require('../middleware/idempotency');
 const {
   recordBuyLiquidityActivity,
   recordWithdrawLiquidityActivity,
@@ -39,6 +47,7 @@ const {
 } = config.payment.safaricom;
 
 const safaricomBreaker = createBlockchainBreaker();
+const paymentBackoff = createPaymentBackoff();
 
 const makePaymentId = () => {
   // Generate cryptographically random payment ID to prevent enumeration attacks
@@ -115,6 +124,22 @@ async function initiateMpesaRequest(purchase, phone, amount, description) {
     throw err;
   }
 
+  // A client retry (double-tap, request timeout) hitting POST /mpesa again
+  // for a quote that already got a real STK push out must not fire a
+  // second one — the user would get two prompts on their phone for the
+  // same purchase. Once status has moved past 'pending' a push already
+  // went out (or the purchase is done/failed), so just report that back.
+  if (purchase.status !== 'pending') {
+    return {
+      ok: true,
+      paymentId: purchase.paymentId || purchase.paymentIds?.[purchase.paymentIds.length - 1] || null,
+      status: purchase.status,
+      raw: null,
+      providerMode: getProviderMode(),
+      duplicate: true,
+    };
+  }
+
   try {
     const token = await getSafaricomToken();
     if (!token) {
@@ -124,11 +149,21 @@ async function initiateMpesaRequest(purchase, phone, amount, description) {
     }
 
     const stkBody = buildStkBody(purchase, phone, amount, description);
-    const stkRes = await axios.post(
-      `${SAFARICOM_API.replace(/\/$/, '')}/mpesa/stkpush/v1/processrequest`,
-      stkBody,
-      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
-    );
+    const stkRes = await paymentBackoff.execute(async () => {
+      try {
+        return await axios.post(
+          `${SAFARICOM_API.replace(/\/$/, '')}/mpesa/stkpush/v1/processrequest`,
+          stkBody,
+          { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+        );
+      } catch (err) {
+        // A 4xx means Safaricom rejected the request itself (bad phone
+        // number, bad shortcode/passkey) — retrying the identical body
+        // can't fix that, so stop instead of burning 3 attempts on it.
+        if (err.response && err.response.status < 500) err.retryable = false;
+        throw err;
+      }
+    }, 'stkpush');
 
     const resp = stkRes.data || {};
     const checkoutId = resp.CheckoutRequestID || resp.checkoutRequestID || '';
@@ -153,7 +188,7 @@ async function initiateMpesaRequest(purchase, phone, amount, description) {
       providerMode: getProviderMode(),
       reason: e.message || String(e),
     }).catch(() => null);
-    console.warn('STK push failed:', e.message || e);
+    logger.warn('buy', 'STK push failed', { error: e.message || String(e) });
     throw e;
   }
 }
@@ -294,56 +329,6 @@ router.get('/config', async (_req, res) => {
   });
 });
 
-function getMpesaCallbackData(data) {
-  const callback = data?.Body?.stkCallback || {};
-  return {
-    paymentId: callback.CheckoutRequestID || callback.RequestID || '',
-    resultCode: typeof callback.ResultCode !== 'undefined' ? callback.ResultCode : 1,
-    callbackMetadata: callback.CallbackMetadata?.Item || [],
-  };
-}
-
-async function processMpesaCallback(data) {
-  const { paymentId, resultCode, callbackMetadata } = getMpesaCallbackData(data);
-  if (!paymentId) {
-    return { ResultCode: 1 };
-  }
-
-  const purchase = await MallcoinPurchase.findOne({
-    $or: [
-      { paymentId },
-      { paymentIds: paymentId }
-    ]
-  });
-  if (!purchase) {
-    return { ResultCode: 0 };
-  }
-
-  if (resultCode === 0) {
-    const metadata = {};
-    callbackMetadata.forEach(item => {
-      metadata[item.Name] = item.Value;
-    });
-
-    purchase.status = 'confirmed';
-    purchase.mpesaRef = metadata.MpesaReceiptNumber || purchase.mpesaRef;
-    purchase.reason = 'Safaricom payment confirmed.';
-  } else {
-    purchase.status = 'failed';
-    purchase.reason = 'User cancelled or payment failed';
-  }
-
-  await purchase.save();
-  await recordBuyLiquidityActivity(resultCode === 0 ? 'payment_confirmed' : 'payment_failed', purchase, {
-    status: resultCode === 0 ? 'success' : 'failed',
-    providerMode: getProviderMode(),
-    reason: resultCode === 0 ? undefined : purchase.reason,
-    note: resultCode === 0 ? 'Safaricom callback confirmed the fiat payment.' : undefined,
-    metadata: { callbackData: data },
-  });
-  return { ResultCode: 0 };
-}
-
 async function applyLiquidityAfterCredit(purchase, creditAddress, mlcnsAmount) {
   const fiatAmount = Number(purchase.fiatAmount || 0);
   if (fiatAmount <= 0) return null;
@@ -441,7 +426,7 @@ async function handleReservedCredit({ quoteId, walletAddress, creditMlcns }) {
   try {
     liquidityResult = await applyLiquidityAfterCredit(purchase, creditAddress, mlcnsAmount);
   } catch (liqErr) {
-    console.warn('[Buy] Liquidity pool add failed:', liqErr.message || liqErr);
+    logger.warn('buy', 'liquidity pool add failed', { error: liqErr.message || String(liqErr) });
     purchase.liquidityAdded = false;
     purchase.liquidityError = liqErr.message || String(liqErr);
     await ensureLiquidityReconciliation(purchase, purchase.liquidityError);
@@ -458,18 +443,31 @@ async function handleReservedCredit({ quoteId, walletAddress, creditMlcns }) {
 }
 
 // Reserve a quote for Mallcoin purchase
-router.post('/reserve', limiters.financial, requireDirectBuyUnlocked(), validate(schemas.buyReserve), async (req, res) => {
+//
+// A client retry (timeout, double-tap) previously meant a second
+// MallcoinPurchase record reserved for the same intent — same failure
+// mode withdraw.js's /mpesa already guards against with an Idempotency-Key.
+router.post('/reserve', limiters.financial, idempotency({ required: true }), requireDirectBuyUnlocked(), validate(schemas.buyReserve), async (req, res) => {
   try {
     const { amount, fiat, currency, walletAddress, phone } = req.validatedBody;
 
     const quoteId = crypto.randomBytes(12).toString('hex');
     const mpesaRef = 'MLCNS' + Date.now();
     
+    // schemas.buyReserve validates `fiat` as `number | string` — Joi's
+    // alternatives() coerces any clean numeric string (e.g. the plain "160"
+    // WalletBuy.tsx actually sends) into a real number, not just a string
+    // with currency text like "4200 KES". `fiat.replace(...)` unconditionally
+    // assumed a string and threw "fiat.replace is not a function" on that
+    // real, common shape — i.e. this crashed on ordinary buy requests as
+    // they're actually sent today, not just some theoretical malformed input.
+    const fiatAmount = typeof fiat === 'number' ? fiat : Number(String(fiat).replace(/[^\d.-]/g, '')) || 0;
+
     const purchase = await MallcoinPurchase.create({
       quoteId,
       walletAddress,
       amount: Number(amount),
-      fiatAmount: Number(fiat.replace(/[^\d.-]/g, '')) || 0,
+      fiatAmount,
       currency: currency || 'KES',
       phone,
       mpesaRef,
@@ -491,13 +489,16 @@ router.post('/reserve', limiters.financial, requireDirectBuyUnlocked(), validate
       quote: paymentSummary(purchase),
     });
   } catch (e) {
-    console.error('buy reserve error:', e);
+    logger.error('buy', 'buy reserve error', e);
     res.status(500).json({ error: e.message });
   }
 });
 
-// Initiate M-Pesa STK push
-router.post('/mpesa', limiters.financial, requireDirectBuyUnlocked(), validate(schemas.buyMpesaInitiate), async (req, res) => {
+// Initiate M-Pesa STK push — Idempotency-Key required for the same reason
+// as /reserve above: a retried request here would prompt the buyer's phone
+// with a second STK push for the same quote rather than replaying the
+// first response.
+router.post('/mpesa', limiters.financial, idempotency({ required: true }), requireDirectBuyUnlocked(), validate(schemas.buyMpesaInitiate), async (req, res) => {
   try {
     const { quoteId, phone, amount, description } = req.validatedBody;
 
@@ -514,7 +515,7 @@ router.post('/mpesa', limiters.financial, requireDirectBuyUnlocked(), validate(s
       currency: purchase.currency,
     });
   } catch (e) {
-    console.error('M-Pesa initiate error:', e);
+    logger.error('buy', 'M-Pesa initiate error', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -536,7 +537,7 @@ router.get('/status/:paymentId', async (req, res) => {
     if (!purchase) return res.json({ status: 'unknown', providerMode: getProviderMode() });
     return res.json(paymentSummary(purchase));
   } catch (e) {
-    console.error('Status check error:', e);
+    logger.error('buy', 'status check error', e);
     res.json({ status: 'error', reason: e.message, providerMode: getProviderMode() });
   }
 });
@@ -547,7 +548,12 @@ router.post('/mpesa/callback', verifyWebhookToken, validate(schemas.mpesaCallbac
     const result = await processMpesaCallback(req.body);
     return res.json(result);
   } catch (e) {
-    console.error('M-Pesa callback error:', e);
+    logger.error('buy', 'M-Pesa callback error', e);
+    // Safaricom will itself retry a non-zero ResultCode, but that window is
+    // short and outside our control — also durably queue it so a transient
+    // failure (not a bad payload — validate() already rejected those) gets
+    // retried on our own schedule and stays visible if it never recovers.
+    await enqueueFailedCallback('mpesa', req.body);
     res.json({ ResultCode: 1 });
   }
 });
@@ -571,7 +577,7 @@ router.post('/credit', limiters.financial, validate(schemas.buyCredit), async (r
     const response = await handleReservedCredit({ quoteId, walletAddress, creditMlcns });
     return res.json(response);
   } catch (e) {
-    console.error('Credit error:', e);
+    logger.error('buy', 'credit error', e);
     const status = e.status || 500;
     res.status(status).json({ error: e.message });
   }
@@ -584,12 +590,87 @@ router.post('/payout/callback', verifyWebhookToken, validate(schemas.payoutCallb
     const result = await handlePayoutCallback(req.body);
     return res.json(result);
   } catch (e) {
-    console.error('Payout callback error:', e);
+    logger.error('buy', 'payout callback error', e);
+    await enqueueFailedCallback('payout', req.body);
     res.json({ ResultCode: 1 });
   }
 });
 
 // Sell Mallcoins: accept client-signed txBytes that transfer MLCNS from seller to operator
+/**
+ * Runs the read-only version of every /sell gate (price -> minimum ->
+ * weekly limit -> AML -> liquidity) so the frontend can show the user
+ * exactly where they stand before they ever build or sign a transaction.
+ * No records are created here — see POST /sell for the same checks with
+ * side effects.
+ */
+router.get('/sell/preview', async (req, res) => {
+  try {
+    const { error, value } = schemas.amount.validate(req.query.amount);
+    if (error) {
+      return res.status(400).json({ error: error.details?.[0]?.message || 'Invalid amount' });
+    }
+    const amount = value;
+    const sellerAddress = typeof req.query.sellerAddress === 'string' ? req.query.sellerAddress : null;
+
+    let marketPrice;
+    try {
+      marketPrice = await getMarketPrice();
+    } catch (err) {
+      return res.status(503).json({ error: 'Unable to verify the current market price right now. Please try again shortly.' });
+    }
+    const estimatedKes = Number(amount) * Number(marketPrice?.sellPriceKes || 0);
+
+    const minimumCheck = checkMinimumWithdrawal(estimatedKes);
+    const rateLimitCheck = sellerAddress
+      ? await checkWeeklyWithdrawalLimit(sellerAddress)
+      : { ok: true, count: 0, limit: WEEKLY_WITHDRAWAL_LIMIT, nextAvailableAt: null };
+    const amlCheck = sellerAddress
+      ? await requireApprovedAmlReview(sellerAddress, estimatedKes)
+      : { ok: true, required: false, thresholdKes: AML_WITHDRAWAL_THRESHOLD_KES, reviewId: null, reviewStatus: 'none' };
+    const walletLinked = sellerAddress ? Boolean(await User.findOne({ walletAddress: sellerAddress }).select('_id').lean()) : false;
+    const liquidityCheck = await checkSellLiquidity(estimatedKes);
+
+    const burnPercentage = 30; // default applied burn rate — see burnCalculator.js, actual split confirmed at settlement time
+    const burnAmount = Math.floor(amount * (burnPercentage / 100));
+    const treasuryAmount = amount - burnAmount;
+
+    return res.json({
+      ok: true,
+      amount,
+      estimatedKes,
+      sellPriceKes: marketPrice?.sellPriceKes || 0,
+      burnPercentage,
+      burnAmount,
+      treasuryAmount,
+      payoutConfigured: isPayoutConfigured(),
+      note: 'Estimate only — confirmed on submission.',
+      minimum: minimumCheck,
+      rateLimit: rateLimitCheck,
+      aml: {
+        required: amlCheck.required,
+        thresholdKes: amlCheck.thresholdKes,
+        walletLinked,
+        reviewStatus: amlCheck.reviewStatus,
+      },
+      liquidity: {
+        ok: liquidityCheck.ok,
+        reserveKes: liquidityCheck.reserveKes,
+        error: liquidityCheck.ok ? null : liquidityCheck.error,
+        wouldQueue: !liquidityCheck.ok,
+      },
+      // Deprecated top-level aliases — WalletWithdraw.tsx reads these
+      // directly today; kept for one release alongside the new `liquidity`
+      // object above rather than requiring a simultaneous two-file change.
+      liquidityOk: liquidityCheck.ok,
+      liquidityError: liquidityCheck.ok ? null : liquidityCheck.error,
+    });
+  } catch (e) {
+    logger.error('buy', 'sell preview error', e);
+    return res.status(500).json({ error: e.message || 'preview failed' });
+  }
+});
+
 router.post('/sell', limiters.financial, validate(schemas.sell), async (req, res) => {
   try {
     const { sellerAddress, amount, txBytes, phone } = req.validatedBody;
@@ -611,14 +692,51 @@ router.post('/sell', limiters.financial, validate(schemas.sell), async (req, res
     }
     const estimatedKes = Number(amount) * Number(marketPrice?.sellPriceKes || 0);
 
-    // The pool's KES-side reserve is what a cash-out payout is actually
-    // backed by — reject before broadcasting anything if it can't cover
-    // this withdrawal, rather than burning MLCNS and promising a Safaricom
-    // payout the system can't back.
-    const liquidityCheck = await checkSellLiquidity(estimatedKes);
-    if (!liquidityCheck.ok) {
-      return res.status(409).json({ error: liquidityCheck.error });
+    // Cheapest checks first: arithmetic -> indexed Mongo count -> indexed
+    // Mongo lookup -> external chain read last. Each of these fails BEFORE
+    // any record is created — a rejection here isn't a real withdrawal
+    // attempt, so it shouldn't count toward the weekly limit either.
+    const minimumCheck = checkMinimumWithdrawal(estimatedKes);
+    if (!minimumCheck.ok) {
+      return res.status(400).json({
+        error: `Minimum withdrawal is ${minimumCheck.minimumKes} KES-equivalent — this amount is short by ${minimumCheck.shortfallKes} KES.`,
+        code: 'below_minimum_withdrawal',
+        details: minimumCheck,
+      });
     }
+
+    const rateLimitCheck = await checkWeeklyWithdrawalLimit(sellerAddress);
+    if (!rateLimitCheck.ok) {
+      return res.status(429).json({
+        error: `You've reached the limit of ${rateLimitCheck.limit} withdrawals this week.`,
+        code: 'weekly_withdrawal_limit_reached',
+        details: rateLimitCheck,
+      });
+    }
+
+    const amlCheck = await requireApprovedAmlReview(sellerAddress, estimatedKes);
+    // Non-blocking anti-structuring check — runs regardless of amlCheck's
+    // own outcome, never throws into this request.
+    checkAndFlagStructuring(sellerAddress).catch(() => {});
+    if (!amlCheck.ok) {
+      return res.status(403).json({
+        error: 'This withdrawal requires a short compliance verification before it can proceed.',
+        code: 'aml_review_required',
+        details: {
+          thresholdKes: amlCheck.thresholdKes,
+          reviewStatus: amlCheck.reviewStatus,
+          reviewId: amlCheck.reviewId,
+        },
+      });
+    }
+
+    // The pool's KES-side reserve is what a cash-out payout is actually
+    // backed by. Below the reserve, hold the withdrawal (queued_liquidity)
+    // rather than reject it outright — MLCNS stays in the user's wallet,
+    // the signed transaction is held server-side, and
+    // withdrawalLiquidityQueueService.js releases it once the pool
+    // recovers.
+    const liquidityCheck = await checkSellLiquidity(estimatedKes);
 
     const saleId = crypto.randomBytes(12).toString('hex');
     const sale = await MallcoinSale.create({ saleId, sellerAddress, amount, phone, status: 'pending' });
@@ -633,6 +751,7 @@ router.post('/sell', limiters.financial, validate(schemas.sell), async (req, res
       status: 'pending_review',
       settlementMode: 'signed_sell',
       saleId,
+      amlReviewId: amlCheck.reviewId || undefined,
       notes: 'Signed Mallchain cash-out submitted and awaiting broadcast.',
     });
     await recordWithdrawLiquidityActivity('cashout_requested', withdrawal, {
@@ -642,195 +761,80 @@ router.post('/sell', limiters.financial, validate(schemas.sell), async (req, res
       note: 'Wallet cash-out registered for pool-linked fiat settlement tracking.',
     });
 
-    const CHAIN_REST = process.env.CHAIN_REST_URL || process.env.VITE_CHAIN_REST || 'http://localhost:1317';
+    if (amlCheck.reviewId) {
+      // Single-use: this approved review is now spent on this withdrawal
+      // and can't cover a later, separate attempt.
+      await WithdrawalAmlReview.findByIdAndUpdate(amlCheck.reviewId, { consumedByWithdrawalId: withdrawal._id });
+    }
 
-    // Normalize txBytes
-    if (!txBytes || typeof txBytes !== 'string') {
-      sale.status = 'failed';
-      sale.reason = 'txBytes (base64) required';
-      withdrawal.status = 'failed';
-      withdrawal.notes = sale.reason;
-      await withdrawal.save();
-      await recordWithdrawLiquidityActivity('cashout_rejected', withdrawal, {
-        status: 'failed',
+    if (!liquidityCheck.ok) {
+      await holdForLiquidity({ sale, withdrawal, txBytes, estimatedKes, reserveKes: liquidityCheck.reserveKes });
+      return res.status(202).json({
+        ok: true,
+        queued: true,
+        code: 'queued_liquidity',
+        withdrawalId,
         saleId,
-        reason: sale.reason,
+        message: liquidityCheck.error || 'Pool liquidity is temporarily insufficient — this withdrawal has been queued and will process automatically once liquidity recovers.',
       });
-      await sale.save();
+    }
+
+    const result = await executeSellSettlement({
+      sale, withdrawal, txBytes, amount, phone, sellerAddress, saleId, withdrawalId, estimatedKes, saleSummary,
+    });
+    return res.status(result.status).json(result.body);
+  } catch (e) {
+    logger.error('buy', 'sell error', e);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// Re-signs a withdrawal that went stale while held (queued_liquidity ->
+// resign_required, see sellExecutionService.js's sequence-mismatch
+// detection). Producing a validly-signed tx for sellerAddress is itself the
+// proof of control — same trust model as the original POST /sell, which
+// also requires no auth.
+router.post('/sell/:saleId/resign', limiters.financial, async (req, res) => {
+  try {
+    const { txBytes } = req.body || {};
+    if (!txBytes || typeof txBytes !== 'string') {
       return res.status(400).json({ error: 'txBytes must be provided as base64 string' });
     }
 
-    // Broadcast to chain
-    const payload = { tx_bytes: txBytes, mode: config.chain.broadcastMode || 'BROADCAST_MODE_SYNC' };
-    let chainResp;
-    try {
-      const resp = await axios.post(`${CHAIN_REST}/cosmos/tx/v1beta1/txs`, payload, { timeout: 10000 });
-      chainResp = resp.data || {};
-    } catch (err) {
-      sale.status = 'failed';
-      sale.reason = err.message || 'broadcast failed';
-      withdrawal.status = 'failed';
-      withdrawal.notes = sale.reason;
-      await withdrawal.save();
-      await recordWithdrawLiquidityActivity('sell_broadcast_failed', withdrawal, {
-        status: 'failed',
-        saleId,
-        reason: sale.reason,
-      });
-      await sale.save();
-      return res.status(503).json({ error: 'Blockchain broadcast failed', details: err.message });
+    const sale = await MallcoinSale.findOne({ saleId: req.params.saleId });
+    const withdrawal = sale ? await WithdrawalRequest.findOne({ saleId: req.params.saleId }) : null;
+    if (!sale || !withdrawal) return res.status(404).json({ error: 'withdrawal not found' });
+    if (sale.status !== 'resign_required' || withdrawal.status !== 'resign_required') {
+      return res.status(409).json({ error: `This withdrawal isn't awaiting a re-sign (current status: ${withdrawal.status})` });
     }
 
-    const txHash = chainResp.tx_response?.txhash || chainResp.txhash || null;
-    const code = chainResp.tx_response?.code || chainResp.code || 0;
-
-    if (code && code !== 0) {
-      sale.status = 'failed';
-      sale.reason = chainResp.tx_response?.raw_log || chainResp.raw_log || `code ${code}`;
-      withdrawal.status = 'failed';
-      withdrawal.notes = sale.reason;
-      await withdrawal.save();
-      await recordWithdrawLiquidityActivity('sell_broadcast_failed', withdrawal, {
-        status: 'failed',
-        saleId,
-        sellTxHash: txHash,
-        reason: sale.reason,
-      });
-      await sale.save();
-      return res.status(400).json({ error: 'Transaction failed', details: sale.reason });
-    }
-
-    sale.status = 'broadcasted';
-    sale.txHash = txHash;
-    withdrawal.sellTxHash = txHash;
-    withdrawal.status = 'pending_review';
-    withdrawal.notes = 'Sell transfer broadcasted successfully; running burn and payout steps.';
-    await withdrawal.save();
-    await recordWithdrawLiquidityActivity('sell_broadcasted', withdrawal, {
-      status: 'success',
-      saleId,
-      sellTxHash: txHash,
-      fiatAmount: estimatedKes,
-      note: 'Signed MLCNS sell transfer broadcasted to Mallchain.',
-    });
-    // Execute burn workflow: calculate amounts, execute on-chain burn, record in ledger
-    const OPERATOR_MNEMONIC = process.env.OPERATOR_MNEMONIC;
-    const burnResult = await executeSellBurnWorkflow({
-      saleId,
-      amount,
-      txHash,
-      operatorMnemonic: OPERATOR_MNEMONIC,
-      sale,
-    });
-
+    sale.status = 'queued_liquidity';
+    sale.pendingTxBytes = txBytes; // encrypted on save via MallcoinSale's pre-save hook
+    sale.pendingTxBytesSetAt = new Date();
     await sale.save();
-    withdrawal.burnTxHash = burnResult.burnTxHash || withdrawal.burnTxHash;
-    withdrawal.notes = 'Sell broadcast succeeded and burn workflow completed.';
+
+    // queuedAt is left untouched — the resign was the chain's interruption,
+    // not the user jumping the queue, so their original position is kept.
+    withdrawal.status = 'queued_liquidity';
+    withdrawal.notes = 'Re-signed and re-queued for liquidity release.';
     await withdrawal.save();
-    await recordWithdrawLiquidityActivity('burn_recorded', withdrawal, {
-      status: 'success',
-      saleId,
-      sellTxHash: txHash,
-      burnTxHash: burnResult.burnTxHash,
-      note: 'Cash-out burn and treasury split recorded.',
-      metadata: {
-        burnAmount: burnResult.burnAmount,
-        treasuryAmount: burnResult.treasuryAmount,
-        burnPercentage: burnResult.burnPercentage,
-      },
+
+    await recordWithdrawLiquidityActivity('withdraw_resigned', withdrawal, {
+      status: 'pending',
+      saleId: sale.saleId,
+      note: 'Withdrawal re-signed after a stale (sequence-mismatch) held transaction.',
     });
 
-    // Initiate B2C payout to seller
-    let payoutRef = null;
-    try {
-      const payoutResult = await initiateB2CPayout({
-        sellerPhone: phone,
-        mlcnsAmount: amount,
-        saleId,
-      });
-
-      if (payoutResult.ok) {
-        payoutRef = payoutResult.payoutRef;
-        const payout = await B2CPayout.create({
-          saleId,
-          sellerPhone: phone,
-          sellerAddress: sellerAddress,
-          amount,
-          txHash,
-          payoutRef,
-          payoutStatus: 'initiated',
-        });
-        console.log('[Sell] B2C payout initiated:', payout._id, 'ref:', payoutRef);
-        withdrawal.status = 'payout_initiated';
-        withdrawal.payoutRef = payoutRef;
-        withdrawal.amountKes = payoutResult.pesaAmount || withdrawal.amountKes;
-        withdrawal.notes = 'Safaricom payout initiated for the cash-out.';
-        await withdrawal.save();
-        await recordWithdrawLiquidityActivity('payout_initiated', withdrawal, {
-          status: 'pending',
-          saleId,
-          payoutRef,
-          sellTxHash: txHash,
-          burnTxHash: burnResult.burnTxHash,
-          fiatAmount: payoutResult.pesaAmount || estimatedKes,
-          providerMode: payoutResult.providerMode,
-          note: 'Safaricom payout has been initiated for the withdrawal.',
-        });
-      } else {
-        console.warn('[Sell] B2C payout initiation failed:', payoutResult.error);
-        withdrawal.status = 'failed';
-        withdrawal.notes = payoutResult.error || 'Safaricom payout initiation failed.';
-        await withdrawal.save();
-        await recordWithdrawLiquidityActivity('payout_initiation_failed', withdrawal, {
-          status: 'failed',
-          saleId,
-          sellTxHash: txHash,
-          burnTxHash: burnResult.burnTxHash,
-          fiatAmount: estimatedKes,
-          providerMode: payoutResult.providerMode,
-          reason: payoutResult.error,
-        });
-      }
-    } catch (payoutErr) {
-      console.error('[Sell] B2C payout error:', payoutErr.message || payoutErr);
-      // Payout failure does not block sale completion; can be retried later
-      withdrawal.status = 'failed';
-      withdrawal.notes = payoutErr.message || 'Safaricom payout error.';
-      await withdrawal.save();
-      await recordWithdrawLiquidityActivity('payout_initiation_failed', withdrawal, {
-        status: 'failed',
-        saleId,
-        sellTxHash: txHash,
-        burnTxHash: burnResult.burnTxHash,
-        fiatAmount: estimatedKes,
-        providerMode: getProviderMode(),
-        reason: payoutErr.message || String(payoutErr),
-      });
-    }
-
-    return res.json({
-      success: true,
-      saleId,
-      withdrawalId,
-      txHash,
-      payoutRef,
-      burnAmount: burnResult.burnAmount,
-      treasuryAmount: burnResult.treasuryAmount,
-      burnPercentage: burnResult.burnPercentage,
-      burnTxHash: burnResult.burnTxHash,
-      providerMode: getProviderMode(),
-      sale: await saleSummary(sale),
-      network: 'mlcoin',
-    });
+    return res.json({ ok: true, saleId: sale.saleId, withdrawalId: withdrawal.withdrawalId, status: withdrawal.status });
   } catch (e) {
-    console.error('Sell error:', e);
-    res.status(500).json({ error: e.message });
+    logger.error('buy', 'sell resign error', e);
+    return res.status(500).json({ error: e.message || 'resign failed' });
   }
 });
 
 router.get('/sell/status/:saleId', async (req, res) => {
   try {
-    const { error, value } = schemas.sellStatusParamSchema.validate(req.params);
+    const { error, value } = schemas.sellStatusParam.validate(req.params);
     if (error) {
       return res.status(400).json({ error: error.details?.[0]?.message || 'Invalid sale id' });
     }
@@ -841,7 +845,7 @@ router.get('/sell/status/:saleId', async (req, res) => {
     }
     return res.json(await saleSummary(sale));
   } catch (e) {
-    console.error('Sell status error:', e);
+    logger.error('buy', 'sell status error', e);
     return res.status(500).json({ error: e.message || 'cash-out status failed' });
   }
 });

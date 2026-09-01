@@ -178,6 +178,17 @@ class ExponentialBackoff {
         return result
       } catch (error) {
         lastError = error
+        // A caller can mark an error non-retryable (e.g. Safaricom returned
+        // a 4xx — the request itself is wrong, not the network) to stop the
+        // loop immediately instead of burning through every attempt on
+        // something a retry can never fix.
+        if (error.retryable === false) {
+          logger.warn('backoff', `${this.name} got a non-retryable error, stopping`, {
+            context,
+            error: error.message,
+          })
+          break
+        }
         if (attempt < this.maxRetries - 1) {
           const delay = this.calculateDelay(attempt)
           logger.warn('backoff', `${this.name} attempt ${attempt + 1} failed, retrying in ${delay}ms`, {
@@ -258,6 +269,25 @@ function createBlockchainBackoff() {
   })
 }
 
+/**
+ * Create exponential backoff for a synchronous, user-facing external payment
+ * call (Safaricom STK push / B2C payout). Bounded tightly compared to the
+ * blockchain backoff — this runs inline while a request is waiting on a
+ * response, so it needs to smooth over a transient network blip (a couple
+ * seconds, total) rather than ride out a real outage; the request's own
+ * circuit breaker (createBlockchainBreaker, used for the OAuth token step)
+ * is what actually protects against hammering a genuinely-down Safaricom.
+ */
+function createPaymentBackoff() {
+  return new ExponentialBackoff({
+    name: 'SafaricomPayment',
+    initialDelay: 400,
+    maxDelay: 2000,
+    maxRetries: 3,
+    jitter: true,
+  })
+}
+
 module.exports = {
   CircuitBreaker,
   ExponentialBackoff,
@@ -266,4 +296,5 @@ module.exports = {
   createDatabaseBreaker,
   createExternalApiBreaker,
   createBlockchainBackoff,
+  createPaymentBackoff,
 }

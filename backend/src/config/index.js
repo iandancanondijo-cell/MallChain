@@ -80,9 +80,12 @@ const config = {
     jwt: required('JWT_SECRET', process.env.JWT_SECRET),
     session: required('SESSION_SECRET', process.env.SESSION_SECRET),
     adminApiKey: required('ADMIN_API_KEY', process.env.ADMIN_API_KEY),
+    monitoringApiKey: process.env.MONITORING_API_KEY || null,
     paymentWebhook: process.env.PAYMENT_WEBHOOK_SECRET || null,
     operatorMnemonic: process.env.OPERATOR_MNEMONIC || null,
     faucetMnemonic: process.env.FAUCET_MNEMONIC || null,
+    fieldEncryptionKey: process.env.FIELD_ENCRYPTION_KEY || null,
+    fieldBlindIndexKey: process.env.FIELD_BLIND_INDEX_KEY || null,
   },
 
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
@@ -221,6 +224,9 @@ function validateRuntimeSecrets() {
     required('JWT_SECRET', process.env.JWT_SECRET);
     required('SESSION_SECRET', process.env.SESSION_SECRET);
     required('ADMIN_API_KEY', process.env.ADMIN_API_KEY);
+    required('MONITORING_API_KEY', process.env.MONITORING_API_KEY);
+    required('FIELD_ENCRYPTION_KEY', process.env.FIELD_ENCRYPTION_KEY);
+    required('FIELD_BLIND_INDEX_KEY', process.env.FIELD_BLIND_INDEX_KEY);
 
     // TEST_MODE bypasses the Vault requirement for treasury signing (see
     // utils/keyManager.js) and short-circuits faucetService's mnemonic
@@ -240,22 +246,73 @@ function validateRuntimeSecrets() {
     assertNotPlaceholder('JWT_SECRET', process.env.JWT_SECRET);
   }
 
-  // Validate SESSION_SECRET length (>= 32 characters for security)
+  // Validate SESSION_SECRET length (>= 32 characters for security). May be
+  // a comma-separated list for rotation (see index.js's session() setup) —
+  // validate each entry on its own for the same reason as ADMIN_API_KEY above.
   if (process.env.SESSION_SECRET) {
-    if (process.env.SESSION_SECRET.length < 32) {
-      throw new Error(`SESSION_SECRET must be at least 32 characters long (currently ${process.env.SESSION_SECRET.length}). Generate with: openssl rand -hex 16`);
+    const sessionSecrets = process.env.SESSION_SECRET.split(',').map(s => s.trim()).filter(Boolean);
+    for (const sessionSecret of sessionSecrets) {
+      if (sessionSecret.length < 32) {
+        throw new Error(`SESSION_SECRET must be at least 32 characters long (each comma-separated entry, currently ${sessionSecret.length}). Generate with: openssl rand -hex 16`);
+      }
+      assertNotPlaceholder('SESSION_SECRET', sessionSecret);
     }
-    assertNotPlaceholder('SESSION_SECRET', process.env.SESSION_SECRET);
   }
 
   // Validate ADMIN_API_KEY length (>= 32 characters) — it gates admin
   // endpoints and /metrics the same way JWT_SECRET gates auth, but had no
-  // strength check at all.
+  // strength check at all. May be a comma-separated list (see
+  // middleware/apiKeyAuth.js) to support rotation — validate each entry on
+  // its own so one strong key can't mask a weak one hiding next to it.
   if (process.env.ADMIN_API_KEY) {
-    if (process.env.ADMIN_API_KEY.length < 32) {
-      throw new Error(`ADMIN_API_KEY must be at least 32 characters long (currently ${process.env.ADMIN_API_KEY.length}). Generate with: openssl rand -hex 16`);
+    const adminKeys = process.env.ADMIN_API_KEY.split(',').map(k => k.trim()).filter(Boolean);
+    for (const adminKey of adminKeys) {
+      if (adminKey.length < 32) {
+        throw new Error(`ADMIN_API_KEY must be at least 32 characters long (each comma-separated entry, currently ${adminKey.length}). Generate with: openssl rand -hex 16`);
+      }
+      assertNotPlaceholder('ADMIN_API_KEY', adminKey);
     }
-    assertNotPlaceholder('ADMIN_API_KEY', process.env.ADMIN_API_KEY);
+  }
+
+  // Validate MONITORING_API_KEY length (>= 32 characters) — gates /metrics
+  // read-only scraping. Must NOT share a value with ADMIN_API_KEY (scope
+  // separation: metrics scrape compromises → admin panel not also).
+  if (process.env.MONITORING_API_KEY) {
+    const monitorKeys = process.env.MONITORING_API_KEY.split(',').map(k => k.trim()).filter(Boolean);
+    for (const monitorKey of monitorKeys) {
+      if (monitorKey.length < 32) {
+        throw new Error(`MONITORING_API_KEY must be at least 32 characters long (each comma-separated entry, currently ${monitorKey.length}). Generate with: openssl rand -hex 16`);
+      }
+      assertNotPlaceholder('MONITORING_API_KEY', monitorKey);
+    }
+    if (process.env.ADMIN_API_KEY) {
+      const adminSet = new Set(process.env.ADMIN_API_KEY.split(',').map(k => k.trim()).filter(Boolean));
+      for (const monitorKey of monitorKeys) {
+        if (adminSet.has(monitorKey)) {
+          throw new Error('MONITORING_API_KEY must not share a value with ADMIN_API_KEY. Use two different secrets: prometheus scrape credentials should not grant admin-panel access. Generate with: openssl rand -hex 32');
+        }
+      }
+    }
+  }
+
+  // Field-level PII encryption keys (production-readiness E2/E1) — 32-byte
+  // hex, and deliberately two DIFFERENT keys: reusing one key for both the
+  // cipher and the blind-index would let an attacker who obtains the
+  // (more-exposed, needed-for-search) index key also decrypt the data.
+  if (process.env.FIELD_ENCRYPTION_KEY) {
+    const buf = Buffer.from(process.env.FIELD_ENCRYPTION_KEY, 'hex');
+    if (buf.length !== 32) {
+      throw new Error(`FIELD_ENCRYPTION_KEY must be a 64-character hex string (32 bytes), decoded to ${buf.length}. Generate with: openssl rand -hex 32`);
+    }
+  }
+  if (process.env.FIELD_BLIND_INDEX_KEY) {
+    const buf = Buffer.from(process.env.FIELD_BLIND_INDEX_KEY, 'hex');
+    if (buf.length !== 32) {
+      throw new Error(`FIELD_BLIND_INDEX_KEY must be a 64-character hex string (32 bytes), decoded to ${buf.length}. Generate with: openssl rand -hex 32`);
+    }
+    if (process.env.FIELD_BLIND_INDEX_KEY === process.env.FIELD_ENCRYPTION_KEY) {
+      throw new Error('FIELD_BLIND_INDEX_KEY must not be the same value as FIELD_ENCRYPTION_KEY.');
+    }
   }
 
   // C9: Require mnemonics in production

@@ -1,0 +1,29 @@
+# Example Prometheus server config for scraping the Mallchain backend.
+# GET /metrics is gated by apiKeyAuth (backend/src/middleware/apiKeyAuth.js),
+# which checks a literal `x-api-key` header — not the standard Authorization
+# header, so Prometheus's `authorization:`/`bearer_token:` scrape options
+# don't apply here (those only ever produce an `Authorization: <scheme> ...`
+# header). `http_headers` (Prometheus 2.51+) sends an arbitrary named header
+# instead. On an older Prometheus, put a small reverse proxy in front that
+# injects x-api-key from a mounted secret instead.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - 'alert_rules.yml'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  - job_name: 'mallchain-backend'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['backend:4000']
+    http_headers:
+      x-api-key:
+        secrets:
+          - '<ADMIN_API_KEY — inject via secret store, never commit the real value>'

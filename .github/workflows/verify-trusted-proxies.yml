@@ -1,0 +1,289 @@
+name: Verify Trusted Proxies (Cloudflare IPs)
+
+# Periodic verification that the application's configured $TRUST_PROXY list matches
+# Cloudflare's current published edge IP ranges.
+#
+# Triggers:
+#   - schedule: cron "0 6 1 */3 *" -> 06:00 UTC on day 1 of every 3rd month
+#     (Jan, Apr, Jul, Oct) — effectively quarterly health check that the proxy list
+#     hasn't drifted from Cloudflare's published ranges without us noticing. Without
+#     this, a Cloudflare IP addition would slip through unnoticed and cause client
+#     IP reporting to be wrong for months.
+#   - push to main: fast feedback on every merge — if a commit touches
+#     ingress / proxy config, we want to catch a typo in TRUST_PROXY
+#     before it ships.
+#
+# On mismatch (missing CIDRs, or stale entries when set):
+#   1. The job logs the MISMATCH/WARN lines printed by the script.
+#   2. We open a GitHub issue (via actions/github-script) listing every
+#      missing CIDR, with links to this workflow run and remediation steps.
+#
+# TRUST_PROXY sourcing:
+#   Primary:  repo variable TRUST_PROXY_EXPECTED
+#           (Settings → Secrets and variables → Actions → Variables)
+# Fallback: the hardcoded default at the bottom of this file — the full
+#           Cloudflare documented ranges as of the last time this workflow file
+#           was updated. The fallback is intentionally verbose so that even if
+#           the variable is missing, CI still runs and surfaces a useful check
+#           (and the opened issue calls out that the variable should be
+#           populated).
+#
+# The fallback list is sourced from:
+#   https://www.cloudflare.com/ips-v4  +  https://www.cloudflare.com/ips-v6
+on:
+  schedule:
+    - cron: '0 6 1 */3 *'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write  # required for actions/github-script to create/update issues
+
+env:
+  # --- Default/fallback Cloudflare published ranges (keep in sync with
+  # https://www.cloudflare.com/ips-v4 and ips-v6 when updating this
+  # workflow file). The primary source is vars.TRUST_PROXY_EXPECTED;
+  # this block is used only when the variable is unset.
+  #
+  # IPv4 ranges:
+  CF_DEFAULT_V4: >-
+    173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,
+    141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,
+    197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,
+    104.24.0.0/14,172.64.0.0/13,131.0.72.0/22
+  # IPv6 ranges:
+  CF_DEFAULT_V6: >-
+    2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,
+    2405:8100::/32,2a06:98c0::/29,2c0f:f248::/29
+
+jobs:
+  verify:
+    name: Cloudflare trusted-proxy drift check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository (script + workflow)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Resolve TRUST_PROXY source (vars → fallback default)
+        id: trust_proxy
+        run: |
+          set -euo pipefail
+          FROM_VAR="${{ vars.TRUST_PROXY_EXPECTED }}"
+          FALLBACK="${CF_DEFAULT_V4//$'\n'/}${CF_DEFAULT_V6//$'\n'/}"
+          # Trim leading/trailing whitespace and collapse internal whitespace
+          FALLBACK="$(echo "$FALLBACK" | tr -d '[:space:]')"
+
+          if [ -n "${FROM_VAR}" ]; then
+            echo "source=vars.TRUST_PROXY_EXPECTED" >> "$GITHUB_OUTPUT"
+            echo "Using repo variable TRUST_PROXY_EXPECTED (length=${#FROM_VAR} chars)"
+            FINAL="$FROM_VAR"
+          else
+            echo "::warning::repository variable TRUST_PROXY_EXPECTED is not set — falling back to the hardcoded Cloudflare default list embedded in this workflow file."
+            echo "::warning::Populate Settings → Variables → TRUST_PROXY_EXPECTED with the current production TRUST_PROXY list so drift is caught against the *actual* deployed config (not this file's static snapshot)."
+            echo "source=workflow-file-fallback" >> "$GITHUB_OUTPUT"
+            FINAL="$FALLBACK"
+          fi
+
+          # Export to a multi-line-safe GITHUB_OUTPUT using the heredoc
+          # delimiter pattern recommended by GitHub Actions docs for
+          # arbitrary string values.
+          {
+            echo 'value<<'
+            printf '%s' "$FINAL"
+            echo ''
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run verify-trusted-proxies.sh
+        id: verify
+        continue-on-error: true
+        env:
+          TRUST_PROXY: ${{ steps.trust_proxy.outputs.value }}
+        run: |
+          set -euo pipefail
+          SCRIPT="./scripts/verify-trusted-proxies.sh"
+          chmod +x "$SCRIPT" 2>/dev/null || true
+
+          # Capture both stdout and stderr — the script prints MISMATCH
+          # and WARN lines we need to parse for the issue body.
+          set +e
+          "$SCRIPT" > /tmp/verify-stdout.txt 2> /tmp/verify-stderr.txt
+          VERIFY_EXIT=$?
+          set -e
+
+          echo "verify_exit_code=${VERIFY_EXIT}" >> "$GITHUB_OUTPUT"
+          echo ""
+          echo "=== STDOUT ==="
+          cat /tmp/verify-stdout.txt
+          echo "=== STDERR ==="
+          cat /tmp/verify-stderr.txt
+
+          # Extract lines of interest for the issue body (keep blank lines in a file.
+          grep -E '^MISMATCH:' /tmp/verify-stdout.txt /tmp/verify-stderr.txt 2>/dev/null | cut -d: -f2- > /tmp/mismatches.txt || true
+          grep -E '^WARN:'     /tmp/verify-stdout.txt /tmp/verify-stderr.txt 2>/dev/null | cut -d: -f2- > /tmp/warns.txt || true
+          grep -E '^MISMATCH:|^WARN:' /tmp/verify-stdout.txt /tmp/verify-stderr.txt 2>/dev/null > /tmp/all-issues.txt || true
+
+          echo "mismatch_count=$(wc -l < /tmp/mismatches.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+          echo "warn_count=$(wc -l < /tmp/warns.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+          if [ -s /tmp/mismatches.txt ]; then
+            {
+              echo 'mismatches<<'
+              cat /tmp/mismatches.txt
+              echo 'MISMATCH_EOF'
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "mismatches=(none)" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ -s /tmp/warns.txt ]; then
+            {
+              echo 'warns<<'
+              cat /tmp/warns.txt
+              echo 'WARN_EOF'
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "warns=(none)" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ -s /tmp/all-issues.txt ]; then
+            {
+              echo 'all_issues<<'
+              cat /tmp/all-issues.txt
+              echo 'ALL_EOF'
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "all_issues=(none)" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo ""
+          echo "Script exit code: ${VERIFY_EXIT}"
+          echo "Mismatches: $(wc -l < /tmp/mismatches.txt)"
+          echo "Warnings: $(wc -l < /tmp/warns.txt)"
+
+      - name: Open / update GitHub issue on mismatch
+        if: steps.verify.outputs.verify_exit_code != 0 && steps.verify.outputs.mismatch_count > 0
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const mismatchCount = parseInt(`${{ steps.verify.outputs.mismatch_count }}`, 10);
+            const warnCount = parseInt(`${{ steps.verify.outputs.warn_count }}`, 10);
+            const mismatches = `${{ steps.verify.outputs.mismatches }}`;
+            const warns = `${{ steps.verify.outputs.warns }}`;
+            const source = `${{ steps.trust_proxy.outputs.source }}`;
+            const runUrl = `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            const commitSha = process.env.GITHUB_SHA;
+            const trigger = process.env.GITHUB_EVENT_NAME;
+
+            const title = `[trusted-proxies] Cloudflare IP ranges out of sync (${mismatchCount} missing)`;
+
+            let body = `## Trusted Proxy Mismatch — Cloudflare published CIDRs not in TRUST_PROXY
+
+            **Severity:** HIGH — client IP detection will be incorrect for traffic
+            from these Cloudflare CIDRs.
+
+            **Workflow run:** ${runUrl}
+            **Trigger:** ${trigger} @ ${commitSha}
+            **TRUST_PROXY source:** ${source}
+
+            ### Missing Cloudflare CIDRs (${mismatchCount})
+
+            Missing Cloudflare CIDRs that are published in Cloudflare's current list but NOT present in TRUST_PROXY.
+            ${mismatches || '(none)'}
+
+            ${warnCount > 0 ? `### Stale TRUST_PROXY entries (${warnCount})
+
+            Entries present in TRUST_PROXY that no longer appear in Cloudflare's current published list (low-severity; clean these up at your convenience.
+
+            ${warns || '(none)'}` : ''}
+
+            ### Remediation
+
+            1. Open the Cloudflare IP list URLs:
+                - https://www.cloudflare.com/ips-v4
+                - https://www.cloudflare.com/ips-v6
+            2. Update TRUST_PROXY in the deployed config (ingress-nginx, app config, or wherever proxy trust is configured) to include the CIDRs above.
+            3. If TRUST_PROXY_EXPECTED wasn't set (source: ${source}), also update the hardcoded CF_DEFAULT_V4/CF_DEFAULT_V6 fallback in this workflow file to match.
+            4. Close this issue when the deployed config is updated.
+            5. Re-run this workflow to confirm clean.
+
+            *Issue opened by GitHub Actions workflow \`.github/workflows/verify-trusted-proxies.yml\`.*
+            `;
+
+            // Look for an existing open issue with the same label so we don't
+            // open duplicates across runs on the same drift.
+            const LABEL = 'trusted-proxies-drift';
+
+            // Ensure the label exists (noop if already present).
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: LABEL,
+              });
+            } catch (e) {
+              if (e.status === 404) {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: LABEL,
+                  color: 'ff7700',
+                  description: 'Cloudflare trusted-proxy list drift (TRUST_PROXY vs published ranges)',
+                });
+              }
+            }
+
+            // Search for an *open* issue with this label.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: LABEL,
+              per_page: 10,
+            });
+
+            if (existing.data.length > 0) {
+              const issue = existing.data[0];
+              core.info(`Updating existing issue #${issue.number}: ${issue.html_url}`);
+              // Update title (refresh counts) and append a new comment with the latest run details instead of spamming a new issue every run.
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                title: title,
+                body: body,
+              });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `Workflow re-ran on ${new Date().toISOString()} — ${mismatchCount} missing, ${warnCount} stale.
+                Workflow run: ${runUrl}
+                Commit: ${commitSha} (${trigger})`,
+              });
+            } else {
+              core.info(`Opening new issue: ${title}`);
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: [LABEL],
+              });
+              core.info(`Created issue #${created.data.number}: ${created.data.html_url}`);
+            }
+
+      - name: Fail job exit
+        run: |
+          set -euo pipefail
+          EXIT="${{ steps.verify.outputs.verify_exit_code }}"
+          if [ "${EXIT}" != "0" ]; then
+            echo "::error::verify-trusted-proxies.sh exited non-zero (${EXIT})."
+            echo "::error::Review the 'Run verify-trusted-proxies.sh' step log above and the GitHub issue (if one was opened/updated)."
+            exit "${EXIT}"
+          fi
+          echo "Trusted proxy verification passed — ${EXIT}"

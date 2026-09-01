@@ -1,0 +1,50 @@
+# Dev/reference default only. Production should use a managed Redis
+# (ElastiCache/Memorystore/Redis Enterprise Cloud) for HA/failover — that's
+# an account/vendor decision, not something this manifest can make for you.
+# If you do run Redis in-cluster anyway, this has no persistence beyond the
+# PVC and no replica — the JWT denylist (middleware/tokenDenylist.js) and
+# the M-Pesa callback DLQ (mallwallet/queue/paymentCallbackQueue.js) both
+# fail open/best-effort if Redis is unreachable, but losing this volume
+# still means every issued JWT becomes unrevokable until each one expires
+# on its own.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: mallchain
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels: { app: redis }
+  template:
+    metadata:
+      labels: { app: redis }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ['redis-server', '--save', '60', '1']
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - { name: redis-data, mountPath: /data }
+          resources:
+            requests: { cpu: '100m', memory: '128Mi' }
+            limits: { cpu: '500m', memory: '512Mi' }
+  volumeClaimTemplates:
+    - metadata: { name: redis-data }
+      spec:
+        accessModes: ['ReadWriteOnce']
+        resources:
+          requests: { storage: 5Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: mallchain
+spec:
+  selector: { app: redis }
+  ports:
+    - port: 6379

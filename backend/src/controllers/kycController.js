@@ -1,9 +1,11 @@
 const path = require('path');
 const KYC = require('../models/kyc');
 const User = require('../models/user');
+const AuditLog = require('../models/AuditLog');
 const { KYC_UPLOAD_DIR } = require('../middleware/upload');
 const { screenAml } = require('../services/amlProvider');
 const { AppError, ErrorCodes, asyncHandler } = require('../utils/errorHandler');
+const logger = require('../utils/logger');
 
 exports.uploadDocument = asyncHandler(async (req, res) => {
   if (!req.file) {
@@ -37,6 +39,29 @@ exports.getDocument = asyncHandler(async (req, res) => {
   // what uploadDocument actually produces (multer's filename has no path
   // separators) and is a no-op for every legitimate document.
   const filePath = path.join(KYC_UPLOAD_DIR, path.basename(kyc.idDocumentUrl));
+
+  // Every view of a raw identity document is logged — who (viewer id/role)
+  // looked at whose KYC record and when. This matters most for the isAdmin
+  // path above: an admin can view ANY user's ID document, and that access
+  // needs its own trail independent of the (separate) KYC approve/reject
+  // decision audit log already written elsewhere. Logged before sendFile
+  // rather than in its callback so a viewing attempt is recorded even if
+  // sendFile itself later fails (e.g. the file went missing on disk).
+  // reason is optional context an admin can attach from the frontend's
+  // access-confirmation step (e.g. "reviewing rejected KYC appeal") — never
+  // required, since the log itself is unconditional and must never be
+  // skippable, but it makes the trail more useful when one is given.
+  const reason = typeof req.query?.reason === 'string' ? req.query.reason.slice(0, 300) : undefined;
+
+  AuditLog.create({
+    action: 'kyc_document_viewed',
+    actor: String(userId),
+    actorType: isAdmin && !isOwner ? 'admin' : 'user',
+    resourceType: 'kyc',
+    resourceId: String(kyc._id),
+    details: { subjectUserId: String(kyc.userId), viewedOwnDocument: isOwner, reason: reason || null },
+  }).catch((err) => logger.error('kycController', 'failed to write document-view audit log', err));
+
   // res.sendFile's error callback fires after headers may already be in
   // flight — it must reply directly rather than throw into asyncHandler.
   res.sendFile(filePath, (err) => {
@@ -185,9 +210,11 @@ exports.getKYCStatus = asyncHandler(async (req, res) => {
     return res.json({ status: 'not_submitted' });
   }
 
-  // This is the user's own submission — safe to return in full so a
-  // real "Profile" view can show exactly what was submitted and what an
-  // admin has (or hasn't) verified, instead of just a bare status chip.
+  // decryptKycPii undoes the model's pre-save encryption of idNumber/
+  // phoneNumber/address/city/postalCode — this is the user's own
+  // submission, safe to return in full so a real "Profile" view can show
+  // exactly what was submitted and what an admin has (or hasn't) verified.
+  const decrypted = KYC.decryptKycPii(kyc);
   res.json({
     kycId: kyc._id,
     status: kyc.status,
@@ -204,15 +231,15 @@ exports.getKYCStatus = asyncHandler(async (req, res) => {
       nationality: kyc.nationality,
     },
     address: {
-      address: kyc.address,
-      city: kyc.city,
+      address: decrypted.address,
+      city: decrypted.city,
       country: kyc.country,
-      postalCode: kyc.postalCode,
-      phoneNumber: kyc.phoneNumber,
+      postalCode: decrypted.postalCode,
+      phoneNumber: decrypted.phoneNumber,
     },
     identity: {
       idType: kyc.idType,
-      idNumber: kyc.idNumber,
+      idNumber: decrypted.idNumber,
       idExpiry: kyc.idExpiry,
     },
     financial: {

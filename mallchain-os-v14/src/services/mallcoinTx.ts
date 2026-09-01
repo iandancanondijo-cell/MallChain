@@ -51,7 +51,7 @@ async function fetchAccountInfo(address: string): Promise<AccountInfo> {
 }
 
 /** Derives the signing wallet from a stored mnemonic and signs a MsgTransferMallcoin, fully offline. */
-async function buildSignedTxBytes(opts: {
+export async function buildSignedTxBytes(opts: {
   mnemonic: string;
   fromAddress: string;
   toAddress: string;

@@ -125,6 +125,9 @@ class CacheService {
     
     // Emission state cache: emission_state
     emissionState: () => `emission_state`,
+
+    // x/mlcoin governance params (MinStakeAmount, MlptsPerMlcns, BurnWallet)
+    mlcoinParams: () => `mlcoin:params`,
     
     // Validator info cache: validator:{address}
     validator: (address) => `validator:${address}`,

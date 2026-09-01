@@ -11,7 +11,7 @@
   --line-2: #2c3a52;
   --txt-1: #eef2f8;
   --txt-2: #9aa7bd;
-  --txt-3: #5d6b82;
+  --txt-3: #6b7a94;
   --gold: #f3ba2f;
   --gold-2: #f59e0b;
   --green: #22c55e;
@@ -100,6 +100,13 @@ a:hover { text-decoration: underline; }
   padding: 16px 18px;
   font-size: 16px; font-weight: 800; letter-spacing: 0.2px;
   border-bottom: 1px solid var(--line-1);
+  color: var(--txt-1); /* Sidebar.tsx now renders this as a real <a> — without this it'd pick up the global a{color:var(--gold)} instead of the original div's inherited body text color */
+}
+/* These render as real <a> elements now (Sidebar.tsx/TopBar.tsx) for
+   keyboard/AT accessibility — without this they'd pick up the global
+   a:hover underline none of them had as plain <div>s before. */
+.side-logo:hover, .side-item:hover, .tb-wallet:hover, .tb-user:hover {
+  text-decoration: none;
 }
 .side-logo .hex {
   width: 26px; height: 26px; flex: none;
@@ -191,14 +198,48 @@ a:hover { text-decoration: underline; }
 
 /* ---------- banners ---------- */
 .global-banner {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   padding: 10px 16px; font-size: 13px; font-weight: 600;
   background: linear-gradient(90deg, rgba(243, 186, 47, 0.16), rgba(243, 186, 47, 0.05));
   border-bottom: 1px solid rgba(243, 186, 47, 0.3); color: var(--gold-2);
 }
 .global-banner.warn { background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.35); color: var(--red-2); }
-.global-banner .close { margin-left: auto; cursor: pointer; opacity: 0.8; }
+.global-banner .close {
+  margin-left: auto; cursor: pointer; opacity: 0.8;
+  background: none; border: none; color: inherit; font: inherit; padding: 0;
+}
 .global-banner .close:hover { opacity: 1; }
+.global-banner > div:first-child {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1;
+}
+.banner-learn-more {
+  background: none; border: 1px solid currentColor; color: inherit; font: inherit;
+  font-weight: 600; font-size: 12px; padding: 2px 10px; border-radius: 999px;
+  cursor: pointer; opacity: 0.85; margin-left: 4px;
+}
+.banner-learn-more:hover { opacity: 1; }
+.banner-detail {
+  flex-basis: 100%; font-weight: 400; font-size: 12.5px; line-height: 1.5;
+  color: var(--txt-2); background: rgba(0, 0, 0, 0.15); border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.banner-detail p { margin: 0 0 6px; }
+.banner-detail p:last-child { margin-bottom: 0; }
+.banner-detail a { color: inherit; text-decoration: underline; }
+
+.cookie-notice {
+  position: fixed; left: 20px; bottom: 20px; z-index: 190;
+  max-width: 420px; display: flex; flex-direction: column; gap: 12px;
+  padding: 16px; border-radius: var(--radius-sm);
+  background: var(--bg-2); border: 1px solid var(--line-2);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+.cookie-notice-body p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--txt-1); }
+.cookie-notice-body .banner-detail { margin-top: 10px; }
+.cookie-notice-ack { align-self: flex-end; padding: 6px 18px; font-size: 13px; }
+@media (max-width: 480px) {
+  .cookie-notice { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+}
 
 /* ---------- typography ---------- */
 h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; }
@@ -214,10 +255,12 @@ h3 { font-size: 14px; font-weight: 700; }
   font-size: 11px; font-weight: 600; padding: 3px 10px;
   border-radius: 20px; background: var(--bg-2); border: 1px solid var(--line-1);
   color: var(--txt-2); white-space: nowrap;
+  font-family: inherit; /* a <button class="chip"> would otherwise fall back to the UA's default button font */
 }
 .chip.gold { color: var(--gold); border-color: rgba(243, 186, 47, 0.4); background: rgba(243, 186, 47, 0.1); }
 .chip.green { color: var(--green-2); border-color: rgba(34, 197, 94, 0.4); background: rgba(34, 197, 94, 0.1); }
 .chip.red { color: var(--red-2); border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.1); }
+.chip:hover { text-decoration: none; }
 
 /* ---------- cards ---------- */
 .card {
@@ -270,6 +313,14 @@ h3 { font-size: 14px; font-weight: 700; }
 }
 .btn-ghost .spin, .btn-danger .spin { border-color: rgba(255, 255, 255, 0.25); border-top-color: currentColor; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.seg-group { display: inline-flex; gap: 4px; padding: 4px; background: var(--bg-3); border-radius: 999px; }
+.seg {
+  background: none; border: none; color: var(--txt-2); font: inherit; font-weight: 600;
+  font-size: 12.5px; padding: 5px 14px; border-radius: 999px; cursor: pointer;
+}
+.seg:hover { color: var(--txt-1); }
+.seg.active { background: var(--gold); color: #16181d; }
 
 /* ---------- forms ---------- */
 .field { margin-bottom: 14px; }
@@ -337,9 +388,13 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   animation: slideUp 0.28s var(--ease);
 }
 .modal.wide { max-width: 760px; }
-.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;
+  position: sticky; top: -22px; margin-top: -22px; padding-top: 22px;
+  background: var(--bg-1); z-index: 1;
+}
 .modal-head h2 { font-size: 17px; }
-.modal-close { cursor: pointer; color: var(--txt-3); font-size: 20px; line-height: 1; }
+.modal-close { cursor: pointer; color: var(--txt-3); font-size: 20px; line-height: 1; background: none; border: none; padding: 0; font-family: inherit; }
 .modal-close:hover { color: var(--txt-1); }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
 @keyframes fadeIn { from { opacity: 0; } }
@@ -355,9 +410,11 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   box-shadow: var(--shadow); font-size: 13px; font-weight: 600;
   animation: toastIn 0.3s var(--ease);
 }
-.toast.ok { border-left-color: var(--green); }
-.toast.err { border-left-color: var(--red); }
-.toast .t-close { margin-left: auto; cursor: pointer; color: var(--txt-3); }
+.toast.success { border-left-color: var(--green); }
+.toast.error { border-left-color: var(--red); }
+.toast.info { border-left-color: var(--cyan); }
+.toast.warning { border-left-color: var(--gold-2); }
+.toast .t-close { margin-left: auto; cursor: pointer; color: var(--txt-3); background: none; border: none; padding: 0; font-family: inherit; font-size: inherit; }
 @keyframes toastIn { from { opacity: 0; transform: translateX(30px); } }
 
 /* ---------- dropdown panels ---------- */
@@ -523,7 +580,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 /* ---------- messaging ---------- */
 .msg-layout { display: grid; grid-template-columns: 260px 1fr; gap: 14px; min-height: 480px; }
 .conv-list { border-right: 1px solid var(--line-1); }
-.conv-item { display: flex; align-items: center; gap: 10px; padding: 11px 12px; cursor: pointer; border-radius: 10px; }
+.conv-item {
+  display: flex; align-items: center; gap: 10px; padding: 11px 12px; cursor: pointer; border-radius: 10px;
+  width: 100%; background: none; border: none; text-align: left; font: inherit; color: inherit;
+}
 .conv-item:hover { background: var(--bg-2); }
 .conv-item.sel { background: rgba(243, 186, 47, 0.08); }
 .conv-item .nm { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px; }
@@ -553,11 +613,19 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .flag-row .desc .t { font-weight: 700; font-size: 13.5px; }
 .flag-row .desc .m { font-size: 11.5px; color: var(--txt-3); }
 .switch { position: relative; width: 42px; height: 24px; flex: none; cursor: pointer; }
-.switch input { opacity: 0; width: 0; height: 0; }
+/* Sized to 0 (rather than .sr-only's off-screen position), the checkbox was
+   skipped by keyboard Tab order entirely in most browsers — moving it
+   off-screen instead keeps it focusable and in the accessibility tree
+   while staying visually hidden behind the custom .track/.knob. */
+.switch input {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 .switch .track { position: absolute; inset: 0; background: var(--bg-3); border-radius: 20px; transition: background 0.2s; }
 .switch .knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--txt-2); transition: transform 0.2s var(--ease), background 0.2s; }
 .switch input:checked + .track { background: rgba(243, 186, 47, 0.35); }
 .switch input:checked ~ .knob { transform: translateX(18px); background: var(--gold); }
+.switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---------- referrals ---------- */
 .ref-tree { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -602,14 +670,176 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 @media (max-width: 1279px) {
   .stat-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
 }
+.tb-hamburger, .tb-search-trigger { display: none; }
+.sidebar-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 49;
+}
+@media (min-width: 768px) {
+  .sidebar-backdrop { display: none !important; }
+}
 @media (max-width: 767px) {
-  .sidebar { width: 64px; }
-  .side-logo span.txt, .side-item .txt, .side-group-title, .side-item .badge { display: none; }
-  .side-logo { justify-content: center; padding: 14px 0; }
-  .side-item { justify-content: center; padding: 10px 0; }
-  .main { margin-left: 64px; padding: 14px 14px 40px; }
-  .topbar { padding: 10px 14px; margin: -14px -14px 14px; }
+  /* Off-canvas drawer instead of a permanent icon-only rail — the icon rail
+     had no way to reach a route's label/grouping at all on mobile, and no
+     way to open/close anything since it was permanently visible. */
+  .sidebar {
+    width: 280px;
+    max-width: 85vw;
+    transform: translateX(-100%);
+    transition: transform 0.25s var(--ease);
+    box-shadow: var(--shadow);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .main { margin-left: 0; padding: 14px 14px 40px; }
+  .topbar {
+    padding: calc(10px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 10px calc(14px + env(safe-area-inset-left));
+    margin: -14px -14px 14px;
+  }
   .tb-search { display: none; }
+  /* Comes after the unconditional display:none above, same specificity —
+     source order is what makes this win at this width (a prior version had
+     these in the opposite order, which meant the hamburger/search-trigger
+     buttons never actually appeared at any viewport width). */
+  .tb-hamburger, .tb-search-trigger { display: flex; }
+  .tb-wallet .lbl { display: none; } /* keep the chip visible (fix #5) but drop the redundant "MALL" label to save width */
   .c-grid { grid-template-columns: 1fr; }
   .calc-hero-row { grid-template-columns: 1fr; }
+
+  /* iOS Safari auto-zooms the page on focusing any input under 16px, then
+     leaves the user to manually zoom back out — 16px is the documented
+     threshold below which that kicks in. */
+  .input, select.input, textarea.input { font-size: 16px; }
+
+  /* Toasts default to bottom-right, which the iOS home indicator and most
+     virtual keyboards cover on a phone; move them below the topbar instead. */
+  .toast-wrap { bottom: auto; top: 76px; right: 12px; left: 12px; }
+
+  table.tbl { display: block; overflow-x: auto; white-space: nowrap; }
+}
+
+@media (max-width: 480px) {
+  .main { padding: 12px 10px 40px; }
+}
+
+/* Inline text-styled button — for a small toggle/action embedded inside a
+   line of text (e.g. "Show"/"Hide" next to masked PII), where a full .btn
+   would be visually too heavy. */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.link-btn:hover,
+.link-btn:focus-visible {
+  color: var(--gold-2);
+}
+
+/* ---------- accessibility ---------- */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 8px;
+  z-index: 1000;
+  background: var(--gold);
+  color: #16181d;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  transition: top 0.15s var(--ease);
+}
+.skip-link:focus {
+  top: 8px;
+}
+
+/* Keyboard-only focus ring — separate from each element's own mouse-click
+   :focus rules (e.g. .input:focus), and applied broadly so every
+   interactive element gets SOME visible indicator when tabbed to, not just
+   the handful of elements that happened to already define their own. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Tooltip — see components/Tooltip.tsx. Bubble stays mounted at all times
+   (opacity/pointer-events toggled by .open) so hover/focus reveal never
+   fights a mount/unmount remount. */
+.tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.tooltip-target {
+  display: inline-flex;
+}
+.tooltip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-2);
+  color: var(--txt-3);
+  border: 1px solid var(--line-1);
+  font-size: 11px;
+  line-height: 1;
+  cursor: help;
+  padding: 0;
+  margin-left: 4px;
+}
+.tooltip-trigger:hover,
+.tooltip-trigger:focus-visible {
+  color: var(--txt-1);
+  background: var(--bg-3);
+}
+.tooltip-bubble {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: var(--bg-3);
+  color: var(--txt-1);
+  border: 1px solid var(--line-2);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.4;
+  width: max-content;
+  max-width: 220px;
+  text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s var(--ease), transform 0.12s var(--ease);
+  z-index: 50;
+  box-shadow: var(--shadow);
+}
+.tooltip-bubble.open {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

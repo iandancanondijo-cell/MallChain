@@ -5,12 +5,13 @@ package types
 
 import (
 	fmt "fmt"
-	_ "github.com/cosmos/cosmos-sdk/types/tx/amino"
-	_ "github.com/cosmos/gogoproto/gogoproto"
-	proto "github.com/cosmos/gogoproto/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
+
+	_ "github.com/cosmos/cosmos-sdk/types/tx/amino"
+	_ "github.com/cosmos/gogoproto/gogoproto"
+	proto "github.com/cosmos/gogoproto/proto"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -26,7 +27,9 @@ const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 
 // Params defines the parameters for the module.
 type Params struct {
-	BurnWallet string `protobuf:"bytes,1,opt,name=burn_wallet,json=burnWallet,proto3" json:"burn_wallet,omitempty"`
+	BurnWallet     string `protobuf:"bytes,1,opt,name=burn_wallet,json=burnWallet,proto3" json:"burn_wallet,omitempty"`
+	MinStakeAmount uint64 `protobuf:"varint,2,opt,name=min_stake_amount,json=minStakeAmount,proto3" json:"min_stake_amount,omitempty"`
+	MlptsPerMlcns  uint64 `protobuf:"varint,3,opt,name=mlpts_per_mlcns,json=mlptsPerMlcns,proto3" json:"mlpts_per_mlcns,omitempty"`
 }
 
 func (m *Params) Reset()         { *m = Params{} }
@@ -67,6 +70,20 @@ func (m *Params) GetBurnWallet() string {
 		return m.BurnWallet
 	}
 	return ""
+}
+
+func (m *Params) GetMinStakeAmount() uint64 {
+	if m != nil {
+		return m.MinStakeAmount
+	}
+	return 0
+}
+
+func (m *Params) GetMlptsPerMlcns() uint64 {
+	if m != nil {
+		return m.MlptsPerMlcns
+	}
+	return 0
 }
 
 func init() {
@@ -116,6 +133,12 @@ func (this *Params) Equal(that interface{}) bool {
 	if this.BurnWallet != that1.BurnWallet {
 		return false
 	}
+	if this.MinStakeAmount != that1.MinStakeAmount {
+		return false
+	}
+	if this.MlptsPerMlcns != that1.MlptsPerMlcns {
+		return false
+	}
 	return true
 }
 func (m *Params) Marshal() (dAtA []byte, err error) {
@@ -138,6 +161,16 @@ func (m *Params) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.MlptsPerMlcns != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MlptsPerMlcns))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.MinStakeAmount != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MinStakeAmount))
+		i--
+		dAtA[i] = 0x10
+	}
 	if len(m.BurnWallet) > 0 {
 		i -= len(m.BurnWallet)
 		copy(dAtA[i:], m.BurnWallet)
@@ -168,6 +201,12 @@ func (m *Params) Size() (n int) {
 	l = len(m.BurnWallet)
 	if l > 0 {
 		n += 1 + l + sovParams(uint64(l))
+	}
+	if m.MinStakeAmount != 0 {
+		n += 1 + sovParams(uint64(m.MinStakeAmount))
+	}
+	if m.MlptsPerMlcns != 0 {
+		n += 1 + sovParams(uint64(m.MlptsPerMlcns))
 	}
 	return n
 }
@@ -239,6 +278,44 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 			}
 			m.BurnWallet = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MinStakeAmount", wireType)
+			}
+			m.MinStakeAmount = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MinStakeAmount |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MlptsPerMlcns", wireType)
+			}
+			m.MlptsPerMlcns = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MlptsPerMlcns |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipParams(dAtA[iNdEx:])

@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: mallchain
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: backend }
+  template:
+    metadata:
+      labels: { app: backend }
+    spec:
+      # Same non-root user the image itself already runs as
+      # (backend/Dockerfile) — restated here so the pod is rejected if the
+      # image ever regresses to running as root.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: backend
+          image: mallchain-backend:latest # replace with the real registry path + tag from your build/push step
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - configMapRef: { name: mallchain-backend-config }
+            - secretRef: { name: mallchain-backend-secrets }
+          readinessProbe:
+            httpGet: { path: /api/health, port: 4000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/health, port: 4000 }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests: { cpu: '250m', memory: '256Mi' }
+            limits: { cpu: '1', memory: '768Mi' } # keep below HighMemoryUsage's 1.5GB alert threshold (monitoring/prometheus/alert_rules.yml)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: mallchain
+spec:
+  selector: { app: backend }
+  ports:
+    - port: 4000
+      targetPort: 4000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend
+  namespace: mallchain
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }

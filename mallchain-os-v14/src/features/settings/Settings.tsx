@@ -125,9 +125,9 @@ export default function Settings() {
             {(['transactions', 'campaigns', 'governance', 'security'] as const).map((key) => (
               <div key={key} className="flag-row">
                 <div className="desc"><div className="t">{key}</div></div>
-                <label className="switch"><input type="checkbox" checked={settings.notifications.email[key]} onChange={(e) => toggleNotif('email', key, e.target.checked)} /><span className="track" /><span className="knob" /></label>
+                <label className="switch"><input type="checkbox" aria-label={`Email notifications for ${key}`} checked={settings.notifications.email[key]} onChange={(e) => toggleNotif('email', key, e.target.checked)} /><span className="track" /><span className="knob" /></label>
                 <span className="tiny">email</span>
-                <label className="switch"><input type="checkbox" checked={settings.notifications.push[key]} onChange={(e) => toggleNotif('push', key, e.target.checked)} /><span className="track" /><span className="knob" /></label>
+                <label className="switch"><input type="checkbox" aria-label={`Push notifications for ${key}`} checked={settings.notifications.push[key]} onChange={(e) => toggleNotif('push', key, e.target.checked)} /><span className="track" /><span className="knob" /></label>
                 <span className="tiny">push</span>
               </div>
             ))}
@@ -137,15 +137,15 @@ export default function Settings() {
             <div className="sec-title"><h2>Privacy</h2></div>
             <div className="flag-row">
               <div className="desc"><div className="t">Show my balance to others</div></div>
-              <label className="switch"><input type="checkbox" checked={settings.privacy.showBalance} onChange={(e) => togglePrivacy('showBalance', e.target.checked)} /><span className="track" /><span className="knob" /></label>
+              <label className="switch"><input type="checkbox" aria-label="Show my balance to others" checked={settings.privacy.showBalance} onChange={(e) => togglePrivacy('showBalance', e.target.checked)} /><span className="track" /><span className="knob" /></label>
             </div>
             <div className="flag-row">
               <div className="desc"><div className="t">Show my activity</div></div>
-              <label className="switch"><input type="checkbox" checked={settings.privacy.showActivity} onChange={(e) => togglePrivacy('showActivity', e.target.checked)} /><span className="track" /><span className="knob" /></label>
+              <label className="switch"><input type="checkbox" aria-label="Show my activity" checked={settings.privacy.showActivity} onChange={(e) => togglePrivacy('showActivity', e.target.checked)} /><span className="track" /><span className="knob" /></label>
             </div>
             <div className="flag-row">
               <div className="desc"><div className="t">Allow direct messages</div></div>
-              <label className="switch"><input type="checkbox" checked={settings.privacy.allowMessages} onChange={(e) => togglePrivacy('allowMessages', e.target.checked)} /><span className="track" /><span className="knob" /></label>
+              <label className="switch"><input type="checkbox" aria-label="Allow direct messages" checked={settings.privacy.allowMessages} onChange={(e) => togglePrivacy('allowMessages', e.target.checked)} /><span className="track" /><span className="knob" /></label>
             </div>
           </div>
         </>

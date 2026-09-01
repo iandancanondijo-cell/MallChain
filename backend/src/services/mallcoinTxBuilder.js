@@ -22,6 +22,44 @@ async function connectClientWithSigner(wallet) {
   });
 }
 
+// C1: Account-Not-Found sequence fallback.
+//
+// Cosmos SDK raises "account does not exist on chain" for BaseAccounts that
+// have never been inserted into auth's store (no MsgSend/credit from genesis
+// allocations, no auth.VestingAccount registration, etc.). New accounts
+// implicitly have {accountNumber: 0, sequence: 0} in the Ante handler's
+// default branch, so returning (0, 0) here instead of surfacing a 500 lets
+// faucets / newly-funded recipients accept their first on-chain write.
+//
+// The only tricky case is accounts that DO exist but the RPC is flaky —
+// a sequence=0 resubmit would produce a duplicate-tx rejection that the
+// faucet's sequence increment logic handles correctly (broadcast fails with
+// sequence mismatch and the request is retried). We limit the fallback to
+// the specific "account does not exist" / "not found" substrings to avoid
+// masking RPC errors.
+function isAccountNotFoundError(err) {
+  if (!err) return false;
+  const msg = [err.message, err.toString(), err.code ? String(err.code) : '']
+    .filter(Boolean)
+    .join(' ');
+  return (
+    /account.*(does not exist|not found)/i.test(msg) ||
+    /key not found/i.test(msg) ||
+    /0x[a-f0-9]{40}.*not found/i.test(msg)
+  );
+}
+
+async function getSequenceOrDefault(client, address) {
+  try {
+    return await client.getSequence(address);
+  } catch (err) {
+    if (isAccountNotFoundError(err)) {
+      return { accountNumber: 0, sequence: 0 };
+    }
+    throw err;
+  }
+}
+
 /**
  * Poll CometBFT's /tx?hash= until the transaction has actually been included
  * in a block, returning its real execution (DeliverTx) result.
@@ -363,7 +401,7 @@ async function transferAndFundGas({
 
   const client = await connectClientWithSigner(wallet);
   const chainId = await client.getChainId();
-  const { accountNumber, sequence: startSequence } = await client.getSequence(account.address);
+  const { accountNumber, sequence: startSequence } = await getSequenceOrDefault(client, account.address);
   let sequence = startSequence;
 
   const amountUnits = toBaseUnits(amountMlcns);
@@ -435,4 +473,6 @@ module.exports = {
   fundStakeFromMnemonic,
   fundStakeFromPrivateKey,
   transferAndFundGas,
+  isAccountNotFoundError,
+  getSequenceOrDefault,
 };

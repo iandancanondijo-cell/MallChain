@@ -1,0 +1,100 @@
+# Network segmentation (see docs/deployment/network-segmentation.md for the
+# reasoning behind each boundary). Default-deny everything in the namespace,
+# then explicitly allow only the paths the app actually needs — a
+# NetworkPolicy is enforced only if the cluster's CNI supports it (Calico,
+# Cilium, etc.); flannel's default config does not, so confirm that before
+# relying on this as an actual boundary.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: mallchain
+spec:
+  podSelector: {}
+  policyTypes: ['Ingress', 'Egress']
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: mallchain
+spec:
+  podSelector: {}
+  policyTypes: ['Egress']
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-policy
+  namespace: mallchain
+spec:
+  podSelector: { matchLabels: { app: frontend } }
+  policyTypes: ['Ingress', 'Egress']
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } }
+      ports: [{ protocol: TCP, port: 8080 }]
+  egress:
+    - {} # static asset server; no server-side calls of its own — DNS covered by allow-dns
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-policy
+  namespace: mallchain
+spec:
+  podSelector: { matchLabels: { app: backend } }
+  policyTypes: ['Ingress', 'Egress']
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } }
+      ports: [{ protocol: TCP, port: 4000 }]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app: redis } } }]
+      ports: [{ protocol: TCP, port: 6379 }]
+    - to: [{ podSelector: { matchLabels: { app: marketplaced } } }]
+      ports:
+        - { protocol: TCP, port: 26657 }
+        - { protocol: TCP, port: 1317 }
+    # Mongo, Safaricom, AML provider, email/SMS, Vault: all external to this
+    # cluster in a typical deployment (managed DB, third-party APIs) — this
+    # namespace can't enumerate their IPs, so egress to the internet is left
+    # open here and should instead be constrained at the VPC/firewall layer
+    # (an egress allowlist by destination, not something a NetworkPolicy
+    # scoped to this namespace can express).
+    - {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-policy
+  namespace: mallchain
+spec:
+  podSelector: { matchLabels: { app: redis } }
+  policyTypes: ['Ingress']
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: backend } } }]
+      ports: [{ protocol: TCP, port: 6379 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: marketplaced-policy
+  namespace: mallchain
+spec:
+  podSelector: { matchLabels: { app: marketplaced } }
+  policyTypes: ['Ingress', 'Egress']
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: backend } } }]
+      ports:
+        - { protocol: TCP, port: 26657 }
+        - { protocol: TCP, port: 1317 }
+    - {} # P2P (26656): validator peers are other nodes outside this cluster/namespace — cannot be scoped to a podSelector
+  egress:
+    - {} # P2P gossip to peers, wherever they are

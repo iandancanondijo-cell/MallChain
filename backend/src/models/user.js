@@ -50,6 +50,14 @@ const UserSchema = new Schema({
   // Timestamps
   lastLoginAt: { type: Date },
   createdAt: { type: Date, default: Date.now },
+
+  // Set by services/gdprService.js on a self-service erasure request. The
+  // account is anonymized in place rather than deleted outright — deleting
+  // the document would orphan every `ref: 'User'` elsewhere (KYC.reviewedBy,
+  // referredBy on OTHER users' accounts, AuditLog history, etc.) and break
+  // the referral tree. banned:true is also forced at erasure time as a
+  // second, independent guard against ever logging into an erased account.
+  erasedAt: { type: Date },
 });
 
 // Add additional indexes for common query patterns

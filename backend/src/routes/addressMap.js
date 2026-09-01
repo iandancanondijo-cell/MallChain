@@ -1,5 +1,6 @@
 const express = require('express')
 const router = express.Router()
+const logger = require('../utils/logger')
 const AddressMap = require('../models/AddressMap')
 
 // Get mapping by hex address
@@ -23,7 +24,7 @@ router.get('/map/:hex', async (req, res) => {
     }
     return res.json({ ok: true, hex: m.hex, bech32: m.bech32 })
   } catch (e) {
-    console.error('address map get error', e)
+    logger.error('addressMap', 'address map get error', e)
     return res.status(500).json({ ok: false, error: String(e) })
   }
 })
@@ -37,7 +38,7 @@ router.post('/map', async (req, res) => {
     const doc = await AddressMap.findOneAndUpdate({ hex: key }, { hex: key, bech32 }, { upsert: true, new: true, setDefaultsOnInsert: true })
     return res.json({ ok: true, mapping: doc })
   } catch (e) {
-    console.error('address map upsert error', e)
+    logger.error('addressMap', 'address map upsert error', e)
     return res.status(500).json({ ok: false, error: String(e) })
   }
 })

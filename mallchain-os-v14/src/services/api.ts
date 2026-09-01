@@ -27,6 +27,8 @@ export interface ApiResult<T = unknown> {
   data?: T;
   error?: string;
   code?: number;
+  /** Structured extra context on an error response (e.g. rule-specific fields on a 4xx) — see performRequest's errorResult below. */
+  details?: unknown;
 }
 
 /**
@@ -148,9 +150,18 @@ class Api {
       // fetch throws if network request fails (connection refused, DNS failed, etc.)
       let res: Response;
       try {
+        // `headers` must come AFTER `...init`, not before — the merged
+        // `headers` above already folds in whatever `init.headers` had.
+        // Spread order the other way round meant that any init object
+        // carrying a `headers` key at all — even explicitly `undefined`,
+        // which post()'s optional third argument now does on every call
+        // that doesn't pass one — clobbered the real, merged headers with
+        // `undefined`, stripping Content-Type and Authorization from every
+        // such request. Caught by the frontend's own test suite the moment
+        // it ran, not by anything downstream.
         res = await fetch(base + path, {
-          headers,
           ...init,
+          headers,
         });
       } catch (fetchError) {
         // Task 2.4: Network error (fetch failed)
@@ -248,8 +259,8 @@ class Api {
    * Example: api.post('/api/wallets', { name: 'My Wallet' })
    * → POST /api/wallets with JSON body
    */
-  post<T = unknown>(path: string, body?: unknown): Promise<ApiResult<T>> {
-    return this.request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) });
+  post<T = unknown>(path: string, body?: unknown, headers?: Record<string, string>): Promise<ApiResult<T>> {
+    return this.request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}), headers });
   }
 
   /** PUT request helper — same contract as post(), for REST endpoints that expect PUT (e.g. admin user/role updates). */

@@ -303,12 +303,15 @@ export function SecuritySettings() {
     else toast(res.error || 'Failed to save session timeout', false);
   };
 
-  // Task 11.10: Sign out everywhere — full logout (token clear + store reset)
-  // so this device's session actually ends, not just a UI toast.
-  const handleSignOutEverywhere = () => {
+  // Task 11.10: Sign out everywhere — revokes every token issued to this
+  // account (middleware/tokenDenylist.js), then does the same local logout
+  // (token clear + store reset) as a regular sign-out. Previously this only
+  // ever did the local half despite its name — any other device holding a
+  // token for this account stayed fully signed in.
+  const handleSignOutEverywhere = async () => {
     setState(prev => ({ ...prev, showSignOutModal: false }));
-    toast('Signed out from all devices', true);
-    authService.logout();
+    const ok = await authService.logoutEverywhere();
+    toast(ok ? 'Signed out from all devices' : 'Signed out here, but revoking other devices failed — try again if you suspect unauthorized access', ok);
   };
 
   return (

@@ -94,6 +94,30 @@ describe('b2cPayoutService failure metrics', () => {
     expect(await getCounterValue('b2c_callback_failed')).toBe(0);
   });
 
+  test('a duplicate callback delivery for an already-terminal payout is a no-op', async () => {
+    // Safaricom retries a callback whenever it doesn't get ResultCode 0 back,
+    // and our own DLQ (paymentCallbackQueue) can replay the same payload —
+    // a payout already marked succeeded/failed must not be re-applied.
+    const payoutDoc = {
+      saleId: 'sale-4',
+      payoutStatus: 'succeeded',
+      save: jest.fn().mockResolvedValue(undefined),
+    };
+    B2CPayout.findOne.mockResolvedValue(payoutDoc);
+    MallcoinSale.findOne.mockResolvedValue(null);
+    WithdrawalRequest.findOne.mockResolvedValue(null);
+
+    const result = await handlePayoutCallback({
+      Result: { ConversationID: 'conv-4', ResultCode: 1, ResultDesc: 'late duplicate delivery' },
+    });
+
+    expect(result).toEqual({ ResultCode: 0 });
+    expect(payoutDoc.payoutStatus).toBe('succeeded');
+    expect(payoutDoc.save).not.toHaveBeenCalled();
+    expect(MallcoinSale.findOne).not.toHaveBeenCalled();
+    expect(WithdrawalRequest.findOne).not.toHaveBeenCalled();
+  });
+
   test('a Safaricom token fetch failure during initiation increments paymentFailuresTotal', async () => {
     axios.get.mockRejectedValue(new Error('token endpoint down'));
 

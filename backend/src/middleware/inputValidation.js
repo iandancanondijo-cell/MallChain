@@ -27,6 +27,13 @@
 const Joi = require('joi');
 const sanitizeHtml = require('sanitize-html');
 
+function emailOptions() {
+  if (process.env.TEST_MODE === 'true') {
+    return { tlds: false };
+  }
+  return undefined;
+}
+
 // DOMPurify was the first choice here, but it needs a real DOM (via jsdom)
 // to operate against, and jsdom's html-encoding-sniffer -> @exodus/bytes
 // dependency ships ESM-only syntax Jest's default CJS transform can't
@@ -46,9 +53,9 @@ const authSchemas = {
   // Registration with email
   register: Joi.object({
     email: Joi.string()
-      .email()
-      .lowercase()  // Normalize to lowercase for case-insensitive lookups
-      .trim()        // Remove leading/trailing whitespace
+      .email(emailOptions())
+      .lowercase()
+      .trim()
       .max(255)
       .required()
       .messages({
@@ -100,7 +107,7 @@ const authSchemas = {
   // Login with email
   login: Joi.object({
     email: Joi.string()
-      .email()
+      .email(emailOptions())
       .lowercase()
       .trim()
       .max(255)

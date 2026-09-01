@@ -1,0 +1,269 @@
+name: Load Test
+
+# Weekly k6 API load test against staging.
+#
+# Triggers:
+#   - schedule: every Saturday 03:00 UTC (low-traffic weekend window)
+#   - workflow_dispatch: manual trigger from the GitHub Actions UI
+#
+# Target:
+#   - URL comes from repo variable STAGING_LOADTEST_URL
+#     (Settings → Secrets and variables → Actions → Variables)
+#   - x-api-key header comes from secret MONITORING_API_KEY
+#     (Settings → Secrets and variables → Actions → Secrets)
+#
+# Reporting:
+#   - If LOADTEST_SLACK_WEBHOOK secret is set, the k6 summary JSON is
+#     formatted and posted to Slack.
+#   - Otherwise the full summary is printed to the action log.
+#
+# Failure conditions:
+#   - Any k6 threshold breach (see load-tests/k6-api-load-test.js
+#     `thresholds` block — typically p95 latency < 500ms, error rate < 1%).
+#   - Job timeout (2 hours) — covers long soak tests in the future.
+#
+# Required configuration:
+#   Repository variables:
+#     STAGING_LOADTEST_URL  = https://staging-api.mallchain.yourdomain.com
+#   Repository secrets:
+#     MONITORING_API_KEY    = x-api-key value shared with the staging API gateway
+#     LOADTEST_SLACK_WEBHOOK = (optional) incoming webhook URL for result posts
+on:
+  schedule:
+    - cron: '0 3 * * 6'  # Saturday 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  k6-load-test:
+    name: k6 API Load Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      K6_STAGING_URL: ${{ vars.STAGING_LOADTEST_URL }}
+      K6_API_KEY: ${{ secrets.MONITORING_API_KEY }}
+
+    steps:
+      - name: Checkout repository (load test script)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Validate required variables and secrets
+        run: |
+          set -euo pipefail
+          if [ -z "${K6_STAGING_URL}" ]; then
+            echo "::error::repository variable STAGING_LOADTEST_URL is not set."
+            echo "::error::Populate Settings → Variables → STAGING_LOADTEST_URL with the staging API base URL."
+            exit 1
+          fi
+          if [ -z "${K6_API_KEY}" ]; then
+            echo "::error::repository secret MONITORING_API_KEY is not set."
+            echo "::error::Populate Settings → Secrets → MONITORING_API_KEY with the x-api-key header value."
+            exit 1
+          fi
+          if [ ! -f "load-tests/k6-api-load-test.js" ]; then
+            echo "::error::load-tests/k6-api-load-test.js not found in the working tree."
+            exit 1
+          fi
+          echo "Target URL: ${K6_STAGING_URL}"
+          echo "k6 script: load-tests/k6-api-load-test.js"
+
+      - name: Run k6 load test (docker run grafana/k6)
+        id: k6_run
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          K6_EXIT=0
+          docker run --rm \
+            -v "${{ github.workspace }}/load-tests:/load-tests:ro" \
+            -e "K6_STAGING_URL=${K6_STAGING_URL}" \
+            -e "K6_API_KEY=${K6_API_KEY}" \
+            -e "K6_OUT=/load-tests/load-test-summary.json" \
+            grafana/k6:latest \
+            run \
+            --out "json=/load-tests/load-test-summary.json" \
+            --summary-export=/load-tests/load-test-summary-export.json \
+            /load-tests/k6-api-load-test.js || K6_EXIT=$?
+          echo "k6_exit_code=${K6_EXIT}" >> "$GITHUB_OUTPUT"
+          echo "k6 completed with exit code ${K6_EXIT}"
+          if [ -f "${{ github.workspace }}/load-tests/load-test-summary-export.json" ]; then
+            echo "summary_export_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "summary_export_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Print k6 summary to action log
+        if: always() && steps.k6_run.outputs.summary_export_exists == 'true'
+        run: |
+          set -euo pipefail
+          echo "=== k6 load test summary (exported) ==="
+          cat "${{ github.workspace }}/load-tests/load-test-summary-export.json" || true
+          echo ""
+          echo "=== raw stdout summary ==="
+          echo "(see the 'Run k6 load test' step logs above for the human-readable table)"
+
+      - name: Post k6 summary to Slack via webhook
+        if: always() && secrets.LOADTEST_SLACK_WEBHOOK != '' && steps.k6_run.outputs.summary_export_exists == 'true'
+        env:
+          SLACK_WEBHOOK: ${{ secrets.LOADTEST_SLACK_WEBHOOK }}
+        run: |
+          set -euo pipefail
+          SUMMARY_FILE="${{ github.workspace }}/load-tests/load-test-summary-export.json"
+          K6_EXIT="${{ steps.k6_run.outputs.k6_exit_code }}"
+          TARGET_URL="${K6_STAGING_URL}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          if [ "${K6_EXIT}" = "0" ]; then
+            STATUS_TEXT=":white_check_mark: *PASSED* (all thresholds met)"
+            COLOR="good"
+          else
+            STATUS_TEXT=":x: *FAILED* (thresholds breached or runtime error)"
+            COLOR="danger"
+          fi
+
+          METRICS_PAYLOAD="$(jq -c '
+            [
+              {
+                title: "HTTP Request Duration p(95)",
+                value: (
+                  if .metrics.http_req_duration then
+                    ( .metrics.http_req_duration.values["p(95)"] // 0 | . * 1000 | round / 1000 | tostring ) + " ms"
+                  else
+                    "n/a"
+                  end
+                ),
+                short: true
+              },
+              {
+                title: "HTTP Request Error Rate",
+                value: (
+                  if .metrics.http_req_failed then
+                    ( .metrics.http_req_failed.values.rate // 0 | . * 100 | round / 100 | tostring ) + " %"
+                  else
+                    "n/a"
+                  end
+                ),
+                short: true
+              },
+              {
+                title: "Total HTTP Requests",
+                value: (
+                  if .metrics.http_reqs then
+                    ( .metrics.http_reqs.values.count // 0 | tostring )
+                  else
+                    "n/a"
+                  end
+                ),
+                short: true
+              },
+              {
+                title: "Requests/sec",
+                value: (
+                  if .metrics.http_reqs then
+                    ( .metrics.http_reqs.values.rate // 0 | . * 100 | round / 100 | tostring ) + " /s"
+                  else
+                    "n/a"
+                  end
+                ),
+                short: true
+              },
+              {
+                title: "Iterations",
+                value: (
+                  if .metrics.iterations then
+                    ( .metrics.iterations.values.count // 0 | tostring )
+                  else
+                    "n/a"
+                  end
+                ),
+                short: true
+              },
+              {
+                title: "Test Duration",
+                value: (
+                  if .state then
+                    ( .state.testRunDurationMs // 0 | . / 1000 | round | tostring ) + " s"
+                  else
+                    "n/a"
+                  end
+                ),
+                short: true
+              }
+            ]
+          ' "$SUMMARY_FILE")"
+
+          THRESHOLDS_PAYLOAD="$(jq -r '
+            if .metrics then
+              [ .metrics | to_entries[] |
+                select(.value.thresholds != null) |
+                .key as $metric |
+                .value.thresholds | to_entries[] |
+                "- `\($metric)`: `\(.key)` → \(.value.ok)"
+              ] | join("\n")
+            else
+              "(no thresholds defined in the test script)"
+            end
+          ' "$SUMMARY_FILE")"
+
+          if [ -z "${THRESHOLDS_PAYLOAD}" ]; then
+            THRESHOLDS_PAYLOAD="(no thresholds defined in the test script)"
+          fi
+
+          PAYLOAD=$(jq -n \
+            --arg status_text "$STATUS_TEXT" \
+            --arg color "$COLOR" \
+            --arg target_url "$TARGET_URL" \
+            --arg run_url "$RUN_URL" \
+            --argjson metrics "$METRICS_PAYLOAD" \
+            --arg thresholds "$THRESHOLDS_PAYLOAD" \
+            --arg repo "${{ github.repository }}" \
+            --arg sha "${{ github.sha }}" \
+            --arg actor "${{ github.actor }}" \
+            '{
+              attachments: [
+                {
+                  fallback: "k6 load test result",
+                  color: $color,
+                  title: "Mallchain k6 Weekly Load Test",
+                  title_link: $run_url,
+                  fields: [
+                    { title: "Status", value: $status_text, short: false },
+                    { title: "Target", value: $target_url, short: true },
+                    { title: "Repository", value: $repo, short: true },
+                    { title: "Commit SHA", value: $sha, short: true },
+                    { title: "Triggered by", value: $actor, short: true }
+                  ] + $metrics + [
+                    { title: "Thresholds", value: $thresholds, short: false }
+                  ],
+                  footer: "mallchain-load-test",
+                  ts: (now | floor)
+                }
+              ]
+            }')
+
+          echo "Posting Slack notification..."
+          HTTP_STATUS=$(curl -s -o /tmp/slack-response.txt -w "%{http_code}" \
+            -X POST \
+            -H "Content-type: application/json" \
+            --data "$PAYLOAD" \
+            "$SLACK_WEBHOOK")
+
+          echo "Slack webhook HTTP status: ${HTTP_STATUS}"
+          if [ "${HTTP_STATUS}" != "200" ]; then
+            echo "::warning::Slack webhook returned ${HTTP_STATUS}. Response body:"
+            cat /tmp/slack-response.txt || true
+            echo ""
+          fi
+
+      - name: Fail the job if k6 thresholds were breached
+        run: |
+          set -euo pipefail
+          K6_EXIT="${{ steps.k6_run.outputs.k6_exit_code }}"
+          if [ "${K6_EXIT}" != "0" ]; then
+            echo "::error::k6 load test exited with non-zero status ${K6_EXIT} — thresholds were breached or the test encountered a runtime error."
+            echo "::error::Review the 'Run k6 load test' step log and the Slack notification for which thresholds failed."
+            exit "${K6_EXIT}"
+          fi
+          echo "All k6 thresholds met; job succeeded."

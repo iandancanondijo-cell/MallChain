@@ -1,0 +1,29 @@
+# Keeps the root Dockerfile's build context (a Go build of cmd/marketplaced)
+# reasonable — without this, the context includes every frontend/tooling
+# directory in this monorepo. Only excludes directories confirmed to have
+# zero .go files, plus go-src (a separate nested Go module — its own go.mod
+# names it "ignore.golang.source" — and huge at ~6800 files, not on this
+# build's import path since nothing replace-directives into it).
+.git
+.github
+node_modules
+backend
+mallchain-os-v14
+explorer
+packages
+e2e
+mallwallet
+operator
+wasm
+go-src
+blockchain_working
+.marketplace_test
+.claude
+.codacy
+.kilo
+.kilocode
+.kiro
+.refact
+.zhanlu
+.vscode
+*.md

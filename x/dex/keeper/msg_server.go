@@ -152,7 +152,7 @@ func (m msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams)
 	if msg.Params == nil {
 		return nil, fmt.Errorf("params cannot be nil")
 	}
-	err := m.k.SetParams(ctx, *msg.Params)
+	err := m.k.SetParams(ctx, msg.Params)
 	if err != nil {
 		return nil, err
 	}

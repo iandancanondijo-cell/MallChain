@@ -12,4 +12,6 @@ message Params {
   option (gogoproto.equal) = true;
 
   string burn_wallet = 1;
+  uint64 min_stake_amount = 2;
+  uint64 mlpts_per_mlcns = 3;
 }

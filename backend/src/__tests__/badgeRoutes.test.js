@@ -144,7 +144,7 @@ describe('POST /api/badge/issue', () => {
   test('rejects a wallet address mismatch', async () => {
     BadgePurchase.findOne.mockResolvedValue({ quoteId: 'q1', walletAddress: VALID_ADDRESS, status: 'confirmed' });
 
-    const res = await request(app).post('/api/badge/issue').send({ quoteId: 'q1', walletAddress: 'mall1someoneelse00000000000000000000000' });
+    const res = await request(app).post('/api/badge/issue').send({ quoteId: 'q1', walletAddress: 'mall1dqd2t5avk0hfu5mmaq2dgmgydvlv8qhxffymaw' });
 
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('wallet_address_mismatch');

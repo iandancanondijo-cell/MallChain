@@ -17,6 +17,7 @@
 const express = require('express');
 const router = express.Router();
 const authCtrl = require('../controllers/authController');
+const auth = require('../middleware/auth');
 const passport = require('passport');
 const { validateInput, preventNoSQLInjection, sanitizeInputs, limitPayloadSize, schemas } = require('../middleware/inputValidation');
 const { limiters } = require('../middleware/rateLimiter');
@@ -98,6 +99,20 @@ router.get('/me', authCtrl.me);
  * rationale). Frontend calls this once after wallet creation/import.
  */
 router.post('/link-wallet', authCtrl.linkWallet);
+
+/**
+ * POST /api/auth/logout — revokes this token server-side (see
+ * middleware/tokenDenylist.js). Uses the shared auth middleware (rather
+ * than this file's other routes' inline jwt.verify) specifically so
+ * req.tokenPayload (jti/exp) is populated for the handler.
+ */
+router.post('/logout', auth, authCtrl.logout);
+
+/**
+ * POST /api/auth/logout-everywhere — revokes every token issued to this
+ * account up to now. Backs SecuritySettings' "Sign Out Everywhere".
+ */
+router.post('/logout-everywhere', auth, authCtrl.logoutEverywhere);
 
 /**
  * Task 4.1: Google OAuth routes

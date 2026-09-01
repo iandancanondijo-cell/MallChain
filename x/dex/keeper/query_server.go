@@ -31,7 +31,7 @@ func (q queryServer) Pool(ctx context.Context, req *types.QueryPoolRequest) (*ty
 		return nil, status.Error(codes.NotFound, "pool not found")
 	}
 
-	return &types.QueryPoolResponse{Pool: &pool}, nil
+	return &types.QueryPoolResponse{Pool: pool}, nil
 }
 
 // Pools implements types.QueryServer
@@ -53,7 +53,7 @@ func (q queryServer) Pools(ctx context.Context, req *types.QueryPoolsRequest) (*
 	paginatedPools := pools[start:end]
 	resPools := make([]*types.Pool, len(paginatedPools))
 	for i := range paginatedPools {
-		resPools[i] = &paginatedPools[i]
+		resPools[i] = paginatedPools[i]
 	}
 
 	return &types.QueryPoolsResponse{
@@ -101,5 +101,5 @@ func (q queryServer) Params(ctx context.Context, req *types.QueryParamsRequest) 
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &types.QueryParamsResponse{Params: &params}, nil
+	return &types.QueryParamsResponse{Params: params}, nil
 }

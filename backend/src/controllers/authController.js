@@ -2,7 +2,13 @@ const User = require('../models/user');
 const UserSettings = require('../models/UserSettings');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const totp = require('../utils/totp');
+const { config } = require('../config');
+const { revokeToken, revokeAllUserTokens } = require('../middleware/tokenDenylist');
+
+const LINK_WALLET_SIGNATURE_MAX_AGE_MS = 10 * 60 * 1000;
+const ADR036_CONSUMED_TTL_SECONDS = 60 * 60;
 
 /**
  * If this account has real 2FA enabled (see settings.js's /2fa/enable),
@@ -43,13 +49,17 @@ function getJwtSecret() {
 function signToken(user) {
   // Task 4.1: Generate JWT with correct payload: {userId, username, exp}
   // exp is set automatically by jsonwebtoken with expiresIn option
+  // jti is a per-token id: logout revokes by jti (see routes/auth.js's
+  // /logout and middleware/tokenDenylist.js) without needing to invalidate
+  // every other token this user holds.
   const sessionTtlMin = parseInt(process.env.SESSION_TTL_MIN || '120', 10);
   return jwt.sign(
-    { 
+    {
       userId: String(user._id),
       username: user.username || user.email,
-    }, 
-    getJwtSecret(), 
+      jti: crypto.randomUUID(),
+    },
+    getJwtSecret(),
     { expiresIn: `${sessionTtlMin}m` }
   );
 }
@@ -266,7 +276,7 @@ exports.linkWallet = async (req, res) => {
     return res.status(401).json({ error: 'invalid token' })
   }
 
-  const { address } = req.body || {};
+  const { address, timestamp, pubKey, signature } = req.body || {};
   const bech32 = require('bech32');
   let decoded;
   try {
@@ -276,6 +286,49 @@ exports.linkWallet = async (req, res) => {
   }
   if (decoded.prefix !== 'mall' || bech32.fromWords(decoded.words).length !== 20) {
     return res.status(400).json({ error: 'invalid address' });
+  }
+
+  // Proves the caller actually holds the private key for `address` before
+  // linking it — a well-formed address alone used to be enough, letting
+  // anyone link a stranger's address to their own account (surfacing that
+  // address's badge/KYC status via /me, and letting the linked-address
+  // ownership check on socket wallet subscriptions be satisfied to watch
+  // someone else's balance updates in real time).
+  if (!timestamp || !pubKey || !signature) {
+    return res.status(401).json({ error: 'a wallet signature is required to link this address' });
+  }
+  const signedAtMs = Date.parse(timestamp);
+  if (!Number.isFinite(signedAtMs) || Math.abs(Date.now() - signedAtMs) > LINK_WALLET_SIGNATURE_MAX_AGE_MS) {
+    return res.status(401).json({ error: 'signature expired — please try again' });
+  }
+  const sigKey = `adr036_consumed:link:${Buffer.from(String(signature || '').slice(0, 128)).toString('base64')}`;
+  if (process.env.TEST_MODE !== 'true') {
+    try {
+      const getRedis = require('../mallwallet/queue/redis');
+      const rds = getRedis();
+      const already = await rds.set(sigKey, '1', 'EX', ADR036_CONSUMED_TTL_SECONDS, 'NX');
+      if (already === null) {
+        return res.status(401).json({ error: 'signature already used — please sign a fresh message' });
+      }
+    } catch (_) {
+      /* Redis unavailable — allow through; replay window + sequence replay on chain is still protection enough */
+    }
+  }
+  // Lazy require: verifyAdr036.js pulls in @cosmjs/amino -> @cosmjs/crypto,
+  // whose argon2 support is an ESM-only transitive dependency Jest's
+  // default CJS resolution can't parse. Requiring it only when this handler
+  // actually runs (instead of at module scope) means tests that exercise
+  // other authController handlers don't have to load or mock it at all.
+  const { verifyLinkWalletSignature } = require('../mallwallet/security/verifyAdr036');
+  const ownsAddress = verifyLinkWalletSignature({
+    address,
+    timestamp,
+    pubKeyBase64: pubKey,
+    signatureBase64: signature,
+    addressPrefix: config.chain.prefix,
+  });
+  if (!ownsAddress) {
+    return res.status(401).json({ error: 'invalid signature — unable to verify you control this wallet' });
   }
 
   const user = await User.findByIdAndUpdate(userId, { walletAddress: address }, { new: true }).select('-password');
@@ -300,4 +353,25 @@ exports.googleCallback = async (req, res) => {
   // redirect to frontend with token
   const frontend = process.env.FRONTEND_URL || 'http://localhost:5173';
   return res.redirect(`${frontend}/?token=${token}`);
+};
+
+// POST /api/auth/logout — revokes just this token (by jti). Without this,
+// "logging out" only ever cleared the token client-side; the JWT itself
+// stayed valid server-side until it naturally expired (SESSION_TTL_MIN).
+exports.logout = async (req, res) => {
+  const payload = req.tokenPayload;
+  if (payload?.jti && payload?.exp) {
+    const ttlSeconds = payload.exp - Math.floor(Date.now() / 1000);
+    await revokeToken(payload.jti, ttlSeconds);
+  }
+  return res.json({ ok: true });
+};
+
+// POST /api/auth/logout-everywhere — revokes every token issued to this
+// user up to now. Backs the "Sign Out Everywhere" button, which previously
+// only cleared the calling device's own local token despite its name —
+// any other device holding a token for this account stayed fully logged in.
+exports.logoutEverywhere = async (req, res) => {
+  await revokeAllUserTokens(String(req.user._id));
+  return res.json({ ok: true });
 };

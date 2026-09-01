@@ -1,9 +1,15 @@
 /**
- * Sidebar — fixed 252px, never moves. 8 collapsible groups mirroring the
+ * Sidebar — fixed 252px, never moves (desktop). 8 collapsible groups mirroring the
  * v14 OS navigation: Home, Wallet, Marketplace, Staking, Governance,
  * Mines, Validators, Explorer, Ecosystem. Admin access isn't listed here —
  * admin credentials are routed straight to the dedicated admin shell
  * (AdminSidebar.tsx) on login instead.
+ *
+ * Below 768px this becomes an off-canvas drawer (see styles/global.css's
+ * .sidebar.open transform) instead of the old permanent icon-only rail,
+ * which had no way to open/close or to reach an item's label at all —
+ * `mobileOpen`/`onClose` are driven from App.tsx, which also owns the
+ * hamburger toggle (TopBar) and the backdrop.
  */
 import { useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -49,6 +55,7 @@ const GROUPS: NavGroup[] = [
       { label: 'Receive', path: '/wallet/receive', icon: Download },
       { label: 'Swap', path: '/wallet/swap', icon: Repeat },
       { label: 'History', path: '/wallet/history', icon: History },
+      { label: 'Performance', path: '/wallet/performance', icon: BarChart3 },
       { label: 'Transactions', path: '/transactions', icon: List },
     ],
   },
@@ -109,43 +116,53 @@ const GROUPS: NavGroup[] = [
   },
 ];
 
-export default function Sidebar({ path, navigate }: { path: string; navigate: (p: string) => void }) {
+export default function Sidebar({ path, mobileOpen, onClose }: { path: string; mobileOpen?: boolean; onClose?: () => void }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   useStoreVersion();
   const st = store.state;
   const isActive = (p: string) => (p === '/' ? path === '/' : path.startsWith(p));
 
   return (
-    <aside className="sidebar">
-      <div className="side-logo" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
-        <span className="hex">M</span>
+    <aside className={'sidebar' + (mobileOpen ? ' open' : '')}>
+      <a href="#/" className="side-logo" onClick={() => onClose?.()}>
+        <span className="hex" aria-hidden="true">M</span>
         <span className="txt">Mallchain</span>
-      </div>
-      {GROUPS.map((g) => (
-        <div key={g.title} className={'side-group' + (collapsed[g.title] ? ' collapsed' : '')}>
-          <div className="side-group-title" onClick={() => setCollapsed((c) => ({ ...c, [g.title]: !c[g.title] }))}>
-            {t(g.title)}
-            <span className="caret">▼</span>
+      </a>
+      <nav aria-label="Main navigation">
+        {GROUPS.map((g) => (
+          <div key={g.title} className={'side-group' + (collapsed[g.title] ? ' collapsed' : '')}>
+            <button
+              type="button"
+              className="side-group-title"
+              aria-expanded={!collapsed[g.title]}
+              onClick={() => setCollapsed((c) => ({ ...c, [g.title]: !c[g.title] }))}
+            >
+              {t(g.title)}
+              <span className="caret" aria-hidden="true">▼</span>
+            </button>
+            <div className="side-item-wrap">
+              {g.items.filter((it) => !it.roles || it.roles.includes(st.user.role as 'admin' | 'superadmin')).map((it) => {
+                const badge = it.badge?.(st) ?? 0;
+                const Icon = it.icon;
+                const active = isActive(it.path);
+                return (
+                  <a
+                    key={it.path}
+                    href={'#' + it.path}
+                    className={'side-item' + (active ? ' active' : '')}
+                    aria-current={active ? 'page' : undefined}
+                    onClick={() => onClose?.()}
+                  >
+                    <span className="ic" aria-hidden="true"><Icon size={16} /></span>
+                    <span className="txt">{t(it.label)}</span>
+                    {badge > 0 && <span className="badge">{badge}<span className="sr-only"> unread</span></span>}
+                  </a>
+                );
+              })}
+            </div>
           </div>
-          <div className="side-item-wrap">
-            {g.items.filter((it) => !it.roles || it.roles.includes(st.user.role as 'admin' | 'superadmin')).map((it) => {
-              const badge = it.badge?.(st) ?? 0;
-              const Icon = it.icon;
-              return (
-                <div
-                  key={it.path}
-                  className={'side-item' + (isActive(it.path) ? ' active' : '')}
-                  onClick={() => navigate(it.path)}
-                >
-                  <span className="ic"><Icon size={16} /></span>
-                  <span className="txt">{t(it.label)}</span>
-                  {badge > 0 && <span className="badge">{badge}</span>}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
+        ))}
+      </nav>
     </aside>
   );
 }

@@ -100,14 +100,20 @@ export default function Messaging() {
         <div className="conv-list">
           {conversations.length === 0 && <div className="empty" style={{ color: 'var(--txt-3)', padding: 20, textAlign: 'center' }}>No conversations yet.</div>}
           {conversations.map((c) => (
-            <div key={c.id} className={'conv-item' + (c.id === selId ? ' sel' : '')} onClick={() => setSelId(c.id)}>
+            <button
+              key={c.id}
+              type="button"
+              className={'conv-item' + (c.id === selId ? ' sel' : '')}
+              aria-current={c.id === selId ? 'true' : undefined}
+              onClick={() => setSelId(c.id)}
+            >
               <div className="avatar" style={{ width: 30, height: 30, fontSize: 12 }}>{c.name[0]?.toUpperCase()}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="nm">{c.name} {c.unread > 0 && <span className="mc-badge b-pending">{c.unread}</span>}</div>
                 <div className="prv">{c.lastMessage?.text || ''}</div>
               </div>
               {c.lastMessage && <span className="tiny">{new Date(c.lastMessage.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
-            </div>
+            </button>
           ))}
         </div>
         <div className="msg-thread" style={{ padding: '0 6px' }}>

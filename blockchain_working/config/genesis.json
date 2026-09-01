@@ -132,6 +132,13 @@
           "pub_key": null,
           "account_number": "5",
           "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
+          "pub_key": null,
+          "account_number": "6",
+          "sequence": "0"
         }
       ]
     },
@@ -237,16 +244,29 @@
               "amount": "100000000"
             }
           ]
+        },
+        {
+          "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
+          "coins": [
+            {
+              "denom": "mlc",
+              "amount": "10000000000000"
+            },
+            {
+              "denom": "stake",
+              "amount": "10000000"
+            }
+          ]
         }
       ],
       "supply": [
         {
           "denom": "mlc",
-          "amount": "254500000000000"
+          "amount": "264500000000000"
         },
         {
           "denom": "stake",
-          "amount": "2500676141"
+          "amount": "2510676141"
         }
       ],
       "denom_metadata": [],
@@ -560,6 +580,13 @@
           "index": "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6",
           "address": "mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6",
           "balance": "1500000000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
+          "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
+          "balance": "500000000000",
           "locked": "0",
           "unlock_time": "0"
         }

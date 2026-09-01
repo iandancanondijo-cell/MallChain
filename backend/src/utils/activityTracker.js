@@ -9,29 +9,47 @@
 const { config } = require('../config');
 const Redis = require('ioredis');
 const logger = require('./logger');
+const { redisTlsOptions } = require('./redisTlsOptions');
 
-const redis = new Redis({
-  host: config.redis.host || '127.0.0.1',
-  port: config.redis.port || 6379,
-  lazyConnect: true,
-  retryStrategy: () => null, // don't retry forever — a badge-streak ping must never block the request it rides on
-});
+const IS_TEST_ENV = process.env.NODE_ENV === 'test';
 
+let redis = null;
 let redisConnected = false;
 let warnedOnce = false;
 
-redis.on('error', () => {
-  redisConnected = false;
-});
-
-redis.connect()
-  .then(() => { redisConnected = true; })
-  .catch(() => {
-    if (!warnedOnce) {
-      warnedOnce = true;
-      logger.warn('activityTracker', 'Redis unavailable — daily-activity streak tracking disabled (development mode)');
-    }
+if (!IS_TEST_ENV) {
+  redis = new Redis({
+    host: config.redis.host || '127.0.0.1',
+    port: config.redis.port || 6379,
+    lazyConnect: true,
+    retryStrategy: () => null,
+    ...redisTlsOptions(),
   });
+} else {
+  // TEST_MODE: Jest already mocked ioredis globally for us via
+  // jest.mock('ioredis'); still construct the instance here (uses the
+  // mock) so the same .connect() → redisConnected flow fires that the
+  // pre-TEST_MODE tests expect — avoids a silent "redisConnected always
+  // false" streak-read regression.
+  redis = new Redis({ lazyConnect: true });
+}
+
+if (redis) {
+  redis.on('error', () => {
+    redisConnected = false;
+  });
+
+  redis.connect()
+    .then(() => { redisConnected = true; })
+    .catch(() => {
+      if (!warnedOnce) {
+        warnedOnce = true;
+        if (!IS_TEST_ENV) {
+          logger.warn('activityTracker', 'Redis unavailable — daily-activity streak tracking disabled (development mode)');
+        }
+      }
+    });
+}
 
 const ACTIVE_DAY_TTL_SECONDS = 40 * 24 * 60 * 60; // outlives the longest streak window this needs to check
 
@@ -76,4 +94,12 @@ async function getConsecutiveActiveDays(userId, asOfDate, requiredDays) {
   }
 }
 
-module.exports = { markActiveToday, getConsecutiveActiveDays, dayKey };
+async function stop() {
+  if (redis && typeof redis.quit === 'function') {
+    try { await redis.quit(); } catch (_) { /* no-op on teardown */ }
+    redis = null;
+    redisConnected = false;
+  }
+}
+
+module.exports = { markActiveToday, getConsecutiveActiveDays, dayKey, stop };

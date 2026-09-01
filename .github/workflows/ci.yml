@@ -10,10 +10,10 @@ jobs:
   go-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.24.0'   # matches go.mod
 
@@ -30,23 +30,15 @@ jobs:
         run: govulncheck ./...
 
       - name: Go vet
-        # x/dex currently fails vet (pre-existing: several functions pass
-        # protobuf-go message structs — which embed a sync.Mutex via
-        # protoimpl.MessageState — by value instead of by pointer). Ordered
-        # after govulncheck so that check still runs and reports on its own
-        # merits instead of being silently skipped by this unrelated,
-        # already-failing step. Fix the x/dex copies and drop
-        # continue-on-error once vet is clean again.
         run: go vet ./...
-        continue-on-error: true
 
   backend-node:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: 'npm'
@@ -64,10 +56,10 @@ jobs:
   frontend-node:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: 'npm'
@@ -88,13 +80,52 @@ jobs:
       - name: Build frontend
         run: cd mallchain-os-v14 && npm run build
 
+  lighthouse:
+    # P1: performance/accessibility budget on the built frontend assets
+    # (mallchain-os-v14/lighthouserc.cjs) — runs against the static build
+    # only (lhci's own local static server), no live backend/staging
+    # environment needed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mallchain-os-v14/package-lock.json
+
+      - name: Install frontend dependencies
+        run: cd mallchain-os-v14 && npm ci
+
+      - name: Build frontend
+        run: cd mallchain-os-v14 && npm run build
+        env:
+          VITE_API_BASE_URL: https://api.example.com # build-time only for this budget check — no real network calls happen during a Lighthouse static-asset audit
+
+      - name: Run Lighthouse CI
+        run: cd mallchain-os-v14 && npx @lhci/cli@0.15.1 autorun
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+
   vuln-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
 
@@ -115,3 +146,71 @@ jobs:
 
       - name: Audit e2e dependencies
         run: cd e2e && npm audit --audit-level=high
+
+  osv-scan:
+    # Open-source, no-account equivalent of a socket.dev/deps.dev dependency
+    # check — queries the OSV.dev vulnerability database (Go modules + every
+    # npm workspace) without needing a Socket account/API token provisioned.
+    # Full Socket.dev supply-chain-risk scoring (install-script/typosquat
+    # detection) is a separate product needing its own account and API key —
+    # flagged here rather than silently left out, not implemented.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Run OSV-Scanner
+        # Pinned to v1.9.2 rather than the current v2 line: the bare "v1"
+        # tag this used to read no longer exists in this repo (only granular
+        # v1.x.y and v2.x.y tags do), so this ref was already unresolvable
+        # as written. v1.9.2 is the last v1 release and keeps this a pure
+        # SHA-pin, not a version bump — revisit for v2 (different action
+        # inputs) separately.
+        uses: google/osv-scanner-action/osv-scanner-action@764c91816374ff2d8fc2095dab36eecd42d61638 # v1.9.2
+        with:
+          scan-args: |-
+            --recursive
+            --skip-git
+            ./
+
+  sast-semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Semgrep
+        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
+        with:
+          config: p/ci p/owasp-top-ten p/javascript p/typescript p/golang
+
+  container-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Build backend image
+        run: docker build -t mallchain-backend:ci ./backend
+
+      - name: Build marketplaced image
+        run: docker build -t mallchain-marketplaced:ci .
+
+      - name: Scan backend image
+        # Pinned tag was previously "0.24.0" (missing the "v" prefix) — that
+        # ref does not exist in this repo (only "v0.24.0" does), so this was
+        # already unresolvable as written. Same version, corrected ref.
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # v0.24.0
+        with:
+          image-ref: mallchain-backend:ci
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Scan marketplaced image
+        # Pinned tag was previously "0.24.0" (missing the "v" prefix) — that
+        # ref does not exist in this repo (only "v0.24.0" does), so this was
+        # already unresolvable as written. Same version, corrected ref.
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # v0.24.0
+        with:
+          image-ref: mallchain-marketplaced:ci
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true

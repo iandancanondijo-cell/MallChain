@@ -9,15 +9,18 @@
 //    reconcile request threw "... is not a function" and 500'd. Fixed by
 //    adding it to the export list.
 // 2. POST /api/liquidity/add and /remove (routes/liquidity.js) had no auth
-//    middleware. /add signs and broadcasts a REAL on-chain MsgAddLiquidity
-//    funded by the server's own OPERATOR_MNEMONIC — unlike client-signed
-//    flows (staking broadcast, send), the caller never proves ownership of
-//    any funds, so anyone could call this repeatedly to drain the operator
-//    wallet's balance/gas for free. Fixed by requiring the standard `auth`
-//    JWT middleware on both routes (matches the pattern used by
-//    kyc/settings/devhub/etc.). The internal `addLiquidityToPool` export
-//    used directly by routes/buy.js's automated post-purchase flow is
-//    unaffected since it's called as a plain function, not over HTTP.
+//    middleware at all, then only the plain `auth` (any logged-in user)
+//    gate. /add signs and broadcasts a REAL on-chain MsgAddLiquidity funded
+//    by the server's own OPERATOR_MNEMONIC — unlike client-signed flows
+//    (staking broadcast, send), the caller never proves ownership of any
+//    funds, so plain `auth` still let any registered account mint itself a
+//    real operator-funded liquidity position for free, repeatedly. These
+//    are genuinely internal treasury/bookkeeping actions (the buy flow's
+//    automated seeding calls addLiquidityToPool() directly in-process and
+//    never goes through this HTTP route), so both are now gated by
+//    requireAdmin instead — matching GET /activity below. The internal
+//    addLiquidityToPool export used by routes/buy.js is unaffected since
+//    it's called as a plain function, not over HTTP.
 const request = require('supertest');
 const express = require('express');
 const jwt = require('jsonwebtoken');
@@ -48,6 +51,7 @@ describe('liquidity controller / routes', () => {
   let User;
   let ctrl;
   let authToken;
+  let nonAdminToken;
 
   beforeEach(() => {
     jest.resetModules();
@@ -82,10 +86,15 @@ describe('liquidity controller / routes', () => {
 
     mockChainResponses(axios);
 
-    User.findById.mockReturnValue({
-      select: jest.fn().mockResolvedValue({ _id: 'u1', email: 'trader@x.com', role: 'user', banned: false }),
-    });
+    User.findById.mockImplementation((id) => ({
+      select: jest.fn().mockResolvedValue(
+        id === 'u1'
+          ? { _id: 'u1', email: 'admin@x.com', role: 'admin', banned: false }
+          : { _id: 'u2', email: 'trader@x.com', role: 'user', banned: false }
+      ),
+    }));
     authToken = jwt.sign({ userId: 'u1' }, process.env.JWT_SECRET, { expiresIn: '10m' });
+    nonAdminToken = jwt.sign({ userId: 'u2' }, process.env.JWT_SECRET, { expiresIn: '10m' });
 
     app = express();
     app.use(express.json());
@@ -147,13 +156,24 @@ describe('liquidity controller / routes', () => {
     });
   });
 
-  describe('POST /add (requires auth)', () => {
+  describe('POST /add (requires admin)', () => {
     test('rejects an unauthenticated request', async () => {
       const res = await request(app)
         .post('/api/liquidity/add')
         .send({ poolId: 2, amount0: 10, amount1: 20, userAddress: 'mall1user' });
 
       expect(res.status).toBe(401);
+      expect(dexTxBuilder.addLiquidityOnChain).not.toHaveBeenCalled();
+    });
+
+    test('rejects a logged-in but non-admin user — this is the actual fix: a plain '
+      + 'account must not be able to mint itself an operator-funded liquidity position', async () => {
+      const res = await request(app)
+        .post('/api/liquidity/add')
+        .set('Authorization', `Bearer ${nonAdminToken}`)
+        .send({ poolId: 2, amount0: 10, amount1: 20, userAddress: 'mall1user' });
+
+      expect(res.status).toBe(403);
       expect(dexTxBuilder.addLiquidityOnChain).not.toHaveBeenCalled();
     });
 
@@ -215,13 +235,23 @@ describe('liquidity controller / routes', () => {
     });
   });
 
-  describe('POST /remove (requires auth)', () => {
+  describe('POST /remove (requires admin)', () => {
     test('rejects an unauthenticated request', async () => {
       const res = await request(app)
         .post('/api/liquidity/remove')
         .send({ poolId: 2, lpTokens: 1, userAddress: 'mall1user' });
 
       expect(res.status).toBe(401);
+    });
+
+    test('rejects a logged-in but non-admin user', async () => {
+      const res = await request(app)
+        .post('/api/liquidity/remove')
+        .set('Authorization', `Bearer ${nonAdminToken}`)
+        .send({ poolId: 2, lpTokens: 1, userAddress: 'mall1user' });
+
+      expect(res.status).toBe(403);
+      expect(dexTxBuilder.removeLiquidityOnChain).not.toHaveBeenCalled();
     });
 
     test('404s for an unknown pool', async () => {

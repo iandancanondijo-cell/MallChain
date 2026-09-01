@@ -2,7 +2,6 @@ const express = require('express')
 const router = express.Router()
 const ctrl = require('../controllers/liquidityController')
 const LiquidityPoolActivity = require('../models/LiquidityPoolActivity')
-const auth = require('../middleware/auth')
 const { requireAdmin } = require('../middleware/adminAuth')
 
 // GET /api/liquidity/pools
@@ -13,15 +12,26 @@ router.get('/pools/:poolId', ctrl.getPool)
 
 // POST /api/liquidity/add
 // Signs and broadcasts a real on-chain MsgAddLiquidity funded by the
-// server's own OPERATOR_MNEMONIC — unlike the client-signed staking/send
-// flows, the caller never proves ownership of any funds here, so this was
-// reachable by anyone to repeatedly drain the operator wallet's balance and
-// gas. Require a logged-in user, matching every other endpoint in this
-// codebase that moves funds from a server-held account.
-router.post('/add', auth, ctrl.addLiquidity)
+// server's own OPERATOR_MNEMONIC — the caller never proves ownership of any
+// funds here (userAddress is just an internal attribution key, not a
+// depositor whose funds get moved), so requiring merely *any* logged-in
+// user (the previous `auth` gate) still let any account mint itself a real
+// operator-funded liquidity position for free. This is genuinely an
+// internal treasury/bookkeeping action — the buy flow's automatic seeding
+// (routes/buy.js's applyLiquidityAfterCredit) calls addLiquidityToPool()
+// directly in-process and never goes through this HTTP route at all — so
+// it belongs behind requireAdmin like every other treasury-affecting admin
+// endpoint (e.g. GET /activity below), not behind plain `auth`.
+//
+// Never expose either of these two routes to end users: removeLiquidity
+// also does not pay the underlying tokens out to `userAddress`'s own
+// wallet — it only debits the operator's own on-chain LP position and this
+// internal per-address bookkeeping counter. There is no real user-owned LP
+// position anywhere in this system to add to or redeem.
+router.post('/add', requireAdmin, ctrl.addLiquidity)
 
-// POST /api/liquidity/remove
-router.post('/remove', auth, ctrl.removeLiquidity)
+// POST /api/liquidity/remove — see the requireAdmin/no-payout note above.
+router.post('/remove', requireAdmin, ctrl.removeLiquidity)
 
 // GET /api/liquidity/position
 router.get('/position', ctrl.getUserPosition)
@@ -36,6 +46,9 @@ router.get('/activity', requireAdmin, async (req, res) => {
       saleId,
       withdrawalId,
       paymentId,
+      walletAddress,
+      startDate,
+      endDate,
       page = 0,
       limit = 100,
     } = req.query
@@ -46,6 +59,12 @@ router.get('/activity', requireAdmin, async (req, res) => {
     if (saleId) query.saleId = saleId
     if (withdrawalId) query.withdrawalId = withdrawalId
     if (paymentId) query.paymentId = paymentId
+    if (walletAddress) query.walletAddress = walletAddress
+    if (startDate || endDate) {
+      query.createdAt = {}
+      if (startDate) query.createdAt.$gte = new Date(startDate)
+      if (endDate) query.createdAt.$lte = new Date(endDate)
+    }
 
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500)
     const skip = Math.max(Number(page) || 0, 0) * safeLimit

@@ -64,6 +64,7 @@ export interface AppState {
     avatarInitial: string;
     bio: string;
     frozen: boolean;
+    frozenReason: string | null;
     kycLevel: number;
     role: 'user' | 'admin' | 'superadmin';
     hasBadge: boolean;
@@ -286,6 +287,7 @@ function emptyState(): AppState {
       avatarInitial: 'C',
       bio: '',
       frozen: false,
+      frozenReason: null,
       kycLevel: 1,
       role: 'user',
       hasBadge: false,

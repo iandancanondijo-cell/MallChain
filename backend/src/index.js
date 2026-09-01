@@ -25,6 +25,7 @@ const { maintenanceGuard } = require('./middleware/maintenanceMode')
 const { computeBlockStaleness } = require('./utils/chainHealth')
 
 const authRoutes = require('./routes/auth');
+const gdprRoutes = require('./routes/gdpr');
 const vaultRoutes = require('./routes/vault');
 const txRoutes = require('./routes/tx');
 const marketRoutes = require('./routes/market');
@@ -51,6 +52,7 @@ const onchainRoutes = require('./routes/onchain');
 const historyRoutes = require('./routes/history');
 const faucetRoutes = require('./routes/faucet');
 const adminPanelRoutes = require('./routes/adminPanel');
+const maintenanceStatusRoutes = require('./routes/maintenanceStatus');
 const contractsRoutes = require('./routes/contracts');
 const devhubRoutes = require('./routes/devhub');
 const settingsRoutes = require('./routes/settings');
@@ -81,11 +83,26 @@ const SESSION_SECRET = config.secrets.session;
 const ADMIN_API_KEY = config.secrets.adminApiKey;
 
 if (config.isProduction) {
-  app.set('trust proxy', 1);
+  // Blindly trusting one hop (the default here) means rate-limiting and
+  // req.ip both trust whatever X-Forwarded-For the immediate upstream sends
+  // — fine behind exactly one known proxy, but if that upstream is itself
+  // reachable directly (misconfigured LB/CDN) a client can just set its own
+  // X-Forwarded-For and borrow another user's rate-limit bucket or spoof
+  // req.ip. TRUST_PROXY should be the actual proxy/CDN CIDR list in any real
+  // deployment; the numeric fallback is a same-as-before default for
+  // environments that haven't set it yet.
+  if (process.env.TRUST_PROXY) {
+    const proxies = process.env.TRUST_PROXY.split(',').map(p => p.trim()).filter(Boolean);
+    app.set('trust proxy', proxies);
+  } else {
+    logger.warn('TRUST_PROXY is not set — falling back to trusting exactly one hop. Set TRUST_PROXY to your reverse proxy/CDN CIDR list(s) for production.');
+    app.set('trust proxy', 1);
+  }
 }
 
 if (!JWT_SECRET) logger.warn('JWT_SECRET is not configured; authentication tokens are insecure.');
 if (!SESSION_SECRET) logger.warn('SESSION_SECRET is not configured; session cookies are insecure.');
+require('./services/treasuryLimitsService').warnIfUnconfigured();
 
 app.use(helmet({
   contentSecurityPolicy: config.isProduction
@@ -95,20 +112,53 @@ app.use(helmet({
           scriptSrc: ["'self'"],
           styleSrc: ["'self'"],
           imgSrc: ["'self'", "data:", "blob:"],
-          connectSrc: ["'self'", config.frontendUrl || 'http://localhost:5173'],
+          connectSrc: ["'self'"],
           fontSrc: ["'self'"],
           objectSrc: ["'none'"],
-          frameAncestors: ["'self'"],
+          frameAncestors: ["'none'"],
+          // Nothing in this backend (or the frontend it serves API
+          // responses to) reassigns <base> or spawns a Worker/ServiceWorker
+          // — confirmed via grep across mallchain-os-v14/src — so both are
+          // denied outright rather than left at helmet's 'self' default.
+          baseUri: ["'none'"],
+          formAction: ["'self'"],
+          frameSrc: ["'none'"],
+          workerSrc: ["'none'"],
         },
       }
-    : false,
-  crossOriginResourcePolicy: { policy: 'cross-origin' },
+    : {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'"],
+          imgSrc: ["'self'", "data:", "blob:"],
+          connectSrc: ["'self'", 'http://localhost:5173', 'ws://localhost:5173'],
+          fontSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+          // Nothing in this backend (or the frontend it serves API
+          // responses to) reassigns <base> or spawns a Worker/ServiceWorker
+          // — confirmed via grep across mallchain-os-v14/src — so both are
+          // denied outright rather than left at helmet's 'self' default.
+          baseUri: ["'none'"],
+          formAction: ["'self'"],
+          frameSrc: ["'none'"],
+          workerSrc: ["'none'"],
+        },
+      },
+  crossOriginResourcePolicy: { policy: 'same-site' },
+  // helmet's default is SAMEORIGIN; nothing in this app frames itself (or
+  // needs to be framed at all), so deny framing outright rather than
+  // leaving a same-origin exception nothing uses.
+  frameguard: { action: 'deny' },
   hsts: config.isProduction ? {
     maxAge: 31536000,
     includeSubDomains: true,
     preload: true,
     force: true,
   } : false,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  permittedCrossDomainPolicies: { policy: 'none' },
 }));
 app.disable('x-powered-by');
 app.use(correlationId);
@@ -207,8 +257,14 @@ if (!SESSION_SECRET) {
   logger.error('SESSION_SECRET is not configured; refusing to start session middleware with an insecure default.');
   process.exit(1);
 }
+// May be a comma-separated list: express-session signs new cookies with the
+// first entry but accepts any of them when verifying an existing cookie, so
+// a rotation can add the new secret first, let both work while old sessions
+// drain out, then remove the old one — instead of invalidating every
+// logged-in user's session the instant the secret changes.
+const sessionSecrets = SESSION_SECRET.split(',').map(s => s.trim()).filter(Boolean);
 app.use(session({
-  secret: SESSION_SECRET,
+  secret: sessionSecrets.length > 1 ? sessionSecrets : SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -273,46 +329,47 @@ async function checkChainHealth() {
 }
 
 app.get('/api/health', async (req, res) => {
+  // Each dependency is checked independently — a chain outage used to throw
+  // out of checkChainHealth() before database/redis were even checked, so
+  // the response collapsed to a bare chain-only error with no db/redis
+  // fields at all. That's exactly the wrong time to lose that signal: a
+  // multi-dependency partial outage is when ops most needs to see all
+  // three statuses at once, not just whichever one happened to throw first.
+  let chainStatus;
   try {
-    const chainStatus = await checkChainHealth();
-
-    // Check database connectivity
-    let dbStatus = 'ok';
-    try {
-      if (mongoose.connection.readyState === 1) {
-        dbStatus = 'ok';
-      } else {
-        dbStatus = 'disconnected';
-      }
-    } catch (dbErr) {
-      dbStatus = 'error';
-    }
-
-    // Check Redis connectivity
-    let redisStatus = 'ok';
-    try {
-      if (global.redisClient) {
-        await global.redisClient.ping();
-        redisStatus = 'ok';
-      } else {
-        redisStatus = 'not_configured';
-      }
-    } catch (redisErr) {
-      redisStatus = 'error';
-    }
-
-    const overallStatus = chainStatus.status === 'ok' ? 'ok' : 'degraded';
-    return res.status(overallStatus === 'ok' ? 200 : 503).json({
-      status: overallStatus,
-      backend: 'ok',
-      chain: chainStatus,
-      database: { status: dbStatus },
-      redis: { status: redisStatus }
-    });
+    chainStatus = await checkChainHealth();
   } catch (err) {
     logger.warn('Chain health check failed', { error: err.message || err });
-    return res.status(503).json({ status: 'degraded', backend: 'ok', chain: { status: 'down', error: err.message || 'chain unavailable' } });
+    chainStatus = { status: 'down', error: err.message || 'chain unavailable' };
   }
+
+  let dbStatus = 'ok';
+  try {
+    dbStatus = mongoose.connection.readyState === 1 ? 'ok' : 'disconnected';
+  } catch (dbErr) {
+    dbStatus = 'error';
+  }
+
+  let redisStatus = 'ok';
+  try {
+    if (global.redisClient) {
+      await global.redisClient.ping();
+      redisStatus = 'ok';
+    } else {
+      redisStatus = 'not_configured';
+    }
+  } catch (redisErr) {
+    redisStatus = 'error';
+  }
+
+  const overallStatus = chainStatus.status === 'ok' && dbStatus === 'ok' && redisStatus === 'ok' ? 'ok' : 'degraded';
+  return res.status(overallStatus === 'ok' ? 200 : 503).json({
+    status: overallStatus,
+    backend: 'ok',
+    chain: chainStatus,
+    database: { status: dbStatus },
+    redis: { status: redisStatus }
+  });
 });
 
 // Readiness probe - checks if service can accept traffic
@@ -349,13 +406,8 @@ app.get('/api', (req, res) => res.json({
   routes: ['/api/auth', '/api/vault', '/api/tx', '/api/market', '/api/send', '/api/blockchain', '/api/blockchain/tx', '/api/mallwallet', '/metrics'],
 }));
 
-// Prometheus metrics endpoint
-app.get('/metrics', async (req, res) => {
-  res.set('Content-Type', register.contentType);
-  res.end(await register.metrics());
-});
-
 app.use('/api/auth', authRoutes);
+app.use('/api/gdpr', gdprRoutes);
 app.use('/api/vault', maintenanceGuard('vault'), vaultRoutes);
 app.use('/api/tx', txRoutes);
 app.use('/api/market', marketRoutes);
@@ -383,6 +435,8 @@ const badgeRoutes = require('./routes/badge');
 app.use('/api/badge', maintenanceGuard('badge'), badgeRoutes);
 const withdrawRoutes = require('./routes/withdraw');
 app.use('/api/withdraw', maintenanceGuard('withdraw'), withdrawRoutes);
+const withdrawalAmlRoutes = require('./routes/withdrawalAml');
+app.use('/api/withdrawals/aml', maintenanceGuard('withdraw'), withdrawalAmlRoutes);
 app.use('/api/staking', maintenanceGuard('staking'), stakingRoutes);
 app.use('/api/key-vault', maintenanceGuard('key-vault'), keyVaultRoutes);
 app.use('/api/dex', maintenanceGuard('dex'), dexRoutes);
@@ -399,6 +453,10 @@ app.use('/api/faucet', faucetRoutes);
 const minesRoutes = require('./routes/mines');
 app.use('/api/mines', minesRoutes);
 app.use('/api/admin', adminPanelRoutes);
+// Public read of maintenance status — separate from /api/admin/maintenance
+// (which requires admin auth) because regular, unauthenticated users need
+// this to show a real banner and disable paused actions.
+app.use('/api/maintenance', maintenanceStatusRoutes);
 const taskAssignmentRoutes = require('./routes/taskAssignment');
 app.use('/api/task-assignment', taskAssignmentRoutes);
 
@@ -414,7 +472,174 @@ app.use('/api/mallwallet/treasury', mallwalletTreasury);
 const transactionsRoutes = require('./routes/transactions')
 const explorerRoutes = require('./routes/explorer')
 app.use('/api/transactions', transactionsRoutes)
-app.use('/api/explorer', explorerRoutes)
+
+// C6: Explorer route consolidation / proxy.
+//
+// There are two possible explorer backends:
+//   A) The in-process Express routes in routes/explorer.js (local, MongoDB,
+//      no Postgres or indexer dependency). These are ALWAYS mounted under
+//      /api/explorer so basic explorer functionality works out of the box.
+//   B) A dedicated standalone Explorer + Indexer backend (uses Postgres —
+//      see the POSTGRES_* / EXPLORER_* env block in the root .env.example)
+//      which ships heavyweight features: block indexing, EVM events,
+//      tx search, validator monitoring, etc.
+//
+// When EXPLORER_ENABLED=true and EXPLORER_BACKEND_URL is configured, we
+// proxy /api/explorer/* sub-routes that the local backend doesn't handle
+// (or all of them, per EXPLORER_PROXY_ALL) to the standalone backend.
+// This lets clients hit a single URL (the main backend) rather than
+// managing a separate host/port for the indexer.
+const EXPLORER_ENABLED = process.env.EXPLORER_ENABLED === 'true'
+const EXPLORER_BACKEND_URL = (process.env.EXPLORER_BACKEND_URL || '').replace(/\/$/, '')
+const EXPLORER_PROXY_PREFIX = process.env.EXPLORER_PROXY_PREFIX || '/api/explorer'
+const EXPLORER_PROXY_ALL = process.env.EXPLORER_PROXY_ALL === 'true'
+
+if (EXPLORER_ENABLED && EXPLORER_BACKEND_URL) {
+  logger.info(
+    'Explorer proxy configured',
+    { EXPLORER_BACKEND_URL, EXPLORER_PROXY_PREFIX, EXPLORER_PROXY_ALL },
+  )
+}
+
+// Verified live against a real explorer/backend instance: this used to list
+// the paths that should be PROXIED (blocks, stats, account, liquidity-pools,
+// ...) rather than the ones routes/explorer.js actually implements
+// (/latest, /block/:height, /tx/:hash) — the exact inverse of what the
+// comment above it described. Since Set.has() does exact string equality,
+// it also could never have matched a real request path against a
+// ":param"-shaped entry anyway. Net effect: every one of those listed paths
+// was falling through to the proxy handler's "treat as local, skip
+// proxying" branch with no local route left to catch it, so it 404'd
+// instead of reaching the real indexer. isExplorerLocalPath() checks the
+// paths routes/explorer.js genuinely handles, with real pattern matching for
+// the two dynamic ones.
+function isExplorerLocalPath(subPath) {
+  if (subPath === '/latest') return true
+  if (/^\/block\/[^/]+$/.test(subPath)) return true
+  if (/^\/tx\/[^/]+$/.test(subPath)) return true
+  return false
+}
+
+// Mount local explorer FIRST so the proxy doesn't shadow routes that the
+// local backend already handles natively.
+app.use(EXPLORER_PROXY_PREFIX, explorerRoutes)
+
+// Only install the proxy forwarder when the standalone backend is
+// configured. Use the existing axios dep (no http-proxy-middleware added
+// as a new dependency) to keep the dependency tree minimal.
+if (EXPLORER_ENABLED && EXPLORER_BACKEND_URL) {
+  const EXPLORER_PROXY_TIMEOUT = Number(process.env.EXPLORER_PROXY_TIMEOUT_MS || 15000)
+  // 3 consecutive upstream failures → enter 5-minute cool-off, returning an
+  // HTTP 503 `explorer_down` immediately instead of hammering the backend
+  // through the full 15s timeout on every request. Any successful request
+  // during the non-open window resets the failure counter.
+  const circuit = {
+    failures: 0,
+    threshold: 3,
+    cooloffMs: 5 * 60 * 1000,
+    openUntil: 0,
+  }
+  function circuitOpenOrTripped() {
+    const now = Date.now()
+    if (circuit.openUntil && now < circuit.openUntil) return true
+    if (circuit.openUntil) { circuit.openUntil = 0; circuit.failures = 0; }
+    return false
+  }
+  function markFailure() {
+    circuit.failures += 1
+    if (circuit.failures >= circuit.threshold) {
+      circuit.openUntil = Date.now() + circuit.cooloffMs
+      logger.warn('Explorer proxy circuit breaker OPEN', {
+        failures: circuit.failures,
+        cooloffMs: circuit.cooloffMs,
+        nextRetryAt: new Date(circuit.openUntil).toISOString(),
+      })
+    }
+  }
+  function markSuccess() {
+    circuit.failures = 0
+    circuit.openUntil = 0
+  }
+
+  app.use(`${EXPLORER_PROXY_PREFIX}`, async (req, res, next) => {
+    const subPath = req.path.startsWith('/') ? req.path : `/${req.path}`
+    if (!EXPLORER_PROXY_ALL && isExplorerLocalPath(subPath)) {
+      return next()
+    }
+
+    if (circuitOpenOrTripped()) {
+      const retryAfterSecs = Math.max(1, Math.ceil((circuit.openUntil - Date.now()) / 1000))
+      res.set('Retry-After', String(retryAfterSecs))
+      return res.status(503).json({
+        code: 'EXPLORER_DOWN',
+        status: 'not_ready',
+        message: 'Explorer backend circuit breaker is open; retry after cool-off',
+        path: subPath,
+        retryAfterMs: circuit.openUntil - Date.now(),
+      })
+    }
+
+    try {
+      // Forward the FULL prefixed path (not the mount-relative subPath) —
+      // explorer/backend/server.js mounts its own routes under
+      // EXPLORER_PROXY_PREFIX too (`app.use('/api/explorer', explorerRoutes)`),
+      // so stripping the prefix here made every proxied request 404 upstream.
+      // Verified live: a real explorer/backend instance on 4100 answers
+      // `/api/explorer/blocks` but not bare `/blocks`.
+      const upUrl = `${EXPLORER_BACKEND_URL}${EXPLORER_PROXY_PREFIX}${subPath}${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`
+      const upstream = await axios.request({
+        method: req.method,
+        url: upUrl,
+        data: Object.keys(req.body || {}).length ? req.body : undefined,
+        params: req.query,
+        headers: {
+          'accept': req.headers.accept || 'application/json',
+          'x-request-id': req.id || '',
+          'x-forwarded-for': req.ip || '',
+          'x-forwarded-host': req.hostname || '',
+        },
+        timeout: EXPLORER_PROXY_TIMEOUT,
+        validateStatus: () => true,
+        responseType: 'arraybuffer',
+      })
+      const upstream5xx = upstream.status >= 500 && upstream.status < 600
+      if (upstream5xx) {
+        markFailure()
+      } else {
+        markSuccess()
+      }
+      if (upstream.headers['content-type']) {
+        res.setHeader('content-type', upstream.headers['content-type'])
+      }
+      return res.status(upstream.status).send(upstream.data)
+    } catch (proxyErr) {
+      markFailure()
+      logger.error(
+        'Explorer proxy upstream failed',
+        { path: subPath, error: proxyErr.message, circuitFailures: circuit.failures },
+      )
+      if (circuit.openUntil) {
+        const retryAfterSecs = Math.max(1, Math.ceil((circuit.openUntil - Date.now()) / 1000))
+        res.set('Retry-After', String(retryAfterSecs))
+        return res.status(503).json({
+          code: 'EXPLORER_DOWN',
+          status: 'not_ready',
+          message: 'Explorer backend unreachable and circuit breaker opened',
+          upstream: EXPLORER_BACKEND_URL,
+          path: subPath,
+          detail: proxyErr.message || String(proxyErr),
+          retryAfterMs: circuit.openUntil - Date.now(),
+        })
+      }
+      return res.status(502).json({
+        error: 'Explorer backend unreachable',
+        upstream: EXPLORER_BACKEND_URL,
+        path: subPath,
+        detail: proxyErr.message || String(proxyErr),
+      })
+    }
+  })
+}
 
 // Previously-written but unmounted routes: registering existing, already-
 // implemented handlers — no new backend logic.
@@ -458,16 +683,35 @@ async function startBackgroundWorkers() {
 
     require('./mallwallet/workers/transactionWorker');
     require('./workers/transactionWorker');
+    require('./mallwallet/workers/paymentCallbackWorker');
+    // C2: Mallpoints convert-flow liquidity dead-letter outbox worker.
+    // Retries pool liquidity adds that failed after a successful creditMlcns.
+    // After 3 exponential retries, failed jobs are written to the Mongo
+    // convert_dead_letters collection for operator remediation (the user's
+    // MLCNS credit never rolls back post-success, so we can't silently drop).
+    require('./mallwallet/workers/convertLiquidityWorker');
+    // Recurring scan releasing withdrawals held in queued_liquidity once
+    // the MLCN/KES pool's reserve recovers enough to cover them — see
+    // withdrawalLiquidityQueueService.js. Schedules its own repeatable job.
+    require('./mallwallet/workers/withdrawalLiquidityWorker');
     logger.info('Background workers started')
   } catch (err) {
     logger.warn('Background workers were not started', { error: err.message || err })
   }
 }
 
-// Monitoring (Prometheus registry)
+// Prometheus metrics endpoint. There used to be a SECOND, identical
+// app.get('/metrics', ...) registered much earlier in this file (using only
+// `register` from utils/metrics) — Express matches routes in registration
+// order and that earlier handler never called next(), so it silently won
+// every request: /metrics was served with NO auth at all, and this
+// apiKeyAuth-gated handler was dead code that never ran. Requiring
+// mallwallet/monitoring/prometheus registers marketplace_tx_job_status_total
+// onto this same shared registry (see that file) — it no longer keeps its
+// own separate one, so there's nothing left to merge.
 try {
-  const register = require('./mallwallet/monitoring/prometheus');
-  app.get('/metrics', apiKeyAuth, async (_req, res) => {
+  require('./mallwallet/monitoring/prometheus');
+  app.get('/metrics', apiKeyAuth.metrics, async (_req, res) => {
     res.set('Content-Type', register.contentType);
     res.end(await register.metrics());
   });
@@ -482,13 +726,72 @@ app.get('/api/protected', require('./middleware/auth'), (req, res) => {
 async function start() {
   const mongo = config.mongoUri;
   mongoose.set('strictQuery', false);
+  // autoIndex builds/checks every schema index on every connect — safe and
+  // convenient in dev, but a real production data volume turns that into an
+  // unpredictable startup-time (and, if a new index is ever added on
+  // deploy, mid-traffic) collection scan. Index changes there should be a
+  // deliberate migration step, not an implicit side effect of restarting.
+  // TLS was previously not supported at all here (production-readiness E3)
+  // — not just left off, there was no option to turn it on. Disabled by
+  // default so local dev against a plain mongod keeps working; a
+  // mongodb+srv:// Atlas URI already implies TLS on its own, but a
+  // self-hosted TLS-enabled mongod (or a plain mongodb:// Atlas-style URI)
+  // needs this explicitly. MONGO_TLS_CA_FILE is for a self-signed or
+  // private-CA server; omit it to verify against the system trust store.
+  const mongoTlsOptions = String(process.env.MONGO_TLS).toLowerCase() === 'true'
+    ? {
+      tls: true,
+      tlsCAFile: process.env.MONGO_TLS_CA_FILE || undefined,
+      tlsCertificateKeyFile: process.env.MONGO_TLS_CERT_KEY_FILE || undefined,
+      tlsAllowInvalidCertificates: String(process.env.MONGO_TLS_ALLOW_INVALID_CERTIFICATES).toLowerCase() === 'true',
+    }
+    : {};
+
   try {
-    await mongoose.connect(mongo);
+    await mongoose.connect(mongo, {
+      maxPoolSize: Number(process.env.MONGO_MAX_POOL_SIZE || 20),
+      minPoolSize: Number(process.env.MONGO_MIN_POOL_SIZE || 2),
+      serverSelectionTimeoutMS: Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS || 10000),
+      socketTimeoutMS: Number(process.env.MONGO_SOCKET_TIMEOUT_MS || 45000),
+      autoIndex: !config.isProduction,
+      ...mongoTlsOptions,
+    });
     logger.info('Mongo connected', { mongo });
     await initializeDefaultBurnPolicies();
     await initializeDefaultDynamicThresholds();
   } catch (err) {
     logger.warn('MongoDB unavailable; starting server in degraded mode', { error: err.message || err });
+  }
+
+  // global.redisClient backs both /api/health's Redis check and the cache
+  // service below — previously neither was ever wired to a real client, so
+  // /api/health always reported Redis as "not_configured" regardless of
+  // whether it was actually running, and the cache service never
+  // initialized at all. Redis is also what BullMQ (faucet cooldowns,
+  // background jobs) and the auth cache use for state shared across
+  // instances, so — unlike Mongo above — treat it as required, not
+  // optional, in production: a Redis-less prod deployment silently falls
+  // back to per-instance in-memory state for all of that.
+  try {
+    // getConnection() is a lazyConnect + enableOfflineQueue:false singleton
+    // also used by BullMQ elsewhere — with both of those set, a command
+    // issued before the socket is actually open is rejected outright
+    // instead of queued, so .connect() must be awaited explicitly first.
+    // Skip it if something else already started connecting (races the
+    // "already connecting/connected" rejection) and just verify readiness
+    // with ping either way.
+    global.redisClient = require('./mallwallet/queue/redis')();
+    if (global.redisClient.status === 'wait') {
+      await global.redisClient.connect();
+    }
+    await global.redisClient.ping();
+    logger.info('Redis connected');
+  } catch (err) {
+    logger.warn('Redis unavailable at startup', { error: err.message || err });
+    if (config.isProduction) {
+      logger.error('Redis is required in production (shared BullMQ/faucet/auth-cache state) — refusing to start without it.');
+      process.exit(1);
+    }
   }
 
   // Initialize Redis cache service if Redis is available

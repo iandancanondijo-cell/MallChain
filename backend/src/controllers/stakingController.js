@@ -9,8 +9,26 @@ exports.summary = asyncHandler(async (req, res) => {
   if (!address) {
     throw new AppError(ErrorCodes.MISSING_REQUIRED_FIELD, 'address required', 400);
   }
-  const summary = await getStakingSummary(address);
-  return res.json({ success: true, summary });
+  try {
+    const summary = await getStakingSummary(address);
+    return res.json({ success: true, summary });
+  } catch (err) {
+    if (err && err.code === 'STAKING_DATA_UNAVAILABLE') {
+      // H1: Never silently zero — surface a 503 not-ready response so the
+      // frontend distinguishes "address has zero active staked MLCNS" from
+      // "chain REST is down". The errorHandler.js fallback is a 500 without
+      // the explicit error code — bypass it here so the UI card is precise.
+      return res.status(err.status || 503).json({
+        success: false,
+        error: {
+          code: err.code,
+          message: err.message,
+          address,
+        },
+      });
+    }
+    throw err;
+  }
 });
 
 exports.broadcast = asyncHandler(async (req, res) => {

@@ -4,6 +4,7 @@
  */
 const express = require('express');
 const router = express.Router();
+const logger = require('../utils/logger')
 const auth = require('../middleware/auth');
 const User = require('../models/user');
 const Conversation = require('../models/Conversation');
@@ -28,8 +29,12 @@ async function requireParticipant(req, res, next) {
  */
 router.get('/conversations', auth, async (req, res) => {
   try {
+    // Each conversation below fires two more queries (last message + unread
+    // count) inside Promise.all — unbounded here means unbounded query
+    // fan-out too, not just an unbounded response payload.
     const conversations = await Conversation.find({ participants: req.user._id })
       .sort({ lastMessageAt: -1 })
+      .limit(50)
       .populate('participants', 'username email')
       .lean();
 
@@ -53,7 +58,7 @@ router.get('/conversations', auth, async (req, res) => {
 
     res.json(result);
   } catch (error) {
-    console.error('Error fetching conversations:', error);
+    logger.error('messaging', 'error fetching conversations', error);
     res.status(500).json({ error: 'Failed to fetch conversations' });
   }
 });
@@ -78,7 +83,7 @@ router.get('/conversations/:id', auth, requireParticipant, async (req, res) => {
       })),
     });
   } catch (error) {
-    console.error('Error fetching conversation:', error);
+    logger.error('messaging', 'error fetching conversation', error);
     res.status(500).json({ error: 'Failed to fetch conversation' });
   }
 });
@@ -113,7 +118,7 @@ router.post('/conversations/:id/messages', auth, requireParticipant, async (req,
 
     res.json({ success: true, message: { id: message._id, from: 'me', text: message.text, ts: message.createdAt } });
   } catch (error) {
-    console.error('Error sending message:', error);
+    logger.error('messaging', 'error sending message', error);
     res.status(500).json({ error: 'Failed to send message' });
   }
 });
@@ -145,7 +150,7 @@ router.post('/conversations', auth, async (req, res) => {
 
     res.json({ success: true, conversation: { id: conversation._id, name: recipient.username || recipient.email, unread: 0 } });
   } catch (error) {
-    console.error('Error creating conversation:', error);
+    logger.error('messaging', 'error creating conversation', error);
     res.status(500).json({ error: 'Failed to create conversation' });
   }
 });
@@ -161,7 +166,7 @@ router.put('/conversations/:id/read', auth, requireParticipant, async (req, res)
     );
     res.json({ success: true, message: 'Marked as read' });
   } catch (error) {
-    console.error('Error marking as read:', error);
+    logger.error('messaging', 'error marking as read', error);
     res.status(500).json({ error: 'Failed to mark as read' });
   }
 });

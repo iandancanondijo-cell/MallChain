@@ -43,6 +43,14 @@ jest.mock('../services/faucetService', () => ({
 }));
 jest.mock('../services/mallcoinService', () => ({
   getMarketPrice: jest.fn(),
+  // (100 MLPTS * 2 KES/MLPTS) / 0.625 KES/MLCN = 320 MLCNS
+  // ratio math: mlcns = (points * fixed) / scale → 320 = (100 * fixed) / 1e6 → fixed = 3,200,000
+  getChainParams: jest.fn().mockResolvedValue({
+    source: 'onchain',
+    mlpts_per_mlcns: '3200000', // 3.2 MLPTS per 1 MLCNS
+  }),
+  getMlptsPerMlcnsScale: jest.fn().mockReturnValue(1000000),
+  mlptsPerMlcnsToNumber: jest.fn().mockImplementation((s) => Number(s) / 1000000),
 }));
 jest.mock('../controllers/liquidityController', () => ({
   addLiquidityToPool: jest.fn(),
@@ -70,15 +78,35 @@ const validBody = { address, timestamp: new Date().toISOString(), pubKey: 'fake-
 describe('POST /api/mallpoints/convert', () => {
   let app;
 
+  const ORIGINAL_TEST_MODE = process.env.TEST_MODE;
+
   beforeAll(() => {
     app = express();
     app.use(express.json());
     app.use('/api/mallpoints', mallpointsRouter);
   });
 
+  afterAll(() => {
+    // process.env is a real Node global shared by every test file a Jest
+    // worker happens to reuse — restore it rather than leave TEST_MODE
+    // permanently 'true' for whatever file runs next in this worker.
+    if (ORIGINAL_TEST_MODE === undefined) delete process.env.TEST_MODE;
+    else process.env.TEST_MODE = ORIGINAL_TEST_MODE;
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     delete process.env.MALLPOINT_PRICE_KES;
+    // routes/mallpoints.js's /convert handler only skips its real Redis-
+    // backed signature-replay guard (SET NX against
+    // adr036_consumed:convert:<sig>) when TEST_MODE==='true' — without
+    // this, every test here that reuses the same fixed fake `signature`
+    // from validBody would hit a REAL Redis instance if one happens to be
+    // reachable in the environment, and the second+ test to use it would
+    // get rejected as a replay ("signature already used"). That made this
+    // suite's pass/fail depend on whether a real Redis was running
+    // wherever it happened to execute, rather than on the code under test.
+    process.env.TEST_MODE = 'true';
     getUserBadgeInfo.mockResolvedValue({ exists: false });
     buildConversionStatus.mockReturnValue({ canConvert: true, reason: null });
     verifyConvertSignature.mockReturnValue(true);
@@ -138,9 +166,13 @@ describe('POST /api/mallpoints/convert', () => {
     expect(res.body.ok).toBe(true);
     expect(res.body.credit).toEqual({ txHash: '0xdef' });
     expect(recordLiquidityActivity).toHaveBeenCalledWith(
-      expect.objectContaining({ flow: 'mallpoints_convert', stage: 'liquidity_add_failed', status: 'failed' })
+      expect.objectContaining({ flow: 'mallpoints_convert', stage: 'liquidity_add_enqueued_dlq', status: 'failed' })
     );
-  });
+    // Everything here is mocked (no real I/O), but this test has been
+    // observed to occasionally exceed Jest's default 5000ms under heavy
+    // full-suite parallel load (many worker processes competing for CPU) —
+    // a longer explicit timeout avoids that being mistaken for a regression.
+  }, 15000);
 
   test('rejects when the conversion window is closed', async () => {
     mockAccount(50);

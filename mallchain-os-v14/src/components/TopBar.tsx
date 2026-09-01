@@ -6,7 +6,7 @@
  * identity remain.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Search, Bell, SlidersHorizontal, ShieldAlert, Wrench } from 'lucide-react';
+import { Search, Bell, SlidersHorizontal, ShieldAlert, Wrench, Menu } from 'lucide-react';
 import { store } from '../store/store';
 import { useStoreVersion, fmtNum, toast, BadgeCheckmark } from './ui';
 import { config } from '../services/config';
@@ -16,10 +16,12 @@ import SocketStatus from './SocketStatus';
 import { notificationsApi, type AppNotification } from '../services/notificationsApi';
 import { socketManager } from '../services/socket';
 import { t } from '../services/i18n';
+import { useMaintenanceStatus } from '../services/maintenanceApi';
+import { openCommandPalette } from './CommandPalette';
 const LANGS = ['EN', 'FR', 'ES', 'SW'];
 const ACCENTS = ['gold', 'cyan', 'purple', 'emerald'];
 
-export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: string) => void; isAdminRoute?: boolean }) {
+export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { navigate: (p: string) => void; isAdminRoute?: boolean; onToggleMobileNav?: () => void }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<'notif' | 'prefs' | null>(null);
   const [nf, setNf] = useState<'all' | 'unread'>('all');
@@ -27,6 +29,8 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
   useStoreVersion();
   const st = store.state;
   const allCurrencies = useSupportedCurrencies();
+  const maintenance = useMaintenanceStatus();
+  const maintenanceActive = maintenance.global || Object.values(maintenance.scopes).some(Boolean);
 
   const loadNotifications = useCallback(async () => {
     if (!st.user.authed) return;
@@ -74,47 +78,73 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
 
   return (
     <header className="topbar">
+      {onToggleMobileNav && (
+        <button type="button" className="tb-icon tb-hamburger" aria-label={t('Open navigation menu')} onClick={onToggleMobileNav}>
+          <Menu size={18} />
+        </button>
+      )}
       {isAdminRoute && (
         <span className="chip red" style={{ fontWeight: 800, letterSpacing: 0.5, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <ShieldAlert size={13} /> {t('ADMIN MODE')}
+          <ShieldAlert size={13} aria-hidden="true" /> {t('ADMIN MODE')}
         </span>
       )}
-      {st.admin.flags.maintenance && (
-        <span className="chip red" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Wrench size={13} /> {t('Maintenance mode — new transactions blocked')}
+      {maintenanceActive && (
+        <span className="chip red" role="status" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Wrench size={13} aria-hidden="true" /> {t('Maintenance mode — new transactions blocked')}
         </span>
       )}
       {!isAdminRoute && (
         <div className="tb-search">
-          <Search size={15} />
-          <input placeholder={t('Search campaigns, blocks, txs, validators…  (Ctrl+K)')} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={search} />
+          <Search size={15} aria-hidden="true" />
+          <input aria-label={t('Search campaigns, blocks, txs, validators')} placeholder={t('Search campaigns, blocks, txs, validators…  (Ctrl+K)')} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={search} />
         </div>
       )}
       {!isAdminRoute && (
-        <div className="tb-wallet" onClick={() => navigate('/wallet')} title="Wallet selector">
-          <span style={{ fontSize: 11, color: 'var(--txt-3)' }}>MALL</span>
+        <button type="button" className="tb-icon tb-search-trigger" aria-label={t('Search')} onClick={() => openCommandPalette()}>
+          <Search size={16} aria-hidden="true" />
+        </button>
+      )}
+      {!isAdminRoute && (
+        <a className="tb-wallet" href="#/wallet" title="Wallet selector">
+          <span className="lbl" style={{ fontSize: 11, color: 'var(--txt-3)' }}>MALL</span>
           <span className="bal">{fmtNum(st.balances.MALL)}</span>
-        </div>
+        </a>
       )}
       {/* The only way back into the admin panel once an admin has left it —
           the sidebar deliberately has no admin entry (see Sidebar.tsx), so
           without this an admin account can get stranded on the regular
           user shell with no route back short of hand-editing the URL. */}
       {!isAdminRoute && (st.user.role === 'admin' || st.user.role === 'superadmin') && (
-        <span className="chip red" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => navigate('/admin')} title="Go to the admin control center">
-          <ShieldAlert size={13} /> {t('Admin panel')}
-        </span>
+        <a className="chip red" style={{ display: 'flex', alignItems: 'center', gap: 6 }} href="#/admin" title="Go to the admin control center">
+          <ShieldAlert size={13} aria-hidden="true" /> {t('Admin panel')}
+        </a>
       )}
       <SocketStatus />
       {!isAdminRoute && (
-        <div className="tb-icon" title={t('Preferences')} onClick={() => setOpen(open === 'prefs' ? null : 'prefs')}>
-          <SlidersHorizontal size={16} />
-        </div>
+        <button
+          type="button"
+          className="tb-icon"
+          title={t('Preferences')}
+          aria-label={t('Preferences')}
+          aria-haspopup="true"
+          aria-expanded={open === 'prefs'}
+          onClick={() => setOpen(open === 'prefs' ? null : 'prefs')}
+        >
+          <SlidersHorizontal size={16} aria-hidden="true" />
+        </button>
       )}
-      <div className="tb-icon" title={t('Notifications')} onClick={() => setOpen(open === 'notif' ? null : 'notif')}>
-        <Bell size={16} />
-        {unread > 0 && <span className="tb-badge">{unread}</span>}
-      </div>
+      <button
+        type="button"
+        className="tb-icon"
+        title={t('Notifications')}
+        aria-label={unread > 0 ? `${t('Notifications')} (${unread} ${t('unread')})` : t('Notifications')}
+        aria-haspopup="true"
+        aria-expanded={open === 'notif'}
+        onClick={() => setOpen(open === 'notif' ? null : 'notif')}
+      >
+        <Bell size={16} aria-hidden="true" />
+        {unread > 0 && <span className="tb-badge" aria-hidden="true">{unread}</span>}
+      </button>
       {open === 'prefs' && !isAdminRoute && (
         <div className="panel" style={{ right: 90 }}>
           <div className="panel-head"><span className="grow">{t('Preferences')}</span></div>
@@ -146,7 +176,7 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
               <label>{t('Language')}</label>
               <div className="row" style={{ gap: 6 }}>
                 {LANGS.map((l) => (
-                  <button key={l} className={'btn btn-ghost btn-sm' + (st.prefs.lang === l ? ' gold' : '')} onClick={() => { st.prefs.lang = l as never; store.commit(); toastLocal('Language → ' + l); }}>
+                  <button key={l} className={'btn btn-ghost btn-sm' + (st.prefs.lang === l ? ' gold' : '')} onClick={() => { st.prefs.lang = l as never; document.documentElement.lang = l.toLowerCase(); store.commit(); toastLocal('Language → ' + l); }}>
                     {l}
                   </button>
                 ))}
@@ -170,11 +200,11 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
         </div>
       )}
       {open === 'notif' && (
-        <div className="panel">
+        <div className="panel" role="dialog" aria-label={t('Notifications')}>
           <div className="panel-head">
             <span className="grow">{t('Notifications')}</span>
-            <span className="chip" style={{ cursor: 'pointer' }} onClick={() => setNf(nf === 'all' ? 'unread' : 'all')}>{nf === 'all' ? t('All') : t('Unread')}</span>
-            <span className="chip gold" style={{ cursor: 'pointer' }} onClick={markAllRead}>{t('Mark all read')}</span>
+            <button type="button" className="chip" onClick={() => setNf(nf === 'all' ? 'unread' : 'all')}>{nf === 'all' ? t('All') : t('Unread')}</button>
+            <button type="button" className="chip gold" onClick={markAllRead}>{t('Mark all read')}</button>
           </div>
           <div style={{ maxHeight: 320, overflowY: 'auto' }}>
             {notifs.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--txt-3)', fontSize: 12.5 }}>{t('No notifications yet')}</div>}
@@ -185,19 +215,29 @@ export default function TopBar({ navigate, isAdminRoute }: { navigate: (p: strin
                   {n.body && <div className="pm">{n.body}</div>}
                 </div>
                 <span className="pts">{new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                <span style={{ cursor: 'pointer', color: 'var(--txt-3)' }} onClick={() => dismiss(n._id)}>✕</span>
+                <button type="button" aria-label={t('Dismiss notification')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--txt-3)' }} onClick={() => dismiss(n._id)}>✕</button>
               </div>
             ))}
           </div>
         </div>
       )}
-      <div className="tb-user" onClick={isAdminRoute ? undefined : () => navigate('/profile')} style={isAdminRoute ? { cursor: 'default' } : undefined}>
-        <div className="avatar">{st.user.avatarInitial || 'C'}</div>
-        <div style={{ lineHeight: 1.2 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 800 }}>{st.user.name || st.user.email?.split('@')[0] || t('Guest')}{st.user.hasBadge && <BadgeCheckmark />}</div>
-          <div style={{ fontSize: 10.5, color: 'var(--txt-3)' }}>{st.user.frozen ? `❄ ${t('Frozen')}` : st.settings.network}</div>
+      {isAdminRoute ? (
+        <div className="tb-user" style={{ cursor: 'default' }}>
+          <div className="avatar" aria-hidden="true">{st.user.avatarInitial || 'C'}</div>
+          <div style={{ lineHeight: 1.2 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800 }}>{st.user.name || st.user.email?.split('@')[0] || t('Guest')}{st.user.hasBadge && <BadgeCheckmark />}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--txt-3)' }}>{st.user.frozen ? `❄ ${t('Frozen')}` : st.settings.network}</div>
+          </div>
         </div>
-      </div>
+      ) : (
+        <a className="tb-user" href="#/profile">
+          <div className="avatar" aria-hidden="true">{st.user.avatarInitial || 'C'}</div>
+          <div style={{ lineHeight: 1.2 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800 }}>{st.user.name || st.user.email?.split('@')[0] || t('Guest')}{st.user.hasBadge && <BadgeCheckmark />}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--txt-3)' }}>{st.user.frozen ? `❄ ${t('Frozen')}` : st.settings.network}</div>
+          </div>
+        </a>
+      )}
     </header>
   );
 }

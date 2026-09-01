@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const logger = require('../utils/logger')
 const mongoose = require('mongoose');
 const User = require('../models/user');
 const AuditLog = require('../models/AuditLog');
@@ -8,6 +9,7 @@ const KYC = require('../models/kyc');
 const TaskSubmission = require('../models/TaskSubmission');
 const LiquidityReconciliation = require('../models/LiquidityReconciliation');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
+const { initiateB2CPayout } = require('../services/b2cPayoutService');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/adminAuth');
 const { invalidateCachedUser } = require('../middleware/authCache');
 const { BurnPolicy, DynamicBurnThreshold } = require('../models/BurnPolicy');
@@ -73,7 +75,7 @@ async function auditLog(action, actor, details, outcome = 'success') {
   try {
     await AuditLog.create({ action, actor: actor?.email || actor?.toString() || 'system', details, outcome });
   } catch (e) {
-    console.error('Audit log failed:', e.message);
+    logger.error('adminPanel', 'audit log failed', e);
   }
 }
 
@@ -281,7 +283,7 @@ router.get('/kyc/pending', async (req, res) => {
     const skip = Math.max(Number(page) || 0, 0) * safeLimit;
     const query = { status: { $in: ['pending', 'review'] } };
 
-    const [submissions, total] = await Promise.all([
+    const [rawSubmissions, total] = await Promise.all([
       KYC.find(query)
         .populate('userId', 'email username')
         .sort({ submittedAt: 1 })
@@ -290,6 +292,11 @@ router.get('/kyc/pending', async (req, res) => {
         .lean(),
       KYC.countDocuments(query),
     ]);
+
+    // .lean() returns plain objects, bypassing the model's decryption
+    // helper's usual toObject() path — decrypt idNumber/phoneNumber/
+    // address/city/postalCode explicitly before this reaches an admin.
+    const submissions = rawSubmissions.map((s) => KYC.decryptKycPii(s));
 
     // Bulk read of full KYC PII (name, DOB, nationality, ID number, address,
     // income, PEP status) for every pending applicant — this is exactly the
@@ -624,6 +631,38 @@ router.get('/reconciliation/items', async (req, res) => {
   }
 });
 
+// Marks a reconciliation item resolved. This is a record-keeping action only —
+// it does NOT itself perform any on-chain reversal or transfer. Matching
+// reconciliationService.js's own compensateFailedLiquidity comment: silently
+// claiming something was fixed without an actual reversal would be a
+// financial-integrity bug, so this just lets an admin document how a
+// pending_manual (or detected) item was actually handled out-of-band.
+router.post('/reconciliation/:id/resolve', limiters.strict, async (req, res) => {
+  try {
+    const { note } = req.body || {};
+    if (!note || !String(note).trim()) {
+      return res.status(400).json({ ok: false, error: 'A resolution note is required' });
+    }
+
+    const item = await LiquidityReconciliation.findById(req.params.id);
+    if (!item) return res.status(404).json({ ok: false, error: 'Reconciliation item not found' });
+    if (item.status === 'resolved') {
+      return res.status(409).json({ ok: false, error: 'This item is already resolved' });
+    }
+
+    item.status = 'resolved';
+    item.resolutionNote = String(note).trim();
+    item.resolvedBy = req.user?._id ? String(req.user._id) : undefined;
+    item.resolvedAt = new Date();
+    await item.save();
+
+    await auditLog('reconciliation_resolved', req.user, { reconciliationId: item._id.toString(), note: item.resolutionNote });
+    return res.json({ ok: true, item });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 router.get('/withdrawals', async (req, res) => {
   try {
     const { status, page = 0, limit = 100 } = req.query;
@@ -638,6 +677,74 @@ router.get('/withdrawals', async (req, res) => {
     ]);
 
     return res.json({ ok: true, withdrawals, total, page: Number(page) || 0, limit: safeLimit });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// Re-attempts the Safaricom B2C payout for a withdrawal whose prior attempt
+// failed — the same call routes/withdraw.js and routes/buy.js's /sell make
+// on the original request, just triggered manually instead of automatically.
+router.post('/withdrawals/:id/retry', limiters.strict, async (req, res) => {
+  try {
+    const withdrawal = await WithdrawalRequest.findById(req.params.id);
+    if (!withdrawal) return res.status(404).json({ ok: false, error: 'Withdrawal not found' });
+    if (withdrawal.status !== 'failed') {
+      return res.status(409).json({ ok: false, error: `Only a failed withdrawal can be retried (current status: ${withdrawal.status})` });
+    }
+
+    const payoutResult = await initiateB2CPayout({
+      sellerPhone: withdrawal.phone,
+      mlcnsAmount: withdrawal.amountMlcns,
+      saleId: withdrawal.saleId || `withdrawal-${withdrawal.withdrawalId}`,
+    });
+
+    if (!payoutResult.ok) {
+      withdrawal.status = payoutResult.requiresApproval ? 'pending_review' : 'failed';
+      withdrawal.notes = payoutResult.error || 'Retried payout initiation failed.';
+      await withdrawal.save();
+      await auditLog('withdrawal_retry', req.user, { withdrawalId: withdrawal.withdrawalId, outcome: 'failed', reason: withdrawal.notes }, 'failure');
+      return res.status(payoutResult.requiresApproval ? 202 : 502).json({ ok: payoutResult.requiresApproval, withdrawal });
+    }
+
+    withdrawal.status = 'payout_initiated';
+    withdrawal.payoutRef = payoutResult.payoutRef;
+    withdrawal.notes = 'Payout retried by admin and re-initiated with Safaricom.';
+    await withdrawal.save();
+
+    await auditLog('withdrawal_retry', req.user, { withdrawalId: withdrawal.withdrawalId, outcome: 'reinitiated', payoutRef: payoutResult.payoutRef });
+    return res.json({ ok: true, withdrawal });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// Records how a failed withdrawal was actually settled outside the automated
+// payout path (e.g. a manual M-Pesa send, or a refund back to the user by
+// another channel) — like reconciliation/resolve above, this is record-
+// keeping only and does not itself move any money.
+router.post('/withdrawals/:id/resolve', limiters.strict, async (req, res) => {
+  try {
+    const { note, outcome } = req.body || {};
+    if (!['completed', 'refunded'].includes(outcome)) {
+      return res.status(400).json({ ok: false, error: "outcome must be 'completed' or 'refunded'" });
+    }
+    if (!note || !String(note).trim()) {
+      return res.status(400).json({ ok: false, error: 'A resolution note is required' });
+    }
+
+    const withdrawal = await WithdrawalRequest.findById(req.params.id);
+    if (!withdrawal) return res.status(404).json({ ok: false, error: 'Withdrawal not found' });
+    if (withdrawal.status !== 'failed') {
+      return res.status(409).json({ ok: false, error: `Only a failed withdrawal can be manually resolved (current status: ${withdrawal.status})` });
+    }
+
+    withdrawal.status = outcome;
+    withdrawal.notes = String(note).trim();
+    await withdrawal.save();
+
+    await auditLog('withdrawal_resolved', req.user, { withdrawalId: withdrawal.withdrawalId, outcome, note: withdrawal.notes });
+    return res.json({ ok: true, withdrawal });
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err) });
   }

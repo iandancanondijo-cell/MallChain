@@ -31,4 +31,11 @@ type BadgeKeeper interface {
 type MlcoinKeeper interface {
 	MintToWallet(ctx context.Context, address string, amount uint64) error
 	WithMintingEnabled(ctx context.Context, fn func() error) error
+	// GetConversionRatio returns the single source of truth for the
+	// Mallpoints (MLPTS) -> Mallcoin (MLCNS) conversion ratio used by
+	// MsgConvertMallpoints on both sides of the API/chain boundary.
+	// Returns (mlptsPerMlcnsFixedPoint, scale) so callers compute:
+	//   mlcnsAmount = (pointsAmount * mlptsPerMlcnsFixedPoint) / scale
+	// Defaults are (3_200_000, 1_000_000) = 3.2 MLCNS per 1 MLPTS.
+	GetConversionRatio(ctx context.Context) (mlptsPerMlcns uint64, scale uint64)
 }

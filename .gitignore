@@ -13,6 +13,11 @@ node_modules/
 .env.*
 !.env.example
 
+# MongoDB replica-set internal-auth keyfile (docker-compose.yml's mongo
+# service) — a shared secret between replica-set members, generate your own
+# per environment with: openssl rand -base64 756 > mongo-keyfile && chmod 400 mongo-keyfile
+mongo-keyfile
+
 # Logs and outputs
 *.log
 *.out
@@ -104,3 +109,6 @@ docs/
 
 # Wallet data (sensitive)
 wallet_data/
+
+# Lighthouse CI local run artifacts (mallchain-os-v14/lighthouserc.cjs)
+.lighthouseci/

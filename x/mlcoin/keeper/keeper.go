@@ -117,6 +117,27 @@ func (k *Keeper) WithMintingEnabled(ctx context.Context, fn func() error) error 
 	return fn()
 }
 
+// GetConversionRatio returns the governance-authoritative
+// Mallpoints (MLPTS) -> Mallcoin (MLCNS) conversion ratio used by
+// MsgConvertMallpoints on both sides of the chain/backend boundary.
+// This is the single source of truth — the backend REST handlers
+// fetch the same value via /mlcoin/v1/params so the client preview
+// matches on-chain settlement. Returns safe compiled defaults if
+// Params is corrupt or unset.
+//
+// Formula (implemented identically on Go and JS sides):
+//
+//	mlcnsAmount = (pointsAmount * mlptsPerMlcns) / scale
+//
+// where both mlptsPerMlcns and scale are uint64s.
+func (k *Keeper) GetConversionRatio(ctx context.Context) (mlptsPerMlcns uint64, scale uint64) {
+	p, err := k.Params.Get(ctx)
+	if err != nil || p.MlptsPerMlcns == 0 {
+		return types.DefaultMlptsPerMlcns, types.MLPTSPerMlcnsScale
+	}
+	return p.MlptsPerMlcns, types.MLPTSPerMlcnsScale
+}
+
 // GetAuthority returns the module's authority.
 func (k Keeper) GetAuthority() []byte {
 	return k.authority

@@ -10,12 +10,41 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
+// effectiveMinStakeAmount resolves the minimum stake amount enforced by
+// Keeper.Stake. If Params.MinStakeAmount is zero (explicitly disabled by
+// governance) we fall back to intervals.RewardDivisor so the floor-division
+// reward bug never silently zeroes yield. If intervals is also unreadable the
+// hardcoded DefaultMinStakeAmount constant is returned.
+func (k Keeper) effectiveMinStakeAmount(ctx context.Context) uint64 {
+	p, err := k.Params.Get(ctx)
+	if err == nil && p.MinStakeAmount > 0 {
+		return p.MinStakeAmount
+	}
+	intervals, err := k.GetModuleIntervals(ctx)
+	if err == nil && intervals.RewardDivisor > 0 {
+		return intervals.RewardDivisor
+	}
+	return types.DefaultMinStakeAmount
+}
+
 // Stake allows users to stake Mallcoins for rewards
 func (k Keeper) Stake(ctx context.Context, address string, amount uint64) (string, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
 	if amount == 0 {
 		return "", errorsmod.Wrap(types.ErrInvalidRequest, "stake amount must be > 0")
+	}
+
+	// Enforce MinStakeAmount. Reject any stake smaller than the effective
+	// minimum because it would produce zero block rewards (integer floor div
+	// `stakedAmount / rewardDivisor` rounds to 0) but still lock funds for the
+	// full lock period. This is a silent theft-of-principal unless we fail
+	// the Msg here and surface the threshold to the caller.
+	minStake := k.effectiveMinStakeAmount(ctx)
+	if amount < minStake {
+		return "", errorsmod.Wrapf(types.ErrStakeBelowMinimum,
+			"stake amount %d < MinStakeAmount %d (raise stake or query /mlcoin/v1/params for the current threshold)",
+			amount, minStake)
 	}
 
 	// Get user's wallet balance
@@ -162,6 +191,13 @@ func (k Keeper) CalculateRewardsForStaking(ctx context.Context, stakedAmount, st
 	rewardDivisor := intervals.RewardDivisor
 	if rewardDivisor == 0 {
 		rewardDivisor = types.DefaultModuleIntervals().RewardDivisor
+	}
+	// Belt-and-suspenders: if stakedAmount < rewardDivisor, floor-div is 0.
+	// (The upstream Stake() gate should have blocked this from ever reaching
+	// the on-chain records, but we keep this check in case of historical or
+	// governance-modified state.)
+	if stakedAmount < rewardDivisor && stakeDurationBlocks > 0 {
+		return 0
 	}
 	blockRewards := stakedAmount / rewardDivisor
 

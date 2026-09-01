@@ -1,5 +1,6 @@
 const express = require('express')
 const router = express.Router()
+const logger = require('../utils/logger')
 const axios = require('axios')
 
 const CHAIN_REST = process.env.MALL_CHAIN_REST || process.env.CHAIN_REST || 'http://127.0.0.1:1317'
@@ -18,7 +19,7 @@ router.get('/balance/:address', async (req, res) => {
     }
     return res.json({ balance: '0' })
   } catch (e) {
-    console.error('mallwallet REST balance error', e && e.message ? e.message : e)
+    logger.error('mallwallet', 'REST balance error', e)
     try {
       res.json({ balance: '0' })
     } catch (err) {

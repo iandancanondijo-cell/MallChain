@@ -4,6 +4,7 @@ const express = require('express');
 const crypto = require('crypto');
 
 const router = express.Router();
+const logger = require('../utils/logger')
 
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 const B2CPayout = require('../models/B2CPayout');
@@ -127,17 +128,24 @@ router.post('/mpesa', idempotency({ required: true }), validateRequest(schemas.w
     });
 
     if (!payoutResult.ok) {
-      withdrawal.status = 'failed';
+      // A cap rejection (requiresApproval) means this withdrawal is still
+      // good — it just needs a human to actually run the payout — not a
+      // dead end the requester needs to retry from scratch.
+      withdrawal.status = payoutResult.requiresApproval ? 'pending_review' : 'failed';
       withdrawal.notes = payoutResult.error || 'Automatic payout initiation failed.';
       await withdrawal.save();
-      await recordWithdrawLiquidityActivity('withdraw_payout_failed', withdrawal, {
-        status: 'failed',
-        payoutRef: payoutResult.payoutRef,
-        providerMode: payoutResult.providerMode,
-        reason: withdrawal.notes,
-      });
-      return res.status(502).json({
-        ok: false,
+      await recordWithdrawLiquidityActivity(
+        payoutResult.requiresApproval ? 'withdraw_payout_requires_review' : 'withdraw_payout_failed',
+        withdrawal,
+        {
+          status: payoutResult.requiresApproval ? 'pending' : 'failed',
+          payoutRef: payoutResult.payoutRef,
+          providerMode: payoutResult.providerMode,
+          reason: withdrawal.notes,
+        }
+      );
+      return res.status(payoutResult.requiresApproval ? 202 : 502).json({
+        ok: payoutResult.requiresApproval,
         withdrawalId,
         status: withdrawal.status,
         error: withdrawal.notes,
@@ -175,7 +183,7 @@ router.post('/mpesa', idempotency({ required: true }), validateRequest(schemas.w
       message: 'Withdrawal payout initiated successfully.',
     });
   } catch (error) {
-    console.error('withdraw mpesa error', error);
+    logger.error('withdraw', 'withdraw mpesa error', error);
     return res.status(500).json({ error: error.message || 'withdrawal failed' });
   }
 });
@@ -189,7 +197,7 @@ router.get('/status/:withdrawalId', async (req, res) => {
 
     return res.json(withdrawalSummary(withdrawal));
   } catch (error) {
-    console.error('withdraw status error', error);
+    logger.error('withdraw', 'withdraw status error', error);
     return res.status(500).json({ error: error.message || 'status failed' });
   }
 });

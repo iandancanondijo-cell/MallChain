@@ -9,6 +9,21 @@ async function getJson(url) {
   return data;
 }
 
+// H1: Staking data unavailable sentinel — thrown by getStakingSummary() when
+// chain REST is unreachable, gRPC-gateway returns non-2xx, or the response
+// body doesn't parse. Controller layer catches this and returns HTTP 503
+// with {success:false, error:{code:"STAKING_DATA_UNAVAILABLE"}} so the UI
+// can render an explicit "Staking data unavailable" not-ready card instead
+// of silently zeroing totals (which the audit flagged as misleading to end
+// users).
+function stakingDataUnavailable(cause) {
+  const err = new Error('Staking data unavailable — chain REST or gRPC-gateway is down');
+  err.code = 'STAKING_DATA_UNAVAILABLE';
+  err.status = 503;
+  if (cause) err.underlying = cause.message || String(cause);
+  return err;
+}
+
 /**
  * Aggregated staking view for an address, backed by the chain's custom MLCNS
  * reward-pool staking (x/mlcoin StakingRecords) — not standard Cosmos
@@ -16,7 +31,16 @@ async function getJson(url) {
  */
 async function getStakingSummary(address) {
   const url = `${CHAIN_REST}/tmp/marketplace/mlcoin/v1/staking/${encodeURIComponent(address)}`;
-  const data = await getJson(url).catch(() => ({ staking_records: [] }));
+  let data;
+  try {
+    data = await getJson(url);
+  } catch (e) {
+    // Network / HTTP-level failure: fail loud with explicit not-ready code.
+    throw stakingDataUnavailable(e);
+  }
+  if (!data || typeof data !== 'object') {
+    throw stakingDataUnavailable(new Error('unexpected response shape'));
+  }
   const entries = data.staking_records || data.stakingRecords || [];
 
   const toRecord = (entry) => {

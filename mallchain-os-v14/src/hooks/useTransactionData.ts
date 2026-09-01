@@ -22,6 +22,9 @@ export interface UseTransactionDataOptions {
   pageSize?: number;
   type?: string; // Filter: send, receive, swap, stake, etc.
   status?: string; // Filter: pending, confirmed, failed
+  search?: string; // Filter: substring match on hash/from/to
+  startDate?: string; // Filter: ISO date, inclusive lower bound
+  endDate?: string; // Filter: ISO date, inclusive upper bound
 }
 
 export interface UseTransactionDataState {
@@ -61,7 +64,7 @@ const DEFAULT_STATE: UseTransactionDataState = {
  * ```
  */
 export function useTransactionData(options: UseTransactionDataOptions) {
-  const { walletAddress, page = 1, pageSize = 20, type, status } = options;
+  const { walletAddress, page = 1, pageSize = 20, type, status, search, startDate, endDate } = options;
   const [state, setState] = useState<UseTransactionDataState>({
     ...DEFAULT_STATE,
     page,
@@ -98,6 +101,9 @@ export function useTransactionData(options: UseTransactionDataOptions) {
           pageSize,
           type,
           status,
+          search,
+          startDate,
+          endDate,
         });
 
         if (result.ok && result.data) {
@@ -141,7 +147,7 @@ export function useTransactionData(options: UseTransactionDataOptions) {
         }
       }
     },
-    [walletAddress, page, pageSize, type, status, getRetryDelay]
+    [walletAddress, page, pageSize, type, status, search, startDate, endDate, getRetryDelay]
   );
 
   /**
@@ -171,7 +177,7 @@ export function useTransactionData(options: UseTransactionDataOptions) {
         clearTimeout(retryTimeoutRef.current);
       }
     };
-  }, [walletAddress, page, pageSize, type, status, fetchTransactions, handleTransactionUpdate]);
+  }, [walletAddress, page, pageSize, type, status, search, startDate, endDate, fetchTransactions, handleTransactionUpdate]);
 
   return state;
 }

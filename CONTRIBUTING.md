@@ -18,11 +18,37 @@ Please read and follow our [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ### Setup
 
+**Option A — docker-compose (fastest path to a fully working stack):**
+
 1. Clone the repository
-2. Install backend dependencies: `cd backend && npm install`
-3. Install frontend dependencies: `cd mallchain-os-v14 && npm install`
-4. Copy `.env.example` to `.env` and configure environment variables
-5. Start services: `./START_ALL.sh`
+2. Copy `.env.example` to `.env` at the repo root and fill in at minimum
+   `MONGO_ROOT_PASSWORD`, `MONGO_APP_PASSWORD`, `JWT_SECRET`,
+   `SESSION_SECRET`, `ADMIN_API_KEY`, `PAYMENT_WEBHOOK_SECRET` (generate
+   each with `openssl rand -hex 16` — the file has guidance next to each)
+3. `docker-compose up --build`
+4. **First run only:** the chain node starts with an empty data volume and
+   won't have a genesis yet — see `docker-compose.yml`'s comment on the
+   `marketplaced` service for the one-time init command
+5. Once everything's up: `./scripts/smoke-test.sh` to confirm the whole
+   stack is actually healthy, not just running
+
+**Option B — running services directly (faster iteration on one piece):**
+
+1. Install backend dependencies: `cd backend && npm install`
+2. Install frontend dependencies: `cd mallchain-os-v14 && npm install`
+3. Copy `.env.example` to `backend/.env` and configure environment variables
+   (MongoDB + Redis must be running locally or reachable — see
+   `docker-compose.yml` for a quick way to get just those two up:
+   `docker-compose up mongo redis`)
+4. `./START_ALL.sh` to start the chain node + backend + frontend together,
+   or start each individually (`cd backend && npm start`,
+   `cd mallchain-os-v14 && npm run dev`, `./scripts/start_blockchain.sh`)
+
+**Running tests:**
+- Backend: `cd backend && npm test` (Jest — see `backend/src/__tests__/`)
+- Frontend: `cd mallchain-os-v14 && npm run test:run` (Vitest)
+- Chain: `go test ./...` from the repo root
+- A single backend test file: `cd backend && npx jest <name-fragment>`
 
 ## Development Workflow
 

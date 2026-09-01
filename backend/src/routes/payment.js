@@ -1,5 +1,6 @@
 const express = require('express')
 const router = express.Router()
+const logger = require('../utils/logger')
 const crypto = require('crypto')
 const Joi = require('joi')
 const PendingPayment = require('../models/PendingPayment')
@@ -42,7 +43,7 @@ router.post('/mpesa/initiate', limiter, async (req, res) => {
     await AuditLog.create({ action: 'payment_initiate', actor: phone || 'unknown', data: { providerRef, amountFiat, amountMallcoin } })
     return res.json({ status: 'pending', providerRef })
   } catch (e) {
-    console.error('payment initiate error', e)
+    logger.error('payment', 'payment initiate error', e)
     return res.status(500).json({ error: 'initiate failed' })
   }
 })
@@ -83,7 +84,7 @@ router.post('/mpesa/confirm', limiter, async (req, res) => {
     await AuditLog.create({ action: 'payment_confirm', actor: doc.phone || 'provider', data: { providerRef, status: doc.status } })
     return res.json({ ok: true, providerRef, status: doc.status })
   } catch (e) {
-    console.error('payment confirm error', e)
+    logger.error('payment', 'payment confirm error', e)
     return res.status(500).json({ error: 'confirm failed' })
   }
 })
@@ -102,7 +103,7 @@ router.get('/mpesa/status', limiter, async (req, res) => {
     if (!doc) return res.status(404).json({ error: 'not found' })
     return res.json({ providerRef, status: doc.status, info: doc })
   } catch (e) {
-    console.error('payment status error', e)
+    logger.error('payment', 'payment status error', e)
     return res.status(500).json({ error: 'status failed' })
   }
 })

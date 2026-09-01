@@ -12,6 +12,16 @@ const MLCNS_DECIMALS = Number(process.env.MLCNS_DECIMALS || 6);
 // rather than quoting one flat rate for both sides.
 const DEFAULT_BUY_PRICE_KES = Number(process.env.MLCNS_BUY_PRICE_KES || 0.62);
 const DEFAULT_SELL_PRICE_KES = Number(process.env.MLCNS_SELL_PRICE_KES || 0.58);
+// Single source of truth for the Mallpoints -> Mallcoin conversion ratio.
+// Mirrors x/mlcoin/types/params.go DefaultMlptsPerMlcns (3_200_000 = 3.2
+// fixed-point with 6 decimals). Used only as a safe fallback when the live
+// on-chain governance param can't be fetched via REST.
+const DEFAULT_MLPTS_PER_MLCNS_FIXED = 3_200_000;
+const MLPTS_PER_MLCNS_SCALE = 1_000_000;
+// Matches x/mlcoin/types DefaultMinStakeAmount (18250 = equal to default
+// RewardDivisor so the smallest accepted stake always earns >= 1 unit of
+// block reward per block). Used as the fallback when chain params are down.
+const DEFAULT_MIN_STAKE_AMOUNT = 18_250;
 const blockchainBreaker = createBlockchainBreaker();
 
 function fromBaseUnits(units) {
@@ -20,6 +30,66 @@ function fromBaseUnits(units) {
 
 function toBaseUnits(amount) {
   return Math.floor(Number(amount) * 10 ** MLCNS_DECIMALS);
+}
+
+// mlptsPerMlcnsToNumber converts the on-chain 6-decimal fixed-point
+// `mlpts_per_mlcns` governance param into a floating-point ratio suitable
+// for preview math in the frontend and backend /convert settle.
+// Example: 3_200_000 (fixed) -> 3.2 (float)
+function mlptsPerMlcnsToNumber(fixed) {
+  const f = Number(fixed || 0);
+  if (!Number.isFinite(f) || f <= 0) {
+    return DEFAULT_MLPTS_PER_MLCNS_FIXED / MLPTS_PER_MLCNS_SCALE;
+  }
+  return f / MLPTS_PER_MLCNS_SCALE;
+}
+
+function getMlptsPerMlcnsScale() {
+  return MLPTS_PER_MLCNS_SCALE;
+}
+
+// getChainParams returns the current on-chain x/mlcoin governance params.
+// Source of truth for: MinStakeAmount, MlptsPerMlcns, BurnWallet.
+// Falls back to safe compiled defaults if REST is unreachable, callers
+// can detect the fallback via result.source === 'fallback'.
+async function getChainParams() {
+  const cache = getCacheService();
+  const cacheKey = CacheService.Keys.mlcoinParams();
+  if (cache) {
+    const cached = await cache.get(cacheKey);
+    if (cached) return cached;
+  }
+
+  const url = `${CHAIN_REST}/tmp/marketplace/mlcoin/v1/params`;
+  try {
+    const { data } = await blockchainBreaker.execute(async () => {
+      return await axios.get(url, { timeout: 8000 });
+    });
+    const p = data.params || data.Params || {};
+    const minStake = Number(p.min_stake_amount ?? p.minStakeAmount ?? 0);
+    const mlptsFixed = Number(p.mlpts_per_mlcns ?? p.mlptsPerMlcns ?? 0);
+    const result = {
+      source: 'chain',
+      burn_wallet: p.burn_wallet || p.burnWallet || '',
+      min_stake_amount: minStake > 0 ? minStake : DEFAULT_MIN_STAKE_AMOUNT,
+      mlpts_per_mlcns: mlptsFixed > 0 ? mlptsFixed : DEFAULT_MLPTS_PER_MLCNS_FIXED,
+    };
+    if (cache) {
+      await cache.set(cacheKey, result, CacheService.TTL.MEDIUM);
+    }
+    return result;
+  } catch {
+    const fallback = {
+      source: 'fallback',
+      burn_wallet: '',
+      min_stake_amount: DEFAULT_MIN_STAKE_AMOUNT,
+      mlpts_per_mlcns: DEFAULT_MLPTS_PER_MLCNS_FIXED,
+    };
+    if (cache) {
+      await cache.set(cacheKey, fallback, CacheService.TTL.SHORT);
+    }
+    return fallback;
+  }
 }
 
 async function getWalletBalance(address) {
@@ -188,8 +258,14 @@ function isValidAddress(address) {
 
 module.exports = {
   MLCNS_DECIMALS,
+  DEFAULT_MLPTS_PER_MLCNS_FIXED,
+  MLPTS_PER_MLCNS_SCALE,
+  DEFAULT_MIN_STAKE_AMOUNT,
   fromBaseUnits,
   toBaseUnits,
+  mlptsPerMlcnsToNumber,
+  getMlptsPerMlcnsScale,
+  getChainParams,
   getWalletBalance,
   getMarketPrice,
   getActivityMetrics,

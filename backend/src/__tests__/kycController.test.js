@@ -12,11 +12,21 @@ const path = require('path');
 
 jest.mock('../models/kyc');
 jest.mock('../models/user');
+jest.mock('../models/AuditLog', () => ({ create: jest.fn().mockResolvedValue({}) }));
 jest.mock('../middleware/upload', () => ({ KYC_UPLOAD_DIR: '/fake/kyc/uploads' }));
 
 const KYC = require('../models/kyc');
 const User = require('../models/user');
+const AuditLog = require('../models/AuditLog');
 const kycCtrl = require('../controllers/kycController');
+
+// automock replaces KYC.decryptKycPii (a plain function property on the
+// real model, not a Mongoose method automock knows how to preserve) with a
+// jest.fn() that returns undefined — this file's fixtures are already
+// plaintext (they're testing controller logic, not the real encryption,
+// which fieldEncryption.test.js and kyc.test.js cover directly), so a
+// passthrough is the correct stand-in here.
+KYC.decryptKycPii = jest.fn((k) => k);
 
 // kycController.js's exports are now asyncHandler-wrapped (see errorHandler.js):
 // error paths throw AppError instead of calling res.status().json() directly,
@@ -61,6 +71,13 @@ function validKycBody(overrides = {}) {
 describe('kycController', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    // resetAllMocks clears implementations too — getDocument calls
+    // AuditLog.create(...).catch(...) without awaiting it, so this must
+    // resolve (not return undefined) or that unguarded .catch() throws.
+    AuditLog.create.mockResolvedValue({});
+    // Same reset problem for decryptKycPii — see the module-scope comment
+    // above; a passthrough is correct since fixtures here are plaintext.
+    KYC.decryptKycPii.mockImplementation((k) => k);
   });
 
   describe('uploadDocument', () => {
@@ -109,8 +126,8 @@ describe('kycController', () => {
       expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 404 }));
     });
 
-    test('lets the owner stream their own document', async () => {
-      KYC.findById.mockResolvedValue({ userId: 'owner1', idDocumentUrl: 'owner1-111-id.png' });
+    test('lets the owner stream their own document and logs it as a self-view', async () => {
+      KYC.findById.mockResolvedValue({ _id: 'kyc1', userId: 'owner1', idDocumentUrl: 'owner1-111-id.png' });
       const req = { params: { kycId: 'k1' }, user: { id: 'owner1' } };
       const res = mockRes();
       await kycCtrl.getDocument(req, res);
@@ -118,15 +135,29 @@ describe('kycController', () => {
         path.join('/fake/kyc/uploads', 'owner1-111-id.png'),
         expect.any(Function)
       );
+      expect(AuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'kyc_document_viewed',
+          actorType: 'user',
+          details: expect.objectContaining({ viewedOwnDocument: true }),
+        })
+      );
     });
 
-    test('lets an admin stream another user\'s document', async () => {
-      KYC.findById.mockResolvedValue({ userId: 'owner1', idDocumentUrl: 'owner1-111-id.png' });
+    test('lets an admin stream another user\'s document and logs it as an admin access', async () => {
+      KYC.findById.mockResolvedValue({ _id: 'kyc1', userId: 'owner1', idDocumentUrl: 'owner1-111-id.png' });
       const req = { params: { kycId: 'k1' }, user: { id: 'admin1', role: 'admin' } };
       const res = mockRes();
       await kycCtrl.getDocument(req, res);
       expect(res.sendFile).toHaveBeenCalled();
       expect(res.status).not.toHaveBeenCalledWith(403);
+      expect(AuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'kyc_document_viewed',
+          actorType: 'admin',
+          details: expect.objectContaining({ subjectUserId: 'owner1', viewedOwnDocument: false }),
+        })
+      );
     });
 
     test('regression: a crafted idDocumentUrl cannot escape the upload directory', async () => {

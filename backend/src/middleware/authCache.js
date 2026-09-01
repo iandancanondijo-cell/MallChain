@@ -13,6 +13,7 @@
  */
 const IORedis = require('ioredis')
 const logger = require('./../utils/logger')
+const { redisTlsOptions } = require('../utils/redisTlsOptions')
 
 const TTL_SECONDS = 120
 const TEST_MODE = process.env.NODE_ENV === 'test'
@@ -29,6 +30,7 @@ function getClient() {
       enableOfflineQueue: false,
       retryStrategy: null,
       connectTimeout: Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 2000),
+      ...redisTlsOptions(),
     })
     redis.on('error', err => {
       if (err && err.code === 'ECONNREFUSED') return

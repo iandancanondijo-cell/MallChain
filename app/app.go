@@ -62,6 +62,24 @@ import (
 	vaultmodulekeeper "marketplace/x/vault/keeper"
 	wasmmodulekeeper "marketplace/x/wasm/keeper"
 	wasmbridgemodulekeeper "marketplace/x/wasmbridge/keeper"
+
+	// C5: Custom module packages registered as AppModuleBasic in AppConfig()
+	// for gRPC-gateway REST descriptor registration. Packages that expose a
+	// standalone AppModuleBasic{} use it directly. Packages that implement
+	// AppModuleBasic on AppModule directly use a zero-value AppModule{} —
+	// RegisterGRPCGatewayRoutes only reads from <pkg>/types, so no cdc/keeper
+	// state is needed at that point.
+	badgemod "marketplace/x/badge/module"
+	crosschainmod "marketplace/x/crosschain/module"
+	dexmod "marketplace/x/dex"
+	govmod "marketplace/x/governance"
+	mallcoinmod "marketplace/x/mallcoin/module"
+	mallpointsmod "marketplace/x/mallpoints/module"
+	marketplacemod "marketplace/x/marketplace"
+	mlcoinmod "marketplace/x/mlcoin/module"
+	vaultmod "marketplace/x/vault/module"
+	wasmmod "marketplace/x/wasm/module"
+	wasmbridgemod "marketplace/x/wasmbridge/module"
 )
 
 const (
@@ -153,8 +171,34 @@ func AppConfig() depinject.Config {
 		appConfig,
 		depinject.Supply(
 			// supply custom module basics
+			//
+			// C5: Registered all 11 custom modules' AppModuleBasic here so the
+			// Cosmos SDK v0.53 runtime walks them and invokes
+			// RegisterGRPCGatewayRoutes during RegisterAPIRoutes. Before this
+			// patch, only genutil was registered → all custom REST/gRPC-gateway
+			// endpoints silently unmounted.
 			map[string]module.AppModuleBasic{
 				genutiltypes.ModuleName: genutil.NewAppModuleBasic(genutiltypes.DefaultMessageValidator),
+
+				// ---- Custom modules (Mallchain) ----
+				// Modules with a dedicated AppModuleBasic type (no cdc/keeper
+				// required): instantiate the struct directly.
+				"crosschain":  crosschainmod.AppModuleBasic{},
+				"dex":         dexmod.AppModuleBasic{},
+				"governance":  govmod.AppModuleBasic{},
+				"marketplace": marketplacemod.AppModuleBasic{},
+				"wasm":        wasmmod.AppModuleBasic{},
+				"wasmbridge":  wasmbridgemod.AppModuleBasic{},
+
+				// Modules that implement AppModuleBasic directly on AppModule:
+				// a zero-value AppModule{} is sufficient here because
+				// RegisterGRPCGatewayRoutes only reads from <pkg>/types (no
+				// receiver fields touched).
+				"badge":      badgemod.AppModule{},
+				"mallcoin":   mallcoinmod.AppModule{},
+				"mallpoints": mallpointsmod.AppModule{},
+				"mlcoin":     mlcoinmod.AppModule{},
+				"vault":      vaultmod.AppModule{},
 			},
 		),
 	)
@@ -296,7 +340,7 @@ func New(
 					}
 				}
 			}
-			
+
 			// Fall back to generic key if no sender found
 			if sender == "" {
 				sender = "unknown"
@@ -306,7 +350,7 @@ func New(
 			rlKeyPrefix := []byte("ante:rl:sender:")
 			rlKey := append(rlKeyPrefix, []byte(sender)...)
 			rlKey = append(rlKey, []byte(":height")...)
-			
+
 			val := store.Get(rlKey)
 			var storedHeight uint64
 			var count uint64
@@ -462,6 +506,8 @@ func New(
 		}
 		return app.App.InitChainer(ctx, req)
 	})
+
+	app.setupUpgradeHandlers()
 
 	if err := app.Load(loadLatest); err != nil {
 		panic(err)

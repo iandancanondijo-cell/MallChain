@@ -1,39 +1,121 @@
+# Before first run, generate the replica-set internal-auth keyfile the
+# mongo service below mounts (never commit this — see .gitignore):
+#   openssl rand -base64 756 > mongo-keyfile && chmod 400 mongo-keyfile
 version: '3.8'
 services:
   mongo:
     image: mongo:6.0
     restart: unless-stopped
+    # --replSet (production-readiness D1): a replica set is a prerequisite
+    # for both real HA (secondaries to fail over to) and continuous, oplog-
+    # based point-in-time recovery (see scripts/oplog-backup.js) — neither
+    # is possible against a single standalone mongod, no matter how often
+    # mongodump runs. A one-node replica set is a real step toward both,
+    # even before a second node/region is added; keyFile secures
+    # intra-replica-set auth (required once auth + replSet are both on).
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile"]
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD must be set}
       MONGO_INITDB_DATABASE: marketplace
     volumes:
       - mongo-data:/data/db
-      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      - ./mongo-keyfile:/etc/mongo-keyfile:ro
     ports:
       - "127.0.0.1:27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: initiates the single-node replica set and creates the
+  # 'mallchain' app user, then exits. Docker's docker-entrypoint-initdb.d
+  # mechanism (used previously) does NOT reliably run once --replSet is on
+  # the mongod command — it depends on this node already being PRIMARY,
+  # which it isn't yet on a first boot — so that init step moved here,
+  # explicitly sequenced after the replica set actually exists.
+  mongo-init:
+    image: mongo:6.0
+    restart: "no"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD must be set}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD must be set}
+    volumes:
+      - ./scripts/mongo-rs-init.sh:/mongo-rs-init.sh:ro
+      - ./mongo-init.js:/mongo-init.js:ro
+    entrypoint: ["bash", "/mongo-rs-init.sh"]
+
+  redis:
+    # Backend requires Redis for JWT revocation (middleware/tokenDenylist.js),
+    # the M-Pesa callback DLQ, rate limiting, and cacheService — not optional.
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  marketplaced:
+    # First run only: the chain-data volume starts empty, and (deliberately —
+    # see the root Dockerfile's comment) this image does not generate a
+    # genesis/validator key on its own. Before the first `docker-compose up`
+    # of this service, initialize it once:
+    #   docker-compose run --rm --entrypoint marketplaced marketplaced \
+    #     init validator1 --home=/home/marketplaced/.marketplaced
+    # then copy a real genesis.json into the chain-data volume (see
+    # scripts/start_blockchain.sh for the equivalent non-Docker flow).
+    build: .
+    restart: unless-stopped
+    volumes:
+      - chain-data:/home/marketplaced/.marketplaced
+    ports:
+      - "127.0.0.1:26657:26657"
+      - "127.0.0.1:1317:1317"
 
   backend:
     build: ./backend
+    restart: unless-stopped
     environment:
-      - MONGO_URI=mongodb://mallchain:${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD must be set}@mongo:27017/marketplace?authSource=admin
+      - MONGO_URI=mongodb://mallchain:${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD must be set}@mongo:27017/marketplace?authSource=admin&replicaSet=rs0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CHAIN_RPC=http://marketplaced:26657
+      - CHAIN_REST_URL=http://marketplaced:1317
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set}
       - SESSION_SECRET=${SESSION_SECRET:?SESSION_SECRET must be set}
-      - FRONTEND_URL=http://localhost:5173
+      - FRONTEND_URL=http://localhost:8080
       - ADMIN_API_KEY=${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
+      - PAYMENT_WEBHOOK_SECRET=${PAYMENT_WEBHOOK_SECRET:?PAYMENT_WEBHOOK_SECRET must be set}
     ports:
       - "127.0.0.1:4000:4000"
     depends_on:
-      - mongo
+      mongo-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      marketplaced:
+        condition: service_started
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./mallchain-os-v14
+      args:
+        # Baked into the static bundle at build time (see Dockerfile) — not
+        # a runtime environment:, which nginx serving a prebuilt bundle
+        # would simply ignore.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:4000}
+    restart: unless-stopped
     ports:
-      - "5173:5173"
-    environment:
-      - VITE_API_BASE=http://localhost:4000
+      - "8080:8080"
     depends_on:
       - backend
 
 volumes:
   mongo-data:
+  redis-data:
+  chain-data:

@@ -25,16 +25,26 @@ function convertMessage(address, timestamp) {
   return `Convert Mallpoints to Mallcoin for ${address} at ${timestamp}`;
 }
 
+/** Signed text for proving ownership before linking a wallet address to an account. */
+function linkWalletMessage(address, timestamp) {
+  return `Link wallet ${address} to my Mallchain account at ${timestamp}`;
+}
+
+/** Signed text for proving ownership before a socket subscribes to a wallet's live updates. */
+function subscribeWalletMessage(address, timestamp) {
+  return `Subscribe to live updates for ${address} at ${timestamp}`;
+}
+
 /**
  * Verifies a signature proves control of `address` for this specific
- * convert request. Two things must both hold:
+ * `message`. Two things must both hold:
  *  1. The signature is cryptographically valid over the exact signed doc.
  *  2. The pubkey that produced it actually derives to `address` under
  *     `addressPrefix` — otherwise a valid signature from ANY wallet could
- *     be replayed to "authorize" a conversion for someone else's address.
+ *     be replayed to "authorize" an action for someone else's address.
  */
-function verifyConvertSignature({ address, timestamp, pubKeyBase64, signatureBase64, addressPrefix }) {
-  if (!address || !timestamp || !pubKeyBase64 || !signatureBase64 || !addressPrefix) return false;
+function verifyOwnershipSignature({ address, message, pubKeyBase64, signatureBase64, addressPrefix }) {
+  if (!address || !message || !pubKeyBase64 || !signatureBase64 || !addressPrefix) return false;
 
   let pubkeyBytes;
   let signatureBytes;
@@ -47,7 +57,7 @@ function verifyConvertSignature({ address, timestamp, pubKeyBase64, signatureBas
   if (signatureBytes.length !== 64) return false;
 
   try {
-    const signDoc = buildSignDoc(address, convertMessage(address, timestamp));
+    const signDoc = buildSignDoc(address, message);
     const serialized = serializeSignDoc(signDoc);
     const hash = new Sha256(serialized).digest();
 
@@ -61,4 +71,46 @@ function verifyConvertSignature({ address, timestamp, pubKeyBase64, signatureBas
   }
 }
 
-module.exports = { verifyConvertSignature, convertMessage };
+/** Back-compat wrapper — same as before for mallpoints.js's convert flow. */
+function verifyConvertSignature({ address, timestamp, pubKeyBase64, signatureBase64, addressPrefix }) {
+  if (!timestamp) return false;
+  return verifyOwnershipSignature({
+    address,
+    message: convertMessage(address, timestamp),
+    pubKeyBase64,
+    signatureBase64,
+    addressPrefix,
+  });
+}
+
+function verifyLinkWalletSignature({ address, timestamp, pubKeyBase64, signatureBase64, addressPrefix }) {
+  if (!timestamp) return false;
+  return verifyOwnershipSignature({
+    address,
+    message: linkWalletMessage(address, timestamp),
+    pubKeyBase64,
+    signatureBase64,
+    addressPrefix,
+  });
+}
+
+function verifySubscribeWalletSignature({ address, timestamp, pubKeyBase64, signatureBase64, addressPrefix }) {
+  if (!timestamp) return false;
+  return verifyOwnershipSignature({
+    address,
+    message: subscribeWalletMessage(address, timestamp),
+    pubKeyBase64,
+    signatureBase64,
+    addressPrefix,
+  });
+}
+
+module.exports = {
+  verifyOwnershipSignature,
+  verifyConvertSignature,
+  verifyLinkWalletSignature,
+  verifySubscribeWalletSignature,
+  convertMessage,
+  linkWalletMessage,
+  subscribeWalletMessage,
+};

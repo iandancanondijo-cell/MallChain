@@ -1,5 +1,6 @@
 const IORedis = require('ioredis')
 const crypto = require('crypto')
+const { redisTlsOptions } = require('./redisTlsOptions')
 
 let redis = null
 function getRedisClient() {
@@ -11,7 +12,8 @@ function getRedisClient() {
       maxRetriesPerRequest: 0,
       enableOfflineQueue: false,
       retryStrategy: null,
-      connectTimeout: Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 2000)
+      connectTimeout: Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 2000),
+      ...redisTlsOptions(),
     })
 
     redis.on('error', err => {

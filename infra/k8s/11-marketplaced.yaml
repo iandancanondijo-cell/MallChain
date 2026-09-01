@@ -1,0 +1,62 @@
+# A single node/validator. Running multiple marketplaced validators is a
+# genesis/networking topology decision (peer addresses, voting power
+# distribution) that belongs in a real deployment runbook, not templated
+# here — bumping `replicas` on this StatefulSet alone would NOT produce a
+# working multi-validator set.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: marketplaced
+  namespace: mallchain
+spec:
+  serviceName: marketplaced
+  replicas: 1
+  selector:
+    matchLabels: { app: marketplaced }
+  template:
+    metadata:
+      labels: { app: marketplaced }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: marketplaced
+          image: mallchain-marketplaced:latest # replace with the real registry path + tag (built from the root Dockerfile)
+          ports:
+            - { name: p2p, containerPort: 26656 }
+            - { name: rpc, containerPort: 26657 }
+            - { name: rest, containerPort: 1317 }
+          volumeMounts:
+            - { name: chain-data, mountPath: /home/marketplaced/.marketplaced }
+          readinessProbe:
+            httpGet: { path: /status, port: 26657 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /status, port: 26657 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: { cpu: '500m', memory: '512Mi' }
+            limits: { cpu: '2', memory: '2Gi' }
+  volumeClaimTemplates:
+    - metadata: { name: chain-data }
+      spec:
+        accessModes: ['ReadWriteOnce']
+        resources:
+          requests:
+            storage: 100Gi # chain data grows monotonically — size for actual expected chain growth, not a guess
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: marketplaced
+  namespace: mallchain
+spec:
+  selector: { app: marketplaced }
+  clusterIP: None # headless — StatefulSet pods addressed individually, matching how validator peering works
+  ports:
+    - { name: p2p, port: 26656 }
+    - { name: rpc, port: 26657 }
+    - { name: rest, port: 1317 }

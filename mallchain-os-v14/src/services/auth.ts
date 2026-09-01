@@ -12,10 +12,19 @@
  * - Type-safe token access
  */
 
+import { Secp256k1HdWallet, makeSignDoc } from '@cosmjs/amino';
+import { toBase64, toUtf8 } from '@cosmjs/encoding';
 import { store } from '../store/store';
 import { api } from './api';
+import { chain } from './config';
+import { requestMnemonic } from './mnemonicAccess';
 
 const TOKEN_KEY = 'token';
+
+/** Must match backend/src/mallwallet/security/verifyAdr036.js's linkWalletMessage() exactly. */
+function linkWalletMessage(address: string, timestamp: string): string {
+  return `Link wallet ${address} to my Mallchain account at ${timestamp}`;
+}
 
 /**
  * JWT payload structure
@@ -188,11 +197,35 @@ class AuthService {
    * -chain, but /me kept reporting hasBadge:false because the account's
    * walletAddress was never populated). Safe to call repeatedly — the
    * backend treats re-linking the same address as a no-op.
+   *
+   * The backend requires an ADR-036 signature proving control of `address`
+   * (a well-formed address alone used to be enough, letting anyone link a
+   * stranger's address to their own account). Prompts for the wallet PIN via
+   * requestMnemonic() to produce it; if the user cancels or no PIN challenge
+   * host is mounted, this just no-ops like any other failure here — linking
+   * is best-effort background sync, never something that should block the UI.
    */
   async linkWallet(address: string): Promise<void> {
     if (!address || !this.getToken()) return;
     try {
-      await api.post('/api/auth/link-wallet', { address });
+      const mnemonic = await requestMnemonic();
+      if (!mnemonic) return;
+
+      const wallet = await Secp256k1HdWallet.fromMnemonic(mnemonic, { prefix: chain.addressPrefix });
+      const timestamp = new Date().toISOString();
+      const msg = {
+        type: 'sign/MsgSignData',
+        value: { signer: address, data: toBase64(toUtf8(linkWalletMessage(address, timestamp))) },
+      };
+      const signDoc = makeSignDoc([msg], { gas: '0', amount: [] }, '', '', 0, 0);
+      const { signature } = await wallet.signAmino(address, signDoc);
+
+      await api.post('/api/auth/link-wallet', {
+        address,
+        timestamp,
+        pubKey: signature.pub_key.value,
+        signature: signature.signature,
+      });
     } catch (error) {
       console.warn('[Auth] Failed to link wallet address:', (error as Error).message);
     }
@@ -205,8 +238,21 @@ class AuthService {
    * logout on a 401. Pass `navigate` when called from within a routed
    * component; otherwise falls back to setting the hash directly (the app's
    * router is itself just a `hashchange` listener, so this is equivalent).
+   *
+   * Also revokes the token server-side (POST /api/auth/logout) — previously
+   * this only ever cleared the token client-side, leaving the JWT itself
+   * valid on the backend until it naturally expired. Fired in the
+   * background (not awaited): the local sign-out must happen instantly
+   * regardless of network conditions, and there's nothing left to roll back
+   * once the token's already been cleared here.
    */
   logout(navigate?: (path: string) => void): void {
+    const token = this.getToken();
+    if (token) {
+      api.post('/api/auth/logout', {}).catch(() => {
+        // best-effort — the token is discarded client-side either way
+      });
+    }
     this.clearToken();
     store.reset();
     if (navigate) {
@@ -214,6 +260,18 @@ class AuthService {
     } else {
       window.location.hash = '#/landing';
     }
+  }
+
+  /**
+   * "Sign out everywhere": revokes every token issued to this account (not
+   * just the calling device's), then performs the same local logout as
+   * above. Awaited (unlike logout()) so the caller can show the result of
+   * the revocation itself succeeding or failing, rather than assuming it did.
+   */
+  async logoutEverywhere(navigate?: (path: string) => void): Promise<boolean> {
+    const res = await api.post('/api/auth/logout-everywhere', {});
+    this.logout(navigate);
+    return res.ok;
   }
 }
 

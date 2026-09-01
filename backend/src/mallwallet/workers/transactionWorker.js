@@ -3,6 +3,7 @@ const getRedisConnection = require('../queue/redis')
 const axios = require('axios')
 const Tx = require('../../models/transaction')
 const register = require('../monitoring/prometheus')
+const logger = require('../../utils/logger')
 
 const CHAIN_REST = process.env.CHAIN_REST || 'http://127.0.0.1:1317'
 const txJobCounter = register.txJobCounter
@@ -40,25 +41,47 @@ const worker = new Worker(
 )
 
 worker.on('completed', job => {
-  console.log(`Job ${job.id} completed`)
+  logger.info('transactionWorker', `Job ${job.id} completed`)
 })
 
 worker.on('failed', async (job, err) => {
-  console.error(`Job ${job.id} failed`, err)
-  if (job.data && job.data.txId) {
-    try {
+  txJobCounter.inc({ status: 'failed' })
+  if (!job) return
+  const attemptsMade = Number(job.attemptsMade || 0)
+  const maxAttempts = Number(job.opts?.attempts || 3)
+  const finalFailure = attemptsMade + 1 >= maxAttempts
+  try {
+    if (job.data && job.data.txId) {
       const tx = await Tx.findById(job.data.txId)
       if (tx) {
-        tx.status = 'failed'
+        tx.status = finalFailure ? 'failed' : 'retrying'
         tx.error = err?.message || 'unknown error'
         tx.updatedAt = Date.now()
         await tx.save()
       }
-    } catch (saveError) {
-      console.error('Error saving failed transaction status', saveError)
     }
+  } catch (saveError) {
+    logger.error(
+      'transactionWorker',
+      `Error saving failed transaction status after job ${job.id} failure`,
+      saveError,
+      { txId: job.data?.txId },
+    )
   }
-  txJobCounter.inc({ status: 'failed' })
+  if (finalFailure) {
+    logger.error(
+      'transactionWorker',
+      `Job ${job.id} (tx ${job.data?.txId || 'unknown'}) exhausted all retries — tx moved to failed`,
+      err,
+      { jobId: job.id, txId: job.data?.txId, attemptsMade: attemptsMade + 1, maxAttempts },
+    )
+  } else {
+    logger.warn(
+      'transactionWorker',
+      `Job ${job.id} (tx ${job.data?.txId || 'unknown'}) attempt ${attemptsMade + 1}/${maxAttempts} failed — will retry`,
+      { jobId: job.id, txId: job.data?.txId, attemptsMade: attemptsMade + 1, maxAttempts },
+    )
+  }
 })
 
 module.exports = worker

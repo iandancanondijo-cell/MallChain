@@ -13,6 +13,8 @@ const LiquidityReconciliationSchema = new mongoose.Schema({
   reason: { type: String }, // error message from failed liquidity add
   status: { type: String, enum: ['detected', 'compensating', 'pending_manual', 'resolved'], default: 'detected' },
   compensationTx: { type: String }, // tx hash of compensation (e.g., refund or rollback)
+  resolutionNote: { type: String }, // admin's account of how this was actually handled
+  resolvedBy: { type: String }, // admin user id who resolved it
   createdAt: { type: Date, default: Date.now },
   resolvedAt: { type: Date },
 });

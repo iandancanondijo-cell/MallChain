@@ -13,11 +13,20 @@ jest.mock('../models/user', () => ({
 jest.mock('../services/badgeService', () => ({
   getUserBadgeInfo: jest.fn(),
 }));
+// verifyAdr036.js pulls in @cosmjs/amino -> @cosmjs/crypto, whose argon2
+// support is an ESM-only transitive dependency Jest's default CJS
+// resolution can't parse (same reason mallpointsConvert.test.js mocks it).
+// linkWallet requires it lazily inside the handler specifically so this
+// mock only has to cover this one test file.
+jest.mock('../mallwallet/security/verifyAdr036', () => ({
+  verifyLinkWalletSignature: jest.fn(),
+}));
 
 process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long!!!';
 
 const User = require('../models/user');
 const { getUserBadgeInfo } = require('../services/badgeService');
+const { verifyLinkWalletSignature } = require('../mallwallet/security/verifyAdr036');
 const authController = require('../controllers/authController');
 
 const VALID_ADDRESS = 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg';
@@ -64,7 +73,48 @@ describe('POST /api/auth/link-wallet', () => {
     expect(res.status).toBe(400);
   });
 
-  test('links a valid address to the authenticated user', async () => {
+  test('rejects a request missing any signature field', async () => {
+    const res = await request(app)
+      .post('/api/auth/link-wallet')
+      .set(authHeader())
+      .send({ address: VALID_ADDRESS });
+    expect(res.status).toBe(401);
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('rejects an expired signature timestamp', async () => {
+    const res = await request(app)
+      .post('/api/auth/link-wallet')
+      .set(authHeader())
+      .send({
+        address: VALID_ADDRESS,
+        timestamp: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+        pubKey: 'fake-pubkey-b64',
+        signature: 'fake-signature-b64',
+      });
+    expect(res.status).toBe(401);
+    expect(verifyLinkWalletSignature).not.toHaveBeenCalled();
+  });
+
+  test('rejects when verifyLinkWalletSignature reports the signature invalid', async () => {
+    verifyLinkWalletSignature.mockReturnValue(false);
+
+    const res = await request(app)
+      .post('/api/auth/link-wallet')
+      .set(authHeader())
+      .send({
+        address: VALID_ADDRESS,
+        timestamp: new Date().toISOString(),
+        pubKey: 'fake-pubkey-b64',
+        signature: 'fake-signature-b64',
+      });
+
+    expect(res.status).toBe(401);
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('links a valid address to the authenticated user once ownership is verified', async () => {
+    verifyLinkWalletSignature.mockReturnValue(true);
     User.findByIdAndUpdate.mockReturnValue({
       select: jest.fn().mockResolvedValue({ _id: 'user-1', walletAddress: VALID_ADDRESS }),
     });
@@ -72,10 +122,18 @@ describe('POST /api/auth/link-wallet', () => {
     const res = await request(app)
       .post('/api/auth/link-wallet')
       .set(authHeader('user-1'))
-      .send({ address: VALID_ADDRESS });
+      .send({
+        address: VALID_ADDRESS,
+        timestamp: new Date().toISOString(),
+        pubKey: 'fake-pubkey-b64',
+        signature: 'fake-signature-b64',
+      });
 
     expect(res.status).toBe(200);
     expect(res.body.walletAddress).toBe(VALID_ADDRESS);
+    expect(verifyLinkWalletSignature).toHaveBeenCalledWith(
+      expect.objectContaining({ address: VALID_ADDRESS, pubKeyBase64: 'fake-pubkey-b64', signatureBase64: 'fake-signature-b64' })
+    );
     expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
       'user-1',
       { walletAddress: VALID_ADDRESS },

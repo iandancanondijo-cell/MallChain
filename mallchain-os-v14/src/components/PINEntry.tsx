@@ -110,7 +110,7 @@ export function PINEntry({
   const isLocked = attempts >= maxAttempts;
 
   return (
-    <div className={`pin-entry-wrapper ${isLocked ? 'locked' : ''}`}>
+    <div className={`pin-entry-wrapper ${isLocked ? 'locked' : ''}`} role="group" aria-label="PIN entry">
       {/* PIN Input Field */}
       <div className="pin-input-container">
         <input

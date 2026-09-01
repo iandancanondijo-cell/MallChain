@@ -153,6 +153,12 @@ export const Help = () => {
     { q: 'What is the validator stake?', a: '500 MALL locked while validating — 25% slashable at strike tier 4.' },
     { q: 'How does escrow work?', a: 'Funds lock in the Escrow contract at checkout and release when delivery is confirmed.' },
     { q: 'How do I appeal a rejection?', a: 'Every rejection is appealable once — resubmit from your My Tasks page.' },
+    { q: 'What is my recovery phrase, and who should I share it with?', a: 'It\'s the master key to your wallet — anyone with it can move your funds. We never ask for it, by email, chat, or support ticket. Set a PIN in Security Settings so it\'s encrypted at rest instead of stored in plain text.' },
+    { q: 'Why do I need to complete KYC?', a: 'Some actions (larger buys/cash-outs) require identity verification for regulatory compliance. Submit your ID under Settings → Verification; most reviews complete within 1-2 business days.' },
+    { q: 'How does buying/cashing out with M-Pesa work?', a: 'Buying: reserve a quote, then complete the STK push prompt on your phone — MLCNS credits once Safaricom confirms payment. Cashing out: your MLCNS is burned on-chain first, then a KES payout is sent to your phone; large amounts may be held for manual review before payout.' },
+    { q: 'Can I export or delete my account data?', a: 'Yes — under Security Settings, you can download a full export of everything linked to your account, or request permanent erasure. Erasure anonymizes your account and personal details immediately; some financial records are retained in redacted form as required for fraud/compliance record-keeping.' },
+    { q: 'Why is a feature showing "temporarily paused"?', a: 'That means maintenance mode is active for that specific feature — usually a brief, deliberate pause during an incident or upstream provider issue, not something wrong with your account. Check back shortly.' },
+    { q: 'My account shows as frozen — what does that mean?', a: 'An admin has restricted your account, usually pending a fraud/policy review. Most actions are blocked while frozen. Contact support if you believe this is a mistake.' },
   ];
   return (
     <div>

@@ -2,23 +2,70 @@
  * Shared UI primitives: Modal, Toast system, StatusChip, ScoreRing,
  * Chart (bar/line), Stepper, EmptyState, Spinner button helper.
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { BadgeCheck } from 'lucide-react';
 import { store } from '../store/store';
 
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /* ---------------- Modal ---------------- */
 export function Modal({ title, onClose, wide, children }: { title: string; onClose: () => void; wide?: boolean; children: ReactNode }) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', esc);
-    return () => window.removeEventListener('keydown', esc);
+    // Focus was somewhere in the page (whatever triggered this modal) —
+    // restore it there on close instead of leaving focus on <body>/wherever
+    // the modal's own last-focused element happened to be, which is what a
+    // keyboard/screen-reader user would otherwise be silently dropped into.
+    const trigger = document.activeElement as HTMLElement | null;
+
+    const first = dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+    (first || dialogRef.current)?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onClose(); return; }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (focusable.length === 0) return;
+      const firstEl = focusable[0];
+      const lastEl = focusable[focusable.length - 1];
+
+      // Cycle focus within the dialog — without this a Tab/Shift+Tab
+      // eventually lands back on the sidebar/topbar/background route while
+      // the modal is still open and visually blocking it.
+      if (e.shiftKey && document.activeElement === firstEl) {
+        e.preventDefault();
+        lastEl.focus();
+      } else if (!e.shiftKey && document.activeElement === lastEl) {
+        e.preventDefault();
+        firstEl.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      trigger?.focus();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose]);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className={'modal' + (wide ? ' wide' : '')} onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        className={'modal' + (wide ? ' wide' : '')}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
         <div className="modal-head">
-          <h2>{title}</h2>
-          <span className="modal-close" onClick={onClose}>✕</span>
+          <h2 id={titleId}>{title}</h2>
+          <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>✕</button>
         </div>
         {children}
       </div>
@@ -27,14 +74,55 @@ export function Modal({ title, onClose, wide, children }: { title: string; onClo
 }
 
 /* ---------------- Toast system ---------------- */
-export interface ToastItem { id: number; text: string; ok?: boolean }
+export interface ToastAction { label: string; onClick: () => void }
+export type ToastKind = 'success' | 'error' | 'info' | 'warning';
+export interface ToastItem { id: number; text: string; ok?: boolean; kind?: ToastKind; action?: ToastAction; durationMs?: number }
 export const toastBus = {
   listeners: new Set<(t: ToastItem) => void>(),
   emit(t: ToastItem) { this.listeners.forEach((fn) => fn(t)); },
 };
 let toastSeq = 1;
+
+/** Plain success/error toast — kept boolean for the ~50 existing call sites. Use toastKind() for info/warning. */
 export function toast(text: string, ok = true) {
-  toastBus.emit({ id: toastSeq++, text, ok });
+  toastBus.emit({ id: toastSeq++, text, ok, kind: ok ? 'success' : 'error' });
+}
+
+/**
+ * A toast for states that are neither success nor failure — "info" for
+ * neutral/expected notices (e.g. a feature window opening), "warning" for
+ * something the user should act on but that isn't itself an error (e.g. a
+ * pending security migration). Previously every non-success toast (this
+ * included) rendered as a red error toast, which is what "PIN migration
+ * required" — a routine one-time prompt, not a failure — looked like.
+ */
+export function toastKind(text: string, kind: 'info' | 'warning', durationMs?: number) {
+  toastBus.emit({ id: toastSeq++, text, ok: kind !== 'warning', kind, durationMs });
+}
+
+/** A toast with an action button (e.g. "Undo"), shown longer than a plain toast so there's time to act on it. */
+export function toastAction(text: string, action: ToastAction, ok = true, durationMs = 6000) {
+  toastBus.emit({ id: toastSeq++, text, ok, kind: ok ? 'success' : 'error', action, durationMs });
+}
+
+/**
+ * Gmail-style undo: `doAction` is delayed by `windowMs` instead of running
+ * immediately, with an "Undo" toast offering to cancel it before it fires.
+ * For actions cheap/safe to reverse (badge grant, void issuance, KYC
+ * decision) rather than truly irreversible ones (ban/delete), which use a
+ * confirm modal instead.
+ */
+export function scheduleUndoable(doAction: () => void | Promise<void>, message: string, windowMs = 5000) {
+  let cancelled = false;
+  const timer = setTimeout(() => { if (!cancelled) doAction(); }, windowMs);
+  toastAction(message, {
+    label: 'Undo',
+    onClick: () => {
+      cancelled = true;
+      clearTimeout(timer);
+      toast('Undone', true);
+    },
+  }, true, windowMs + 1000);
 }
 
 export function ToastHost() {
@@ -42,20 +130,36 @@ export function ToastHost() {
   useEffect(() => {
     const fn = (t: ToastItem) => {
       setItems((prev) => [...prev, t]);
-      setTimeout(() => setItems((prev) => prev.filter((x) => x.id !== t.id)), 4200);
+      setTimeout(() => setItems((prev) => prev.filter((x) => x.id !== t.id)), t.durationMs ?? 4200);
     };
     toastBus.listeners.add(fn);
     return () => { toastBus.listeners.delete(fn); };
   }, []);
+  const iconFor = (kind: ToastKind): string =>
+    kind === 'error' ? '✕' : kind === 'warning' ? '⚠' : kind === 'info' ? 'ℹ' : '✓';
+
   return (
-    <div className="toast-wrap">
-      {items.map((t) => (
-        <div key={t.id} className={'toast' + (t.ok ? ' ok' : ' err')}>
-          <span>{t.ok ? '✓' : '✕'}</span>
+    <div className="toast-wrap" aria-live="polite" role="status">
+      {items.map((t) => {
+        const kind = t.kind ?? (t.ok ? 'success' : 'error');
+        return (
+        <div key={t.id} className={`toast ${kind}`}>
+          <span aria-hidden="true">{iconFor(kind)}</span>
           <span>{t.text}</span>
-          <span className="t-close" onClick={() => setItems((p) => p.filter((x) => x.id !== t.id))}>✕</span>
+          {t.action && (
+            <button
+              type="button"
+              className="link-btn"
+              style={{ marginLeft: 8, color: 'inherit', fontWeight: 700 }}
+              onClick={() => { t.action!.onClick(); setItems((p) => p.filter((x) => x.id !== t.id)); }}
+            >
+              {t.action.label}
+            </button>
+          )}
+          <button type="button" className="t-close" aria-label="Dismiss" onClick={() => setItems((p) => p.filter((x) => x.id !== t.id))}>✕</button>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -67,12 +171,20 @@ export function StatusChip({ status }: { status: string | null | undefined }) {
     : s === 'rejected' || s === 'failed' || s === 'defeated' || s === 'cancelled' ? 'b-rejected'
     : s === 'active' || s === 'voting' || s === 'pending' || s === 'transit' || s === 'pending_review' || s === 'payout_initiated' || s === 'detected' || s === 'compensating' || s === 'pending_manual' ? 'b-pending'
     : 'b-live';
+  const icon = (s: string) => {
+    switch (s) {
+      case 'approved': case 'confirmed': case 'delivered': case 'passed': case 'success': case 'resolved': case 'completed': return '✓ ';
+      case 'rejected': case 'failed': case 'defeated': case 'cancelled': return '✕ ';
+      case 'active': case 'voting': case 'pending': case 'transit': case 'pending_review': case 'payout_initiated': case 'detected': case 'compensating': case 'pending_manual': return '⏳ ';
+      default: return '• ';
+    }
+  };
   // Data from the backend isn't always guaranteed to have this field set
   // (e.g. a document written before a schema default existed) — a missing
   // status shouldn't crash the whole page over a single badge.
   const safeStatus = status || 'unknown';
   const label = safeStatus.charAt(0).toUpperCase() + safeStatus.slice(1).replace(/-/g, ' ');
-  return <span className={'mc-badge ' + cls(safeStatus)}>{label}</span>;
+  return <span className={'mc-badge ' + cls(safeStatus)} aria-label={label} role="status">{icon(safeStatus)}{label}</span>;
 }
 
 /* ---------------- BadgeCheckmark ---------------- */

@@ -501,6 +501,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         <AnimatePresence>
           {err && (
             <motion.div
+              role="alert"
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
@@ -516,7 +517,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 gap: 8
               }}
             >
-              <AlertTriangle size={16} />
+              <AlertTriangle size={16} aria-hidden="true" />
               {err}
             </motion.div>
           )}
@@ -537,14 +538,17 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                  <label htmlFor="kyc-first-name" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                     First Name
                   </label>
                   <input
+                    id="kyc-first-name"
                     type="text"
                     value={kycData.firstName}
                     onChange={(e) => kyc.setData({ firstName: e.target.value })}
                     placeholder="John"
+                    autoComplete="given-name"
+                    autoCapitalize="words"
                     style={{
                       width: '100%',
                       padding: '12px 14px',
@@ -557,14 +561,17 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                  <label htmlFor="kyc-last-name" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                     Last Name
                   </label>
                   <input
+                    id="kyc-last-name"
                     type="text"
                     value={kycData.lastName}
                     onChange={(e) => kyc.setData({ lastName: e.target.value })}
                     placeholder="Doe"
+                    autoComplete="family-name"
+                    autoCapitalize="words"
                     style={{
                       width: '100%',
                       padding: '12px 14px',
@@ -579,21 +586,23 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                <label htmlFor="kyc-dob" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   Date of Birth
                 </label>
                 <div style={{ position: 'relative' }}>
-                  <Calendar size={18} style={{ 
-                    position: 'absolute', 
-                    left: 14, 
-                    top: '50%', 
+                  <Calendar size={18} aria-hidden="true" style={{
+                    position: 'absolute',
+                    left: 14,
+                    top: '50%',
                     transform: 'translateY(-50%)',
                     color: 'var(--txt-3)'
                   }} />
                   <input
+                    id="kyc-dob"
                     type="date"
                     value={kycData.dateOfBirth}
                     onChange={(e) => kyc.setData({ dateOfBirth: e.target.value })}
+                    autoComplete="bday"
                     style={{
                       width: '100%',
                       padding: '12px 14px 12px 44px',
@@ -608,14 +617,17 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                <label htmlFor="kyc-nationality" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   Nationality
                 </label>
                 <input
+                  id="kyc-nationality"
                   type="text"
                   value={kycData.nationality}
                   onChange={(e) => kyc.setData({ nationality: e.target.value })}
                   placeholder="United States"
+                  autoComplete="off"
+                  autoCapitalize="words"
                   style={{
                     width: '100%',
                     padding: '12px 14px',
@@ -637,14 +649,16 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               </h2>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                <label htmlFor="kyc-address" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   Street Address
                 </label>
                 <input
+                  id="kyc-address"
                   type="text"
                   value={kycData.address}
                   onChange={(e) => kyc.setData({ address: e.target.value })}
                   placeholder="123 Main Street"
+                  autoComplete="address-line1"
                   style={{
                     width: '100%',
                     padding: '12px 14px',
@@ -659,14 +673,17 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                  <label htmlFor="kyc-city" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                     City
                   </label>
                   <input
+                    id="kyc-city"
                     type="text"
                     value={kycData.city}
                     onChange={(e) => kyc.setData({ city: e.target.value })}
                     placeholder="New York"
+                    autoComplete="address-level2"
+                    autoCapitalize="words"
                     style={{
                       width: '100%',
                       padding: '12px 14px',
@@ -679,14 +696,17 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                  <label htmlFor="kyc-postal-code" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                     Postal Code
                   </label>
                   <input
+                    id="kyc-postal-code"
                     type="text"
                     value={kycData.postalCode}
                     onChange={(e) => kyc.setData({ postalCode: e.target.value })}
                     placeholder="10001"
+                    autoComplete="postal-code"
+                    inputMode="text"
                     style={{
                       width: '100%',
                       padding: '12px 14px',
@@ -701,14 +721,17 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                <label htmlFor="kyc-country" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   Country
                 </label>
                 <input
+                  id="kyc-country"
                   type="text"
                   value={kycData.country}
                   onChange={(e) => kyc.setData({ country: e.target.value })}
                   placeholder="United States"
+                  autoComplete="country-name"
+                  autoCapitalize="words"
                   style={{
                     width: '100%',
                     padding: '12px 14px',
@@ -722,22 +745,25 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                <label htmlFor="kyc-phone" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   Phone Number
                 </label>
                 <div style={{ position: 'relative' }}>
-                  <Phone size={18} style={{ 
-                    position: 'absolute', 
-                    left: 14, 
-                    top: '50%', 
+                  <Phone size={18} aria-hidden="true" style={{
+                    position: 'absolute',
+                    left: 14,
+                    top: '50%',
                     transform: 'translateY(-50%)',
                     color: 'var(--txt-3)'
                   }} />
                   <input
+                    id="kyc-phone"
                     type="tel"
                     value={kycData.phoneNumber}
                     onChange={(e) => kyc.setData({ phoneNumber: e.target.value })}
                     placeholder="+1 (555) 123-4567"
+                    autoComplete="tel"
+                    inputMode="tel"
                     style={{
                       width: '100%',
                       padding: '12px 14px 12px 44px',
@@ -760,10 +786,11 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               </h2>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                <label htmlFor="kyc-id-type" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   ID Type
                 </label>
                 <select
+                  id="kyc-id-type"
                   value={kycData.idType}
                   onChange={(e) => kyc.setData({ idType: e.target.value })}
                   style={{
@@ -784,14 +811,17 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                <label htmlFor="kyc-id-number" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   ID Number
                 </label>
                 <input
+                  id="kyc-id-number"
                   type="text"
                   value={kycData.idNumber}
                   onChange={(e) => kyc.setData({ idNumber: e.target.value })}
                   placeholder="A12345678"
+                  autoComplete="off"
+                  autoCapitalize="characters"
                   style={{
                     width: '100%',
                     padding: '12px 14px',
@@ -805,18 +835,19 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                <label htmlFor="kyc-id-expiry" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   ID Expiry Date
                 </label>
                 <div style={{ position: 'relative' }}>
-                  <Calendar size={18} style={{ 
-                    position: 'absolute', 
-                    left: 14, 
-                    top: '50%', 
+                  <Calendar size={18} aria-hidden="true" style={{
+                    position: 'absolute',
+                    left: 14,
+                    top: '50%',
                     transform: 'translateY(-50%)',
                     color: 'var(--txt-3)'
                   }} />
                   <input
+                    id="kyc-id-expiry"
                     type="date"
                     value={kycData.idExpiry}
                     onChange={(e) => kyc.setData({ idExpiry: e.target.value })}
@@ -834,10 +865,11 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                <label htmlFor="kyc-doc-upload" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   Upload ID Document
                 </label>
                 <input
+                  id="kyc-doc-upload"
                   ref={docInputRef}
                   type="file"
                   accept="image/png,image/jpeg,application/pdf"
@@ -845,7 +877,11 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   onChange={(e) => handleDocumentSelect(e.target.files?.[0])}
                 />
                 <div
+                  role="button"
+                  tabIndex={0}
+                  aria-describedby="kyc-doc-upload-hint"
                   onClick={() => docInputRef.current?.click()}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); docInputRef.current?.click(); } }}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => { e.preventDefault(); handleDocumentSelect(e.dataTransfer.files?.[0]); }}
                   style={{
@@ -857,7 +893,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                     cursor: 'pointer'
                   }}
                 >
-                  <Upload size={32} style={{ color: kycData.idDocumentUrl ? 'var(--green-2)' : 'var(--txt-3)', marginBottom: 8 }} />
+                  <Upload size={32} aria-hidden="true" style={{ color: kycData.idDocumentUrl ? 'var(--green-2)' : 'var(--txt-3)', marginBottom: 8 }} />
                   <div style={{ fontSize: 13, color: 'var(--txt-3)' }}>
                     {docUploading
                       ? 'Uploading…'
@@ -865,11 +901,11 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                       ? `${docFileName || 'Document'} uploaded — click to replace`
                       : 'Click to upload or drag and drop'}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--txt-3)', marginTop: 4 }}>
+                  <div id="kyc-doc-upload-hint" style={{ fontSize: 11, color: 'var(--txt-3)', marginTop: 4 }}>
                     PNG, JPG, or PDF up to 10MB
                   </div>
                 </div>
-                {docError && <div style={{ color: 'var(--red-2)', fontSize: 12.5, marginTop: 8 }}>⚠ {docError}</div>}
+                {docError && <div role="alert" style={{ color: 'var(--red-2)', fontSize: 12.5, marginTop: 8 }}>⚠ {docError}</div>}
               </div>
             </div>
           )}
@@ -881,14 +917,17 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               </h2>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                <label htmlFor="kyc-occupation" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   Occupation
                 </label>
                 <input
+                  id="kyc-occupation"
                   type="text"
                   value={kycData.occupation}
                   onChange={(e) => kyc.setData({ occupation: e.target.value })}
                   placeholder="Software Engineer"
+                  autoComplete="organization-title"
+                  autoCapitalize="words"
                   style={{
                     width: '100%',
                     padding: '12px 14px',
@@ -902,10 +941,11 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                <label htmlFor="kyc-source-of-funds" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   Source of Funds
                 </label>
                 <select
+                  id="kyc-source-of-funds"
                   value={kycData.sourceOfFunds}
                   onChange={(e) => kyc.setData({ sourceOfFunds: e.target.value })}
                   style={{
@@ -928,10 +968,11 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+                <label htmlFor="kyc-annual-income" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
                   Annual Income Range
                 </label>
                 <select
+                  id="kyc-annual-income"
                   value={kycData.annualIncome}
                   onChange={(e) => kyc.setData({ annualIncome: e.target.value })}
                   style={{
@@ -939,7 +980,6 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                     padding: '12px 14px',
                     background: 'var(--bg-2)',
                     border: '1px solid var(--border)',
-                    borderRadius: 10,
                     color: 'var(--txt)',
                     fontSize: 14
                   }}
@@ -1354,28 +1394,35 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
       >
         {/* Email */}
         <div>
-          <label style={{ 
-            display: 'block', 
-            fontSize: 13, 
-            fontWeight: 600, 
-            marginBottom: 8, 
-            color: 'var(--txt-2)' 
+          <label htmlFor="auth-email" style={{
+            display: 'block',
+            fontSize: 13,
+            fontWeight: 600,
+            marginBottom: 8,
+            color: 'var(--txt-2)'
           }}>
             Email address
           </label>
           <div style={{ position: 'relative' }}>
-            <Mail size={18} style={{ 
-              position: 'absolute', 
-              left: 14, 
-              top: '50%', 
+            <Mail size={18} aria-hidden="true" style={{
+              position: 'absolute',
+              left: 14,
+              top: '50%',
               transform: 'translateY(-50%)',
               color: 'var(--txt-3)'
             }} />
             <input
+              id="auth-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
+              autoComplete="email"
+              autoCapitalize="off"
+              autoCorrect="off"
+              inputMode="email"
+              aria-invalid={err && !email.includes('@') ? true : undefined}
+              aria-describedby={err ? 'auth-form-error' : undefined}
               style={{
                 width: '100%',
                 padding: '14px 14px 14px 44px',
@@ -1394,28 +1441,32 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
 
         {/* Password */}
         <div>
-          <label style={{ 
-            display: 'block', 
-            fontSize: 13, 
-            fontWeight: 600, 
-            marginBottom: 8, 
-            color: 'var(--txt-2)' 
+          <label htmlFor="auth-password" style={{
+            display: 'block',
+            fontSize: 13,
+            fontWeight: 600,
+            marginBottom: 8,
+            color: 'var(--txt-2)'
           }}>
             Password
           </label>
           <div style={{ position: 'relative' }}>
-            <Lock size={18} style={{ 
-              position: 'absolute', 
-              left: 14, 
-              top: '50%', 
+            <Lock size={18} aria-hidden="true" style={{
+              position: 'absolute',
+              left: 14,
+              top: '50%',
               transform: 'translateY(-50%)',
               color: 'var(--txt-3)'
             }} />
             <input
+              id="auth-password"
               type={showPass ? 'text' : 'password'}
               value={pass}
               onChange={(e) => setPass(e.target.value)}
               placeholder="••••••••"
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              aria-invalid={err && pass.length < 8 ? true : undefined}
+              aria-describedby={err ? 'auth-form-error' : undefined}
               style={{
                 width: '100%',
                 padding: '14px 44px 14px 44px',
@@ -1430,6 +1481,9 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               onBlur={(e) => e.currentTarget.style.borderColor = err && pass.length < 8 ? 'var(--red)' : 'var(--border)'}
             />
             <button
+              type="button"
+              aria-label={showPass ? 'Hide password' : 'Show password'}
+              aria-pressed={showPass}
               onClick={() => setShowPass(!showPass)}
               style={{
                 position: 'absolute',
@@ -1443,7 +1497,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 padding: 4
               }}
             >
-              {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+              {showPass ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
             </button>
           </div>
 
@@ -1451,12 +1505,14 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               real TOTP enabled (checkTwoFactor() in authController.js). */}
           {mode === 'login' && requires2fa && (
             <div style={{ marginTop: 12 }}>
-              <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 600, color: 'var(--txt-2)' }}>
+              <label htmlFor="auth-otp" style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 600, color: 'var(--txt-2)' }}>
                 Authenticator code
               </label>
               <input
+                id="auth-otp"
                 type="text"
                 inputMode="numeric"
+                autoComplete="one-time-code"
                 autoFocus
                 value={otp}
                 onChange={(e) => setOtp(e.target.value)}
@@ -1515,28 +1571,32 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         {/* Confirm Password */}
         {mode === 'signup' && (
           <div>
-            <label style={{ 
-              display: 'block', 
-              fontSize: 13, 
-              fontWeight: 600, 
-              marginBottom: 8, 
-              color: 'var(--txt-2)' 
+            <label htmlFor="auth-confirm-password" style={{
+              display: 'block',
+              fontSize: 13,
+              fontWeight: 600,
+              marginBottom: 8,
+              color: 'var(--txt-2)'
             }}>
               Confirm password
             </label>
             <div style={{ position: 'relative' }}>
-              <Lock size={18} style={{ 
-                position: 'absolute', 
-                left: 14, 
-                top: '50%', 
+              <Lock size={18} aria-hidden="true" style={{
+                position: 'absolute',
+                left: 14,
+                top: '50%',
                 transform: 'translateY(-50%)',
                 color: 'var(--txt-3)'
               }} />
               <input
+                id="auth-confirm-password"
                 type={showConfirmPass ? 'text' : 'password'}
                 value={confirmPass}
                 onChange={(e) => setConfirmPass(e.target.value)}
                 placeholder="••••••••"
+                autoComplete="new-password"
+                aria-invalid={err && pass !== confirmPass ? true : undefined}
+                aria-describedby={err ? 'auth-form-error' : undefined}
                 style={{
                   width: '100%',
                   padding: '14px 44px 14px 44px',
@@ -1551,6 +1611,9 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 onBlur={(e) => e.currentTarget.style.borderColor = err && pass !== confirmPass ? 'var(--red)' : 'var(--border)'}
               />
               <button
+                type="button"
+                aria-label={showConfirmPass ? 'Hide password' : 'Show password'}
+                aria-pressed={showConfirmPass}
                 onClick={() => setShowConfirmPass(!showConfirmPass)}
                 style={{
                   position: 'absolute',
@@ -1564,7 +1627,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   padding: 4
                 }}
               >
-                {showConfirmPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                {showConfirmPass ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
               </button>
             </div>
           </div>
@@ -1573,14 +1636,17 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         {/* Referral code (signup only) */}
         {mode === 'signup' && (
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
+            <label htmlFor="auth-referral" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
               Referral code (optional)
             </label>
             <input
+              id="auth-referral"
               type="text"
               value={referralCode}
               onChange={(e) => setReferralCode(e.target.value)}
               placeholder="MALL-XXXXXXXX"
+              autoComplete="off"
+              autoCapitalize="characters"
               style={{
                 width: '100%',
                 padding: '14px',
@@ -1598,6 +1664,8 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         <AnimatePresence>
           {err && (
             <motion.div
+              id="auth-form-error"
+              role="alert"
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
@@ -1612,7 +1680,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 gap: 8
               }}
             >
-              <AlertTriangle size={16} />
+              <AlertTriangle size={16} aria-hidden="true" />
               {err}
             </motion.div>
           )}

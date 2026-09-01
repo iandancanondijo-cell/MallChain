@@ -108,10 +108,12 @@ func (am AppModule) ValidateGenesis(cdc codec.JSONCodec, config client.TxEncodin
 
 // InitGenesis performs genesis initialization for the dex module.
 func (am AppModule) InitGenesis(ctx sdk.Context, cdc codec.JSONCodec, bz json.RawMessage) {
-	var genState types.GenesisState
-	cdc.MustUnmarshalJSON(bz, &genState)
+	genState := &types.GenesisState{}
+	cdc.MustUnmarshalJSON(bz, genState)
 
-	am.keeper.InitGenesis(ctx, genState)
+	if err := am.keeper.InitGenesis(ctx, genState); err != nil {
+		panic(err)
+	}
 }
 
 // ExportGenesis returns the exported genesis state as raw bytes for the dex module.

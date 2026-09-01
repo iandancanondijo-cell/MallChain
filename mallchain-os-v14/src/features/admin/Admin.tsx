@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { store } from '../../store/store';
-import { useStoreVersion, fmtNum, fmtMoney, StatusChip, Modal, toast } from '../../components/ui';
+import { useStoreVersion, fmtNum, fmtMoney, StatusChip, Modal, toast, scheduleUndoable } from '../../components/ui';
 import {
   adminApi,
   type CurrentUser,
@@ -8,6 +8,8 @@ import {
   type AdminUser,
   type AdminValidatorApplication,
   type AdminKycSubmission,
+  type AdminAmlReview,
+  type AdminStructuringFlag,
   type AdminCampaign,
   type AdminSubmission,
   type AuditLogEntry,
@@ -20,10 +22,12 @@ import {
   type DynamicBurnThresholdEntry,
   type TreasuryLedgerEntry,
   type TreasuryMetricTotal,
+  type MaintenanceState,
 } from '../../services/adminApi';
 import { kycApi } from '../../services/kycApi';
+import { withdrawalAmlApi } from '../../services/withdrawalAmlApi';
 
-type Tab = 'dashboard' | 'users' | 'kyc' | 'validators' | 'mining' | 'badges' | 'liquidity' | 'reconciliation' | 'withdrawals' | 'treasury' | 'audit' | 'local';
+type Tab = 'dashboard' | 'users' | 'kyc' | 'aml' | 'validators' | 'mining' | 'badges' | 'liquidity' | 'reconciliation' | 'withdrawals' | 'treasury' | 'audit' | 'local';
 
 /**
  * Admin Control Center — real backend (backend/src/routes/adminPanel.js),
@@ -69,6 +73,7 @@ export default function Admin() {
         <button className={tab === 'dashboard' ? 'on' : ''} onClick={() => setTab('dashboard')}>Dashboard</button>
         <button className={tab === 'users' ? 'on' : ''} onClick={() => setTab('users')}>Users</button>
         <button className={tab === 'kyc' ? 'on' : ''} onClick={() => setTab('kyc')}>KYC Review</button>
+        <button className={tab === 'aml' ? 'on' : ''} onClick={() => setTab('aml')}>AML Review</button>
         <button className={tab === 'validators' ? 'on' : ''} onClick={() => setTab('validators')}>Validator Applications</button>
         <button className={tab === 'mining' ? 'on' : ''} onClick={() => setTab('mining')}>Mining</button>
         <button className={tab === 'badges' ? 'on' : ''} onClick={() => setTab('badges')}>Badges</button>
@@ -77,12 +82,13 @@ export default function Admin() {
         <button className={tab === 'withdrawals' ? 'on' : ''} onClick={() => setTab('withdrawals')}>Withdrawals</button>
         <button className={tab === 'treasury' ? 'on' : ''} onClick={() => setTab('treasury')}>Treasury</button>
         <button className={tab === 'audit' ? 'on' : ''} onClick={() => setTab('audit')}>Audit Log</button>
-        <button className={tab === 'local' ? 'on' : ''} onClick={() => setTab('local')}>Local Banners</button>
+        <button className={tab === 'local' ? 'on' : ''} onClick={() => setTab('local')}>Maintenance & Banners</button>
       </div>
 
       {tab === 'dashboard' && <DashboardTab />}
       {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} />}
       {tab === 'kyc' && <KycReviewTab />}
+      {tab === 'aml' && <AmlReviewTab />}
       {tab === 'validators' && <ValidatorApplicationsTab />}
       {tab === 'mining' && <MiningTab meId={me.id} />}
       {tab === 'badges' && <BadgesTab />}
@@ -134,6 +140,8 @@ function UsersTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [confirmBan, setConfirmBan] = useState<AdminUser | null>(null);
+  const [banReason, setBanReason] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<AdminUser | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -147,7 +155,7 @@ function UsersTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   }, [load]);
 
   const doBan = async (u: AdminUser, banned: boolean) => {
-    const res = await adminApi.banUser(u._id, banned, banned ? 'Banned by admin' : undefined);
+    const res = await adminApi.banUser(u._id, banned, banned ? (banReason.trim() || 'Banned by admin') : undefined);
     if (res.ok) {
       toast(banned ? `${u.email} banned` : `${u.email} unbanned`);
       load();
@@ -155,6 +163,13 @@ function UsersTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       toast(res.error || 'Action failed', false);
     }
     setConfirmBan(null);
+    setBanReason('');
+  };
+
+  const doDelete = async (u: AdminUser) => {
+    const res = await adminApi.deleteUser(u._id);
+    if (res.ok) { toast(`${u.email} deleted`); load(); } else toast(res.error || 'Delete failed', false);
+    setConfirmDelete(null);
   };
 
   const setRole = async (u: AdminUser, role: 'user' | 'admin' | 'superadmin') => {
@@ -193,10 +208,7 @@ function UsersTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                 <td>
                   <button className="btn btn-ghost btn-sm" onClick={() => setConfirmBan(u)}>{u.banned ? 'Unban' : 'Ban'}</button>
                   {isSuperAdmin && (
-                    <button className="btn btn-danger btn-sm" style={{ marginLeft: 6 }} onClick={async () => {
-                      const res = await adminApi.deleteUser(u._id);
-                      if (res.ok) { toast(`${u.email} deleted`); load(); } else toast(res.error || 'Delete failed', false);
-                    }}>Delete</button>
+                    <button className="btn btn-danger btn-sm" style={{ marginLeft: 6 }} onClick={() => setConfirmDelete(u)}>Delete</button>
                   )}
                 </td>
               </tr>
@@ -206,11 +218,29 @@ function UsersTab({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       </div>
 
       {confirmBan && (
-        <Modal title="Confirm user action" onClose={() => setConfirmBan(null)}>
+        <Modal title="Confirm user action" onClose={() => { setConfirmBan(null); setBanReason(''); }}>
           <p style={{ fontSize: 13.5, color: 'var(--txt-2)' }}>{confirmBan.banned ? 'Unban' : 'Ban'} <b>{confirmBan.email}</b>?</p>
+          {!confirmBan.banned && (
+            <div className="field mb">
+              <label>Reason</label>
+              <input className="input" value={banReason} onChange={(e) => setBanReason(e.target.value)} placeholder="Fraud investigation, ToS violation, chargeback dispute, etc." autoFocus />
+            </div>
+          )}
           <div className="modal-actions">
-            <button className="btn btn-ghost" onClick={() => setConfirmBan(null)}>Cancel</button>
+            <button className="btn btn-ghost" onClick={() => { setConfirmBan(null); setBanReason(''); }}>Cancel</button>
             <button className="btn btn-danger" onClick={() => doBan(confirmBan, !confirmBan.banned)}>Confirm {confirmBan.banned ? 'unban' : 'ban'}</button>
+          </div>
+        </Modal>
+      )}
+
+      {confirmDelete && (
+        <Modal title="Delete user" onClose={() => setConfirmDelete(null)}>
+          <p style={{ fontSize: 13.5, color: 'var(--txt-2)' }}>
+            Permanently delete <b>{confirmDelete.email}</b>? This cannot be undone from the admin panel.
+          </p>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={() => setConfirmDelete(null)}>Cancel</button>
+            <button className="btn btn-danger" onClick={() => doDelete(confirmDelete)}>Confirm delete</button>
           </div>
         </Modal>
       )}
@@ -262,11 +292,20 @@ function ValidatorApplicationsTab() {
   );
 }
 
+function maskIdNumber(idNumber: string): string {
+  const digits = idNumber.trim();
+  if (digits.length <= 4) return '•'.repeat(digits.length);
+  return `${'•'.repeat(digits.length - 4)}${digits.slice(-4)}`;
+}
+
 function KycReviewTab() {
   const [subs, setSubs] = useState<AdminKycSubmission[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [docModal, setDocModal] = useState<{ kycId: string; blobUrl: string; loading: boolean } | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [revealedIds, setRevealedIds] = useState<Record<string, boolean>>({});
+  const [confirmTarget, setConfirmTarget] = useState<AdminKycSubmission | null>(null);
+  const [accessReason, setAccessReason] = useState('');
 
   const load = useCallback(async () => {
     setError(null);
@@ -279,14 +318,18 @@ function KycReviewTab() {
     load();
   }, [load]);
 
-  const review = async (id: string, action: 'approved' | 'rejected') => {
-    const res = await adminApi.reviewKyc(id, action, notes[id]);
-    if (res.ok) { toast(`KYC ${action}`); load(); } else toast(res.error || 'Review failed', false);
+  const review = (id: string, action: 'approved' | 'rejected') => {
+    const note = notes[id];
+    scheduleUndoable(async () => {
+      const res = await adminApi.reviewKyc(id, action, note);
+      if (res.ok) load();
+      else toast(res.error || 'Review failed', false);
+    }, `Marking KYC as ${action}…`);
   };
 
-  const viewDocument = async (kycId: string) => {
+  const viewDocument = async (kycId: string, reason: string) => {
     setDocModal({ kycId, blobUrl: '', loading: true });
-    const res = await kycApi.fetchDocumentBlobUrl(kycId);
+    const res = await kycApi.fetchDocumentBlobUrl(kycId, reason);
     if (res.ok && res.data) setDocModal({ kycId, blobUrl: res.data, loading: false });
     else {
       toast(res.error || 'Failed to load document', false);
@@ -299,6 +342,15 @@ function KycReviewTab() {
     setDocModal(null);
   };
 
+  const confirmViewDocument = () => {
+    if (!confirmTarget) return;
+    const kycId = confirmTarget._id;
+    const reason = accessReason;
+    setConfirmTarget(null);
+    setAccessReason('');
+    viewDocument(kycId, reason);
+  };
+
   return (
     <div>
       {error && <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}><div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div></div>}
@@ -306,13 +358,24 @@ function KycReviewTab() {
         {subs?.length === 0 && <div className="empty-state"><div className="es-ico">🪪</div><div className="es-t">No pending KYC submissions</div></div>}
         {(subs || []).map((s) => {
           const applicant = typeof s.userId === 'object' ? s.userId : null;
+          const revealed = !!revealedIds[s._id];
           return (
             <div key={s._id} className="list-row" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <div className="grow">
                 <div className="t">{s.firstName} {s.lastName}</div>
                 <div className="m">
-                  {applicant?.email || 'unknown'} · {s.idType.replace('_', ' ')} #{s.idNumber} · risk: {s.riskLevel} ·
-                  {' '}submitted {new Date(s.submittedAt).toLocaleString()}
+                  {applicant?.email || 'unknown'} · {s.idType.replace('_', ' ')} #{revealed ? s.idNumber : maskIdNumber(s.idNumber)}
+                  {' '}
+                  <button
+                    type="button"
+                    className="link-btn"
+                    style={{ fontSize: 11, verticalAlign: 'baseline' }}
+                    onClick={() => setRevealedIds((r) => ({ ...r, [s._id]: !r[s._id] }))}
+                    aria-label={revealed ? `Hide ID number for ${s.firstName} ${s.lastName}` : `Show full ID number for ${s.firstName} ${s.lastName}`}
+                  >
+                    {revealed ? 'Hide' : 'Show'}
+                  </button>
+                  {' '}· risk: {s.riskLevel} · submitted {new Date(s.submittedAt).toLocaleString()}
                 </div>
                 <input
                   className="input input-sm"
@@ -322,7 +385,7 @@ function KycReviewTab() {
                   onChange={(e) => setNotes((n) => ({ ...n, [s._id]: e.target.value }))}
                 />
               </div>
-              <button className="btn btn-ghost btn-sm" onClick={() => viewDocument(s._id)}>View document</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setConfirmTarget(s)}>View document</button>
               <button className="btn btn-primary btn-sm" onClick={() => review(s._id, 'approved')}>Approve</button>
               <button className="btn btn-danger btn-sm" style={{ marginLeft: 6 }} onClick={() => review(s._id, 'rejected')}>Reject</button>
             </div>
@@ -330,12 +393,194 @@ function KycReviewTab() {
         })}
       </div>
 
+      {confirmTarget && (
+        <Modal title="Sensitive PII access" onClose={() => setConfirmTarget(null)}>
+          <p style={{ fontSize: 13.5, color: 'var(--txt-2)' }}>
+            🔒 You're about to view <b>{confirmTarget.firstName} {confirmTarget.lastName}</b>'s government ID document.
+            This access is logged to your admin account regardless of what you enter below.
+          </p>
+          <div className="field mb">
+            <label>Reason (optional)</label>
+            <input className="input" value={accessReason} onChange={(e) => setAccessReason(e.target.value)} placeholder="Reviewing rejected KYC appeal, verifying document quality, etc." autoFocus />
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={() => setConfirmTarget(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={confirmViewDocument}>View document</button>
+          </div>
+        </Modal>
+      )}
+
       {docModal && (
         <Modal title="ID document" onClose={closeDocModal}>
+          <div className="tiny muted mb">🔒 Sensitive PII — this view was logged to your admin account.</div>
           {docModal.loading ? (
             <div className="tiny" style={{ padding: 20 }}>Loading…</div>
           ) : docModal.blobUrl.startsWith('blob:') ? (
             <img src={docModal.blobUrl} alt="ID document" style={{ maxWidth: '100%', borderRadius: 8 }} onError={() => window.open(docModal.blobUrl, '_blank')} />
+          ) : null}
+          <div className="modal-actions"><button className="btn btn-ghost" onClick={() => window.open(docModal.blobUrl, '_blank')}>Open in new tab</button></div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+const FUNDS_SOURCE_LABELS: Record<string, string> = {
+  mining_staking_rewards: 'Mining/Staking rewards',
+  mallpoints_conversion: 'Mallpoints conversion',
+  referral_bonus: 'Referral bonus',
+  salary: 'Salary/employment',
+  business_income: 'Business income',
+  gift: 'Gift',
+  asset_sale: 'Asset sale',
+  other: 'Other',
+};
+
+/**
+ * Compliance approval for withdrawals that crossed AML_WITHDRAWAL_THRESHOLD_KES
+ * (see withdrawalAmlGateService.js) — distinct from the ops-focused
+ * Withdrawals tab (payout retry/manual resolution, not compliance
+ * decisions). Structured directly after KycReviewTab, same pattern:
+ * pending-review list, notes, approve/reject, document-view modal with the
+ * same sensitive-access confirmation — plus a secondary structuring-flags
+ * list below (system-generated, acknowledge-only, no approve/reject).
+ */
+function AmlReviewTab() {
+  const [reviews, setReviews] = useState<AdminAmlReview[] | null>(null);
+  const [flags, setFlags] = useState<AdminStructuringFlag[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [docModal, setDocModal] = useState<{ reviewId: string; blobUrl: string; loading: boolean } | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [confirmTarget, setConfirmTarget] = useState<AdminAmlReview | null>(null);
+  const [accessReason, setAccessReason] = useState('');
+
+  const load = useCallback(async () => {
+    setError(null);
+    const [reviewRes, flagRes] = await Promise.all([
+      adminApi.listPendingAmlReviews(),
+      adminApi.listStructuringFlags(false),
+    ]);
+    if (reviewRes.ok && reviewRes.data) setReviews(reviewRes.data.reviews);
+    else setError(reviewRes.error || 'Failed to load AML reviews');
+    if (flagRes.ok && flagRes.data) setFlags(flagRes.data.flags);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const review = (id: string, action: 'approved' | 'rejected') => {
+    const note = notes[id];
+    scheduleUndoable(async () => {
+      const res = await adminApi.reviewAmlSubmission(id, action, note);
+      if (res.ok) load();
+      else toast(res.error || 'Review failed', false);
+    }, `Marking AML review as ${action}…`);
+  };
+
+  const acknowledgeFlag = async (id: string) => {
+    const res = await adminApi.acknowledgeStructuringFlag(id);
+    if (res.ok) load();
+    else toast(res.error || 'Failed to acknowledge', false);
+  };
+
+  const viewDocument = async (reviewId: string, reason: string) => {
+    setDocModal({ reviewId, blobUrl: '', loading: true });
+    const res = await withdrawalAmlApi.fetchDocumentBlobUrl(reviewId, reason);
+    if (res.ok && res.data) setDocModal({ reviewId, blobUrl: res.data, loading: false });
+    else {
+      toast(res.error || 'Failed to load document', false);
+      setDocModal(null);
+    }
+  };
+
+  const closeDocModal = () => {
+    if (docModal?.blobUrl) URL.revokeObjectURL(docModal.blobUrl);
+    setDocModal(null);
+  };
+
+  const confirmViewDocument = () => {
+    if (!confirmTarget) return;
+    const reviewId = confirmTarget._id;
+    const reason = accessReason;
+    setConfirmTarget(null);
+    setAccessReason('');
+    viewDocument(reviewId, reason);
+  };
+
+  return (
+    <div>
+      {error && <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}><div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div></div>}
+      <div className="card">
+        {reviews?.length === 0 && <div className="empty-state"><div className="es-ico">🛡</div><div className="es-t">No pending withdrawal verifications</div></div>}
+        {(reviews || []).map((r) => {
+          const applicant = typeof r.userId === 'object' ? r.userId : null;
+          return (
+            <div key={r._id} className="list-row" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              <div className="grow">
+                <div className="t">{applicant?.email || r.walletAddress} · {fmtMoney(r.triggerAmountKes, 'KES')}</div>
+                <div className="m">
+                  {FUNDS_SOURCE_LABELS[r.fundsSource] || r.fundsSource}
+                  {r.isNativeEarnings ? ' (platform earnings — no document required)' : ''}
+                  {' '}· submitted {new Date(r.submittedAt).toLocaleString()}
+                </div>
+                <div className="tiny muted" style={{ marginTop: 4, maxWidth: 480 }}>{r.narrative}</div>
+                <input
+                  className="input input-sm"
+                  placeholder="Review notes (optional)"
+                  style={{ marginTop: 6, maxWidth: 320 }}
+                  value={notes[r._id] || ''}
+                  onChange={(e) => setNotes((n) => ({ ...n, [r._id]: e.target.value }))}
+                />
+              </div>
+              {r.documentRef && <button className="btn btn-ghost btn-sm" onClick={() => setConfirmTarget(r)}>View document</button>}
+              <button className="btn btn-primary btn-sm" onClick={() => review(r._id, 'approved')}>Approve</button>
+              <button className="btn btn-danger btn-sm" style={{ marginLeft: 6 }} onClick={() => review(r._id, 'rejected')}>Reject</button>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="sec-title" style={{ marginTop: 24 }}><h2>Structuring alerts</h2></div>
+      <div className="card">
+        {flags?.length === 0 && <div className="empty-state"><div className="es-ico">📊</div><div className="es-t">No unacknowledged structuring alerts</div></div>}
+        {(flags || []).map((f) => (
+          <div key={f._id} className="list-row">
+            <div className="grow">
+              <div className="t">{f.walletAddress}</div>
+              <div className="m">
+                {fmtMoney(f.cumulativeKes, 'KES')} across {f.relatedWithdrawalIds.length} withdrawal(s) in the rolling week
+              </div>
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={() => acknowledgeFlag(f._id)}>Acknowledge</button>
+          </div>
+        ))}
+      </div>
+
+      {confirmTarget && (
+        <Modal title="Sensitive document access" onClose={() => setConfirmTarget(null)}>
+          <p style={{ fontSize: 13.5, color: 'var(--txt-2)' }}>
+            🔒 You're about to view a source-of-funds document for <b>{confirmTarget.walletAddress}</b>'s withdrawal
+            verification. This access is logged to your admin account regardless of what you enter below.
+          </p>
+          <div className="field mb">
+            <label>Reason (optional)</label>
+            <input className="input" value={accessReason} onChange={(e) => setAccessReason(e.target.value)} placeholder="Verifying source of funds, reviewing rejected appeal, etc." autoFocus />
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={() => setConfirmTarget(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={confirmViewDocument}>View document</button>
+          </div>
+        </Modal>
+      )}
+
+      {docModal && (
+        <Modal title="Supporting document" onClose={closeDocModal}>
+          <div className="tiny muted mb">🔒 Sensitive document — this view was logged to your admin account.</div>
+          {docModal.loading ? (
+            <div className="tiny" style={{ padding: 20 }}>Loading…</div>
+          ) : docModal.blobUrl.startsWith('blob:') ? (
+            <img src={docModal.blobUrl} alt="Supporting document" style={{ maxWidth: '100%', borderRadius: 8 }} onError={() => window.open(docModal.blobUrl, '_blank')} />
           ) : null}
           <div className="modal-actions"><button className="btn btn-ghost" onClick={() => window.open(docModal.blobUrl, '_blank')}>Open in new tab</button></div>
         </Modal>
@@ -450,26 +695,30 @@ function BadgesTab() {
     load();
   }, [load]);
 
-  const grant = async () => {
+  const grant = () => {
     if (!grantAddress.trim()) return toast('Wallet address is required', false);
-    setGranting(true);
-    const res = await adminApi.grantBadge(grantAddress.trim());
-    setGranting(false);
-    if (res.ok) {
-      toast('Badge granted');
-      setGrantAddress('');
-      load();
-    } else {
-      toast(res.error || 'Grant failed', false);
-    }
+    const address = grantAddress.trim();
+    setGrantAddress('');
+    scheduleUndoable(async () => {
+      setGranting(true);
+      const res = await adminApi.grantBadge(address);
+      setGranting(false);
+      if (res.ok) load();
+      else toast(res.error || 'Grant failed', false);
+    }, `Granting a badge to ${address.slice(0, 10)}…`);
   };
 
-  const doVoid = async () => {
+  const doVoid = () => {
     if (!voidTarget) return;
-    const res = await adminApi.voidBadgePurchase(voidTarget.quoteId, voidReason);
-    if (res.ok) { toast('Purchase voided'); load(); } else toast(res.error || 'Void failed', false);
+    const target = voidTarget;
+    const reason = voidReason;
     setVoidTarget(null);
     setVoidReason('');
+    scheduleUndoable(async () => {
+      const res = await adminApi.voidBadgePurchase(target.quoteId, reason);
+      if (res.ok) load();
+      else toast(res.error || 'Void failed', false);
+    }, `Voiding purchase ${target.quoteId}…`);
   };
 
   return (
@@ -547,16 +796,58 @@ function BadgesTab() {
 function LiquidityActivityTab() {
   const [items, setItems] = useState<LiquidityActivityItem[] | null>(null);
   const [flow, setFlow] = useState('');
+  const [walletAddress, setWalletAddress] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  // Debounce the free-text wallet-address filter so every keystroke doesn't
+  // trigger a fetch.
+  const [debouncedWallet, setDebouncedWallet] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedWallet(walletAddress), 400);
+    return () => clearTimeout(t);
+  }, [walletAddress]);
+
   const load = useCallback(() => {
-    adminApi.listLiquidityActivity({ flow: flow || undefined, limit: 200 }).then((res) => {
+    adminApi.listLiquidityActivity({
+      flow: flow || undefined,
+      limit: 200,
+      walletAddress: debouncedWallet || undefined,
+      startDate: startDate ? new Date(startDate).toISOString() : undefined,
+      endDate: endDate ? new Date(endDate).toISOString() : undefined,
+    }).then((res) => {
       if (res.ok && res.data) setItems(res.data.items);
       else setError(res.error || 'Failed to load liquidity activity');
     });
-  }, [flow]);
+  }, [flow, debouncedWallet, startDate, endDate]);
 
   useEffect(() => { load(); }, [load]);
+
+  const exportCsv = useCallback(() => {
+    const rows = [['id', 'flow', 'stage', 'status', 'walletAddress', 'amountMlcns', 'fiatAmount', 'currency', 'createdAt'].join(',')];
+    (items || []).forEach((it) =>
+      rows.push(
+        [
+          it._id,
+          it.flow,
+          it.stage,
+          it.status,
+          it.walletAddress || '',
+          it.amountMlcns ?? '',
+          it.fiatAmount ?? '',
+          it.currency || '',
+          new Date(it.createdAt).toISOString(),
+        ].join(',')
+      )
+    );
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `liquidity-activity-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [items]);
 
   return (
     <div>
@@ -564,6 +855,31 @@ function LiquidityActivityTab() {
         {['', 'buy', 'withdraw', 'reconciliation', 'mallpoints_convert'].map((f) => (
           <button key={f || 'all'} className={flow === f ? 'on' : ''} onClick={() => setFlow(f)}>{f || 'All'}</button>
         ))}
+      </div>
+      <div className="filter-row" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+        <label className="tiny muted" style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 260px', minWidth: 220 }}>
+          Filter by wallet address
+          <input
+            className="input"
+            type="search"
+            placeholder="mall1…"
+            aria-label="Filter by wallet address"
+            value={walletAddress}
+            onChange={(e) => setWalletAddress(e.target.value)}
+            style={{ flex: '1 1 auto' }}
+          />
+        </label>
+        <label className="tiny muted" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          From
+          <input className="input" type="date" aria-label="Start date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </label>
+        <label className="tiny muted" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          To
+          <input className="input" type="date" aria-label="End date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </label>
+        <button className="btn btn-ghost btn-sm" onClick={exportCsv} disabled={!items || items.length === 0}>
+          ⬇ Export CSV
+        </button>
       </div>
       {error && <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}><div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div></div>}
       <div className="card">
@@ -596,6 +912,9 @@ function ReconciliationTab() {
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [resolveTarget, setResolveTarget] = useState<ReconciliationItem | null>(null);
+  const [resolveNote, setResolveNote] = useState('');
+  const [resolving, setResolving] = useState(false);
 
   const load = useCallback(() => {
     adminApi.listReconciliationItems(status || undefined).then((res) => {
@@ -615,6 +934,16 @@ function ReconciliationTab() {
     } finally {
       setRunning(false);
     }
+  };
+
+  const doResolve = async () => {
+    if (!resolveTarget || !resolveNote.trim()) return;
+    setResolving(true);
+    const res = await adminApi.resolveReconciliationItem(resolveTarget._id, resolveNote.trim());
+    setResolving(false);
+    if (res.ok) { toast('Marked resolved'); load(); } else toast(res.error || 'Failed to resolve', false);
+    setResolveTarget(null);
+    setResolveNote('');
   };
 
   return (
@@ -637,12 +966,33 @@ function ReconciliationTab() {
               <div className="m">
                 {fmtNum(it.mlcnsAmount)} MLCNS / {fmtMoney(it.fiatAmount, 'KES')} · {it.reason || 'liquidity add failed after credit'}
                 {' · '}{new Date(it.createdAt).toLocaleString()}
+                {it.status === 'resolved' && it.resolutionNote && <> · resolved: {it.resolutionNote}</>}
               </div>
             </div>
             <StatusChip status={it.status} />
+            {it.status !== 'resolved' && (
+              <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => setResolveTarget(it)}>Resolve</button>
+            )}
           </div>
         ))}
       </div>
+
+      {resolveTarget && (
+        <Modal title="Resolve reconciliation item" onClose={() => setResolveTarget(null)}>
+          <p style={{ fontSize: 13.5, color: 'var(--txt-2)' }}>
+            Mark <b className="mono">{resolveTarget.walletAddress}</b>'s {fmtNum(resolveTarget.mlcnsAmount)} MLCNS item resolved.
+            This is a record only — it does not perform any on-chain reversal itself. Describe how it was actually handled.
+          </p>
+          <div className="field mb">
+            <label>Resolution note</label>
+            <input className="input" value={resolveNote} onChange={(e) => setResolveNote(e.target.value)} placeholder="Manually re-added liquidity via admin wallet, confirmed no action needed, etc." autoFocus />
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={() => setResolveTarget(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={doResolve} disabled={resolving || !resolveNote.trim()}>{resolving && <span className="spin" />} Confirm resolved</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -652,18 +1002,42 @@ function WithdrawalsTab() {
   const [items, setItems] = useState<AdminWithdrawalRequest[] | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [resolveTarget, setResolveTarget] = useState<AdminWithdrawalRequest | null>(null);
+  const [resolveOutcome, setResolveOutcome] = useState<'completed' | 'refunded'>('refunded');
+  const [resolveNote, setResolveNote] = useState('');
+  const [resolving, setResolving] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     adminApi.listWithdrawals(status || undefined).then((res) => {
       if (res.ok && res.data) setItems(res.data.withdrawals);
       else setError(res.error || 'Failed to load withdrawals');
     });
   }, [status]);
 
+  useEffect(() => { load(); }, [load]);
+
+  const doRetry = async (w: AdminWithdrawalRequest) => {
+    setRetryingId(w._id);
+    const res = await adminApi.retryWithdrawal(w._id);
+    setRetryingId(null);
+    if (res.ok) { toast('Payout retried'); load(); } else toast(res.error || 'Retry failed', false);
+  };
+
+  const doResolve = async () => {
+    if (!resolveTarget || !resolveNote.trim()) return;
+    setResolving(true);
+    const res = await adminApi.resolveWithdrawal(resolveTarget._id, resolveOutcome, resolveNote.trim());
+    setResolving(false);
+    if (res.ok) { toast('Withdrawal updated'); load(); } else toast(res.error || 'Failed to update', false);
+    setResolveTarget(null);
+    setResolveNote('');
+  };
+
   return (
     <div>
       <div className="mc-subnav" style={{ marginBottom: 12 }}>
-        {['', 'pending_review', 'payout_initiated', 'completed', 'failed'].map((s) => (
+        {['', 'pending_review', 'payout_initiated', 'completed', 'failed', 'refunded'].map((s) => (
           <button key={s || 'all'} className={status === s ? 'on' : ''} onClick={() => setStatus(s)}>{s || 'All'}</button>
         ))}
       </div>
@@ -678,12 +1052,51 @@ function WithdrawalsTab() {
                 {fmtNum(w.amountMlcns)} MLCNS → {fmtMoney(w.amountKes, w.currency || 'KES')}
                 {w.payoutRef ? ` · ref ${w.payoutRef}` : ''}
                 {' · '}{new Date(w.createdAt).toLocaleString()}
+                {w.notes && <> · {w.notes}</>}
               </div>
             </div>
             <StatusChip status={w.status} />
+            {w.status === 'failed' && (
+              <>
+                <button className="btn btn-secondary btn-sm" style={{ marginLeft: 6 }} onClick={() => doRetry(w)} disabled={retryingId === w._id}>
+                  {retryingId === w._id && <span className="spin" />} Retry
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ marginLeft: 6 }}
+                  onClick={() => { setResolveTarget(w); setResolveOutcome('refunded'); }}
+                >
+                  Resolve
+                </button>
+              </>
+            )}
           </div>
         ))}
       </div>
+
+      {resolveTarget && (
+        <Modal title="Resolve withdrawal" onClose={() => setResolveTarget(null)}>
+          <p style={{ fontSize: 13.5, color: 'var(--txt-2)' }}>
+            Record how <b className="mono">{resolveTarget.walletAddress}</b>'s failed {fmtMoney(resolveTarget.amountKes, resolveTarget.currency || 'KES')}
+            {' '}withdrawal was actually settled outside the automated payout. This does not move any money itself.
+          </p>
+          <div className="field mb">
+            <label>Outcome</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className={`btn btn-sm ${resolveOutcome === 'completed' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setResolveOutcome('completed')}>Completed (paid manually)</button>
+              <button className={`btn btn-sm ${resolveOutcome === 'refunded' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setResolveOutcome('refunded')}>Refunded</button>
+            </div>
+          </div>
+          <div className="field mb">
+            <label>Note</label>
+            <input className="input" value={resolveNote} onChange={(e) => setResolveNote(e.target.value)} placeholder="Sent via manual M-Pesa transfer, ref ABC123, etc." autoFocus />
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={() => setResolveTarget(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={doResolve} disabled={resolving || !resolveNote.trim()}>{resolving && <span className="spin" />} Confirm</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -853,32 +1266,81 @@ function AuditTab() {
   );
 }
 
+const MAINTENANCE_SCOPES = ['send', 'withdraw', 'buy', 'payment', 'marketplace', 'staking', 'vault', 'key-vault', 'badge', 'dex'];
+
 /**
- * Maintenance-mode / announcement banners (App.tsx, TopBar.tsx). These have
- * no backend model — they're a per-browser local toggle, not a real
- * cross-user broadcast, so they're kept here but clearly labeled as such
- * rather than presented as real admin infrastructure.
+ * Maintenance mode is the real backend kill-switch (MaintenanceMode model +
+ * maintenanceGuard middleware, backend/src/routes/adminPanel.js) — toggling
+ * here broadcasts to every user via the public /api/maintenance banner
+ * (App.tsx, TopBar.tsx). The announcement banner below has no backend model
+ * behind it — it's a per-browser local toggle, kept clearly labeled as such.
  */
 function LocalBannersTab() {
   useStoreVersion();
   const st = store.state;
   const [annText, setAnnText] = useState('');
+  const [maint, setMaint] = useState<MaintenanceState | null>(null);
+  const [reason, setReason] = useState('');
+  const [savingScope, setSavingScope] = useState<string | null>(null);
+
+  const loadMaintenance = () => {
+    adminApi.getMaintenance().then((res) => {
+      if (res.ok && res.data) {
+        setMaint(res.data);
+        setReason(res.data.reason || '');
+      }
+    });
+  };
+
+  useEffect(() => { loadMaintenance(); }, []);
+
+  const toggleGlobal = async (checked: boolean) => {
+    setSavingScope('global');
+    const res = await adminApi.setMaintenance({ global: checked, reason });
+    setSavingScope(null);
+    if (res.ok && res.data) setMaint(res.data);
+    else toast(res.error || 'Failed to update maintenance mode', false);
+  };
+
+  const toggleScope = async (scope: string, paused: boolean) => {
+    setSavingScope(scope);
+    const res = await adminApi.setMaintenance({ scope, paused, reason });
+    setSavingScope(null);
+    if (res.ok && res.data) setMaint(res.data);
+    else toast(res.error || 'Failed to update maintenance mode', false);
+  };
 
   return (
     <div>
-      <div className="card mb" style={{ borderColor: 'rgba(243,186,47,.35)' }}>
-        <div className="tiny">⚠ These toggles only affect this browser session — there's no backend model backing them, so they don't broadcast to other users.</div>
-      </div>
       <div className="grid-2">
         <div className="card">
           <div className="sec-title"><h2>Maintenance mode</h2></div>
-          <label className="switch">
-            <input type="checkbox" checked={!!st.admin.flags.maintenance} onChange={(e) => { st.admin.flags.maintenance = e.target.checked; store.commit(); }} />
-            <span className="track" /><span className="knob" />
-          </label>
+          {!maint ? (
+            <div className="tiny">Loading…</div>
+          ) : (
+            <>
+              <div className="tiny mb">Pausing a scope blocks that route group for every user (enforced server-side) and shows a real banner app-wide.</div>
+              <label className="switch">
+                <input type="checkbox" aria-label="Global pause" checked={maint.global} disabled={savingScope === 'global'} onChange={(e) => toggleGlobal(e.target.checked)} />
+                <span className="track" /><span className="knob" />
+              </label>
+              <span style={{ marginLeft: 8 }}>Global pause</span>
+              <input className="input mt" placeholder="Reason (shown to users)" value={reason} onChange={(e) => setReason(e.target.value)} />
+              <div className="mt" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {MAINTENANCE_SCOPES.map((scope) => (
+                  <label key={scope} className="chip" style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: savingScope === scope ? 0.6 : 1 }}>
+                    <input type="checkbox" checked={!!maint.scopes[scope]} disabled={savingScope === scope} onChange={(e) => toggleScope(scope, e.target.checked)} />
+                    {scope}
+                  </label>
+                ))}
+              </div>
+              {maint.updatedBy && <div className="tiny mt">Last changed by {maint.updatedBy}{maint.updatedAt ? ' at ' + new Date(maint.updatedAt).toLocaleString() : ''}</div>}
+            </>
+          )}
         </div>
         <div className="card">
           <div className="sec-title"><h2>Local announcement banner</h2></div>
+          <div className="tiny mb">⚠ This banner only affects this browser session — there's no backend model backing it, so it doesn't broadcast to other users.</div>
           {st.admin.announcements.length > 0 && (
             <div className="card mb" style={{ background: 'var(--bg-2)' }}>
               <div style={{ fontSize: 13, color: 'var(--txt-2)' }}>{st.admin.announcements[0].text}</div>

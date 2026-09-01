@@ -4,6 +4,7 @@ const chainClient = require('../utils/chainClient')
 const { isValidAddress } = require('../services/mallcoinService')
 const { limiters } = require('../middleware/rateLimiter')
 const logger = require('../utils/logger')
+const { getCacheService } = require('../services/cacheService')
 
 const CHAIN_REST = process.env.MALL_CHAIN_REST || process.env.CHAIN_REST || 'http://127.0.0.1:1317'
 
@@ -42,9 +43,18 @@ function mapTx(tx, address) {
   return { type, from, to, amount, block: tx.height, txHash: tx.txhash, timestamp: tx.timestamp || '' }
 }
 
+// Every paginated history fetch used to cost its own /blocks/latest RPC
+// call just to compute a confirmation count — the chain only produces a new
+// block every few seconds, so a 2s cache turns a request storm into at most
+// one real chain call per block.
 async function getLatestHeight() {
-  const blockRes = await chainClient.get(`${CHAIN_REST}/cosmos/base/tendermint/v1beta1/blocks/latest`, { timeout: 10000 })
-  return Number(blockRes.data.block.header.height)
+  const fetchHeight = async () => {
+    const blockRes = await chainClient.get(`${CHAIN_REST}/cosmos/base/tendermint/v1beta1/blocks/latest`, { timeout: 10000 })
+    return Number(blockRes.data.block.header.height)
+  }
+  const cache = getCacheService()
+  if (!cache) return fetchHeight()
+  return cache.getOrSet('chain:latest_height', fetchHeight, 2)
 }
 
 // GET /api/history/performance?address=mall1...&days=30

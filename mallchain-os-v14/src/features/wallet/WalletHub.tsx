@@ -72,6 +72,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
     { label: 'Send MALL', icon: '➤', p: '/wallet/send' },
     { label: 'Receive MALL', icon: '⬇', p: '/wallet/receive' },
     { label: 'Buy MALL', icon: '💳', p: '/wallet/buy' },
+    { label: 'Withdraw', icon: '🏧', p: '/wallet/withdraw' },
     { label: 'Mallpoints', icon: '✦', p: '/wallet/points' },
     { label: 'Swap MALL', icon: '⇄', p: '/wallet/swap' },
     { label: 'History', icon: '▤', p: '/wallet/history' },
@@ -79,7 +80,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
 
   // SECTION 15.5: Empty state skeleton loader
   const BalanceSkeleton = () => (
-    <div className="card" style={{ opacity: 0.6 }}>
+    <div className="card" style={{ opacity: 0.6 }} aria-busy="true" aria-label="Loading balance">
       <div className="card-label">Loading balance...</div>
       <div className="card-value" style={{ backgroundColor: 'var(--bg-2)', height: '32px', borderRadius: '4px' }} />
       <div className="card-sub" style={{ backgroundColor: 'var(--bg-2)', height: '16px', borderRadius: '4px', marginTop: '8px' }} />

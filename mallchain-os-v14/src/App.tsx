@@ -2,13 +2,14 @@
  * App shell — fixed sidebar + topbar + routed content + global banners +
  * toasts + command palette.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import Sidebar from './components/Sidebar';
 import AdminSidebar from './components/AdminSidebar';
 import TopBar from './components/TopBar';
 import CommandPalette from './components/CommandPalette';
-import { ToastHost, toast } from './components/ui';
+import { ToastHost, toast, toastKind } from './components/ui';
 import { PinChallengeHost } from './components/PinChallenge';
+import { CookieConsentBanner } from './components/CookieConsentBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { matchRoute, useHashRoute } from './router';
 import { store } from './store/store';
@@ -17,6 +18,7 @@ import { storeSync } from './services/storeSync';
 import { socketManager } from './services/socket';
 import { api } from './services/api';
 import { authService } from './services/auth';
+import { useMaintenanceStatus } from './services/maintenanceApi';
 import './styles/auth.css';
 import './styles/wallet-data.css';
 import './styles/explorer.css';
@@ -26,6 +28,9 @@ export default function App() {
   useStoreVersion();
   const st = store.state;
   const [authInitialized, setAuthInitialized] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [expandedBanner, setExpandedBanner] = useState<'maintenance' | 'frozen' | null>(null);
+  const maintenance = useMaintenanceStatus();
 
   useEffect(() => {
     // Initialize auth state first, before any routing decisions
@@ -52,11 +57,12 @@ export default function App() {
         // login/register only set these at the moment of auth, so a reload
         // (or an admin ban/KYC decision since then) would otherwise show stale data.
         if (authService.getToken()) {
-          const res = await api.get<{ user?: { id: string; banned: boolean; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string; hasBadge?: boolean } }>('/api/auth/me');
+          const res = await api.get<{ user?: { id: string; banned: boolean; banReason?: string | null; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string; hasBadge?: boolean } }>('/api/auth/me');
           if (res.ok && res.data?.user) {
             const u = res.data.user;
             store.state.user.id = u.id;
             store.state.user.frozen = !!u.banned;
+            store.state.user.frozenReason = u.banned ? (u.banReason || null) : null;
             store.state.user.kycLevel = u.kycLevel ?? 1;
             store.state.user.role = u.role || 'user';
             store.state.user.hasBadge = Boolean(u.hasBadge);
@@ -109,6 +115,10 @@ export default function App() {
     document.documentElement.style.setProperty('--accent', a);
     document.documentElement.style.setProperty('--accent-2', a === '#22d3ee' ? '#0ea5e9' : a === '#a78bfa' ? '#8b5cf6' : a === '#34d399' ? '#10b981' : '#f59e0b');
 
+    // Apply saved language to the document's lang attribute (screen readers
+    // and browser translation tools use it, not just the in-app t() calls).
+    if (st.prefs.lang) document.documentElement.lang = st.prefs.lang.toLowerCase();
+
     // Task 5.12: Initialize Socket.IO connection for real-time updates
     socketManager.connect();
 
@@ -142,7 +152,7 @@ export default function App() {
   useEffect(() => {
     const needsMigration = !!st.wallet.mnemonic && !st.wallet.pinHash;
     if (needsMigration && path !== '/security') {
-      toast('Secure your wallet — set a PIN to continue', false);
+      toastKind('Secure your wallet — set a PIN to continue', 'warning');
       navigate('/security');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -187,36 +197,116 @@ export default function App() {
   // what renders, not the URL), and the badge/accent must not lie about that.
   const isAdminRoute = route.path.startsWith('/admin');
 
+  // index.html's single static <title> never changed on navigation before
+  // this — every route (and every browser tab/history entry) read
+  // "Mallchain Mission Control" regardless of what was actually open.
+  useEffect(() => {
+    document.title = `${route.title} · Mallchain`;
+  }, [route.title]);
+
+  // The mobile drawer (Sidebar/AdminSidebar) should close itself once a
+  // destination is actually reached — otherwise it stays open over the new
+  // page until the user manually taps the backdrop.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [path]);
+
   return (
     <div className={'app-shell' + (isAdminRoute ? ' app-shell--admin' : '')}>
-      {!hiddenNav && (isAdminRoute ? <AdminSidebar navigate={navigate} /> : <Sidebar path={path} navigate={navigate} />)}
-      <div className="main" style={hiddenNav ? { marginLeft: 0 } : undefined}>
-        {!hiddenNav && <TopBar navigate={navigate} isAdminRoute={isAdminRoute} />}
+      <a href="#main-content" className="skip-link">Skip to main content</a>
+      {!hiddenNav && (isAdminRoute
+        ? <AdminSidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+        : <Sidebar path={path} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />)}
+      {!hiddenNav && mobileNavOpen && (
+        <div className="sidebar-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />
+      )}
+      <main className="main" id="main-content" style={hiddenNav ? { marginLeft: 0 } : undefined}>
+        {!hiddenNav && (
+          <TopBar
+            navigate={navigate}
+            isAdminRoute={isAdminRoute}
+            onToggleMobileNav={() => setMobileNavOpen((o) => !o)}
+          />
+        )}
 
         {/* global banners (admin-driven) */}
-        {!hiddenNav && st.admin.flags.maintenance && (
-          <div className="global-banner warn">
-            🛠 Maintenance mode is ON — new transactions are blocked. Existing data is safe.
-            <span className="close" onClick={() => { st.admin.flags.maintenance = false; store.commit(); }}>✕</span>
+        {!hiddenNav && (maintenance.global || Object.values(maintenance.scopes).some(Boolean)) && (
+          <div className="global-banner warn" role="status">
+            <div>
+              🛠 {maintenance.global
+                ? 'Maintenance mode is ON — new transactions are blocked.'
+                : `Some features are temporarily paused (${Object.keys(maintenance.scopes).filter((k) => maintenance.scopes[k]).join(', ')}).`}
+              {' '}Existing data is safe.
+              <button
+                type="button"
+                className="banner-learn-more"
+                aria-expanded={expandedBanner === 'maintenance'}
+                onClick={() => setExpandedBanner((b) => (b === 'maintenance' ? null : 'maintenance'))}
+              >
+                {expandedBanner === 'maintenance' ? 'Show less' : 'Learn more'}
+              </button>
+            </div>
+            {expandedBanner === 'maintenance' && (
+              <div className="banner-detail">
+                {maintenance.reason ? <p>{maintenance.reason}</p> : <p>No further detail has been provided by the operations team.</p>}
+                <p>
+                  Your balances, orders, and account data are unaffected — this only pauses new activity while the
+                  affected systems are worked on. Try again shortly, or{' '}
+                  <a href="#/help">visit the Help Center</a> if this persists.
+                </p>
+              </div>
+            )}
           </div>
         )}
         {!hiddenNav && st.admin.announcements.length > 0 && (
-          <div className="global-banner">
+          <div className="global-banner" role="status">
             📢 {st.admin.announcements[0].text}
-            <span className="close" onClick={() => { st.admin.announcements.shift(); store.commit(); }}>✕</span>
+            <button
+              type="button"
+              className="close"
+              aria-label="Dismiss announcement"
+              onClick={() => { st.admin.announcements.shift(); store.commit(); }}
+            >✕</button>
           </div>
         )}
         {!hiddenNav && st.user.frozen && (
-          <div className="global-banner warn">
-            ❄ Your account has been frozen by an administrator. Some actions are blocked.
+          <div className="global-banner warn" role="status">
+            <div>
+              ❄ Your account has been frozen by an administrator. Some actions are blocked.
+              <button
+                type="button"
+                className="banner-learn-more"
+                aria-expanded={expandedBanner === 'frozen'}
+                onClick={() => setExpandedBanner((b) => (b === 'frozen' ? null : 'frozen'))}
+              >
+                {expandedBanner === 'frozen' ? 'Show less' : 'Learn more'}
+              </button>
+            </div>
+            {expandedBanner === 'frozen' && (
+              <div className="banner-detail">
+                <p>
+                  <b>Reason given: </b>
+                  {st.user.frozenReason || 'No reason was recorded by the administrator.'}
+                </p>
+                <p>
+                  While frozen, you can't send, withdraw, or trade — your funds and account data remain intact.
+                  If you believe this was a mistake, <a href="#/help">contact support</a> for a review.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
-        <ErrorBoundary resetKey={path}>{route.render(navigate)}</ErrorBoundary>
-      </div>
+        <ErrorBoundary resetKey={path}>
+          <Suspense fallback={<div className="tiny" role="status" style={{ padding: 20 }}>Loading…</div>}>
+            {route.render(navigate)}
+          </Suspense>
+        </ErrorBoundary>
+      </main>
       <CommandPalette navigate={navigate} isAdminRoute={isAdminRoute} />
       <ToastHost />
       <PinChallengeHost />
+      <CookieConsentBanner />
     </div>
   );
 }

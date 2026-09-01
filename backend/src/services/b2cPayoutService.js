@@ -5,9 +5,10 @@ const { Buffer } = require('buffer');
 const { Console } = require('console');
 const { stdout, stderr } = require('process');
 const { config } = require('../config');
-const { createBlockchainBreaker } = require('../utils/circuitBreaker');
+const { createBlockchainBreaker, createPaymentBackoff } = require('../utils/circuitBreaker');
 const { paymentFailuresTotal } = require('../utils/metrics');
 const { getMarketPrice } = require('./mallcoinService');
+const { checkPayoutLimits, recordPayout } = require('./treasuryLimitsService');
 const console = new Console(stdout, stderr);
 
 const {
@@ -24,6 +25,7 @@ const {
 // (SellPrice: 58 => KES 0.58) — used if the chain is unreachable.
 const DEFAULT_PESA_PRICE_KES = Number(process.env.MLCNS_SELL_PRICE_KES || 0.58);
 const safaricomBreaker = createBlockchainBreaker();
+const paymentBackoff = createPaymentBackoff();
 
 function getProviderMode() {
   return SAFARICOM_KEY && SAFARICOM_SECRET ? 'live' : 'unconfigured';
@@ -69,6 +71,16 @@ async function initiateB2CPayout({ sellerPhone, mlcnsAmount, saleId }) {
     return { ok: false, error: 'Safaricom payout is not configured yet', providerMode: 'unconfigured' };
   }
 
+  // SEC3: per-tx / daily caps — checked before any Safaricom call is made.
+  // A rejection here is not a hard failure; callers (routes/withdraw.js,
+  // routes/buy.js's /sell) already treat a non-ok result as "hold this for
+  // manual review" rather than discarding the underlying withdrawal/sale.
+  const limitsCheck = await checkPayoutLimits(pesaAmount / 100);
+  if (!limitsCheck.ok) {
+    paymentFailuresTotal.inc({ reason: 'b2c_limit_exceeded' });
+    return { ok: false, error: limitsCheck.reason, requiresApproval: true, providerMode: 'live' };
+  }
+
   try {
     const token = await getSafaricomToken();
     if (!token) {
@@ -89,14 +101,23 @@ async function initiateB2CPayout({ sellerPhone, mlcnsAmount, saleId }) {
       ResultURL: PAYOUT_CALLBACK_URL,
     };
 
-    const b2cRes = await axios.post(
-      `${SAFARICOM_API.replace(/\/$/, '')}/mpesa/b2c/v1/paymentrequest`,
-      b2cPayload,
-      { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
-    );
+    const b2cRes = await paymentBackoff.execute(async () => {
+      try {
+        return await axios.post(
+          `${SAFARICOM_API.replace(/\/$/, '')}/mpesa/b2c/v1/paymentrequest`,
+          b2cPayload,
+          { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+        );
+      } catch (err) {
+        if (err.response && err.response.status < 500) err.retryable = false;
+        throw err;
+      }
+    }, 'b2c-payout');
 
     const resp = b2cRes.data || {};
     const payoutRef = resp.ConversationID || resp.conversationID || 'B2C' + Date.now();
+
+    await recordPayout(pesaAmount / 100);
 
     return {
       ok: true,
@@ -130,6 +151,15 @@ async function handlePayoutCallback(callbackData) {
 
   const payout = await B2CPayout.findOne({ payoutRef });
   if (!payout) {
+    return { ResultCode: 0 };
+  }
+
+  // Safaricom retries a callback it didn't get ResultCode 0 for, and our own
+  // DLQ (paymentCallbackQueue) can also replay this payload — once a payout
+  // has already reached a terminal state, re-applying it would re-save the
+  // sale/withdrawal and re-emit liquidity activity for something already done.
+  if (payout.payoutStatus === 'succeeded' || payout.payoutStatus === 'failed') {
+    console.log('[b2cPayout] ignoring duplicate payout callback delivery — already processed', { payoutRef, status: payout.payoutStatus });
     return { ResultCode: 0 };
   }
 

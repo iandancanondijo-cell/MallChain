@@ -17,25 +17,28 @@ func TestMsgStakeAndUnstake(t *testing.T) {
 	queryServer := keeper.NewQueryServerImpl(&f.keeper)
 	staker := "mall1staker"
 
-	require.NoError(t, f.keeper.WalletBalance.Set(f.ctx, staker, types.WalletBalance{Address: staker, Balance: 1000}))
+	require.NoError(t, f.keeper.WalletBalance.Set(f.ctx, staker, types.WalletBalance{Address: staker, Balance: 30_000}))
 	require.NoError(t, f.keeper.SetModuleIntervals(f.ctx, types.ModuleIntervals{
 		DynamicPricingBlocks: 100,
 		EmissionTickBlocks:   100,
 		StakingLockBlocks:    50,
+		RewardDivisor:        100,
 	}))
 
 	// Zero amount is rejected.
 	_, err := msgServer.Stake(f.ctx, &types.MsgStake{Creator: staker, Amount: 0})
 	require.Error(t, err)
 
-	// Stake 400 of the 1000 available.
-	stakeRes, err := msgServer.Stake(f.ctx, &types.MsgStake{Creator: staker, Amount: 400})
+	// Stake 20000 of the 30000 available. RewardDivisor=100 → effective
+	// MinStakeAmount=100 (no explicit Params.MinStakeAmount override in
+	// the fixture), so 20000 is well above the C3 acceptance gate.
+	stakeRes, err := msgServer.Stake(f.ctx, &types.MsgStake{Creator: staker, Amount: 20_000})
 	require.NoError(t, err)
 	require.NotEmpty(t, stakeRes.StakeId)
 
 	wallet, err := f.keeper.WalletBalance.Get(f.ctx, staker)
 	require.NoError(t, err)
-	require.Equal(t, uint64(600), wallet.Balance)
+	require.Equal(t, uint64(10_000), wallet.Balance)
 
 	// Query should show one active record for the staker, owning the returned stake_id.
 	queryRes, err := queryServer.GetStakingRecords(f.ctx, &types.QueryGetStakingRecordsRequest{Address: staker})
@@ -43,7 +46,7 @@ func TestMsgStakeAndUnstake(t *testing.T) {
 	require.Len(t, queryRes.StakingRecords, 1)
 	require.Equal(t, stakeRes.StakeId, queryRes.StakingRecords[0].StakeId)
 	require.True(t, queryRes.StakingRecords[0].Info.IsActive)
-	require.Equal(t, uint64(400), queryRes.StakingRecords[0].Info.StakedAmount)
+	require.Equal(t, uint64(20_000), queryRes.StakingRecords[0].Info.StakedAmount)
 
 	// Unstake before the lock period ends is rejected.
 	_, err = msgServer.Unstake(f.ctx, &types.MsgUnstake{Creator: staker, StakeId: stakeRes.StakeId})
@@ -60,7 +63,7 @@ func TestMsgStakeAndUnstake(t *testing.T) {
 
 	wallet, err = f.keeper.WalletBalance.Get(sdkCtx, staker)
 	require.NoError(t, err)
-	require.Equal(t, uint64(600)+400+unstakeRes.RewardsEarned, wallet.Balance)
+	require.Equal(t, uint64(10_000)+20_000+unstakeRes.RewardsEarned, wallet.Balance)
 
 	// The record is no longer active.
 	queryRes, err = queryServer.GetStakingRecords(sdkCtx, &types.QueryGetStakingRecordsRequest{Address: staker})
@@ -83,8 +86,12 @@ func TestMsgStake_InsufficientBalance(t *testing.T) {
 		DynamicPricingBlocks: 100,
 		EmissionTickBlocks:   100,
 		StakingLockBlocks:    50,
+		RewardDivisor:        10,
 	}))
 
+	// 500 > 100 (balance), but also > RewardDivisor=10 → fails AFTER the
+	// C3 MinStakeAmount gate, which is exactly the insufficient-balance
+	// path this fixture targets.
 	_, err := msgServer.Stake(f.ctx, &types.MsgStake{Creator: staker, Amount: 500})
 	require.Error(t, err)
 
@@ -98,7 +105,16 @@ func TestMsgStake_WalletNotFound(t *testing.T) {
 	f := initFixture(t)
 	msgServer := keeper.NewMsgServerImpl(&f.keeper)
 
-	_, err := msgServer.Stake(f.ctx, &types.MsgStake{Creator: "mall1neverfunded", Amount: 100})
+	require.NoError(t, f.keeper.SetModuleIntervals(f.ctx, types.ModuleIntervals{
+		DynamicPricingBlocks: 100,
+		EmissionTickBlocks:   100,
+		StakingLockBlocks:    50,
+		RewardDivisor:        10,
+	}))
+
+	// Amount 200 passes RewardDivisor=10 → error surface is wallet-not-found
+	// (the intended validation target for this fixture).
+	_, err := msgServer.Stake(f.ctx, &types.MsgStake{Creator: "mall1neverfunded", Amount: 200})
 	require.Error(t, err)
 }
 

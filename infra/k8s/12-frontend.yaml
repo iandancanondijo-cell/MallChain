@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: mallchain
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: frontend }
+  template:
+    metadata:
+      labels: { app: frontend }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: frontend
+          image: mallchain-frontend:latest # built from mallchain-os-v14/Dockerfile with --build-arg VITE_API_BASE_URL=<public backend URL>
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /, port: 8080 }
+          resources:
+            requests: { cpu: '50m', memory: '64Mi' }
+            limits: { cpu: '250m', memory: '128Mi' }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: mallchain
+spec:
+  selector: { app: frontend }
+  ports:
+    - port: 8080
+      targetPort: 8080

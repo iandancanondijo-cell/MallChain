@@ -1,0 +1,162 @@
+name: Deploy
+
+# Workflow triggers:
+#   - workflow_dispatch: manual trigger from the GitHub Actions UI (any env)
+#   - push to main: automatically deploys to staging on every merge
+#   - push tag v*.*.*: automatically deploys the tagged SHA to production
+#
+# The OIDC assume-role pattern means no AWS access keys are stored as repo
+# secrets — the job assumes a short-lived scoped role (see
+# infra/terraform/github-oidc.tf + infra/terraform/README.md step 3).
+#
+# Required configuration — set these BEFORE expecting push/tag triggers:
+#   Repository secrets:
+#     AWS_DEPLOY_ROLE_ARN = arn:aws:iam::<ACCT>:role/<PREFIX>-github-deploy-role
+#                          (terraform output `github_actions_deploy_role_arn`)
+#   Repository variables (org/repo → Settings → Variables):
+#     ECR_REGISTRY       = 123456789012.dkr.ecr.eu-west-1.amazonaws.com
+#                          (terraform output `ecr_registry`)
+#     EKS_CLUSTER_NAME   = mallchain-prod-eu-west-1
+#                          (terraform output `eks_cluster_name`)
+#     PUBLIC_API_URL     = https://api.mallchain.yourdomain.com
+#                          (frontend build-arg VITE_API_BASE_URL)
+#
+# If any of the above are unset, the deploy step fails fast with a ::error
+# message (no silent fallback to the old empty-string ECR behavior).
+on:
+  push:
+    branches: [main]
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment target (manual)'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  id-token: write # required for OIDC — scoped to this job only, NOT repo-wide
+  contents: read
+
+env:
+  AWS_REGION: eu-west-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: ${{ github.ref_type == 'tag' && 'production' || (github.event.inputs.environment || 'staging') }}
+      url: ${{ vars.PUBLIC_API_URL }}
+    concurrency:
+      group: deploy-${{ github.ref_type == 'tag' && 'production' || (github.event.inputs.environment || 'staging') }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Derive target env, image tag, ECR, EKS cluster from trigger
+        id: meta
+        run: |
+          set -euo pipefail
+          ECR="${{ vars.ECR_REGISTRY }}"
+          if [ -z "$ECR" ]; then
+            echo "::error::repository variable ECR_REGISTRY is not set. Apply terraform and populate vars.ECR_REGISTRY with the \`ecr_registry\` output."
+            exit 1
+          fi
+          EKS="${{ vars.EKS_CLUSTER_NAME }}"
+          if [ -z "$EKS" ]; then
+            echo "::error::repository variable EKS_CLUSTER_NAME is not set. Apply terraform and populate vars.EKS_CLUSTER_NAME with the \`eks_cluster_name\` output."
+            exit 1
+          fi
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TARGET="production"
+            IMG_TAG="${GITHUB_REF_NAME}"
+          elif [ "${{ github.event.inputs.environment }}" = "production" ]; then
+            TARGET="production"
+            IMG_TAG="sha-${GITHUB_SHA::7}"
+          else
+            TARGET="staging"
+            IMG_TAG="sha-${GITHUB_SHA::7}"
+          fi
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "img_tag=$IMG_TAG" >> "$GITHUB_OUTPUT"
+          echo "ecr=$ECR" >> "$GITHUB_OUTPUT"
+          echo "eks=$EKS" >> "$GITHUB_OUTPUT"
+          echo "TRIGGER: target=$TARGET tag=$IMG_TAG ecr=$ECR eks=$EKS"
+
+      - name: Configure AWS credentials via OIDC (no long-lived keys in secrets)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-mallchain-deploy-${{ github.run_id }}
+          role-duration-seconds: 3600
+
+      - name: Log in to ECR
+        run: aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.meta.outputs.ecr }}
+
+      - name: Build and push backend image
+        run: |
+          set -euo pipefail
+          IMG="${{ steps.meta.outputs.ecr }}/mallchain-backend:${{ steps.meta.outputs.img_tag }}"
+          docker build -t "$IMG" ./backend
+          docker push "$IMG"
+          if [ "${{ steps.meta.outputs.target }}" = "production" ]; then
+            docker tag "$IMG" "${{ steps.meta.outputs.ecr }}/mallchain-backend:latest"
+            docker push "${{ steps.meta.outputs.ecr }}/mallchain-backend:latest"
+          fi
+
+      - name: Build and push frontend image
+        run: |
+          set -euo pipefail
+          PUBLIC_API="${{ vars.PUBLIC_API_URL }}"
+          if [ -z "$PUBLIC_API" ]; then
+            echo "::warning::repository variable PUBLIC_API_URL is empty — frontend build will fall back to same-origin API (works only if frontend + API share a domain)."
+          fi
+          IMG="${{ steps.meta.outputs.ecr }}/mallchain-frontend:${{ steps.meta.outputs.img_tag }}"
+          docker build \
+            --build-arg VITE_API_BASE_URL="$PUBLIC_API" \
+            -t "$IMG" ./mallchain-os-v14
+          docker push "$IMG"
+          if [ "${{ steps.meta.outputs.target }}" = "production" ]; then
+            docker tag "$IMG" "${{ steps.meta.outputs.ecr }}/mallchain-frontend:latest"
+            docker push "${{ steps.meta.outputs.ecr }}/mallchain-frontend:latest"
+          fi
+
+      - name: Build and push marketplaced (Cosmos) image
+        run: |
+          set -euo pipefail
+          IMG="${{ steps.meta.outputs.ecr }}/mallchain-marketplaced:${{ steps.meta.outputs.img_tag }}"
+          docker build -t "$IMG" .
+          docker push "$IMG"
+          if [ "${{ steps.meta.outputs.target }}" = "production" ]; then
+            docker tag "$IMG" "${{ steps.meta.outputs.ecr }}/mallchain-marketplaced:latest"
+            docker push "${{ steps.meta.outputs.ecr }}/mallchain-marketplaced:latest"
+          fi
+
+      - name: Update kubeconfig for target EKS
+        run: aws eks update-kubeconfig --name ${{ steps.meta.outputs.eks }} --region ${{ env.AWS_REGION }}
+
+      - name: Roll out new images (backend → frontend → marketplaced)
+        run: |
+          set -euo pipefail
+          K8S_NS="mallchain"
+          IMG_TAG="${{ steps.meta.outputs.img_tag }}"
+          ECR="${{ steps.meta.outputs.ecr }}"
+          echo "== kubectl versions =="
+          kubectl version --client
+          echo "== set images =="
+          kubectl -n "$K8S_NS" set image deployment/backend backend="${ECR}/mallchain-backend:${IMG_TAG}"
+          kubectl -n "$K8S_NS" set image deployment/frontend frontend="${ECR}/mallchain-frontend:${IMG_TAG}"
+          kubectl -n "$K8S_NS" set image statefulset/marketplaced marketplaced="${ECR}/mallchain-marketplaced:${IMG_TAG}"
+          echo "== rollout status /health backend =="
+          kubectl -n "$K8S_NS" rollout status deployment/backend --timeout=10m
+          echo "== rollout status frontend =="
+          kubectl -n "$K8S_NS" rollout status deployment/frontend --timeout=5m
+          echo "== rollout status marketplaced =="
+          kubectl -n "$K8S_NS" rollout status statefulset/marketplaced --timeout=10m
+          echo "== rollouts complete =="

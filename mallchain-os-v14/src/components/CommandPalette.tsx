@@ -10,6 +10,15 @@ import { COMMON_CURRENCIES } from '../services/locale';
 
 interface Cmd { label: string; icon?: string; hint?: string; run: () => void }
 
+// Lets a control outside this component (TopBar's mobile search trigger —
+// the Ctrl/Cmd+K shortcut isn't discoverable/reachable on a touch device
+// with no keyboard) open the palette too, without lifting `open` state up
+// through App.tsx. Mirrors the toastBus pattern already used in ui.tsx.
+const openBus = new Set<() => void>();
+export function openCommandPalette() {
+  openBus.forEach((fn) => fn());
+}
+
 export default function CommandPalette({ navigate, isAdminRoute }: { navigate: (p: string) => void; isAdminRoute?: boolean }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -26,7 +35,14 @@ export default function CommandPalette({ navigate, isAdminRoute }: { navigate: (
       if (e.key === 'Escape') setOpen(false);
     };
     window.addEventListener('keydown', fn);
-    return () => window.removeEventListener('keydown', fn);
+
+    const openNow = () => { setOpen(true); setQ(''); setSel(0); };
+    openBus.add(openNow);
+
+    return () => {
+      window.removeEventListener('keydown', fn);
+      openBus.delete(openNow);
+    };
   }, []);
 
   const cmds = useMemo<Cmd[]>(() => {
@@ -86,10 +102,15 @@ export default function CommandPalette({ navigate, isAdminRoute }: { navigate: (
   if (!open) return null;
 
   return (
-    <div className="palette-backdrop" onClick={() => setOpen(false)}>
-      <div className="palette" onClick={(e) => e.stopPropagation()}>
+    <div className="palette-backdrop" onClick={() => setOpen(false)} role="presentation">
+      <div className="palette" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Command palette">
         <input
           autoFocus
+          aria-label="Type a command or search"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="palette-listbox"
+          aria-activedescendant={filtered[sel] ? `palette-item-${sel}` : undefined}
           placeholder="Type a command or search…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -99,11 +120,19 @@ export default function CommandPalette({ navigate, isAdminRoute }: { navigate: (
             if (e.key === 'Enter' && filtered[sel]) { filtered[sel].run(); }
           }}
         />
-        <div className="palette-list">
+        <div className="palette-list" role="listbox" id="palette-listbox">
           {filtered.length === 0 && <div style={{ padding: 16, color: 'var(--txt-3)', fontSize: 13 }}>No matching commands.</div>}
           {filtered.map((c, i) => (
-            <div key={c.label} className={'palette-item' + (i === sel ? ' sel' : '')} onClick={c.run} onMouseEnter={() => setSel(i)}>
-              <span>{c.icon}</span>
+            <div
+              key={c.label}
+              id={`palette-item-${i}`}
+              role="option"
+              aria-selected={i === sel}
+              className={'palette-item' + (i === sel ? ' sel' : '')}
+              onClick={c.run}
+              onMouseEnter={() => setSel(i)}
+            >
+              <span aria-hidden="true">{c.icon}</span>
               <span>{c.label}</span>
               {c.hint && <span className="k">{c.hint}</span>}
             </div>

@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const logger = require('../utils/logger')
 const axios = require('axios');
 
 const CHAIN_RPC = process.env.CHAIN_RPC || 'http://localhost:26657';
@@ -33,7 +34,7 @@ router.get('/market/price', async (req, res) => {
       source: 'blockchain'
     });
   } catch (e) {
-    console.error('[OnChain Market Price]', e.message);
+    logger.error('onchain', 'market price error', e);
     // Fallback prices
     return res.json({
       success: true,
@@ -71,7 +72,7 @@ router.get('/trades/:address', async (req, res) => {
       address
     });
   } catch (e) {
-    console.error('[OnChain Trade History]', e.message);
+    logger.error('onchain', 'trade history error', e);
     return res.json({
       success: true,
       trades: [],
@@ -111,7 +112,7 @@ router.get('/wallet/:address/balance', async (req, res) => {
       source: 'blockchain'
     });
   } catch (e) {
-    console.error('[OnChain Wallet Balance]', e.message);
+    logger.error('onchain', 'wallet balance error', e);
     return res.json({
       success: true,
       address: req.params.address,
@@ -155,7 +156,7 @@ router.post('/broadcast', async (req, res) => {
       rawLog: data.tx_response?.raw_log
     });
   } catch (e) {
-    console.error('[OnChain Broadcast]', e.message);
+    logger.error('onchain', 'broadcast error', e);
     return res.status(400).json({
       success: false,
       error: e.message,
@@ -186,7 +187,7 @@ router.get('/tx/:txHash', async (req, res) => {
       status: data.tx_response?.code === 0 ? 'success' : 'failed'
     });
   } catch (e) {
-    console.error('[OnChain Tx Query]', e.message);
+    logger.error('onchain', 'tx query error', e);
     return res.status(400).json({
       success: false,
       error: e.message

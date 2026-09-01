@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { sendMallcoinTransfer, MallcoinTxError } from '../../services/mallcoinTx';
@@ -6,6 +6,7 @@ import { isValidMallAddress } from '../../services/wallet';
 import { faucetApi } from '../../services/faucetApi';
 import { requestMnemonic } from '../../services/mnemonicAccess';
 import { useWizard } from '../../hooks/useWizard';
+import { loadAddressBook } from '../../services/addressBookStore';
 
 const SEND_STEPS = ['recipient', 'review', 'authorize', 'broadcast'] as const;
 type SendStep = typeof SEND_STEPS[number];
@@ -50,6 +51,9 @@ export default function WalletSend() {
 
   const validAddr = isValidMallAddress(addr);
   const max = st.balances.MALL;
+  // Read once per mount rather than on every render — this page doesn't
+  // need to react to address-book edits happening in another tab mid-flow.
+  const addressBook = useMemo(() => loadAddressBook(), []);
 
   const review = () => {
     setErr('');
@@ -142,19 +146,51 @@ export default function WalletSend() {
         {step === 'recipient' && (
           <>
             <div className="field">
-              <label>Recipient address</label>
-              <input className={'input mono' + (addr && !validAddr ? ' err' : '')} placeholder="mall1… (bech32 address)" value={addr} onChange={(e) => setAddr(e.target.value)} />
-              {addr && !validAddr && <div className="hint" style={{ color: 'var(--red-2)' }}>⚠ Invalid address format — expected mall1… bech32 address.</div>}
-              {validAddr && <div className="hint" style={{ color: 'var(--green-2)' }}>✓ Valid address</div>}
+              <label htmlFor="send-recipient">Recipient address</label>
+              <input
+                id="send-recipient"
+                className={'input mono' + (addr && !validAddr ? ' err' : '')}
+                placeholder="mall1… (bech32 address)"
+                value={addr}
+                onChange={(e) => setAddr(e.target.value)}
+                list={addressBook.length > 0 ? 'send-address-book' : undefined}
+                aria-invalid={addr ? !validAddr : undefined}
+                aria-describedby="send-recipient-hint"
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              {addressBook.length > 0 && (
+                <datalist id="send-address-book">
+                  {addressBook.map((a) => (
+                    <option key={a.id} value={a.address}>{a.label}</option>
+                  ))}
+                </datalist>
+              )}
+              <div id="send-recipient-hint">
+                {addr && !validAddr && <div className="hint" style={{ color: 'var(--red-2)' }} role="alert">⚠ Invalid address format — expected mall1… bech32 address.</div>}
+                {validAddr && <div className="hint" style={{ color: 'var(--green-2)' }}>✓ Valid address</div>}
+              </div>
             </div>
             <div className="field">
-              <label>Amount (MALL) — balance {max.toFixed(2)}</label>
-              <input className="input" type="number" min={0} step="any" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
+              <label htmlFor="send-amount">Amount (MALL) — balance {max.toFixed(2)}</label>
+              <input id="send-amount" className="input" type="number" inputMode="decimal" min={0} step="any" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
               <button className="btn btn-ghost btn-sm mt" onClick={() => setAmount(String(Math.max(0, max - fee)))}>Max</button>
             </div>
             <div className="field">
-              <label>Network fee — {fee.toFixed(2)} MALL</label>
-              <input type="range" min={0.01} max={0.5} step={0.01} value={fee} onChange={(e) => setFee(parseFloat(e.target.value))} style={{ width: '100%', accentColor: 'var(--gold)' }} />
+              <label htmlFor="send-fee">Network fee — {fee.toFixed(2)} MALL</label>
+              <input
+                id="send-fee"
+                type="range"
+                min={0.01}
+                max={0.5}
+                step={0.01}
+                value={fee}
+                aria-valuetext={`${fee.toFixed(2)} MALL`}
+                onChange={(e) => setFee(parseFloat(e.target.value))}
+                style={{ width: '100%', accentColor: 'var(--gold)' }}
+              />
             </div>
             <div className="modal-actions">
               <button className="btn btn-primary btn-block" onClick={review}>Review transaction →</button>
@@ -184,7 +220,7 @@ export default function WalletSend() {
             <div className="card" style={{ background: 'var(--bg-2)', textAlign: 'center', padding: 16 }}>
               <div className="muted" style={{ fontSize: 12 }}>You'll be asked for your PIN to unlock your recovery phrase and sign this transaction.</div>
             </div>
-            {err && <div style={{ color: 'var(--red-2)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
+            {err && <div role="alert" style={{ color: 'var(--red-2)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
             {gasError && (
               <div className="card" style={{ background: 'var(--bg-2)', borderColor: 'var(--gold)', marginTop: 10, padding: 14 }}>
                 <div style={{ fontSize: 13, color: 'var(--txt-2)' }}>

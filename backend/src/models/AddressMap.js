@@ -7,9 +7,13 @@ const AddressMapSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: () => new Date() }
 })
 
-AddressMapSchema.pre('save', function (next) {
+// No `next` param — see models/kyc.js's comment on the same Mongoose-9
+// Kareem behavior. This hook is currently unreachable in practice (every
+// write in routes/addressMap.js goes through findOneAndUpdate, which
+// document middleware never runs for), so the bug was silent, but it's
+// still worth being correct for any future .save() caller.
+AddressMapSchema.pre('save', function () {
   this.updatedAt = new Date()
-  next()
 })
 
 module.exports = mongoose.model('AddressMap', AddressMapSchema)

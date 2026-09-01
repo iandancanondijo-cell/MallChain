@@ -320,9 +320,20 @@ func TestStakeNonexistentWallet(t *testing.T) {
 		types.BankKeeper{},
 	)
 
+	// Use a smaller RewardDivisor (→ effective MinStakeAmount=10) so the
+	// C3 acceptance gate passes for small test stakes. This fixture's
+	// actual assertion is on wallet-not-found, which is evaluated AFTER
+	// the amount/minimum checks in Keeper.Stake.
+	require.NoError(t, k.SetModuleIntervals(ctx, types.ModuleIntervals{
+		DynamicPricingBlocks: 100,
+		EmissionTickBlocks:   100,
+		StakingLockBlocks:    50,
+		RewardDivisor:        10,
+	}))
+
 	user := "marketplace1nowalletuser1234567890"
 
-	_, err := k.Stake(ctx, user, 1000)
+	_, err := k.Stake(ctx, user, 200)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "wallet not found")
 }

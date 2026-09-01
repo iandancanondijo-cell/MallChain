@@ -1,0 +1,19 @@
+# Extends gitleaks' built-in default ruleset (https://github.com/gitleaks/gitleaks)
+# rather than replacing it — this file only narrows false positives specific
+# to this repo.
+title = "mallchain gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "known-safe placeholders and lockfiles"
+paths = [
+  '''\.env\.example$''',
+  '''package-lock\.json$''',
+  '''go\.sum$''',
+]
+regexes = [
+  # .env.example's placeholders — never real secrets, just instructive names.
+  '''REPLACE_WITH_[A-Z0-9_]+''',
+]

@@ -6,6 +6,11 @@
 #
 # Usage:
 #   ./scripts/restore.sh <backup-name> [--yes]
+#
+# Transparently decrypts any *.tar.gz.gpg produced by backup.sh's
+# BACKUP_GPG_RECIPIENT option (gpg must have the matching private key
+# available) before restoring, and unpacks mongo.tar.gz (or falls back to a
+# pre-encryption-support backup's plain mongo/ directory).
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -50,6 +55,23 @@ if [[ "$CONFIRM" != "--yes" ]]; then
   fi
 fi
 
+# Decrypts $1.gpg to $1 in place, if present. Leaves $1 untouched if only the
+# plaintext form exists (a backup taken without BACKUP_GPG_RECIPIENT set).
+decrypt_if_present() {
+  local file="$1"
+  if [[ -f "${file}.gpg" ]]; then
+    if ! command -v gpg >/dev/null 2>&1; then
+      echo "ERROR: ${file}.gpg is encrypted but gpg is not on PATH." >&2
+      exit 1
+    fi
+    echo "Decrypting ${file}.gpg ..."
+    gpg --batch --yes --output "$file" --decrypt "${file}.gpg"
+  fi
+}
+
+decrypt_if_present "${SRC}/chain-data.tar.gz"
+decrypt_if_present "${SRC}/mongo.tar.gz"
+
 if [[ -f "${SRC}/chain-data.tar.gz" ]]; then
   echo "Restoring chain data..."
   if [[ -d "$CHAIN_HOME" ]]; then
@@ -63,7 +85,15 @@ else
   echo "  (no chain-data.tar.gz in backup — skipping chain restore)"
 fi
 
-if [[ -d "${SRC}/mongo" ]]; then
+MONGO_DIR="${SRC}/mongo"
+CLEANUP_MONGO_DIR=""
+if [[ -f "${SRC}/mongo.tar.gz" ]]; then
+  echo "Unpacking mongo.tar.gz..."
+  tar xzf "${SRC}/mongo.tar.gz" -C "$SRC"
+  CLEANUP_MONGO_DIR="$MONGO_DIR"
+fi
+
+if [[ -d "$MONGO_DIR" ]]; then
   if ! command -v mongorestore >/dev/null 2>&1; then
     echo "ERROR: mongorestore not found on PATH — install the MongoDB Database Tools." >&2
     exit 1
@@ -75,17 +105,21 @@ if [[ -d "${SRC}/mongo" ]]; then
   # per-database subdirectory directly — pointed at the parent "mongo" dir
   # instead, it silently skips it ("don't know what to do with subdirectory")
   # and restores nothing, with exit code 0 and no error.
-  DB_DIRS=("${SRC}/mongo"/*/)
+  DB_DIRS=("${MONGO_DIR}"/*/)
   if [[ ${#DB_DIRS[@]} -ne 1 ]]; then
-    echo "ERROR: expected exactly one database directory under ${SRC}/mongo, found ${#DB_DIRS[@]}." >&2
+    echo "ERROR: expected exactly one database directory under ${MONGO_DIR}, found ${#DB_DIRS[@]}." >&2
     exit 1
   fi
 
   echo "Restoring MongoDB (${MONGO_URI})..."
   mongorestore --uri="$MONGO_URI" --drop --quiet "${DB_DIRS[0]}"
   echo "  MongoDB restored"
+  # Only remove what this run unpacked from mongo.tar.gz — never touch a
+  # bare mongo/ directory that was the original backup artifact itself
+  # (older, pre-encryption-support backups).
+  [[ -n "$CLEANUP_MONGO_DIR" ]] && rm -rf "$CLEANUP_MONGO_DIR"
 else
-  echo "  (no mongo/ directory in backup — skipping Mongo restore)"
+  echo "  (no mongo.tar.gz or mongo/ directory in backup — skipping Mongo restore)"
 fi
 
 echo ""

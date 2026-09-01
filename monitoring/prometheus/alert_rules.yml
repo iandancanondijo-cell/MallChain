@@ -1,0 +1,163 @@
+# Prometheus alerting rules for the Mallchain backend, matched exactly to
+# the metric names actually emitted by backend/src/utils/metrics.js and
+# backend/src/mallwallet/monitoring/prometheus.js, both merged onto one
+# registry exposed at GET /metrics (apiKeyAuth.metrics-gated — the scrape
+# config needs to send the MONITORING_API_KEY (or, as a fallback,
+# ADMIN_API_KEY) header, see monitoring/README.md).
+#
+# Load into Prometheus with `rule_files: ["alert_rules.yml"]` and route
+# `mallchain` -severity alerts through Alertmanager to whatever paging/chat
+# channel is configured there (see monitoring/README.md for the parts that
+# need a real account: PagerDuty/Opsgenie/Slack webhook).
+groups:
+  - name: mallchain-backend.rules
+    rules:
+      - alert: MallchainBackendDown
+        expr: up{job="mallchain-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Mallchain backend is unreachable'
+          description: 'Prometheus has not been able to scrape {{ $labels.instance }} for 2 minutes. The API is likely down.'
+
+      - alert: HighHttp5xxErrorRate
+        expr: |
+          sum(rate(http_requests_total{status_code=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'More than 5% of HTTP responses are 5xx'
+          description: '{{ $value | humanizePercentage }} of requests over the last 5m returned a 5xx status.'
+
+      - alert: HighRequestLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, route)) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'p95 request latency on {{ $labels.route }} exceeds 2s'
+          description: 'p95 latency has been above 2s for 10 minutes on route {{ $labels.route }}.'
+
+      - alert: BackendErrorRateSpike
+        expr: sum(rate(backend_errors_total[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Backend error handler firing more than 1/s'
+          description: 'The global error handler (utils/errorHandler.js) has recorded a sustained elevated error rate over 5m.'
+
+      - alert: PaymentFailureSpike
+        expr: sum(rate(payment_failures_total[15m])) > 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Sustained M-Pesa/B2C payment failures'
+          description: 'payment_failures_total has been incrementing continuously for 15m (reason={{ $labels.reason }}) — check Safaricom API status and the payment-callbacks DLQ (mallwallet/queue/paymentCallbackQueue.js).'
+
+      - alert: TransactionQueueJobFailureRate
+        expr: |
+          sum(rate(marketplace_tx_job_status_total{status="failed"}[10m]))
+          /
+          sum(rate(marketplace_tx_job_status_total[10m]))
+          > 0.1
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'More than 10% of on-chain transaction jobs are failing'
+          description: 'mallwallet/workers/transactionWorker.js is failing a significant share of broadcast jobs — check chain RPC health.'
+
+      - alert: BullMQQueueBacklogGrowing
+        expr: |
+          sum by (queue) (
+            marketplace_queue_depth{state="wait"}
+            or on() vector(0)
+          ) > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'BullMQ queue wait backlog > 50 jobs for 10 minutes (queue={{ $labels.queue }})'
+          description: 'The wait depth of {{ $labels.queue }} has been above 50 for 10m — the worker pool may be under-sized, or chain RPC is blocking broadcasts. See docs/runbooks/dead-letter-outbox.md for queue-specific remediation.'
+          runbook: 'docs/runbooks/dead-letter-outbox.md'
+
+      - alert: BullMQQueueDeadLetterAccumulating
+        expr: |
+          sum by (queue) (
+            marketplace_queue_depth{state="failed"}
+            or on() vector(0)
+          ) > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'BullMQ queue failed/DLQ depth > 5 (queue={{ $labels.queue }})'
+          description: '{{ $labels.queue }} has {{ $value }} permanently-failed jobs awaiting DLQ replay. Replay via the queue-specific CLI in docs/runbooks/dead-letter-outbox.md, then route a postmortem because final-exhaustion failures trigger ALERT_WEBHOOK per worker — page the on-call rotation.'
+          runbook: 'docs/runbooks/dead-letter-outbox.md'
+
+      - alert: BullMQQueueDelayedStuck
+        expr: |
+          (
+            sum by (queue) (
+              marketplace_queue_depth{state="delayed"}
+              or on() vector(0)
+            )
+          )
+          and on (queue)
+          (
+            sum by (queue) (
+              rate(marketplace_queue_depth{state="completed"}[10m])
+              or on() vector(0)
+            ) == 0
+          )
+          > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'BullMQ delayed backlog stagnant (queue={{ $labels.queue }})'
+          description: '{{ $labels.queue }} shows > 100 delayed jobs AND zero completions over 10m — the worker pod may have exited. Verify pod replicas, BullMQ Redis keyspace events, and worker.on("stalled") counts.'
+
+      - alert: LiquidityAddFailureSpike
+        expr: sum(rate(liquidity_activity_total{stage=~"liquidity_add_(failed|enqueued_dlq)"}[15m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Liquidity pool adds are failing after successful buys'
+          description: 'A fiat buy is settling on-chain but the follow-up liquidity-pool add is failing — check services/reconciliationService.js pending_manual items and the convert-liquidity-dlq replay in docs/runbooks/dead-letter-outbox.md.'
+
+      - alert: SocketErrorRateSpike
+        expr: sum(rate(socket_errors_total[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Socket.IO connection error rate elevated'
+          description: 'socket_errors_total has been incrementing faster than 1/s for 5 minutes.'
+
+      - alert: SocketRoomCapAbuseSignal
+        expr: sum(rate(socket_room_cap_rejections_total[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Unusually high rate of room-subscription rejections'
+          description: 'A client (or several) may be attempting excessive room subscriptions — see index.js joinRoomWithCap.'
+
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes{job="mallchain-backend"} > 1.5e9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Backend process RSS above 1.5GB'
+          description: 'Resident memory has stayed above 1.5GB for 10 minutes — check for a leak before it hits the container/host memory limit.'

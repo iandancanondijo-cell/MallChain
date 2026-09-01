@@ -97,7 +97,13 @@ class WalletApi {
    * equivalent (already used correctly elsewhere) — this maps its response
    * shape into the Transaction/TransactionsResponse shape the rest of the
    * app expects, rather than duplicating its logic under a second route.
-   * It has no separate `type` filter, so that option is applied client-side.
+   *
+   * type/search/startDate/endDate are all applied server-side (alongside
+   * status) before pagination — filtering only the current page client-side
+   * previously left `total`/page-count reflecting the *unfiltered* set, so
+   * "page 1 of N" and Next/Previous paged through the wrong data. This
+   * endpoint only ever derives 'send'/'receive' from a generic bank-transfer
+   * event, so 'swap'/'stake'/etc are not valid `type` values here.
    *
    * @param options - Query options
    * @returns Promise resolving to paginated transactions or error
@@ -106,10 +112,13 @@ class WalletApi {
     walletAddress: string;
     page?: number;
     pageSize?: number;
-    type?: string; // Filter by transaction type (send, receive, etc.) — applied client-side
+    type?: string; // 'send' | 'receive' — this endpoint has no other categories
     status?: string; // Filter by status (pending, confirmed, failed)
+    search?: string; // Substring match on hash/from/to
+    startDate?: string; // ISO date, inclusive lower bound
+    endDate?: string; // ISO date, inclusive upper bound
   }): Promise<ApiResult<TransactionsResponse>> {
-    const { walletAddress, page = 1, pageSize = 20, type, status } = options;
+    const { walletAddress, page = 1, pageSize = 20, type, status, search, startDate, endDate } = options;
 
     if (!walletAddress) {
       return { ok: false, error: 'Wallet address is required' };
@@ -121,6 +130,10 @@ class WalletApi {
         page: String(page),
         limit: String(pageSize),
         ...(status && { status }),
+        ...(type && { type }),
+        ...(search && { search }),
+        ...(startDate && { startDate }),
+        ...(endDate && { endDate }),
       });
 
       const result = await api.get<{
@@ -134,7 +147,7 @@ class WalletApi {
       if (!result.ok || !result.data) return { ok: false, error: result.error || 'Failed to fetch transactions' };
 
       const MLCNS_DECIMALS = 6;
-      let transactions: Transaction[] = result.data.transactions.map((t) => ({
+      const transactions: Transaction[] = result.data.transactions.map((t) => ({
         id: t.hash,
         type: (t.type as Transaction['type']) || 'send',
         amount: Number(t.amount || 0) / 10 ** MLCNS_DECIMALS,
@@ -146,7 +159,6 @@ class WalletApi {
         hash: t.hash,
         blockNumber: t.block,
       }));
-      if (type) transactions = transactions.filter((t) => t.type === type);
 
       return {
         ok: true,

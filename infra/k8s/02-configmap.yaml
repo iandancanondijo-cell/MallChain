@@ -1,0 +1,16 @@
+# Non-secret backend config — mirrors .env.example's defaults. Split from
+# the Secret above so this half can be reviewed/diffed in plain git history.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mallchain-backend-config
+  namespace: mallchain
+data:
+  NODE_ENV: 'production'
+  REDIS_HOST: 'redis'
+  REDIS_PORT: '6379'
+  CHAIN_RPC: 'http://marketplaced:26657'
+  CHAIN_REST_URL: 'http://marketplaced:1317'
+  TRUST_PROXY: '' # set to the real LB/ingress-controller CIDR, never left as the "1" fallback in production
+  MONGO_MAX_POOL_SIZE: '20'
+  MONGO_MIN_POOL_SIZE: '2'

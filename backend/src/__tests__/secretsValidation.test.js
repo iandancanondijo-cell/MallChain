@@ -14,6 +14,7 @@ function setBaseValidSecrets() {
   process.env.JWT_SECRET = REAL_SECRET;
   process.env.SESSION_SECRET = REAL_SECRET;
   process.env.ADMIN_API_KEY = REAL_SECRET;
+  process.env.MONITORING_API_KEY = 'a-second-random-value-long-enough-monitor01';
   process.env.OPERATOR_MNEMONIC = 'word '.repeat(12).trim();
   process.env.FAUCET_MNEMONIC = 'word '.repeat(12).trim();
   process.env.PAYMENT_WEBHOOK_SECRET = REAL_SECRET;

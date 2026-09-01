@@ -12,8 +12,12 @@ describe('keyManager.getTreasuryMnemonic', () => {
     process.env = { ...ORIGINAL_ENV };
     delete process.env.VAULT_ADDR;
     delete process.env.VAULT_TOKEN;
+    delete process.env.VAULT_ROLE_ID;
+    delete process.env.VAULT_SECRET_ID;
     delete process.env.TEST_MODE;
     delete process.env.TREASURY_MNEMONIC;
+    process.env.VAULT_RETRY_BASE_DELAY_MS = '1'; // keep retry-backoff tests fast
+    require('../utils/keyManager')._resetAppRoleTokenCache();
   });
 
   afterAll(() => {
@@ -83,5 +87,110 @@ describe('keyManager.getTreasuryMnemonic', () => {
     const { getTreasuryMnemonic } = require('../utils/keyManager');
 
     await expect(getTreasuryMnemonic()).rejects.toThrow('Treasury mnemonic not configured');
+  });
+
+  describe('retry on transient Vault failures', () => {
+    beforeEach(() => {
+      process.env.VAULT_ADDR = 'https://vault.internal';
+      process.env.VAULT_TOKEN = 'vault-token';
+    });
+
+    test('retries on a 429 and succeeds on the next attempt', async () => {
+      const rateLimited = { response: { status: 429 } };
+      axios.get
+        .mockRejectedValueOnce(rateLimited)
+        .mockResolvedValueOnce({ data: { data: { mnemonic: 'retried mnemonic' } } });
+
+      await expect(getTreasuryMnemonic()).resolves.toBe('retried mnemonic');
+      expect(axios.get).toHaveBeenCalledTimes(2);
+    });
+
+    test('retries on a 503 and succeeds on the next attempt', async () => {
+      const serverError = { response: { status: 503 } };
+      axios.get
+        .mockRejectedValueOnce(serverError)
+        .mockResolvedValueOnce({ data: { data: { mnemonic: 'retried after 503' } } });
+
+      await expect(getTreasuryMnemonic()).resolves.toBe('retried after 503');
+      expect(axios.get).toHaveBeenCalledTimes(2);
+    });
+
+    test('does not retry a non-retryable 403 — fails on the first attempt', async () => {
+      const forbidden = { response: { status: 403 } };
+      axios.get.mockRejectedValue(forbidden);
+
+      await expect(getTreasuryMnemonic()).rejects.toThrow('Failed to retrieve mnemonic from Vault');
+      expect(axios.get).toHaveBeenCalledTimes(1);
+    });
+
+    test('gives up after exhausting VAULT_MAX_RETRIES retries on persistent 500s', async () => {
+      process.env.VAULT_MAX_RETRIES = '2';
+      const serverError = { response: { status: 500 } };
+      axios.get.mockRejectedValue(serverError);
+
+      await expect(getTreasuryMnemonic()).rejects.toThrow('Failed to retrieve mnemonic from Vault');
+      expect(axios.get).toHaveBeenCalledTimes(3); // initial attempt + 2 retries
+    });
+  });
+
+  describe('AppRole authentication', () => {
+    test('exchanges VAULT_ROLE_ID/VAULT_SECRET_ID for a client token and uses it to fetch the secret', async () => {
+      process.env.VAULT_ADDR = 'https://vault.internal';
+      process.env.VAULT_ROLE_ID = 'role-1';
+      process.env.VAULT_SECRET_ID = 'secret-1';
+      axios.post.mockResolvedValue({ data: { auth: { client_token: 'approle-token', lease_duration: 3600 } } });
+      axios.get.mockResolvedValue({ data: { data: { mnemonic: 'approle mnemonic' } } });
+
+      await expect(getTreasuryMnemonic()).resolves.toBe('approle mnemonic');
+      expect(axios.post).toHaveBeenCalledWith(
+        'https://vault.internal/v1/auth/approle/login',
+        { role_id: 'role-1', secret_id: 'secret-1' },
+        expect.any(Object)
+      );
+      expect(axios.get).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ headers: { 'X-Vault-Token': 'approle-token' } })
+      );
+    });
+
+    test('caches the AppRole token across calls instead of re-authenticating every time', async () => {
+      process.env.VAULT_ADDR = 'https://vault.internal';
+      process.env.VAULT_ROLE_ID = 'role-1';
+      process.env.VAULT_SECRET_ID = 'secret-1';
+      axios.post.mockResolvedValue({ data: { auth: { client_token: 'approle-token', lease_duration: 3600 } } });
+      axios.get.mockResolvedValue({ data: { data: { mnemonic: 'approle mnemonic' } } });
+
+      await getTreasuryMnemonic();
+      await getTreasuryMnemonic();
+
+      expect(axios.post).toHaveBeenCalledTimes(1); // only logged in once
+      expect(axios.get).toHaveBeenCalledTimes(2); // but fetched the secret both times
+    });
+
+    test('prefers AppRole over a static VAULT_TOKEN when both are configured', async () => {
+      process.env.VAULT_ADDR = 'https://vault.internal';
+      process.env.VAULT_TOKEN = 'static-token';
+      process.env.VAULT_ROLE_ID = 'role-1';
+      process.env.VAULT_SECRET_ID = 'secret-1';
+      axios.post.mockResolvedValue({ data: { auth: { client_token: 'approle-token', lease_duration: 3600 } } });
+      axios.get.mockResolvedValue({ data: { data: { mnemonic: 'x' } } });
+
+      await getTreasuryMnemonic();
+
+      expect(axios.get).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ headers: { 'X-Vault-Token': 'approle-token' } })
+      );
+    });
+
+    test('throws a clear error when AppRole login does not return a client token', async () => {
+      process.env.VAULT_ADDR = 'https://vault.internal';
+      process.env.VAULT_ROLE_ID = 'role-1';
+      process.env.VAULT_SECRET_ID = 'secret-1';
+      axios.post.mockResolvedValue({ data: { auth: {} } });
+
+      await expect(getTreasuryMnemonic()).rejects.toThrow('Failed to authenticate to Vault');
+      expect(axios.get).not.toHaveBeenCalled();
+    });
   });
 });

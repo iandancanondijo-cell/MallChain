@@ -72,11 +72,12 @@ export const kycApi = {
   },
 
   /** Fetches an uploaded document as a blob URL for display (auth-gated, not a public link). */
-  async fetchDocumentBlobUrl(kycId: string): Promise<ApiResult<string>> {
+  async fetchDocumentBlobUrl(kycId: string, reason?: string): Promise<ApiResult<string>> {
     const base = config.apiBaseUrl.replace(/\/$/, '');
     const token = getToken();
+    const qs = reason?.trim() ? `?reason=${encodeURIComponent(reason.trim())}` : '';
     try {
-      const res = await fetch(`${base}/api/kyc/document/${kycId}`, {
+      const res = await fetch(`${base}/api/kyc/document/${kycId}${qs}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
       if (!res.ok) {

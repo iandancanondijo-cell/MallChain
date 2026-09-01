@@ -110,6 +110,7 @@ describe('messaging routes', () => {
   test('GET /conversations returns unread counts and last message per conversation', async () => {
     Conversation.find.mockReturnValue({
       sort: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
       populate: jest.fn().mockReturnThis(),
       lean: jest.fn().mockResolvedValue([
         { _id: 'conv1', participants: [{ _id: 'me1' }, { _id: 'them1', username: 'them' }] },

@@ -1,5 +1,6 @@
 const express = require('express')
 const router = express.Router()
+const logger = require('../utils/logger')
 const axios = require('axios')
 const { getMarketPrice } = require('../services/mallcoinService')
 
@@ -69,7 +70,7 @@ router.get('/wallets', async (req, res) => {
     const balances = await fetchWalletBalances()
     return res.json({ success: true, wallets: balances })
   } catch (e) {
-    console.error('[Economy Wallets]', e.message)
+    logger.error('economy', 'wallets error', e)
     return res.status(500).json({ success: false, error: e.message })
   }
 })
@@ -168,7 +169,7 @@ router.get('/state', async (req, res) => {
       timestamp: now.toISOString()
     })
   } catch (e) {
-    console.error('[Economy State]', e.message)
+    logger.error('economy', 'state error', e)
     return res.status(500).json({ success: false, error: e.message })
   }
 })
@@ -224,7 +225,7 @@ router.get('/user/:address', async (req, res) => {
       valueRatio: (2 / mlcnsPriceKes).toFixed(2)
     })
   } catch (e) {
-    console.error('[Economy User]', e.message)
+    logger.error('economy', 'user error', e)
     return res.status(500).json({ success: false, error: e.message })
   }
 })

@@ -23,4 +23,5 @@ var (
 	ErrUnauthorized          = errors.Register(ModuleName, 1112, "unauthorized")
 	ErrInvalidSignature      = errors.Register(ModuleName, 1113, "invalid signature")
 	ErrLockedFunds           = errors.Register(ModuleName, 1114, "cannot transfer from locked wallet")
+	ErrStakeBelowMinimum     = errors.Register(ModuleName, 1115, "stake amount below minimum required to earn rewards")
 )

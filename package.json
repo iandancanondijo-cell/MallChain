@@ -2,7 +2,8 @@
   "name": "mallchain",
   "private": true,
   "scripts": {
-    "send-mlc": "node scripts/send_mlcoin_msg.js"
+    "send-mlc": "node scripts/send_mlcoin_msg.js",
+    "prepare": "git config core.hooksPath .githooks"
   },
   "workspaces": [
     "backend",

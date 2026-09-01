@@ -7,10 +7,10 @@ import (
 )
 
 // InitGenesis initializes the dex module's state from a provided genesis state.
-func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) error {
+func (k Keeper) InitGenesis(ctx context.Context, genState *types.GenesisState) error {
 	// Set module parameters
 	if genState.Params != nil {
-		if err := k.SetParams(ctx, *genState.Params); err != nil {
+		if err := k.SetParams(ctx, genState.Params); err != nil {
 			return err
 		}
 	}
@@ -25,7 +25,7 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 		if pool == nil {
 			continue
 		}
-		if err := k.pools.Set(ctx, pool.Id, *pool); err != nil {
+		if err := k.pools.Set(ctx, pool.Id, pool); err != nil {
 			return err
 		}
 	}
@@ -53,14 +53,9 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 		return nil, err
 	}
 
-	poolPointers := make([]*types.Pool, len(pools))
-	for i := range pools {
-		poolPointers[i] = &pools[i]
-	}
-
 	return &types.GenesisState{
-		Params:     &params,
-		Pools:      poolPointers,
+		Params:     params,
+		Pools:      pools,
 		NextPoolId: nextPoolId,
 	}, nil
 }

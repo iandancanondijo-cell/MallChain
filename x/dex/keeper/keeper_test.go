@@ -111,7 +111,7 @@ func newTestKeeper(t *testing.T) (Keeper, mockBankKeeper, sdk.Context) {
 	)
 	require.NoError(t, err)
 
-	require.NoError(t, k.SetParams(ctx, types.DefaultParams()))
+	require.NoError(t, k.SetParams(ctx, func() *types.Params { p := types.DefaultParams(); return &p }()))
 	return k, bank, ctx
 }
 

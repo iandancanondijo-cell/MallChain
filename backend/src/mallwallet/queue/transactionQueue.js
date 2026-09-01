@@ -18,6 +18,10 @@ function getTransactionQueue() {
         }
       }
     })
+    try {
+      const { registerQueueForMetrics } = require('../monitoring/prometheus')
+      registerQueueForMetrics('transactions', async () => transactionQueue)
+    } catch (_) { /* monitoring optional */ }
   }
   return transactionQueue
 }

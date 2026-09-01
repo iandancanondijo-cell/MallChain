@@ -61,6 +61,32 @@ export interface AdminKycSubmission {
   submittedAt: string;
 }
 
+export interface AdminAmlReview {
+  _id: string;
+  userId: { _id: string; email: string; username: string | null } | string;
+  walletAddress: string;
+  triggerAmountKes: number;
+  fundsSource: 'mining_staking_rewards' | 'mallpoints_conversion' | 'referral_bonus' | 'salary' | 'business_income' | 'gift' | 'asset_sale' | 'other';
+  isNativeEarnings: boolean;
+  narrative: string;
+  documentRef: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewNotes?: string;
+}
+
+export interface AdminStructuringFlag {
+  _id: string;
+  walletAddress: string;
+  windowStartAt: string;
+  windowEndAt: string;
+  cumulativeKes: number;
+  relatedWithdrawalIds: string[];
+  acknowledged: boolean;
+  acknowledgedAt?: string;
+}
+
 export interface AdminCampaign {
   _id: string;
   creator_id: string;
@@ -150,6 +176,8 @@ export interface ReconciliationItem {
   reason?: string;
   status: 'detected' | 'compensating' | 'pending_manual' | 'resolved';
   compensationTx?: string;
+  resolutionNote?: string;
+  resolvedBy?: string;
   createdAt: string;
   resolvedAt?: string;
 }
@@ -162,7 +190,7 @@ export interface AdminWithdrawalRequest {
   amountMlcns: number;
   amountKes: number;
   currency?: string;
-  status: 'pending_review' | 'payout_initiated' | 'completed' | 'failed';
+  status: 'pending_review' | 'payout_initiated' | 'completed' | 'failed' | 'refunded';
   payoutProvider?: string;
   payoutRef?: string;
   settlementMode?: 'review' | 'signed_sell';
@@ -258,6 +286,22 @@ class AdminApi {
     return api.post(`/api/admin/kyc/${encodeURIComponent(id)}/review`, { action, notes });
   }
 
+  async listPendingAmlReviews(): Promise<ApiResult<{ reviews: AdminAmlReview[]; total: number }>> {
+    return api.get('/api/admin/aml-reviews/pending');
+  }
+
+  async reviewAmlSubmission(id: string, action: 'approved' | 'rejected', notes?: string): Promise<ApiResult<{ review: AdminAmlReview }>> {
+    return api.post(`/api/admin/aml-reviews/${encodeURIComponent(id)}/review`, { action, notes });
+  }
+
+  async listStructuringFlags(acknowledged?: boolean): Promise<ApiResult<{ flags: AdminStructuringFlag[]; total: number }>> {
+    return api.get('/api/admin/structuring-flags', acknowledged === undefined ? undefined : { acknowledged: String(acknowledged) });
+  }
+
+  async acknowledgeStructuringFlag(id: string): Promise<ApiResult<{ flag: AdminStructuringFlag }>> {
+    return api.post(`/api/admin/structuring-flags/${encodeURIComponent(id)}/acknowledge`, {});
+  }
+
   async listMiningCampaigns(status?: string): Promise<ApiResult<{ campaigns: AdminCampaign[]; total: number }>> {
     return api.get('/api/admin/mining/campaigns', status ? { status } : undefined);
   }
@@ -299,10 +343,19 @@ class AdminApi {
     return api.post(`/api/admin/badges/purchases/${encodeURIComponent(quoteId)}/void`, { reason });
   }
 
-  async listLiquidityActivity(params?: { flow?: string; limit?: number }): Promise<ApiResult<{ items: LiquidityActivityItem[]; total: number }>> {
+  async listLiquidityActivity(params?: {
+    flow?: string;
+    limit?: number;
+    walletAddress?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<ApiResult<{ items: LiquidityActivityItem[]; total: number }>> {
     const query: Record<string, string | number> = {};
     if (params?.flow) query.flow = params.flow;
     if (params?.limit) query.limit = params.limit;
+    if (params?.walletAddress) query.walletAddress = params.walletAddress;
+    if (params?.startDate) query.startDate = params.startDate;
+    if (params?.endDate) query.endDate = params.endDate;
     return api.get('/api/liquidity/activity', query);
   }
 
@@ -314,8 +367,23 @@ class AdminApi {
     return api.post('/api/admin/reconciliation/run', {});
   }
 
+  /** Record-keeping only — does not itself perform any on-chain reversal. */
+  async resolveReconciliationItem(id: string, note: string): Promise<ApiResult<{ item: ReconciliationItem }>> {
+    return api.post(`/api/admin/reconciliation/${encodeURIComponent(id)}/resolve`, { note });
+  }
+
   async listWithdrawals(status?: string): Promise<ApiResult<{ withdrawals: AdminWithdrawalRequest[]; total: number }>> {
     return api.get('/api/admin/withdrawals', status ? { status } : undefined);
+  }
+
+  /** Re-attempts the Safaricom B2C payout for a withdrawal whose prior attempt failed. */
+  async retryWithdrawal(id: string): Promise<ApiResult<{ withdrawal: AdminWithdrawalRequest }>> {
+    return api.post(`/api/admin/withdrawals/${encodeURIComponent(id)}/retry`, {});
+  }
+
+  /** Records how a failed withdrawal was actually settled outside the automated payout path. */
+  async resolveWithdrawal(id: string, outcome: 'completed' | 'refunded', note: string): Promise<ApiResult<{ withdrawal: AdminWithdrawalRequest }>> {
+    return api.post(`/api/admin/withdrawals/${encodeURIComponent(id)}/resolve`, { outcome, note });
   }
 
   async listBurnPolicies(): Promise<ApiResult<{ policies: BurnPolicyEntry[] }>> {
@@ -353,6 +421,24 @@ class AdminApi {
   async getTreasuryMetrics(): Promise<ApiResult<{ totals: TreasuryMetricTotal[] }>> {
     return api.get('/api/admin/treasury/metrics');
   }
+
+  async getMaintenance(): Promise<ApiResult<MaintenanceState>> {
+    return api.get('/api/admin/maintenance');
+  }
+
+  /** Toggling requires superadmin (backend/src/routes/adminPanel.js). */
+  async setMaintenance(payload: { global?: boolean; scope?: string; paused?: boolean; reason?: string }): Promise<ApiResult<MaintenanceState>> {
+    return api.post('/api/admin/maintenance', payload);
+  }
+}
+
+export interface MaintenanceState {
+  ok: boolean;
+  global: boolean;
+  scopes: Record<string, boolean>;
+  reason: string;
+  updatedBy?: string | null;
+  updatedAt?: string | null;
 }
 
 export const adminApi = new AdminApi();

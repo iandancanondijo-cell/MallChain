@@ -4,6 +4,7 @@
  */
 const express = require('express');
 const router = express.Router();
+const logger = require('../utils/logger')
 const mongoose = require('mongoose');
 const auth = require('../middleware/auth');
 const User = require('../models/user');
@@ -29,7 +30,7 @@ router.get('/', auth, async (req, res) => {
 
     res.json(referralData);
   } catch (error) {
-    console.error('Error fetching referral data:', error);
+    logger.error('referrals', 'error fetching referral data', error);
     res.status(500).json({ error: 'Failed to fetch referral data' });
   }
 });
@@ -49,7 +50,7 @@ router.get('/code', auth, async (req, res) => {
     
     res.json({ code });
   } catch (error) {
-    console.error('Error fetching referral code:', error);
+    logger.error('referrals', 'error fetching referral code', error);
     res.status(500).json({ error: 'Failed to fetch referral code' });
   }
 });
@@ -97,7 +98,7 @@ router.post('/claim', auth, async (req, res) => {
       message: `Claimed ${unclaimed} MLPTS`
     });
   } catch (error) {
-    console.error('Error claiming referral rewards:', error);
+    logger.error('referrals', 'error claiming referral rewards', error);
     res.status(500).json({ error: 'Failed to claim rewards' });
   }
 });
@@ -111,7 +112,7 @@ router.get('/history', auth, async (req, res) => {
     const history = [];
     res.json(history);
   } catch (error) {
-    console.error('Error fetching referral history:', error);
+    logger.error('referrals', 'error fetching referral history', error);
     res.status(500).json({ error: 'Failed to fetch referral history' });
   }
 });

@@ -10,7 +10,7 @@ This document describes how to run Marketplace / Mallchain in a production-ready
 | Backend API | 4000 | REST + WebSocket for the app |
 | Frontend (static) | 443 / CDN | Built with `npm run build` |
 | MongoDB | 27017 | Users, payments, tx history |
-| Redis | 6379 | Background workers (optional) |
+| Redis | 6379 | Background workers, auth cache, rate limits (**required** in production) |
 
 Do **not** expose the wallet service (`wallet-service.js`) on the public internet. Wallets should sign in the browser (`frontend/src/core/wallet/walletUtils.js`).
 

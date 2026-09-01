@@ -13,16 +13,20 @@ import { StatusChip } from './ui';
 describe('StatusChip', () => {
   test('renders a known status', () => {
     render(<StatusChip status="active" />);
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    // StatusChip prefixes an icon (⏳/✓/✕/•) before the label as a non-color
+    // status cue (WCAG 1.4.1) — the visible text is "⏳ Active", not "Active"
+    // alone, so match on a regex rather than an exact string.
+    expect(screen.getByText(/Active/)).toBeInTheDocument();
+    expect(screen.getByText(/Active/)).toHaveAttribute('aria-label', 'Active');
   });
 
   test('does not throw when status is undefined', () => {
     expect(() => render(<StatusChip status={undefined} />)).not.toThrow();
-    expect(screen.getByText('Unknown')).toBeInTheDocument();
+    expect(screen.getByText(/Unknown/)).toBeInTheDocument();
   });
 
   test('does not throw when status is null', () => {
     expect(() => render(<StatusChip status={null} />)).not.toThrow();
-    expect(screen.getByText('Unknown')).toBeInTheDocument();
+    expect(screen.getByText(/Unknown/)).toBeInTheDocument();
   });
 });
