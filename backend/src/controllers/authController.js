@@ -463,6 +463,28 @@ exports.logout = async (req, res) => {
   return res.json({ ok: true });
 };
 
+// POST /api/auth/refresh — issues a fresh session cookie (new JWT, new
+// exp, new jti) for an already-authenticated caller, so a session can stay
+// silently alive past SESSION_TTL_MIN without forcing a full re-login.
+// req.user/req.tokenPayload come from the shared auth middleware, so this
+// gets the same cookie/CSRF/denylist/banned-user handling as every other
+// protected route for free. The old jti is revoked immediately (not left
+// to expire naturally) so a leaked pre-rotation token can't be replayed
+// once a fresher one exists — same reasoning as logout(), just triggered
+// by rotation instead of an explicit sign-out.
+exports.refresh = async (req, res) => {
+  const oldPayload = req.tokenPayload;
+  const { token, sessionTtlMin, expiresAt } = signToken(req.user);
+  setAuthCookie(res, token, sessionTtlMin);
+
+  if (oldPayload?.jti && oldPayload?.exp) {
+    const ttlSeconds = oldPayload.exp - Math.floor(Date.now() / 1000);
+    if (ttlSeconds > 0) await revokeToken(oldPayload.jti, ttlSeconds);
+  }
+
+  return res.json({ expiresAt });
+};
+
 // POST /api/auth/logout-everywhere — revokes every token issued to this
 // user up to now. Backs the "Sign Out Everywhere" button, which previously
 // only cleared the calling device's own local token despite its name —

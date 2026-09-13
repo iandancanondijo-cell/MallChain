@@ -91,6 +91,58 @@ describe('POST /api/auth/logout', () => {
   });
 });
 
+describe('POST /api/auth/refresh', () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    isRevoked.mockResolvedValue(false);
+    app = express();
+    app.use(express.json());
+    app.post('/refresh', auth, authCtrl.refresh);
+  });
+
+  test('issues a fresh cookie with a new jti and revokes the old one', async () => {
+    User.findById.mockReturnValue(selectable({ _id: 'u1', email: 'a@x.com', username: 'a' }));
+    const oldToken = jwt.sign({ userId: 'u1', jti: 'jti-old', username: 'a' }, process.env.JWT_SECRET, { expiresIn: '10m' });
+
+    const res = await request(app).post('/refresh').set('Authorization', `Bearer ${oldToken}`);
+
+    expect(res.status).toBe(200);
+    expect(typeof res.body.expiresAt).toBe('number');
+
+    // The new session cookie must carry a genuinely different token — not
+    // a re-signed copy of the same jti (that would defeat revoking it).
+    const setCookie = res.headers['set-cookie'] || [];
+    const authCookie = setCookie.find((c) => c.startsWith('auth_token='));
+    expect(authCookie).toBeDefined();
+    const newToken = authCookie.split(';')[0].split('=')[1];
+    const decoded = jwt.verify(newToken, process.env.JWT_SECRET);
+    expect(decoded.userId).toBe('u1');
+    expect(decoded.jti).not.toBe('jti-old');
+    expect(decoded.exp).toBe(res.body.expiresAt);
+
+    // The pre-rotation token must be revoked immediately, not left to
+    // expire naturally — same reasoning as an explicit logout.
+    expect(revokeToken).toHaveBeenCalledTimes(1);
+    const [jti, ttlSeconds] = revokeToken.mock.calls[0];
+    expect(jti).toBe('jti-old');
+    expect(ttlSeconds).toBeGreaterThan(590);
+    expect(ttlSeconds).toBeLessThanOrEqual(600);
+  });
+
+  test('rejects when the calling token is already revoked', async () => {
+    isRevoked.mockResolvedValue(true);
+    User.findById.mockReturnValue(selectable({ _id: 'u1', email: 'a@x.com' }));
+    const token = jwt.sign({ userId: 'u1', jti: 'jti-dead' }, process.env.JWT_SECRET, { expiresIn: '10m' });
+
+    const res = await request(app).post('/refresh').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(401);
+    expect(revokeToken).not.toHaveBeenCalled();
+  });
+});
+
 describe('POST /api/auth/logout-everywhere', () => {
   let app;
 

@@ -107,6 +107,13 @@ router.get('/me', authCtrl.me);
 router.post('/link-wallet', auth, authCtrl.linkWallet);
 
 /**
+ * POST /api/auth/refresh — silently renews the session (new JWT/cookie,
+ * new expiry) without requiring a full re-login. authService.ts's
+ * isSessionExpiringSoon() drives when the frontend calls this.
+ */
+router.post('/refresh', auth, authCtrl.refresh);
+
+/**
  * POST /api/auth/logout — revokes this token server-side (see
  * middleware/tokenDenylist.js). Uses the shared auth middleware (rather
  * than this file's other routes' inline jwt.verify) specifically so

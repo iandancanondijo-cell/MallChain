@@ -97,6 +97,13 @@ export class StoreSync {
           store.state.user.authed = true;
           store.commit();
         }
+        // Proactively renew before the session actually expires, rather
+        // than waiting for a 401 mid-action to force a full re-login.
+        // authService.refreshSession() dedupes concurrent calls, so it's
+        // safe to just ask on every 3s tick while inside this window.
+        if (authService.isSessionExpiringSoon(600)) {
+          authService.refreshSession();
+        }
       } else {
         if (store.state.user.authed) {
           console.log('[StoreSync] Session missing or invalid, clearing auth state');

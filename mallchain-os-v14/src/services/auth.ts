@@ -118,6 +118,42 @@ class AuthService {
     return expiresIn < timeoutSeconds;
   }
 
+  private refreshPromise: Promise<boolean> | null = null;
+
+  /**
+   * Silently renews the session — POSTs to /api/auth/refresh, which issues
+   * a fresh httpOnly cookie server-side, and updates the local
+   * `{authedUntil}` marker from the real expiresAt it returns. Call this
+   * once the session enters its expiring-soon window (see
+   * isSessionExpiringSoon()) rather than waiting for a 401 to force a full
+   * re-login. storeSync.ts's periodic check is what actually triggers this
+   * in practice.
+   *
+   * Concurrent callers share one in-flight request instead of each firing
+   * their own refresh.
+   */
+  async refreshSession(): Promise<boolean> {
+    if (this.refreshPromise) return this.refreshPromise;
+
+    this.refreshPromise = (async () => {
+      try {
+        const res = await api.post<{ expiresAt: number }>('/api/auth/refresh', {});
+        if (res.ok && res.data?.expiresAt) {
+          this.setSession(res.data.expiresAt);
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.warn('[Auth] Failed to refresh session:', (error as Error).message);
+        return false;
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
+  }
+
   /**
    * Returns the CSRF token to attach as `X-CSRF-Token` on a mutating
    * request, fetching (and caching) it from GET /api/csrf-token on first
