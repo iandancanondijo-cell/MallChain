@@ -5,6 +5,26 @@
 
 const isProduction = process.env.NODE_ENV === 'production';
 
+const TRUST_PROXY_IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\/(?:[1-9]|[12]\d|3[0-2]))?$/;
+const TRUST_PROXY_IPV6 = /^[0-9a-fA-F:]+(?:\/\d{1,3})?$/;
+
+function parseTrustProxy(raw) {
+  if (!raw) return null;
+  const entries = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  for (const entry of entries) {
+    if (entry === 'loopback' || entry === 'uniquelocal' || entry === 'linklocal') continue;
+    const n = Number(entry);
+    if (Number.isFinite(n) && n >= 0) continue;
+    const bracketless = entry.startsWith('[') && entry.endsWith(']') ? entry.slice(1, -1) : entry;
+    if (!TRUST_PROXY_IPV4.test(bracketless) && !TRUST_PROXY_IPV6.test(bracketless)) {
+      throw new Error(`TRUST_PROXY entry is not a valid CIDR, known name, or hop count: "${entry}". See https://expressjs.com/en/guide/behind-proxies.html — or run scripts/verify-trusted-proxies.sh to produce the expected comma list for Cloudflare.`);
+    }
+  }
+  return entries.length === 1 ? entries[0] : entries;
+}
+
+const trustProxy = parseTrustProxy(process.env.TRUST_PROXY || null);
+
 function required(name, value) {
   if (isProduction && (value === undefined || value === null || value === '')) {
     throw new Error(`Missing required environment variable: ${name}`);
@@ -68,6 +88,8 @@ const config = {
   isProduction,
 
   port: Number(process.env.PORT || 4000),
+
+  trustProxy,
 
   mongoUri: mongoUri,
 
@@ -227,6 +249,15 @@ function validateRuntimeSecrets() {
     required('MONITORING_API_KEY', process.env.MONITORING_API_KEY);
     required('FIELD_ENCRYPTION_KEY', process.env.FIELD_ENCRYPTION_KEY);
     required('FIELD_BLIND_INDEX_KEY', process.env.FIELD_BLIND_INDEX_KEY);
+    // Fail-closed: a production backend behind a CDN/load balancer that has
+    // no TRUST_PROXY configured will see every request as coming from the
+    // proxy's IP, which means IP-based rate limiting, KYC geo checks, and
+    // fraud-signals tied to client IP all silently use the wrong address.
+    // parseTrustProxy() will already throw at module-load time if the value
+    // is malformed; this rejects the empty/unset case specifically.
+    if (!trustProxy || (Array.isArray(trustProxy) && trustProxy.length === 0)) {
+      throw new Error('TRUST_PROXY is required in production. Run scripts/verify-trusted-proxies.sh to generate the expected comma-separated CIDR list for your CDN (Cloudflare ips-v4 + ips-v6), then set TRUST_PROXY to that list. Leaving it unset breaks rate limiting and IP-based fraud detection.');
+    }
 
     // TEST_MODE bypasses the Vault requirement for treasury signing (see
     // utils/keyManager.js) and short-circuits faucetService's mnemonic

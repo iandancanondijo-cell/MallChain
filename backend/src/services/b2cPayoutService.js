@@ -2,14 +2,12 @@
 /* global require, module, process */
 const axios = require('axios');
 const { Buffer } = require('buffer');
-const { Console } = require('console');
-const { stdout, stderr } = require('process');
 const { config } = require('../config');
 const { createBlockchainBreaker, createPaymentBackoff } = require('../utils/circuitBreaker');
 const { paymentFailuresTotal } = require('../utils/metrics');
 const { getMarketPrice } = require('./mallcoinService');
 const { checkPayoutLimits, recordPayout } = require('./treasuryLimitsService');
-const console = new Console(stdout, stderr);
+const logger = require('../utils/logger');
 
 const {
   apiBaseUrl: SAFARICOM_API,
@@ -49,7 +47,7 @@ async function getSafaricomToken() {
     if (!token) throw new Error('No access token from Safaricom');
     return token;
   } catch (err) {
-    console.error('Failed to get Safaricom token:', err.message || err);
+    logger.error('b2cPayout', 'Failed to get Safaricom token', err);
     return null;
   }
 }
@@ -128,7 +126,7 @@ async function initiateB2CPayout({ sellerPhone, mlcnsAmount, saleId }) {
       raw: resp,
     };
   } catch (err) {
-    console.warn('B2C payout initiation failed:', err.message || err);
+    logger.warn('b2cPayout', 'B2C payout initiation failed', { error: err.message || String(err) });
     paymentFailuresTotal.inc({ reason: 'b2c_initiation_error' });
     return { ok: false, error: err.message || 'Payout initiation failed', providerMode: 'live' };
   }
@@ -159,7 +157,7 @@ async function handlePayoutCallback(callbackData) {
   // has already reached a terminal state, re-applying it would re-save the
   // sale/withdrawal and re-emit liquidity activity for something already done.
   if (payout.payoutStatus === 'succeeded' || payout.payoutStatus === 'failed') {
-    console.log('[b2cPayout] ignoring duplicate payout callback delivery — already processed', { payoutRef, status: payout.payoutStatus });
+    logger.info('b2cPayout', 'ignoring duplicate payout callback delivery — already processed', { payoutRef, status: payout.payoutStatus });
     return { ResultCode: 0 };
   }
 

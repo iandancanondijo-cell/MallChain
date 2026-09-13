@@ -19,6 +19,11 @@ function setBaseValidSecrets() {
   process.env.FAUCET_MNEMONIC = 'word '.repeat(12).trim();
   process.env.PAYMENT_WEBHOOK_SECRET = REAL_SECRET;
   process.env.MONGO_URI = 'mongodb://localhost:27017/marketplace';
+  // Required in production since TRUST_PROXY's own fail-closed guardrail
+  // (config/index.js) was added — without it every test in this file that
+  // doesn't specifically exercise that guardrail was tripping on it instead
+  // of the guardrail actually under test.
+  process.env.TRUST_PROXY = '203.0.113.0/24';
 }
 
 describe('validateRuntimeSecrets (production guardrails)', () => {

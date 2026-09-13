@@ -130,6 +130,36 @@ const authSchemas = {
       .max(256)
       .required(),
   }),
+
+  // Link wallet: requires a signed ADR-036 payload proving address custody.
+  // timestamp is an integer ms unix timestamp; pubKey/signature are base64.
+  linkWallet: Joi.object({
+    address: Joi.string()
+      .trim()
+      .pattern(/^mall1[a-z0-9]{38,58}$/)
+      .required()
+      .messages({
+        'string.pattern.base': 'Invalid wallet address format',
+      }),
+    timestamp: Joi.number()
+      .integer()
+      .positive()
+      .required(),
+    pubKey: Joi.string()
+      .trim()
+      .base64()
+      .max(1024)
+      .required(),
+    signature: Joi.string()
+      .trim()
+      .base64()
+      .max(2048)
+      .required(),
+  }),
+
+  // me route has no body, but declare a schema so validateInput can reject
+  // any unexpected fields an attacker tries to POST/GET with.
+  me: Joi.object({}).unknown(false),
 };
 
 /**

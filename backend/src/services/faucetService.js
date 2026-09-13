@@ -9,6 +9,7 @@ const {
 const { DirectSecp256k1Wallet, DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
 const Redis = require('ioredis');
 const { redisTlsOptions } = require('../utils/redisTlsOptions');
+const logger = require('../utils/logger');
 
 const IS_TEST_ENV = process.env.NODE_ENV === 'test';
 const isProduction = process.env.NODE_ENV === 'production';
@@ -25,18 +26,18 @@ if (!IS_TEST_ENV) {
     ...redisTlsOptions(),
   });
 
-  redis.on('error', (err) => console.error('Redis client error:', err));
+  redis.on('error', (err) => logger.error('faucet', 'Redis client error', err));
 
   redis.connect()
     .then(() => {
       redisConnected = true;
-      console.log('Redis connected for faucet cooldown');
+      logger.info('faucet', 'Redis connected for faucet cooldown');
     })
     .catch(() => {
       if (isProduction) {
-        console.error('Redis unavailable in production - faucet service disabled');
+        logger.error('faucet', 'Redis unavailable in production - faucet service disabled', new Error('redis connect failed'));
       } else {
-        console.warn('Redis unavailable, faucet cooldown will be in-memory only (development mode)');
+        logger.warn('faucet', 'Redis unavailable, faucet cooldown will be in-memory only (development mode)');
       }
     });
 }
@@ -67,7 +68,7 @@ async function getFaucetMnemonic() {
   if (process.env.FAUCET_MNEMONIC) return process.env.FAUCET_MNEMONIC;
   if (process.env.OPERATOR_MNEMONIC) {
     if (process.env.ALLOW_OPERATOR_MNEMONIC === 'true') {
-      console.warn('Using OPERATOR_MNEMONIC for faucet operations (ALLOW_OPERATOR_MNEMONIC=true)');
+      logger.warn('faucet', 'Using OPERATOR_MNEMONIC for faucet operations (ALLOW_OPERATOR_MNEMONIC=true)');
       return process.env.OPERATOR_MNEMONIC;
     }
     return null;
@@ -224,7 +225,7 @@ async function setCooldown(address) {
   const cooldownKey = `faucet_cooldown:${address}`;
 
   if (isProduction && !redisConnected) {
-    console.error('Cannot set cooldown: Redis unavailable in production');
+    logger.error('faucet', 'Cannot set cooldown: Redis unavailable in production', new Error('redis not connected'));
     return;
   }
 
@@ -236,7 +237,7 @@ async function setCooldown(address) {
     }
   } catch (redisErr) {
     if (isProduction) {
-      console.error('Cannot set cooldown: Redis connection failed');
+      logger.error('faucet', 'Cannot set cooldown: Redis connection failed', redisErr);
       return;
     }
     lastRequestByAddress.set(address, Date.now());
