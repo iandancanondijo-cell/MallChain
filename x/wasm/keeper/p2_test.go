@@ -24,7 +24,7 @@ var minimalValidWasmVM = []byte{
 func TestWasmVMNew(t *testing.T) {
 	vm := keeper.NewWasmVM(nil)
 	require.NotNil(t, vm)
-	assert.Equal(t, uint64(0), vm.GasUsed())
+	require.NotNil(t, vm.Runtime)
 }
 
 func TestWasmVMValidateWASM(t *testing.T) {

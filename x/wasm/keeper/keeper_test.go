@@ -2,6 +2,7 @@ package keeper_test
 
 import (
 	"context"
+	_ "embed"
 	"testing"
 
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -188,17 +189,17 @@ func TestGenerateContractAddress(t *testing.T) {
 	assert.NotEqual(t, addr1, addr2)
 }
 
-// minimalValidWasm is a hand-crafted WASM module that exports an empty `_execute` function.
-// Compiled bytecode verified against wazero v1.x.
-var minimalValidWasm = []byte{
-	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version 1
-	0x01, 0x04, 0x01, 0x60, 0x00, 0x00,                // type section: 1 func type () -> ()
-	0x03, 0x02, 0x01, 0x00,                            // function section: 1 func, type 0
-	0x07, 0x0c, 0x01, 0x08,                            // export section
-	'_', 'e', 'x', 'e', 'c', 'u', 't', 'e',            //   name: "_execute"
-	0x00, 0x00,                                        //   export func index 0
-	0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,                // code section: 1 body, 0 locals, end
-}
+// minimalValidWasm is a real, ABI-conformant WASM module (see WasmVM's doc
+// comment in wasm_vm.go for the calling convention): it exports memory,
+// allocate(size)->ptr, and _instantiate/_execute/_query(msg_ptr,msg_len)->
+// ptr. _instantiate and _query return 0 (no result); _execute returns a
+// genuine, real region — a preloaded {"success":true} — proving the VM
+// actually reads a contract's real return value rather than fabricating
+// one. Compiled from testdata/minimal.wat via wabt, validated against
+// wazero v1.11.0.
+//
+//go:embed testdata/minimal.wasm
+var minimalValidWasm []byte
 
 func TestWasmVMIntegration(t *testing.T) {
 	k, ctx := newWasmTestKeeper(t)

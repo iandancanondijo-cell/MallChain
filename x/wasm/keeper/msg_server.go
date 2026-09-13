@@ -23,31 +23,35 @@ func NewQueryServerImpl(k Keeper) QueryServer {
 	return QueryServer{Keeper: k}
 }
 
-// moduleDisabledErr rejects the state-mutating x/wasm messages until the VM
-// integration described in wasm_vm.go's WasmVM doc comment is finished:
-// contract input/output is never actually wired to the sandboxed wazero
-// instance, no host functions are registered (no way to read/write state or
-// move tokens from inside a contract), and gas is a flat fee rather than
-// metered per instruction. Shipping StoreCode/Instantiate/Execute as-is
-// would let anyone deploy "contracts" that always report hardcoded success
-// regardless of what they actually do — unacceptable for a surface that can
-// hold or move funds. Queries stay open since they're read-only against
-// pre-existing (pre-this-change) state and can't move funds. Remove this
-// gate once that VM work lands.
-func moduleDisabledErr(msgName string) error {
-	return types.ErrModuleDisabled.Wrapf("%s is disabled: x/wasm's contract execution is not production-ready (see WasmVM doc comment in keeper/wasm_vm.go)", msgName)
-}
+// x/wasm was previously hard-disabled at this layer (moduleDisabledErr)
+// because contract input/output was never wired to the sandboxed wazero
+// instance, no host functions were registered, and gas was a flat fee
+// rather than metered per call. wasm_vm.go and host.go now implement all
+// three (see WasmVM's doc comment for the exact calling convention), so
+// these are wired to the real keeper methods.
 
 func (m MsgServer) StoreCode(ctx context.Context, msg *types.MsgStoreCode) (*types.MsgStoreCodeResponse, error) {
-	return nil, moduleDisabledErr("MsgStoreCode")
+	codeID, err := m.Keeper.StoreCode(ctx, msg.WasmCode)
+	if err != nil {
+		return nil, err
+	}
+	return &types.MsgStoreCodeResponse{CodeId: codeID}, nil
 }
 
 func (m MsgServer) InstantiateContract(ctx context.Context, msg *types.MsgInstantiateContract) (*types.MsgInstantiateContractResponse, error) {
-	return nil, moduleDisabledErr("MsgInstantiateContract")
+	contractAddr, err := m.Keeper.InstantiateContract(ctx, msg.Sender, msg.CodeId, msg.Label, msg.InitMsg)
+	if err != nil {
+		return nil, err
+	}
+	return &types.MsgInstantiateContractResponse{ContractAddress: contractAddr}, nil
 }
 
 func (m MsgServer) ExecuteContract(ctx context.Context, msg *types.MsgExecuteContract) (*types.MsgExecuteContractResponse, error) {
-	return nil, moduleDisabledErr("MsgExecuteContract")
+	result, err := m.Keeper.ExecuteContract(ctx, msg.Sender, msg.ContractAddress, msg.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return &types.MsgExecuteContractResponse{Data: result}, nil
 }
 
 func (q QueryServer) Contract(ctx context.Context, req *types.QueryContractRequest) (*types.QueryContractResponse, error) {

@@ -149,7 +149,7 @@ func (k Keeper) InstantiateContract(ctx context.Context, sender string, codeID u
 	if err != nil {
 		return "", fmt.Errorf("failed to get gas config: %w", err)
 	}
-	if _, err := vm.InitializeWASM(ctx, wasmCode, initMsg, contractAddr, gasCfg.DefaultGasLimit, gasCfg.InstantiateCost); err != nil {
+	if _, _, err := vm.InitializeWASM(ctx, wasmCode, initMsg, contractAddr, sender, gasCfg.DefaultGasLimit, gasCfg.InstantiateCost); err != nil {
 		return "", fmt.Errorf("failed to initialize WASM contract: %w", err)
 	}
 
@@ -299,7 +299,7 @@ func (k Keeper) ExecuteContract(ctx context.Context, sender string, contractAddr
 		k.emitContractEvent(sdkCtx, contractAddr, "approve", actionMsg)
 		return result, nil
 	case "wasm_execute":
-		return k.executeWASMRaw(ctx, sdkCtx, contract, msg, gasLimit, gasCfg)
+		return k.executeWASMRaw(ctx, sdkCtx, contract, contractAddr, sender, msg, gasLimit, gasCfg)
 	default:
 		return "", types.ErrContractFailed.Wrap("unknown action")
 	}
@@ -331,20 +331,30 @@ func (k Keeper) emitContractEvent(sdkCtx sdk.Context, contractAddr, action strin
 }
 
 // executeWASMRaw executes raw WASM bytecode when VM is available
-func (k Keeper) executeWASMRaw(ctx context.Context, sdkCtx sdk.Context, contract *ContractMetadata, msg []byte, gasLimit uint64, gasCfg types.GasConfig) (string, error) {
+func (k Keeper) executeWASMRaw(ctx context.Context, sdkCtx sdk.Context, contract *ContractMetadata, contractAddr, sender string, msg []byte, gasLimit uint64, gasCfg types.GasConfig) (string, error) {
 	wasmCode, err := k.GetCode(ctx, contract.CodeID)
 	if err != nil {
 		return "", err
 	}
 
-	senderAddr := contract.Creator
 	vm := k.getWasmVM(ctx)
-	result, err := vm.ExecuteWASM(ctx, wasmCode, msg, contract.Creator, senderAddr, gasLimit, gasCfg.ExecuteBaseCost, gasCfg.ExecuteExportCost)
+	// C: this used to pass contract.Creator as the contract's own address
+	// (ContractMetadata has no address field of its own — it's only ever
+	// the map key in k.Contracts) — every db_read/db_write host call would
+	// silently namespace state under the CREATOR's address instead of the
+	// actual contract's, invisible in a single self-consistent
+	// write-then-read but real corruption the moment two different
+	// contracts share a creator, or state is inspected from outside the
+	// same execution (a live test of the host storage round-trip caught
+	// this immediately). sender is the real message caller, also
+	// previously hardcoded to contract.Creator regardless of who actually
+	// sent the execute message.
+	result, gasUsed, err := vm.ExecuteWASM(ctx, wasmCode, msg, contractAddr, sender, gasLimit, gasCfg.ExecuteBaseCost, gasCfg.ExecuteExportCost)
 	if err != nil {
 		return "", err
 	}
 
-	if err := k.consumeSDKGas(sdkCtx, vm.GasUsed(), "wasm execute"); err != nil {
+	if err := k.consumeSDKGas(sdkCtx, gasUsed, "wasm execute"); err != nil {
 		return "", err
 	}
 
@@ -353,7 +363,7 @@ func (k Keeper) executeWASMRaw(ctx context.Context, sdkCtx sdk.Context, contract
 			types.EventTypeExecute,
 			sdk.NewAttribute("contract_code_id", strconv.FormatUint(contract.CodeID, 10)),
 			sdk.NewAttribute("result", string(result)),
-			sdk.NewAttribute("gas_used", strconv.FormatUint(vm.GasUsed(), 10)),
+			sdk.NewAttribute("gas_used", strconv.FormatUint(gasUsed, 10)),
 		),
 	)
 
@@ -432,7 +442,11 @@ func (k Keeper) queryWASMRaw(ctx context.Context, contractAddr string, queryMsg 
 	queryBytes, _ := json.Marshal(queryMsg)
 	gasCfg, _ := k.GetGasConfig(ctx)
 	vm := k.getWasmVM(ctx)
-	result, err := vm.QueryWASM(ctx, wasmCode, queryBytes, contractAddr, gasCfg.DefaultGasLimit, gasCfg.QueryCost)
+	// Queries are unauthenticated in Cosmos SDK (no tx signer) — sender is
+	// empty. The msg_server layer is what keeps this path read-only in
+	// practice; the ABI itself can't distinguish a query call from an
+	// execute call (see WasmVM's QueryWASM doc comment).
+	result, _, err := vm.QueryWASM(ctx, wasmCode, queryBytes, contractAddr, "", gasCfg.DefaultGasLimit, gasCfg.QueryCost)
 	if err != nil {
 		return nil, err
 	}

@@ -9,39 +9,81 @@ import (
 	wasmtypes "marketplace/x/wasm/types"
 )
 
-// TestMutatingMsgsAreDisabled locks in the deliberate production gate: x/wasm's
-// contract execution never actually wires msg/query/init bytes to the wazero
-// instance, always returns a hardcoded success result, and has no host
-// functions or per-instruction gas metering (see WasmVM's doc comment in
-// wasm_vm.go). Until that's built, StoreCode/InstantiateContract/ExecuteContract
-// must be rejected at the MsgServer boundary — the single choke point every
-// client (CLI, gRPC, REST, frontend) goes through — rather than silently
-// accepting "contracts" that can't do what they claim.
-func TestMutatingMsgsAreDisabled(t *testing.T) {
+// TestMutatingMsgsWorkEndToEnd replaces the old TestMutatingMsgsAreDisabled:
+// StoreCode/InstantiateContract/ExecuteContract used to be hard-rejected at
+// this boundary because contract input/output was never actually wired to
+// wazero, there were no host functions, and gas was a flat fee (see
+// WasmVM's doc comment in wasm_vm.go for what "real" now means). That's
+// implemented now, so this proves the MsgServer path — the single choke
+// point every client (CLI, gRPC, REST, frontend) goes through — actually
+// works with a genuinely ABI-conformant contract end-to-end, using the same
+// minimalValidWasm fixture keeper_test.go's other tests already rely on.
+func TestMutatingMsgsWorkEndToEnd(t *testing.T) {
 	k, ctx := newWasmTestKeeper(t)
 	msgServer := wasmkeeper.NewMsgServerImpl(k)
+	sender := "cosmos1wdjkuer9wf0kzerywfjhxu6lta047h6lta047h6ltukxm685"
 
+	var codeID uint64
 	t.Run("StoreCode", func(t *testing.T) {
-		resp, err := msgServer.StoreCode(ctx, &wasmtypes.MsgStoreCode{Sender: "mall1abc", WasmCode: []byte("code")})
-		require.Nil(t, resp)
-		require.ErrorIs(t, err, wasmtypes.ErrModuleDisabled)
+		resp, err := msgServer.StoreCode(ctx, &wasmtypes.MsgStoreCode{Sender: sender, WasmCode: minimalValidWasm})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.Greater(t, resp.CodeId, uint64(0))
+		codeID = resp.CodeId
 	})
 
+	var contractAddr string
 	t.Run("InstantiateContract", func(t *testing.T) {
-		resp, err := msgServer.InstantiateContract(ctx, &wasmtypes.MsgInstantiateContract{Sender: "mall1abc", CodeId: 1})
-		require.Nil(t, resp)
-		require.ErrorIs(t, err, wasmtypes.ErrModuleDisabled)
+		resp, err := msgServer.InstantiateContract(ctx, &wasmtypes.MsgInstantiateContract{
+			Sender: sender, CodeId: codeID, Label: "e2e-test", InitMsg: []byte("{}"),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.NotEmpty(t, resp.ContractAddress)
+		contractAddr = resp.ContractAddress
 	})
 
 	t.Run("ExecuteContract", func(t *testing.T) {
-		resp, err := msgServer.ExecuteContract(ctx, &wasmtypes.MsgExecuteContract{Sender: "mall1abc", ContractAddress: "mall1contract"})
-		require.Nil(t, resp)
-		require.ErrorIs(t, err, wasmtypes.ErrModuleDisabled)
+		resp, err := msgServer.ExecuteContract(ctx, &wasmtypes.MsgExecuteContract{
+			Sender: sender, ContractAddress: contractAddr, Msg: []byte(`{"action":"wasm_execute"}`),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		// Real return value from the contract's own _execute, not a
+		// hardcoded VM-level success string.
+		require.Contains(t, resp.Data, "success")
 	})
 }
 
-// TestQueriesStayEnabled confirms the gate is scoped to the state-mutating
-// msgs only — read-only queries against pre-existing state must keep working.
+// TestInstantiateRejectsNonConformantCode preserves the spirit of the old
+// disabled-by-default gate — a contract that can't do what it claims must
+// fail loudly — but enforces it via real ABI-conformance checking instead
+// of blanket-rejecting every contract.
+func TestInstantiateRejectsNonConformantCode(t *testing.T) {
+	k, ctx := newWasmTestKeeper(t)
+	msgServer := wasmkeeper.NewMsgServerImpl(k)
+	sender := "cosmos1wdjkuer9wf0kzerywfjhxu6lta047h6lta047h6ltukxm685"
+
+	storeResp, err := msgServer.StoreCode(ctx, &wasmtypes.MsgStoreCode{
+		// A module with no exports at all — no memory, no allocate, no
+		// _instantiate. It's valid WASM (compiles fine) but doesn't
+		// implement the ABI this VM requires.
+		Sender: sender,
+		WasmCode: []byte{
+			0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version 1
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = msgServer.InstantiateContract(ctx, &wasmtypes.MsgInstantiateContract{
+		Sender: sender, CodeId: storeResp.CodeId, Label: "bad", InitMsg: []byte("{}"),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "_instantiate")
+}
+
+// TestQueriesStayEnabled confirms queries against pre-existing state work
+// regardless of the mutating-message wiring above.
 func TestQueriesStayEnabled(t *testing.T) {
 	k, ctx := newWasmTestKeeper(t)
 	queryServer := wasmkeeper.NewQueryServerImpl(k)
