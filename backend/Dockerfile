@@ -6,6 +6,12 @@ RUN npm ci --omit=dev
 
 # Production stage
 FROM node:20-alpine
+# The node:20-alpine tag is floating but still lags Alpine's own package repo
+# by hours-to-days — Trivy caught OpenSSL (libcrypto3/libssl3) HIGH CVEs
+# fixed upstream but not yet in the base image snapshot this pulled. Force
+# a package refresh at build time rather than wait on the next base image
+# publish.
+RUN apk upgrade --no-cache
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 WORKDIR /app
 COPY --from=deps /app/package*.json ./

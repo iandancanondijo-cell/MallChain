@@ -13,7 +13,11 @@ COPY . .
 RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/marketplaced ./cmd/marketplaced
 
 FROM alpine:3.19
-RUN apk add --no-cache ca-certificates wget && \
+# Pull current security patches for this Alpine release branch at build
+# time, rather than whatever the 3.19 base image snapshot shipped with —
+# same reasoning as backend/Dockerfile.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache ca-certificates wget && \
     addgroup -g 1001 -S marketplaced && adduser -S marketplaced -u 1001
 WORKDIR /home/marketplaced
 COPY --from=build /out/marketplaced /usr/local/bin/marketplaced

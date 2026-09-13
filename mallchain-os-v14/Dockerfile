@@ -15,6 +15,9 @@ COPY . .
 RUN npm run build
 
 FROM nginx:1.27-alpine
+# Same reasoning as backend/Dockerfile — patch OS packages at build time
+# rather than trust the base image snapshot is current.
+RUN apk upgrade --no-cache
 RUN addgroup -g 1001 -S appuser && adduser -S appuser -u 1001 \
   && chown -R appuser:appuser /var/cache/nginx /var/run /var/log/nginx \
   && touch /var/run/nginx.pid && chown appuser:appuser /var/run/nginx.pid
