@@ -51,6 +51,13 @@ type Keeper struct {
 	// ordered chronologically; RecordTreasurySnapshot (end_blocker.go) prunes
 	// old entries so this stays bounded.
 	TreasurySnapshots collections.Map[int64, types.TreasurySnapshot]
+
+	// EmissionMonthAnchor caches the absolute calendar month (year*12+month)
+	// observed the first time updateEmissionSchedule runs, so the halving
+	// schedule can be indexed by months-since-that-point instead of feeding
+	// GetMonthlyEmission a raw absolute calendar month (which produced a
+	// phase shift far past 64 bits and zeroed the emission rate forever).
+	EmissionMonthAnchor collections.Item[uint64]
 }
 
 func NewKeeper(
@@ -95,6 +102,8 @@ func NewKeeper(
 		StakingSequence:  collections.NewSequence(sb, types.StakingSequenceKey, "staking_sequence"),
 
 		TreasurySnapshots: collections.NewMap(sb, types.TreasurySnapshotsKey, "treasury_snapshots", collections.Int64Key, codec.CollValue[types.TreasurySnapshot](cdc)),
+
+		EmissionMonthAnchor: collections.NewItem(sb, collections.NewPrefix("p_mlcoin_emission_anchor"), "emissionMonthAnchor", collections.Uint64Value),
 	}
 
 	schema, err := sb.Build()

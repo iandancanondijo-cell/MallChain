@@ -717,7 +717,11 @@
       "total_escrowed": []
     },
     "upgrade": {},
-    "vesting": {}
+    "vesting": {},
+    "edu": {
+      "params": {},
+      "document_record_map": []
+    }
   },
   "consensus": {
     "validators": [

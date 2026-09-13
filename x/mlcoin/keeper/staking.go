@@ -143,15 +143,43 @@ func (k Keeper) UnstakeAndClaimRewards(ctx context.Context, address string, stak
 	stakedBlocks := uint64(sdkCtx.BlockHeight()) - uint64(stakeInfo.StakeDate)
 	rewards := k.CalculateRewardsForStaking(ctx, stakeInfo.StakedAmount, stakedBlocks)
 
-	// Return staked amount + rewards to wallet
+	// Return the staked principal directly: Stake() only ever deducted it
+	// from wallet.Balance, never from EmissionState.Circulating, so it was
+	// never "un-emitted" and returning it here is not new supply — no mint
+	// path needed, just an overflow-safe credit back.
 	wallet, err := k.WalletBalance.Get(ctx, address)
 	if err != nil {
 		wallet = types.WalletBalance{Address: address, Balance: 0, Locked: 0}
 	}
-	totalReturn := stakeInfo.StakedAmount + rewards
-	wallet.Balance += totalReturn
+	newBalance, err := safeAdd(wallet.Balance, stakeInfo.StakedAmount)
+	if err != nil {
+		return 0, errorsmod.Wrap(types.ErrInvalidSupply, "wallet balance overflow on unstake")
+	}
+	wallet.Balance = newBalance
 	if err := k.WalletBalance.Set(ctx, address, wallet); err != nil {
 		return 0, err
+	}
+
+	// C-high: rewards ARE new supply (interest paid on staking) and were
+	// previously credited with raw `wallet.Balance += rewards` — no
+	// TotalSupply/DailyLimit check, no Circulating/EmittedTotal update, no
+	// overflow guard. Route through the same governed MintToWallet path
+	// every other source of new supply uses (BuyMallcoin, Mallpoints
+	// conversion) instead of a second, ungoverned mint mechanism. If the
+	// daily emission limit is already exhausted, forfeit the reward for
+	// this unstake rather than blocking the user from ever recovering
+	// their now-unlocked principal.
+	totalReturn := stakeInfo.StakedAmount
+	if rewards > 0 {
+		if err := k.WithMintingEnabled(ctx, func() error { return k.MintToWallet(ctx, address, rewards) }); err != nil {
+			sdkCtx.Logger().Info("staking reward mint skipped (principal still returned)", "address", address, "rewards", rewards, "error", err)
+			rewards = 0
+		} else {
+			totalReturn, err = safeAdd(totalReturn, rewards)
+			if err != nil {
+				return 0, errorsmod.Wrap(types.ErrInvalidSupply, "stake return overflow")
+			}
+		}
 	}
 
 	// Mark stake inactive and persist closure details
