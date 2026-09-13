@@ -14,11 +14,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	badgetypes "marketplace/x/badge/types"
-	crosschaintypes "marketplace/x/crosschain/types"
-	governancetypes "marketplace/x/governance/types"
-	mallcointypes "marketplace/x/mallcoin/types"
-	mallpointstypes "marketplace/x/mallpoints/types"
 	mlcointypes "marketplace/x/mlcoin/types"
 	vaulttypes "marketplace/x/vault/types"
 )
@@ -41,125 +36,15 @@ func ProvideCustomGetSigners() []signing.CustomGetSigner {
 		// produces, so nothing changes signer-resolution-wise by relying on
 		// the declarative path instead.
 
-		// Governance module
-		{
-			MsgType: protoreflect.FullName("marketplace.governance.v1.MsgSubmitProposal"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*governancetypes.MsgSubmitProposal](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgSubmitProposal, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-		{
-			MsgType: protoreflect.FullName("marketplace.governance.v1.MsgVote"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*governancetypes.MsgVote](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgVote, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-		{
-			MsgType: protoreflect.FullName("marketplace.governance.v1.MsgVoteWeighted"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*governancetypes.MsgVoteWeighted](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgVoteWeighted, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-		{
-			MsgType: protoreflect.FullName("marketplace.governance.v1.MsgDeposit"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*governancetypes.MsgDeposit](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgDeposit, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-		{
-			MsgType: protoreflect.FullName("marketplace.governance.v1.MsgUpdateParams"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*governancetypes.MsgUpdateParams](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgUpdateParams, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-
-		// Crosschain module
-		{
-			MsgType: protoreflect.FullName("marketplace.crosschain.v1.MsgInitiateBridgeTransfer"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*crosschaintypes.MsgInitiateBridgeTransfer](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgInitiateBridgeTransfer, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-		{
-			MsgType: protoreflect.FullName("marketplace.crosschain.v1.MsgCompleteBridgeTransfer"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*crosschaintypes.MsgCompleteBridgeTransfer](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgCompleteBridgeTransfer, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-		{
-			MsgType: protoreflect.FullName("marketplace.crosschain.v1.MsgUpdateParams"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*crosschaintypes.MsgUpdateParams](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgUpdateParams, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-
-		// Badge module
-		{
-			MsgType: protoreflect.FullName("marketplace.badge.v1.MsgUpdateParams"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*badgetypes.MsgUpdateParams](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgUpdateParams, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-
-		// Mallcoin module
-		{
-			MsgType: protoreflect.FullName("marketplace.mallcoin.v1.MsgUpdateParams"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*mallcointypes.MsgUpdateParams](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgUpdateParams, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-
-		// Mallpoints module
-		{
-			MsgType: protoreflect.FullName("marketplace.mallpoints.v1.MsgUpdateParams"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*mallpointstypes.MsgUpdateParams](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgUpdateParams, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
+		// Governance, Crosschain, Badge, Mallcoin, and Mallpoints modules:
+		// same story as the DEX module above — every one of their Msg types
+		// already declares `option (cosmos.msg.v1.signer)` in its .proto
+		// (MsgSubmitProposal/MsgVote/MsgVoteWeighted/MsgDeposit/MsgUpdateParams
+		// for governance; MsgInitiateBridgeTransfer/MsgCompleteBridgeTransfer/
+		// MsgUpdateParams for crosschain; MsgUpdateParams for badge, mallcoin,
+		// and mallpoints), so registering CustomGetSigners for them here too
+		// was a duplicate ProvideInterfaceRegistry rejects. Confirmed by
+		// reading each proto file before removing — not a guess.
 
 		// Mlcoin module
 		{
@@ -173,13 +58,42 @@ func ProvideCustomGetSigners() []signing.CustomGetSigner {
 			},
 		},
 
-		// Vault module
+		// Vault module: none of its three Msg types declare a proto-level
+		// signer option (unlike every module above), so all three
+		// legitimately need a CustomGetSigner — MsgSetupVault already had
+		// one; MsgConfirmVault and MsgDisableVault had real GetSigners()
+		// implementations sitting in x/vault/types/msg_signer.go but were
+		// never actually registered here, which is a different bug from the
+		// duplicate-registration one above: ProvideInterfaceRegistry's other
+		// error, "no cosmos.msg.v1.signer option found for message
+		// marketplace.vault.v1.MsgConfirmVault/MsgDisableVault; use
+		// DefineCustomGetSigners to specify a custom getter".
 		{
 			MsgType: protoreflect.FullName("marketplace.vault.v1.MsgSetupVault"),
 			Fn: func(msg proto.Message) ([][]byte, error) {
 				m, ok := safeCast[*vaulttypes.MsgSetupVault](msg)
 				if !ok {
 					return nil, fmt.Errorf("expected MsgSetupVault, got %T", msg)
+				}
+				return sdkAddressesToBytes(m.GetSigners()), nil
+			},
+		},
+		{
+			MsgType: protoreflect.FullName("marketplace.vault.v1.MsgConfirmVault"),
+			Fn: func(msg proto.Message) ([][]byte, error) {
+				m, ok := safeCast[*vaulttypes.MsgConfirmVault](msg)
+				if !ok {
+					return nil, fmt.Errorf("expected MsgConfirmVault, got %T", msg)
+				}
+				return sdkAddressesToBytes(m.GetSigners()), nil
+			},
+		},
+		{
+			MsgType: protoreflect.FullName("marketplace.vault.v1.MsgDisableVault"),
+			Fn: func(msg proto.Message) ([][]byte, error) {
+				m, ok := safeCast[*vaulttypes.MsgDisableVault](msg)
+				if !ok {
+					return nil, fmt.Errorf("expected MsgDisableVault, got %T", msg)
 				}
 				return sdkAddressesToBytes(m.GetSigners()), nil
 			},
