@@ -19,7 +19,7 @@ const apiKeyAuth = require('./middleware/apiKeyAuth')
 const { errorHandler } = require('./utils/errorHandler')
 const logger = require('./utils/logger')
 const correlationId = require('./middleware/correlationId')
-const { metricsMiddleware, register, socketErrorsTotal, socketRoomCapRejectionsTotal } = require('./utils/metrics')
+const { metricsMiddleware, register, socketErrorsTotal, socketRoomCapRejectionsTotal, recordCspViolation } = require('./utils/metrics')
 const { initCacheService } = require('./services/cacheService')
 const { maintenanceGuard } = require('./middleware/maintenanceMode')
 const { computeBlockStaleness } = require('./utils/chainHealth')
@@ -104,6 +104,17 @@ if (!JWT_SECRET) logger.warn('JWT_SECRET is not configured; authentication token
 if (!SESSION_SECRET) logger.warn('SESSION_SECRET is not configured; session cookies are insecure.');
 require('./services/treasuryLimitsService').warnIfUnconfigured();
 
+// TRUST_PROXY fail-closed wiring (see config/index.js parseTrustProxy +
+// validateRuntimeSecrets): in production a malformed TRUST_PROXY throws at
+// require(config) time, an empty one fails validateRuntimeSecrets, and here
+// — regardless of env — we pass the parsed list straight through to
+// Express's trust proxy setting so req.ip / req.ips are correct for rate
+// limiting. The sentinel `null` means "leave it unset" (the Express default
+// behaviour of trusting nothing in effect for local dev).
+if (config.trustProxy !== null) {
+  app.set('trust proxy', config.trustProxy);
+}
+
 app.use(helmet({
   contentSecurityPolicy: config.isProduction
     ? {
@@ -116,14 +127,11 @@ app.use(helmet({
           fontSrc: ["'self'"],
           objectSrc: ["'none'"],
           frameAncestors: ["'none'"],
-          // Nothing in this backend (or the frontend it serves API
-          // responses to) reassigns <base> or spawns a Worker/ServiceWorker
-          // — confirmed via grep across mallchain-os-v14/src — so both are
-          // denied outright rather than left at helmet's 'self' default.
           baseUri: ["'none'"],
           formAction: ["'self'"],
           frameSrc: ["'none'"],
           workerSrc: ["'none'"],
+          reportUri: '/csp-report',
         },
       }
     : {
@@ -136,20 +144,14 @@ app.use(helmet({
           fontSrc: ["'self'"],
           objectSrc: ["'none'"],
           frameAncestors: ["'none'"],
-          // Nothing in this backend (or the frontend it serves API
-          // responses to) reassigns <base> or spawns a Worker/ServiceWorker
-          // — confirmed via grep across mallchain-os-v14/src — so both are
-          // denied outright rather than left at helmet's 'self' default.
           baseUri: ["'none'"],
           formAction: ["'self'"],
           frameSrc: ["'none'"],
           workerSrc: ["'none'"],
+          reportUri: '/csp-report',
         },
       },
   crossOriginResourcePolicy: { policy: 'same-site' },
-  // helmet's default is SAMEORIGIN; nothing in this app frames itself (or
-  // needs to be framed at all), so deny framing outright rather than
-  // leaving a same-origin exception nothing uses.
   frameguard: { action: 'deny' },
   hsts: config.isProduction ? {
     maxAge: 31536000,
@@ -270,7 +272,16 @@ app.use(session({
   cookie: {
     secure: config.isProduction,
     sameSite: 'strict',
-    httpOnly: true
+    httpOnly: true,
+    // This cookie only backs the brief passport OAuth handshake (Google
+    // login) — the app's ongoing auth is the separate stateless JWT, not
+    // this session — so an unset maxAge (session cookie, cleared on
+    // browser close) is intentional rather than a bug. Still, an OAuth
+    // redirect that outlives a very short-lived session cookie (slow
+    // consent screen, mobile browser backgrounding) fails oddly, so give
+    // it a bounded lifetime instead of "until the tab closes".
+    maxAge: 1000 * 60 * 30,
+    ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {})
   }
 }));
 app.use(passport.initialize());
@@ -462,6 +473,8 @@ app.use('/api/task-assignment', taskAssignmentRoutes);
 
 const economyRoutes = require('./routes/economy');
 app.use('/api/economy', economyRoutes);
+const eduRoutes = require('./routes/edu');
+app.use('/api/edu', eduRoutes);
 const mallwalletRoutes = require('./routes/mallwallet');
 app.use('/api/mallwallet', mallwalletRoutes);
 // Mallwallet integrations (moved from separate project)
@@ -721,6 +734,31 @@ try {
 
 app.get('/api/protected', require('./middleware/auth'), (req, res) => {
   res.json({ msg: 'protected', user: req.user });
+});
+
+// Browser CSP/HSTS violation report endpoint. Helmet registers `reportUri:
+// /csp-report` on the CSP directives above, which sends a POST every time a
+// directive is violated. Without this handler the browser calls fire into a
+// 404 (defeating the purpose of having a report URI) — and without the
+// dedupe below a single user running a Chrome extension that CSP blocks
+// would hammer this endpoint at 100+/sec and blow up our backend counter.
+// Must be registered BEFORE helmet's `reportOnly` or after the directives.
+app.post('/csp-report', express.json({ limit: '128kb', type: ['application/csp-report', 'application/reports+json', 'application/json'] }), (req, res) => {
+  try {
+    const body = req.body || {};
+    const report = body['csp-report'] || body[0]?.body || body;
+    if (report && typeof report === 'object') {
+      recordCspViolation({
+        blockedUri: report['blocked-uri'] || report.blocked_uri || report.blockedUri,
+        violatedDirective: report['violated-directive'] || report.violated_directive || report.violatedDirective,
+        documentUri: report['document-uri'] || report.document_uri || report.documentUri,
+      });
+    }
+  } catch (_err) {
+    // A malformed report from a weird browser should never produce a 5xx on
+    // our side; we simply discard it.
+  }
+  res.status(204).end();
 });
 
 async function start() {
@@ -1071,6 +1109,20 @@ io.on('connection', socket => {
   // node-cron schedule, and the streak check it depends on already
   // degrades gracefully (reads as "no badge") when Redis is unavailable.
   require('./jobs/badgeSnapshot').start();
+
+  // Auto-tops-up the operator wallet's gas balance from the treasury before
+  // it runs dry (see jobs/operatorStakeWatcher.js) — badge issuance,
+  // Mallpoints awards, and EDU chain anchoring all sign with the operator
+  // key and fail together the moment it hits zero.
+  require('./jobs/operatorStakeWatcher').start();
+
+  // Claims the treasury's staking rewards (x/mint inflation via
+  // x/distribution) back into its liquid balance — see
+  // jobs/treasuryRewardsSweeper.js. This is what makes the treasury a real
+  // ongoing source of stake in production rather than something that only
+  // ever depletes. No-ops harmlessly until scripts/delegate-treasury.js has
+  // bonded some treasury stake to a validator.
+  require('./jobs/treasuryRewardsSweeper').start();
 
   // Cleanup on shutdown
   process.on('SIGINT', () => {
