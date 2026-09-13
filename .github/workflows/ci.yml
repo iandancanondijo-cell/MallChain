@@ -15,7 +15,14 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.24.0'   # matches go.mod
+          # Exact patch 1.24.0 broke the build here: bytedance/sonic v1.14.0
+          # (pulled in transitively) has hand-written runtime assembly that's
+          # sensitive to exact Go patch versions — 1.24.0 hit
+          # "link: ...invalid reference to runtime.lastmoduledatap", while
+          # 1.24.3 (what local dev actually uses) builds clean. '1.24' (no
+          # patch) has actions/setup-go always resolve the latest 1.24.x,
+          # avoiding pinning to a specific patch that can go stale like this.
+          go-version: '1.24'   # matches go.mod's `go 1.24.0` minimum
 
       - name: Build blockchain binary
         run: go build -o /tmp/marketplaced ./cmd/marketplaced
@@ -57,7 +64,10 @@ jobs:
         run: cd backend && npx eslint src/ --max-warnings=0
 
       - name: Run njsscan (Node.js SAST)
-        uses: opensecurity/njsscan-action@d41d41b01f5eb4af6da451f55e028571a8872e68 # v1
+        # opensecurity/njsscan-action no longer resolves (repository not
+        # found) — njsscan's actual maintainer publishes the action under
+        # their own org instead.
+        uses: ajinabraham/njsscan-action@231750a435d85095d33be7d192d52ec650625146 # v9
         with:
           scan-path: 'backend/src'
           args: '--json -o njsscan-report.json'
