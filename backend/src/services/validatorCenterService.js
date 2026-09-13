@@ -1,8 +1,35 @@
 const axios = require('axios');
+// Plain Node crypto, not @cosmjs/crypto — that package's argon2 support
+// drags in an ESM-only transitive dependency Jest's CJS resolver can't
+// parse (same issue documented in other test files this session). A
+// SHA-256 truncation doesn't need a Cosmos-specific library.
+const crypto = require('crypto');
+const bech32 = require('bech32');
 const { config } = require('../config');
 
 const CHAIN_REST = config.chain.rest.replace(/\/$/, '');
 const DEFAULT_PAGE_LIMIT = 100;
+
+/**
+ * A validator's operator_address (mallvaloper1...) and its
+ * /cosmos/slashing signing_infos entry (keyed by consensus address,
+ * mallvalcons1...) are two different addresses derived from two different
+ * keys — looking one up by the other silently misses every time. Derives
+ * the real mallvalcons address from the validator's ed25519 consensus_pubkey
+ * using Tendermint's address spec — SHA256(pubkey)[:20], NOT the
+ * RIPEMD160(SHA256(...)) "hash160" scheme secp256k1 account addresses use.
+ * Verified against this chain's live signing_infos output (byte-for-byte
+ * match) before trusting the formula.
+ */
+function consensusAddressFromPubkey(pubkeyBase64) {
+  try {
+    const pubkeyBytes = Buffer.from(pubkeyBase64, 'base64');
+    const hash = crypto.createHash('sha256').update(pubkeyBytes).digest().slice(0, 20);
+    return bech32.encode(`${config.chain.prefix}valcons`, bech32.toWords(hash));
+  } catch (err) {
+    return null;
+  }
+}
 
 const STATUS_LABELS = {
   BOND_STATUS_BONDED: 'bonded',
@@ -83,6 +110,30 @@ async function fetchSigningInfos() {
   return results;
 }
 
+/**
+ * Standard Cosmos SDK APR approximation (inflation / bonded ratio) — the
+ * same formula block explorers (Mintscan, Keplr) use. Real, not hardcoded:
+ * driven by the chain's actual current inflation and bonded-token ratio.
+ */
+async function fetchEstimatedApr() {
+  try {
+    const [inflationRes, supplyRes, poolRes] = await Promise.all([
+      axios.get(`${CHAIN_REST}/cosmos/mint/v1beta1/inflation`, { timeout: 5000 }),
+      axios.get(`${CHAIN_REST}/cosmos/bank/v1beta1/supply/by_denom?denom=${config.chain.baseDenom}`, { timeout: 5000 }),
+      axios.get(`${CHAIN_REST}/cosmos/staking/v1beta1/pool`, { timeout: 5000 }),
+    ]);
+    const inflation = safeNumber(inflationRes.data?.inflation);
+    const totalSupply = safeNumber(supplyRes.data?.amount?.amount);
+    const bonded = safeNumber(poolRes.data?.pool?.bonded_tokens);
+    if (!inflation || !totalSupply || !bonded) return null;
+    const bondedRatio = bonded / totalSupply;
+    if (bondedRatio <= 0) return null;
+    return Math.round((inflation / bondedRatio) * 10000) / 100; // percent, 2dp
+  } catch (err) {
+    return null; // Caller falls back to omitting the field rather than a fake number.
+  }
+}
+
 async function fetchValidators() {
   const validators = [];
   try {
@@ -103,8 +154,13 @@ async function getValidatorLeaderboard() {
   ]);
 
   const records = validators.map((validator) => {
-    const address = validator.operator_address || validator.operatorAddress;
-    return buildValidatorRecord(validator, signingInfos[address], totalBonded);
+    // signing_infos is keyed by consensus address (mallvalcons1...), not
+    // operator_address (mallvaloper1...) — see consensusAddressFromPubkey's
+    // doc comment. Looking it up by operator_address always missed, so
+    // missedBlocks silently defaulted to 0 (i.e. every validator showed a
+    // fake 100% uptime) regardless of its real signing record.
+    const consAddress = consensusAddressFromPubkey(validator.consensus_pubkey?.key);
+    return buildValidatorRecord(validator, consAddress ? signingInfos[consAddress] : null, totalBonded);
   });
 
   return records.sort((a, b) => b.reputationScore - a.reputationScore || b.totalStaked - a.totalStaked);
@@ -141,4 +197,8 @@ async function getValidatorDetail(operatorAddress) {
 module.exports = {
   getValidatorLeaderboard,
   getValidatorDetail,
+  fetchSigningInfos,
+  fetchTotalBonded,
+  fetchEstimatedApr,
+  consensusAddressFromPubkey,
 };

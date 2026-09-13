@@ -118,12 +118,19 @@ export default function ValidatorsProfile() {
         </div>
       )}
 
-      <div className="card">
+      <div className="card" style={error ? { opacity: 0.65 } : undefined}>
         {loading && application === undefined && <div className="tiny">Loading…</div>}
-        {!loading && application === null && (
+        {error && !loading && (
+          <div className="empty-state">
+            <div className="es-ico">⚠️</div>
+            <div className="es-t">Application data unavailable</div>
+            <div className="es-m">Couldn't load your validator application status — try reloading the page or contact support if this persists.</div>
+          </div>
+        )}
+        {!error && !loading && application === null && (
           <div className="empty-state"><div className="es-ico">📝</div><div className="es-t">No application on file</div><div className="es-m">Apply from the Validators home page.</div></div>
         )}
-        {application && (
+        {(!error && application) && (
           <table className="tbl">
             <tbody>
               <tr><td className="muted">Status</td><td className="num"><b style={{ color: statusColor }}>{application.status}</b></td></tr>

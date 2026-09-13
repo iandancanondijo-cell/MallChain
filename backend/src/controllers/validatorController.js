@@ -1,6 +1,12 @@
 const axios = require('axios');
 const { config } = require('../config');
-const { getValidatorLeaderboard, getValidatorDetail } = require('../services/validatorCenterService');
+const {
+  getValidatorLeaderboard,
+  getValidatorDetail,
+  fetchSigningInfos,
+  fetchEstimatedApr,
+  consensusAddressFromPubkey,
+} = require('../services/validatorCenterService');
 const ValidatorApplication = require('../models/ValidatorApplication');
 
 const CHAIN_REST = config.chain.rest;
@@ -9,22 +15,35 @@ const CHAIN_REST = config.chain.rest;
 exports.listValidators = async (_req, res) => {
   try {
     const base = CHAIN_REST.replace(/\/$/, '');
-    const response = await axios.get(
-      `${base}/cosmos/staking/v1beta1/validators?status=BOND_STATUS_BONDED&pagination.limit=100`,
-      { timeout: 8000 }
-    );
+    const [response, signingInfos, apr] = await Promise.all([
+      axios.get(
+        `${base}/cosmos/staking/v1beta1/validators?status=BOND_STATUS_BONDED&pagination.limit=100`,
+        { timeout: 8000 }
+      ),
+      // Real per-validator missed-block counts and a real inflation/bonded-ratio
+      // APR estimate — both were previously hardcoded (apr: 12, uptime: 99.5)
+      // regardless of what the chain actually reported.
+      fetchSigningInfos(),
+      fetchEstimatedApr(),
+    ]);
     const validators = (response.data?.validators || []).map((v, index) => {
       const commission = v.commission?.commission_rates?.rate || '0';
       const tokens = Number(v.tokens || 0);
+      // signing_infos is keyed by consensus address (mallvalcons1...), not
+      // operator_address — see consensusAddressFromPubkey's doc comment.
+      const consAddress = consensusAddressFromPubkey(v.consensus_pubkey?.key);
+      const signingInfo = consAddress ? signingInfos[consAddress] : null;
+      const missedBlocks = Number(signingInfo?.missed_blocks_counter || 0);
+      const uptime = Math.max(0, Math.min(100, 100 - Math.min(100, missedBlocks / 10)));
       return {
         id: v.operator_address,
         operatorAddress: v.operator_address,
         name: v.description?.moniker || `Validator ${index + 1}`,
         description: v.description?.details || v.description?.website || '',
         commission: Math.round(parseFloat(commission) * 10000) / 100,
-        apr: 12,
+        apr, // null when the chain query fails — never a fabricated fallback number
         totalStaked: tokens / 1e6,
-        uptime: 99.5,
+        uptime,
         logo: '🛡️',
         status: v.status,
       };

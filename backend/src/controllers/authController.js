@@ -6,9 +6,52 @@ const crypto = require('crypto');
 const totp = require('../utils/totp');
 const { config } = require('../config');
 const { revokeToken, revokeAllUserTokens } = require('../middleware/tokenDenylist');
+const getRedis = require('../mallwallet/queue/redis');
 
 const LINK_WALLET_SIGNATURE_MAX_AGE_MS = 10 * 60 * 1000;
 const ADR036_CONSUMED_TTL_SECONDS = 60 * 60;
+
+// Account lockout after repeated failed logins. limiters.auth (rateLimiter.js)
+// already throttles by IP, which an attacker defeats by rotating IPs; this
+// is keyed by the account identifier itself so it can't be sidestepped that
+// way. Backed by Redis (best-effort — if Redis is unreachable we fail open
+// and allow the attempt rather than locking everyone out on an infra blip).
+const FAILED_LOGIN_LIMIT = 10;
+const FAILED_LOGIN_WINDOW_SECONDS = 15 * 60;
+
+async function checkAccountLock(identifier) {
+  try {
+    const redis = getRedis();
+    const key = `failed_login:${identifier}`;
+    const count = Number(await redis.get(key) || 0);
+    if (count >= FAILED_LOGIN_LIMIT) {
+      const ttl = await redis.ttl(key);
+      return { locked: true, retryAfterSeconds: ttl > 0 ? ttl : FAILED_LOGIN_WINDOW_SECONDS };
+    }
+  } catch (_) {
+    /* Redis unavailable — fail open. */
+  }
+  return { locked: false };
+}
+
+async function recordFailedLogin(identifier) {
+  try {
+    const redis = getRedis();
+    const key = `failed_login:${identifier}`;
+    const count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, FAILED_LOGIN_WINDOW_SECONDS);
+  } catch (_) {
+    /* best-effort only */
+  }
+}
+
+async function clearFailedLogins(identifier) {
+  try {
+    await getRedis().del(`failed_login:${identifier}`);
+  } catch (_) {
+    /* best-effort only */
+  }
+}
 
 /**
  * If this account has real 2FA enabled (see settings.js's /2fa/enable),
@@ -157,16 +200,23 @@ exports.login = async (req, res) => {
   const { password, otp } = req.body;
   const email = normalizeEmail(req.body.email);
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+
+  const lock = await checkAccountLock(email);
+  if (lock.locked) {
+    return res.status(423).json({ error: 'account temporarily locked after repeated failed logins', retryAfterSeconds: lock.retryAfterSeconds });
+  }
+
   const u = await User.findOne({ email });
-  if (!u) return res.status(400).json({ error: 'invalid credentials' });
+  if (!u) { await recordFailedLogin(email); return res.status(400).json({ error: 'invalid credentials' }); }
   if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
   const ok = await bcrypt.compare(password, u.password);
-  if (!ok) return res.status(400).json({ error: 'invalid credentials' });
+  if (!ok) { await recordFailedLogin(email); return res.status(400).json({ error: 'invalid credentials' }); }
 
   const twoFactorResult = await checkTwoFactor(u._id, otp);
   if (twoFactorResult?.requires2fa) return res.json({ requires2fa: true });
   if (twoFactorResult?.error) return res.status(twoFactorResult.status).json({ error: twoFactorResult.error });
 
+  await clearFailedLogins(email);
   u.lastLoginAt = new Date();
   await u.save();
   const token = signToken(u);
@@ -207,16 +257,22 @@ exports.loginUsername = async (req, res) => {
     return res.status(400).json({ error: 'username and password required' });
   }
 
+  const lock = await checkAccountLock(username);
+  if (lock.locked) {
+    return res.status(423).json({ error: 'account temporarily locked after repeated failed logins', retryAfterSeconds: lock.retryAfterSeconds });
+  }
+
   const u = await User.findOne({ username });
-  if (!u) return res.status(400).json({ error: 'invalid credentials' });
+  if (!u) { await recordFailedLogin(username); return res.status(400).json({ error: 'invalid credentials' }); }
   if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
   const ok = await bcrypt.compare(password, u.password);
-  if (!ok) return res.status(400).json({ error: 'invalid credentials' });
+  if (!ok) { await recordFailedLogin(username); return res.status(400).json({ error: 'invalid credentials' }); }
 
   const twoFactorResult = await checkTwoFactor(u._id, req.body?.otp);
   if (twoFactorResult?.requires2fa) return res.json({ requires2fa: true });
   if (twoFactorResult?.error) return res.status(twoFactorResult.status).json({ error: twoFactorResult.error });
 
+  await clearFailedLogins(username);
   u.lastLoginAt = new Date();
   await u.save();
 

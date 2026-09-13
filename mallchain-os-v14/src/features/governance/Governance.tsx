@@ -184,9 +184,20 @@ export default function Governance() {
         </div>
       )}
 
-      <div className="stat-grid">
-        <div className="card"><div className="card-label">Open proposals</div><div className="card-value">{loading ? '—' : stats?.active ?? 0}</div><div className="card-sub">active now</div></div>
-        <div className="card"><div className="card-label">Total proposals</div><div className="card-value">{loading ? '—' : stats?.total ?? 0}</div></div>
+      <div className="stat-grid" style={error ? { opacity: 0.65 } : undefined}>
+        <div className="card">
+          <div className="card-label" style={error ? { color: 'var(--txt-3)' } : undefined}>{error && '⚠ '}Open proposals</div>
+          <div className="card-value" style={error ? { color: 'var(--txt-3)' } : undefined}>
+            {loading ? '—' : error ? 'N/A' : stats?.active ?? 0}
+          </div>
+          <div className="card-sub">{!error ? 'active now' : 'governance service unavailable'}</div>
+        </div>
+        <div className="card">
+          <div className="card-label" style={error ? { color: 'var(--txt-3)' } : undefined}>{error && '⚠ '}Total proposals</div>
+          <div className="card-value" style={error ? { color: 'var(--txt-3)' } : undefined}>
+            {loading ? '—' : error ? 'N/A' : stats?.total ?? 0}
+          </div>
+        </div>
         <div className="card">
           <div className="card-label">Your voting power</div>
           <div className="card-value">{votingPower === null ? '—' : `${votingPower.toLocaleString()} STAKE`}</div>
@@ -214,14 +225,25 @@ export default function Governance() {
         </div>
       )}
 
-      <div className="sec-title"><h2>Proposals</h2></div>
+      <div className="sec-title">
+        <h2>Proposals</h2>
+        {error && <span className="sub" style={{ color: 'var(--gold-2)' }}>⚠ governance service unavailable — showing stale data</span>}
+      </div>
 
-      {!loading && (proposals?.length ?? 0) === 0 && (
+      {!loading && error && (proposals?.length ?? 0) === 0 && (
+        <div className="empty-state">
+          <div className="es-ico">⚠️</div>
+          <div className="es-t">Proposal data unavailable</div>
+          <div className="es-m">Couldn't fetch on-chain proposals right now — check your connection and retry above.</div>
+        </div>
+      )}
+
+      {!loading && !error && (proposals?.length ?? 0) === 0 && (
         <div className="empty-state"><div className="es-ico">⚖️</div><div className="es-t">No proposals yet</div></div>
       )}
 
       <div className="vgrid" style={{ display: 'grid', gap: 12 }}>
-        {(proposals || []).map((p) => (
+        {((!error && proposals) || []).map((p) => (
           <div key={p.id} className="card card-hover" style={{ cursor: 'pointer' }} onClick={() => openProposal(p)}>
             <div className="row">
               <span className="chip gold">#{p.id}</span>

@@ -12,21 +12,54 @@ export default function MinesHome({ navigate }: { navigate: (p: string) => void 
   const [reviewQueueCount, setReviewQueueCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [failedModules, setFailedModules] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setFailedModules([]);
     const [profileResult, campaignsResult, submissionsResult, queueResult] = await Promise.all([
       minesApi.getProfile(),
       minesApi.listActiveCampaigns(),
       minesApi.mySubmissions(),
       minesApi.getQueue(),
     ]);
-    if (profileResult.ok && profileResult.data) setProfile(profileResult.data);
-    if (campaignsResult.ok && campaignsResult.data) setCampaigns(campaignsResult.data);
-    if (submissionsResult.ok && submissionsResult.data) setSubmissions(submissionsResult.data);
-    if (queueResult.ok && queueResult.data) setReviewQueueCount(queueResult.data.length);
-    if (!profileResult.ok) setError(profileResult.error || 'Failed to load your Mines profile');
+
+    const failures: string[] = [];
+    if (profileResult.ok && profileResult.data) {
+      setProfile(profileResult.data);
+    } else {
+      failures.push('Profile');
+    }
+    if (campaignsResult.ok && campaignsResult.data) {
+      setCampaigns(campaignsResult.data);
+    } else {
+      failures.push('Campaigns');
+    }
+    if (submissionsResult.ok && submissionsResult.data) {
+      setSubmissions(submissionsResult.data);
+    } else {
+      failures.push('Submissions');
+    }
+    if (queueResult.ok && queueResult.data) {
+      setReviewQueueCount(queueResult.data.length);
+    } else {
+      failures.push('Review Queue');
+    }
+
+    if (failures.length > 0) {
+      const firstError =
+        profileResult.error ||
+        campaignsResult.error ||
+        submissionsResult.error ||
+        queueResult.error;
+      setFailedModules(failures);
+      setError(
+        failures.length === 4
+          ? `Mines service unavailable — ${firstError || 'backend not reachable'}`
+          : `Some Mines data could not load (${failures.join(', ')}). ${firstError || ''}`
+      );
+    }
     setLoading(false);
   }, []);
 
@@ -34,13 +67,49 @@ export default function MinesHome({ navigate }: { navigate: (p: string) => void 
     load();
   }, [load]);
 
-  const pendingSubmissions = (submissions || []).filter((s) => !['auto_approved', 'rejected'].includes(s.status)).length;
+  const pendingSubmissions =
+    submissions === null ? null : submissions.filter((s) => !['auto_approved', 'rejected'].includes(s.status)).length;
 
-  const cards = [
-    { label: 'Active Campaigns', icon: '🎯', value: campaigns?.length ?? '—', sub: 'live', path: '/mines/discover' },
-    { label: 'My Pending Submissions', icon: '⏳', value: pendingSubmissions, sub: 'awaiting review', path: '/mines/participation' },
-    { label: 'Mallpoints Balance', icon: '💰', value: profile ? fmtNum(profile.mlpts_balance) : '—', sub: 'MLPTS', path: '/mines/earnings' },
-    { label: 'Reviewer Queue', icon: '🛂', value: reviewQueueCount ?? '—', sub: 'assigned to you', path: '/mines/validator-queue' },
+  const cards: Array<{
+    label: string;
+    icon: string;
+    value: string | number | null | undefined;
+    sub: string;
+    path: string;
+    degraded: boolean;
+  }> = [
+    {
+      label: 'Active Campaigns',
+      icon: '🎯',
+      value: failedModules.includes('Campaigns') ? 'N/A' : campaigns?.length ?? '—',
+      sub: failedModules.includes('Campaigns') ? 'data unavailable' : 'live',
+      path: '/mines/discover',
+      degraded: failedModules.includes('Campaigns'),
+    },
+    {
+      label: 'My Pending Submissions',
+      icon: '⏳',
+      value: failedModules.includes('Submissions') ? 'N/A' : pendingSubmissions ?? '—',
+      sub: failedModules.includes('Submissions') ? 'data unavailable' : 'awaiting review',
+      path: '/mines/participation',
+      degraded: failedModules.includes('Submissions'),
+    },
+    {
+      label: 'Mallpoints Balance',
+      icon: '💰',
+      value: failedModules.includes('Profile') ? 'N/A' : profile ? fmtNum(profile.mlpts_balance) : '—',
+      sub: failedModules.includes('Profile') ? 'data unavailable' : 'MLPTS',
+      path: '/mines/earnings',
+      degraded: failedModules.includes('Profile'),
+    },
+    {
+      label: 'Reviewer Queue',
+      icon: '🛂',
+      value: failedModules.includes('Review Queue') ? 'N/A' : reviewQueueCount ?? '—',
+      sub: failedModules.includes('Review Queue') ? 'data unavailable' : 'assigned to you',
+      path: '/mines/validator-queue',
+      degraded: failedModules.includes('Review Queue'),
+    },
   ];
 
   return (
@@ -69,28 +138,58 @@ export default function MinesHome({ navigate }: { navigate: (p: string) => void 
         </div>
       )}
 
-      <div className="sec-title"><h2>Your Mines snapshot</h2><span className="sub">{loading ? 'loading…' : 'live from your account'}</span></div>
+      <div className="sec-title">
+        <h2>Your Mines snapshot</h2>
+        <span className="sub">
+          {loading ? 'loading…' : failedModules.length > 0 ? `${failedModules.length} module(s) unavailable — partial data` : 'live from your account'}
+        </span>
+      </div>
       <div className="mc-stats-grid">
         {cards.map((c) => (
-          <div key={c.label} className="card card-hover" style={{ cursor: 'pointer' }} onClick={() => navigate(c.path)}>
-            <div className="lbl">{c.icon} {c.label}</div>
-            <div className="num">{c.value} <small>{c.sub}</small></div>
+          <div
+            key={c.label}
+            className="card card-hover"
+            style={{
+              cursor: 'pointer',
+              opacity: c.degraded ? 0.65 : 1,
+              borderColor: c.degraded ? 'var(--line-2)' : undefined,
+            }}
+            onClick={() => navigate(c.path)}
+          >
+            <div className="lbl" style={{ color: c.degraded ? 'var(--txt-3)' : undefined }}>
+              {c.icon} {c.label}
+              {c.degraded && <span title="This module's data could not be loaded from the backend" aria-label="degraded"> ⚠</span>}
+            </div>
+            <div className="num" style={{ color: c.degraded ? 'var(--txt-3)' : undefined }}>
+              {c.value} <small>{c.sub}</small>
+            </div>
           </div>
         ))}
       </div>
 
       <div className="card">
         <div className="sec-title"><h2>Recent submissions</h2></div>
-        {submissions?.length === 0 && <div className="empty" style={{ color: 'var(--txt-3)', padding: 22 }}>No submissions yet — join a campaign to get started.</div>}
-        {(submissions || []).slice(0, 6).map((s) => (
-          <div key={s._id} className="list-row">
-            <div className="grow">
-              <div className="t">{s.title || `Submission ${s._id}`}</div>
-              <div className="m" style={{ fontSize: 11.5, color: 'var(--txt-2)' }}>{s.status}</div>
+        {failedModules.includes('Submissions') ? (
+          <div className="empty" style={{ color: 'var(--txt-3)', padding: 22, textAlign: 'center' }}>
+            <div style={{ fontSize: 28 }}>⚠️</div>
+            <div style={{ fontWeight: 600, marginTop: 6 }}>Submissions data unavailable</div>
+            <div className="tiny" style={{ marginTop: 4 }}>
+              The backend submissions endpoint is not reachable right now.
             </div>
-            {s.status === 'auto_approved' && <b className="green">+{s.reward_amount} MLPTS</b>}
           </div>
-        ))}
+        ) : submissions?.length === 0 ? (
+          <div className="empty" style={{ color: 'var(--txt-3)', padding: 22 }}>No submissions yet — join a campaign to get started.</div>
+        ) : (
+          (submissions || []).slice(0, 6).map((s) => (
+            <div key={s._id} className="list-row">
+              <div className="grow">
+                <div className="t">{s.title || `Submission ${s._id}`}</div>
+                <div className="m" style={{ fontSize: 11.5, color: 'var(--txt-2)' }}>{s.status}</div>
+              </div>
+              {s.status === 'auto_approved' && <b className="green">+{s.reward_amount} MLPTS</b>}
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

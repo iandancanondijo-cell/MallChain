@@ -89,10 +89,26 @@ export default function Staking() {
         </div>
       )}
 
-      <div className="stat-grid">
-        <div className="card"><div className="card-label">Actively staked</div><div className="card-value">{loading ? '—' : fmtNum(summary?.totalStaked ?? 0)} <span className="unit">MLCNS</span></div></div>
-        <div className="card"><div className="card-label">Rewards claimed (lifetime)</div><div className="card-value up">{loading ? '—' : fmtNum(summary?.totalRewardsClaimed ?? 0)} <span className="unit">MLCNS</span></div></div>
-        <div className="card"><div className="card-label">Active stakes</div><div className="card-value">{loading ? '—' : summary?.active.length ?? 0}</div></div>
+      <div className="stat-grid" style={error ? { opacity: 0.65 } : undefined}>
+        <div className="card">
+          <div className="card-label" style={error ? { color: 'var(--txt-3)' } : undefined}>{error && '⚠ '}Actively staked</div>
+          <div className="card-value" style={error ? { color: 'var(--txt-3)' } : undefined}>
+            {loading ? '—' : error ? 'N/A' : <>{fmtNum(summary?.totalStaked ?? 0)} <span className="unit">MLCNS</span></>}
+          </div>
+          {error && <div className="tiny muted mt">staking service unavailable</div>}
+        </div>
+        <div className="card">
+          <div className="card-label" style={error ? { color: 'var(--txt-3)' } : undefined}>{error && '⚠ '}Rewards claimed (lifetime)</div>
+          <div className="card-value up" style={error ? { color: 'var(--txt-3)' } : undefined}>
+            {loading ? '—' : error ? 'N/A' : <>{fmtNum(summary?.totalRewardsClaimed ?? 0)} <span className="unit">MLCNS</span></>}
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-label" style={error ? { color: 'var(--txt-3)' } : undefined}>{error && '⚠ '}Active stakes</div>
+          <div className="card-value" style={error ? { color: 'var(--txt-3)' } : undefined}>
+            {loading ? '—' : error ? 'N/A' : summary?.active.length ?? 0}
+          </div>
+        </div>
       </div>
 
       <div className="grid-2">
@@ -104,13 +120,23 @@ export default function Staking() {
               <button className="btn btn-ghost btn-sm" onClick={() => setAmt(String(st.balances.MALL))}>Max</button>
             </div>
           </div>
-          <button className="btn btn-primary btn-block" onClick={delegate} disabled={busy}>{busy && <span className="spin" />} Stake</button>
+          <button className="btn btn-primary btn-block" onClick={delegate} disabled={busy || !!error}>{busy && <span className="spin" />} {error ? 'Service unavailable' : 'Stake'}</button>
           <div className="tiny mt">Unstaking a stake pays out its principal and any accrued rewards together — there's no separate claim step.</div>
         </div>
-        <div className="card">
-          <div className="sec-title"><h2>Active stakes</h2></div>
-          {!loading && (summary?.active.length ?? 0) === 0 && <div className="empty" style={{ color: 'var(--txt-3)', padding: 24, textAlign: 'center' }}>No active stakes yet.</div>}
-          {(summary?.active || []).map((s) => (
+        <div className="card" style={error ? { opacity: 0.65 } : undefined}>
+          <div className="sec-title">
+            <h2>Active stakes</h2>
+            {error && <span className="sub" style={{ color: 'var(--gold-2)' }}>⚠ data unavailable</span>}
+          </div>
+          {!loading && error && (
+            <div className="empty-state" style={{ padding: '24px 16px' }}>
+              <div className="es-ico" style={{ fontSize: 28 }}>⚠️</div>
+              <div className="es-t">Active stakes unavailable</div>
+              <div className="es-m">Couldn't load active stakes — retry above.</div>
+            </div>
+          )}
+          {!loading && !error && (summary?.active.length ?? 0) === 0 && <div className="empty" style={{ color: 'var(--txt-3)', padding: 24, textAlign: 'center' }}>No active stakes yet.</div>}
+          {((!error && summary?.active) || []).map((s) => (
             <div key={s.stakeId} className="list-row">
               <div className="grow">
                 <div className="t">{fmtNum(s.stakedAmount)} MLCNS</div>
@@ -124,10 +150,20 @@ export default function Staking() {
         </div>
       </div>
 
-      <div className="card mt">
-        <div className="sec-title"><h2>History</h2></div>
-        {!loading && (summary?.history.length ?? 0) === 0 && <div className="empty" style={{ color: 'var(--txt-3)', padding: 24, textAlign: 'center' }}>No completed stakes yet.</div>}
-        {(summary?.history || []).map((s) => (
+      <div className="card mt" style={error ? { opacity: 0.65 } : undefined}>
+        <div className="sec-title">
+          <h2>History</h2>
+          {error && <span className="sub" style={{ color: 'var(--gold-2)' }}>⚠ data unavailable</span>}
+        </div>
+        {!loading && error && (
+          <div className="empty-state" style={{ padding: '24px 16px' }}>
+            <div className="es-ico" style={{ fontSize: 28 }}>⚠️</div>
+            <div className="es-t">Staking history unavailable</div>
+            <div className="es-m">Retry above to load completed stakes.</div>
+          </div>
+        )}
+        {!loading && !error && (summary?.history.length ?? 0) === 0 && <div className="empty" style={{ color: 'var(--txt-3)', padding: 24, textAlign: 'center' }}>No completed stakes yet.</div>}
+        {((!error && summary?.history) || []).map((s) => (
           <div key={s.stakeId} className="list-row">
             <div className="grow"><div className="t">{fmtNum(s.stakedAmount)} MLCNS</div><div className="m">staked {new Date(s.stakeDate * 1000).toLocaleDateString()}</div></div>
             <span className="green">+{fmtNum(s.rewardsEarned)} MLCNS rewards</span>

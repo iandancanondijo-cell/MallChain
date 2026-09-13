@@ -39,12 +39,19 @@ export default function ValidatorsLeaderboard() {
         </div>
       )}
 
-      <div className="card">
+      <div className="card" style={error ? { opacity: 0.65 } : undefined}>
         {loading && !rows && <div className="tiny">Loading…</div>}
-        {rows?.length === 0 && (
+        {error && !loading && (
+          <div className="empty-state">
+            <div className="es-ico">⚠️</div>
+            <div className="es-t">Leaderboard unavailable</div>
+            <div className="es-m">Couldn't load validator rankings — use the Retry button above.</div>
+          </div>
+        )}
+        {!error && rows?.length === 0 && (
           <div className="empty-state"><div className="es-ico">🏆</div><div className="es-t">No validators yet</div></div>
         )}
-        {(rows || []).map((r, i) => (
+        {(!error && rows || []).map((r, i) => (
           <div key={r.operatorAddress} className="lb-row">
             <span className="lb-rank">{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span>
             <div className="avatar" style={{ width: 30, height: 30, fontSize: 13 }}>{r.name[0]}</div>

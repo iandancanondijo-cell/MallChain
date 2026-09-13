@@ -27,8 +27,8 @@ export default function ValidatorsHome({ navigate }: { navigate: (p: string) => 
     load();
   }, [load]);
 
-  const totalStaked = (validators || []).reduce((s, v) => s + v.totalStaked, 0);
-  const bonded = (validators || []).filter((v) => v.status === 'BOND_STATUS_BONDED').length;
+  const totalStaked = error ? null : (validators || []).reduce((s, v) => s + v.totalStaked, 0);
+  const bonded = error ? null : (validators || []).filter((v) => v.status === 'BOND_STATUS_BONDED').length;
 
   return (
     <div>
@@ -55,18 +55,44 @@ export default function ValidatorsHome({ navigate }: { navigate: (p: string) => 
         </div>
       )}
 
-      <div className="mc-stats-grid">
-        <div className="card"><div className="lbl">Bonded validators</div><div className="num">{loading ? '—' : bonded}</div></div>
-        <div className="card"><div className="lbl">Total staked</div><div className="num">{loading ? '—' : fmtNum(totalStaked)} MALL</div></div>
+      <div className="mc-stats-grid" style={error ? { opacity: 0.65 } : undefined}>
+        <div className="card">
+          <div className="lbl" style={error ? { color: 'var(--txt-3)' } : undefined}>
+            {error && '⚠ '}Bonded validators
+          </div>
+          <div className="num" style={error ? { color: 'var(--txt-3)' } : undefined}>
+            {loading ? '—' : error ? 'N/A' : bonded}
+          </div>
+          {error && <div className="tiny muted mt">validator service unavailable</div>}
+        </div>
+        <div className="card">
+          <div className="lbl" style={error ? { color: 'var(--txt-3)' } : undefined}>
+            {error && '⚠ '}Total staked
+          </div>
+          <div className="num" style={error ? { color: 'var(--txt-3)' } : undefined}>
+            {loading ? '—' : error ? 'N/A' : `${fmtNum(totalStaked ?? 0)} MALL`}
+          </div>
+          {error && <div className="tiny muted mt">data unavailable</div>}
+        </div>
       </div>
 
       <div className="card">
-        <div className="sec-title"><h2>Active validator set</h2></div>
+        <div className="sec-title">
+          <h2>Active validator set</h2>
+          {error && <span className="sub" style={{ color: 'var(--gold-2)' }}>⚠ partial data — validator service unavailable</span>}
+        </div>
         {loading && !validators && <div className="tiny">Loading…</div>}
-        {validators?.length === 0 && (
+        {error && !loading && (
+          <div className="empty-state">
+            <div className="es-ico">⚠️</div>
+            <div className="es-t">Validator data unavailable</div>
+            <div className="es-m">Couldn't load the validator set from the chain right now — check your connection and retry above.</div>
+          </div>
+        )}
+        {!error && validators?.length === 0 && (
           <div className="empty-state"><div className="es-ico">🛡</div><div className="es-t">No bonded validators found</div><div className="es-m">The chain may still be initializing.</div></div>
         )}
-        {(validators || []).map((v) => (
+        {(!error && validators || []).map((v) => (
           <div key={v.operatorAddress} className="list-row">
             <span style={{ fontSize: 18 }}>{v.logo}</span>
             <div className="grow">
