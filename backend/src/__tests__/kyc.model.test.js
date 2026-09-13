@@ -4,6 +4,7 @@
 // are ciphertext, not just that a utility function round-trips in isolation.
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const mongoose = require('mongoose');
+const os = require('os');
 
 let mongod;
 let KYC;
@@ -15,14 +16,20 @@ beforeAll(async () => {
   // though this file's own beforeAll timeout below is much larger —
   // that's a separate, shorter timeout inside the library itself.
   mongod = await MongoMemoryServer.create({ instance: { launchTimeout: 60000 } });
-  await mongoose.connect(mongod.getUri());
+  // mongodb driver 7.6.0's client-metadata handshake auto-detects the
+  // runtime adapter in a way that fails under Jest specifically (works
+  // fine under plain Node) — a known upstream regression
+  // (mongodb/node-mongodb-native#4992, typegoose/mongodb-memory-server#1026)
+  // that surfaces as "Missing required sub-document 'driver'". Passing the
+  // adapter explicitly is the documented workaround.
+  await mongoose.connect(mongod.getUri(), { runtimeAdapters: { os } });
   KYC = require('../models/kyc');
 }, 90000);
 
 afterAll(async () => {
   await mongoose.disconnect();
   if (mongod) await mongod.stop();
-});
+}, 30000); // mongod.stop()'s process teardown can outlast Jest's 5s hook default under CPU/memory contention
 
 afterEach(async () => {
   await KYC.deleteMany({});
