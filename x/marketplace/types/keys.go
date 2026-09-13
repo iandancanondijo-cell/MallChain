@@ -30,6 +30,7 @@ var (
 	ErrAlreadyResolved     = cosmossdkerrors.Register(ModuleName, 5, "escrow already resolved")
 	ErrDisputePeriodPassed = cosmossdkerrors.Register(ModuleName, 6, "dispute period has passed")
 	ErrInsufficientBalance = cosmossdkerrors.Register(ModuleName, 7, "insufficient balance")
+	ErrInvalidRequest      = cosmossdkerrors.Register(ModuleName, 8, "invalid request")
 )
 
 // Escrow is now defined in tx.pb.go, generated from proto/marketplace/marketplace/v1/tx.proto.

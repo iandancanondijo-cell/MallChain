@@ -3,7 +3,6 @@ package keeper
 import (
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	clienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types"
 	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
 	commitmenttypes "github.com/cosmos/ibc-go/v10/modules/core/23-commitment/types"
+	host "github.com/cosmos/ibc-go/v10/modules/core/24-host"
 	ibcexported "github.com/cosmos/ibc-go/v10/modules/core/exported"
 
 	"marketplace/x/crosschain/types"
@@ -69,13 +69,18 @@ func (k Keeper) sendOutboundIBCTransfer(ctx sdk.Context, transfer types.BridgeTr
 		types.FormatBridgeMemo(transferID),
 	)
 
-	if _, err := k.ibcKeeper.Transfer(ctx, msg); err != nil {
+	resp, err := k.ibcKeeper.Transfer(ctx, msg)
+	if err != nil {
 		return err
 	}
 
 	meta := types.TransferMeta{
-		InitHeight:    uint64(ctx.BlockHeight()),
-		TimeoutBlocks: timeoutBlocks,
+		InitHeight:       uint64(ctx.BlockHeight()),
+		TimeoutBlocks:    timeoutBlocks,
+		IBCSequence:      resp.Sequence,
+		TimeoutTimestamp: timeoutTimestamp,
+		PortID:           portID,
+		ChannelID:        route.ChannelID,
 	}
 	if err := k.TransferMeta.Set(ctx, transferID, meta); err != nil {
 		return err
@@ -234,30 +239,51 @@ func (k Keeper) refundTimedOutTransfer(ctx context.Context, transferID uint64, r
 	return nil
 }
 
+// bridgeTransferProof is only the caller-supplied HALF of what
+// verifyTransferProof checks: which light client, which height, and the
+// actual ICS-23 merkle inclusion proof bytes. It deliberately does NOT
+// carry the path or value being proven — those are reconstructed by the
+// keeper itself from the transfer's own recorded fields (see
+// verifyTransferProof), not accepted from the caller.
 type bridgeTransferProof struct {
-	ClientID           string   `json:"client_id"`
-	RevisionNumber     uint64   `json:"revision_number"`
-	RevisionHeight     uint64   `json:"revision_height"`
-	Height             uint64   `json:"height"`
-	Proof              string   `json:"proof"`
-	ProofBytes         []byte   `json:"proof_bytes"`
-	MerklePath         []string `json:"merkle_path"`
-	Value              string   `json:"value"`
-	ValueBytes         []byte   `json:"value_bytes"`
-	Acknowledgement    string   `json:"acknowledgement"`
-	AcknowledgementHex string   `json:"acknowledgement_hex"`
+	ClientID       string `json:"client_id"`
+	RevisionNumber uint64 `json:"revision_number"`
+	RevisionHeight uint64 `json:"revision_height"`
+	Height         uint64 `json:"height"`
+	Proof          string `json:"proof"`
+	ProofBytes     []byte `json:"proof_bytes"`
 }
 
+// verifyTransferProof proves that this transfer's real outbound IBC packet
+// was actually committed on-chain, by reconstructing the EXACT ICS-24
+// packet-commitment path and value from the transfer's own recorded fields
+// (via TransferMeta, populated by sendOutboundIBCTransfer) and checking
+// THAT reconstruction's membership — not whatever path/value the caller's
+// proof claims. Trusting a caller-supplied path/value (the previous
+// behavior) proved nothing about this specific transfer at all: any validly
+// -formed merkle proof for any unrelated fact — or one against a caller's
+// own self-controlled light client — would pass, letting a proof for one
+// (possibly tiny, legitimate) transfer complete a completely different one.
 func (k Keeper) verifyTransferProof(ctx sdk.Context, proof string, transfer types.BridgeTransfer) error {
 	if k.ibcClientKeeper == nil {
 		return types.ErrInvalidProof
+	}
+
+	// A transfer only has a real packet-commitment sequence recorded when
+	// InitiateBridgeTransfer found a configured chain route (see
+	// sendOutboundIBCTransfer) — IBCSequence stays 0 otherwise. With no real
+	// packet ever sent, there is no legitimate commitment to prove, so this
+	// must reject outright rather than accept whatever the caller claims.
+	meta, err := k.TransferMeta.Get(ctx, transfer.Id)
+	if err != nil || meta.IBCSequence == 0 || meta.PortID == "" || meta.ChannelID == "" {
+		return fmt.Errorf("%w: no real IBC packet was ever sent for transfer %d", types.ErrInvalidProof, transfer.Id)
 	}
 
 	parsedProof, err := parseBridgeTransferProof(proof)
 	if err != nil {
 		return err
 	}
-	if parsedProof.ClientID == "" || len(parsedProof.MerklePath) == 0 {
+	if parsedProof.ClientID == "" {
 		return types.ErrInvalidProof
 	}
 
@@ -269,28 +295,30 @@ func (k Keeper) verifyTransferProof(ctx sdk.Context, proof string, transfer type
 		return types.ErrInvalidProof
 	}
 
-	value := parsedProof.ValueBytes
-	if len(value) == 0 {
-		value, err = decodeProofValue(parsedProof.Value)
-		if err != nil {
-			return err
-		}
+	// Reconstructs the exact bytes sendOutboundIBCTransfer's real
+	// MsgTransfer caused ibc-transfer to commit — same fields
+	// HandleOutboundIBCAck already assumes on the decode side (plain
+	// FungibleTokenPacketData, not a v2/multi-denom packet).
+	packetData := ibctransfertypes.FungibleTokenPacketData{
+		Denom:    transfer.AssetDenom,
+		Amount:   transfer.Amount.Amount.String(),
+		Sender:   authtypes.NewModuleAddress(types.ModuleName).String(),
+		Receiver: transfer.Recipient,
+		Memo:     types.FormatBridgeMemo(transfer.Id),
 	}
-	if len(value) == 0 && parsedProof.Acknowledgement != "" {
-		value, err = decodeProofValue(parsedProof.Acknowledgement)
-		if err != nil {
-			return err
-		}
-	}
-	if len(value) == 0 && len(parsedProof.AcknowledgementHex) > 0 {
-		value, err = decodeHexProofValue(parsedProof.AcknowledgementHex)
-		if err != nil {
-			return err
-		}
-	}
-	if len(value) == 0 {
-		return types.ErrInvalidProof
-	}
+	packet := channeltypes.NewPacket(
+		packetData.GetBytes(),
+		meta.IBCSequence,
+		meta.PortID, meta.ChannelID,
+		"", "", // destination port/channel don't factor into CommitPacket's hash
+		clienttypes.NewHeight(0, 0),
+		meta.TimeoutTimestamp,
+	)
+	expectedValue := channeltypes.CommitPacket(packet)
+	expectedPath := commitmenttypes.NewMerklePath(
+		[]byte(ibcexported.StoreKey),
+		host.PacketCommitmentKey(meta.PortID, meta.ChannelID, meta.IBCSequence),
+	)
 
 	clientModule, err := k.ibcClientKeeper.Route(ctx, parsedProof.ClientID)
 	if err != nil {
@@ -307,8 +335,8 @@ func (k Keeper) verifyTransferProof(ctx sdk.Context, proof string, transfer type
 		0,
 		0,
 		parsedProof.ProofBytes,
-		commitmenttypes.NewMerklePath(toByteSlices(parsedProof.MerklePath)...),
-		value,
+		expectedPath,
+		expectedValue,
 	); err != nil {
 		return fmt.Errorf("%w: %v", types.ErrInvalidProof, err)
 	}
@@ -351,24 +379,3 @@ func decodeProofValue(value string) ([]byte, error) {
 	return nil, types.ErrInvalidProof
 }
 
-func decodeHexProofValue(value string) ([]byte, error) {
-	if value == "" {
-		return nil, types.ErrInvalidProof
-	}
-	decoded, err := hex.DecodeString(value)
-	if err != nil {
-		return nil, types.ErrInvalidProof
-	}
-	return decoded, nil
-}
-
-func toByteSlices(values []string) [][]byte {
-	bytesValues := make([][]byte, 0, len(values))
-	for _, value := range values {
-		if value == "" {
-			return nil
-		}
-		bytesValues = append(bytesValues, []byte(value))
-	}
-	return bytesValues
-}

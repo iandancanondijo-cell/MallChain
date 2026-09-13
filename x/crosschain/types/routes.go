@@ -18,11 +18,21 @@ func (*ChainRoute) ProtoMessage()    {}
 // DefaultPortID is the standard IBC transfer port.
 const DefaultPortID = "transfer"
 
-// TransferMeta stores block-level metadata for a bridge transfer.
+// TransferMeta stores block-level metadata for a bridge transfer. The
+// IBCSequence/TimeoutTimestamp/PortID/ChannelID fields are only populated
+// when a real outbound IBC packet was actually sent (see
+// keeper.sendOutboundIBCTransfer) — they're what lets
+// keeper.verifyTransferProof reconstruct the exact packet commitment that
+// must be proven, rather than trusting a caller-supplied value. A transfer
+// with IBCSequence == 0 never had a real packet sent for it (no chain route
+// was configured), so no legitimate proof can exist for it either.
 type TransferMeta struct {
-	InitHeight    uint64 `json:"init_height"`
-	IBCSequence   uint64 `json:"ibc_sequence,omitempty"`
-	TimeoutBlocks uint64 `json:"timeout_blocks"`
+	InitHeight       uint64 `json:"init_height"`
+	IBCSequence      uint64 `json:"ibc_sequence,omitempty"`
+	TimeoutBlocks    uint64 `json:"timeout_blocks"`
+	TimeoutTimestamp uint64 `json:"timeout_timestamp,omitempty"`
+	PortID           string `json:"port_id,omitempty"`
+	ChannelID        string `json:"channel_id,omitempty"`
 }
 
 func (m *TransferMeta) Reset()         { *m = TransferMeta{} }

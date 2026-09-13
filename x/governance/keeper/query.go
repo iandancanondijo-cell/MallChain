@@ -23,6 +23,33 @@ func NewQueryServerImpl(keeper Keeper) types.QueryServer {
 
 var _ types.QueryServer = queryServer{}
 
+// paginationBounds computes a safe [start, end) slice range for `total`
+// items from an OPTIONAL page request. A plain (non-gateway) gRPC caller
+// can send a request with a nil Pagination field — this used to be
+// dereferenced directly (req.Pagination.Offset), crashing the node on any
+// such request. A zero Limit (either from a nil Pagination or one
+// explicitly set to {Limit: 0}) means "no limit", matching this file's
+// pre-existing behavior for every OTHER query in it (GetProposal, GetVote,
+// etc. never truncated); the previous code's literal `start + 0` instead
+// silently returned an empty page whenever a caller left Limit unset.
+func paginationBounds(p *query.PageRequest, total uint64) (start, end uint64) {
+	if p == nil {
+		return 0, total
+	}
+	start = p.Offset
+	if start > total {
+		start = total
+	}
+	if p.Limit == 0 {
+		return start, total
+	}
+	end = start + p.Limit
+	if end > total {
+		end = total
+	}
+	return start, end
+}
+
 // Params implements Query.Params method.
 func (k queryServer) Params(ctx context.Context, req *types.QueryParamsRequest) (*types.QueryParamsResponse, error) {
 	params, err := k.Keeper.GetParams(ctx)
@@ -35,6 +62,10 @@ func (k queryServer) Params(ctx context.Context, req *types.QueryParamsRequest) 
 
 // Proposals implements Query.Proposals method.
 func (k queryServer) Proposals(ctx context.Context, req *types.QueryProposalsRequest) (*types.QueryProposalsResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	}
+
 	proposals, err := k.Keeper.GetProposals(ctx)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
@@ -65,11 +96,7 @@ func (k queryServer) Proposals(ctx context.Context, req *types.QueryProposalsReq
 
 	// Handle pagination
 	total := uint64(len(filteredProposals))
-	start := (req.Pagination.Offset)
-	end := start + req.Pagination.Limit
-	if end > total {
-		end = total
-	}
+	start, end := paginationBounds(req.Pagination, total)
 
 	return &types.QueryProposalsResponse{
 		Proposals: filteredProposals[start:end],
@@ -82,6 +109,10 @@ func (k queryServer) Proposals(ctx context.Context, req *types.QueryProposalsReq
 
 // Proposal implements Query.Proposal method.
 func (k queryServer) Proposal(ctx context.Context, req *types.QueryProposalRequest) (*types.QueryProposalResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	}
+
 	proposal, err := k.Keeper.GetProposal(ctx, req.ProposalId)
 	if err != nil {
 		return nil, status.Error(codes.NotFound, "proposal not found")
@@ -92,6 +123,10 @@ func (k queryServer) Proposal(ctx context.Context, req *types.QueryProposalReque
 
 // Deposits implements Query.Deposits method.
 func (k queryServer) Deposits(ctx context.Context, req *types.QueryDepositsRequest) (*types.QueryDepositsResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	}
+
 	deposits, err := k.Keeper.GetDeposits(ctx, req.ProposalId)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
@@ -99,11 +134,7 @@ func (k queryServer) Deposits(ctx context.Context, req *types.QueryDepositsReque
 
 	// Handle pagination
 	total := uint64(len(deposits))
-	start := (req.Pagination.Offset)
-	end := start + req.Pagination.Limit
-	if end > total {
-		end = total
-	}
+	start, end := paginationBounds(req.Pagination, total)
 
 	return &types.QueryDepositsResponse{
 		Deposits: deposits[start:end],
@@ -116,6 +147,10 @@ func (k queryServer) Deposits(ctx context.Context, req *types.QueryDepositsReque
 
 // Deposit implements Query.Deposit method.
 func (k queryServer) Deposit(ctx context.Context, req *types.QueryDepositRequest) (*types.QueryDepositResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	}
+
 	deposit, err := k.Keeper.GetDeposit(ctx, req.ProposalId, req.Depositor)
 	if err != nil {
 		return nil, status.Error(codes.NotFound, "deposit not found")
@@ -126,6 +161,10 @@ func (k queryServer) Deposit(ctx context.Context, req *types.QueryDepositRequest
 
 // Votes implements Query.Votes method.
 func (k queryServer) Votes(ctx context.Context, req *types.QueryVotesRequest) (*types.QueryVotesResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	}
+
 	votes, err := k.Keeper.GetVotes(ctx, req.ProposalId)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
@@ -133,11 +172,7 @@ func (k queryServer) Votes(ctx context.Context, req *types.QueryVotesRequest) (*
 
 	// Handle pagination
 	total := uint64(len(votes))
-	start := (req.Pagination.Offset)
-	end := start + req.Pagination.Limit
-	if end > total {
-		end = total
-	}
+	start, end := paginationBounds(req.Pagination, total)
 
 	return &types.QueryVotesResponse{
 		Votes: votes[start:end],
@@ -150,6 +185,10 @@ func (k queryServer) Votes(ctx context.Context, req *types.QueryVotesRequest) (*
 
 // Vote implements Query.Vote method.
 func (k queryServer) Vote(ctx context.Context, req *types.QueryVoteRequest) (*types.QueryVoteResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	}
+
 	vote, err := k.Keeper.GetVote(ctx, req.ProposalId, req.Voter)
 	if err != nil {
 		return nil, status.Error(codes.NotFound, "vote not found")
@@ -160,6 +199,10 @@ func (k queryServer) Vote(ctx context.Context, req *types.QueryVoteRequest) (*ty
 
 // TallyResult implements Query.TallyResult method.
 func (k queryServer) TallyResult(ctx context.Context, req *types.QueryTallyResultRequest) (*types.QueryTallyResultResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid request")
+	}
+
 	// Get proposal to check if voting has ended
 	proposal, err := k.Keeper.GetProposal(ctx, req.ProposalId)
 	if err != nil {

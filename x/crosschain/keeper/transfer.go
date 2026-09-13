@@ -227,32 +227,35 @@ func (k Keeper) validateModuleBalance(ctx sdk.Context, transfer types.BridgeTran
 	return nil
 }
 
-// validateBondedValidator authorizes any currently bonded, non-jailed validator to complete a transfer.
+// validateBondedValidator checks that `validator` (MsgCompleteBridgeTransfer's
+// cosmos.msg.v1.signer field — see types/msg_signer.go's GetSigners, which
+// requires it to decode as a plain account address) is currently a bonded,
+// non-jailed validator.
+//
+// It previously re-parsed that same string via
+// ValAddressFromBech32/ConsAddressFromBech32, expecting a
+// "mallvaloper1.../mallvalcons1..." prefix — but GetSigners requires an
+// account-prefixed ("mall1...") string for the ante handler's signature
+// check to succeed at all, and bech32 decoding rejects a string against the
+// wrong prefix outright. The two requirements were mutually exclusive: no
+// legitimately-signed transaction could ever satisfy both, so this check
+// always failed and MsgCompleteBridgeTransfer could never succeed for
+// anyone. The fix is to convert, not re-parse: a validator's operator
+// address is the same 20 bytes as its account address when (the standard
+// case) it registered using its own key — sdk.ValAddress(accAddr) reuses
+// those bytes under the operator-address type instead of asking bech32 to
+// decode one prefix's string as if it were another.
 func (k Keeper) validateBondedValidator(ctx context.Context, validator string) error {
 	if validator == "" || k.stakingKeeper == nil {
 		return types.ErrUnauthorized
 	}
 
-	if valAddr, err := sdk.ValAddressFromBech32(validator); err == nil {
-		validatorRecord, err := k.stakingKeeper.GetValidator(ctx, valAddr)
-		if err != nil {
-			if errors.Is(err, stakingtypes.ErrNoValidatorFound) {
-				return types.ErrUnauthorized
-			}
-			return err
-		}
-		if validatorRecord.IsBonded() && !validatorRecord.Jailed {
-			return nil
-		}
-		return types.ErrUnauthorized
-	}
-
-	consAddr, err := sdk.ConsAddressFromBech32(validator)
+	accAddr, err := sdk.AccAddressFromBech32(validator)
 	if err != nil {
 		return types.ErrUnauthorized
 	}
 
-	validatorRecord, err := k.stakingKeeper.GetValidatorByConsAddr(ctx, consAddr)
+	validatorRecord, err := k.stakingKeeper.GetValidator(ctx, sdk.ValAddress(accAddr))
 	if err != nil {
 		if errors.Is(err, stakingtypes.ErrNoValidatorFound) {
 			return types.ErrUnauthorized

@@ -70,6 +70,13 @@ func (k Keeper) CreateEscrow(sdkCtx sdk.Context, buyer, seller, amount, denom, d
 		return "", cosmossdkerrors.Wrap(types.ErrInvalidAmount, "invalid seller address")
 	}
 
+	// sdk.NewCoin below panics on a malformed denom (ValidateDenom fails) —
+	// checking first turns a would-be chain-halting panic into an ordinary
+	// rejected transaction.
+	if err := sdk.ValidateDenom(denom); err != nil {
+		return "", cosmossdkerrors.Wrap(types.ErrInvalidAmount, "invalid denom")
+	}
+
 	coins := sdk.NewCoins(sdk.NewCoin(denom, amountInt))
 
 	// Transfer funds from buyer to module account
