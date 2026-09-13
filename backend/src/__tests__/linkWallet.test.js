@@ -13,6 +13,12 @@ jest.mock('../models/user', () => ({
 jest.mock('../services/badgeService', () => ({
   getUserBadgeInfo: jest.fn(),
 }));
+// linkWallet now runs behind the shared `auth` middleware (routes/auth.js),
+// which needs the token-revocation check mocked the same way
+// tokenRevocation.test.js does it — real Redis isn't available here.
+jest.mock('../middleware/tokenDenylist', () => ({
+  isRevoked: jest.fn().mockResolvedValue(false),
+}));
 // verifyAdr036.js pulls in @cosmjs/amino -> @cosmjs/crypto, whose argon2
 // support is an ESM-only transitive dependency Jest's default CJS
 // resolution can't parse (same reason mallpointsConvert.test.js mocks it).
@@ -27,6 +33,7 @@ process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long!!!';
 const User = require('../models/user');
 const { getUserBadgeInfo } = require('../services/badgeService');
 const { verifyLinkWalletSignature } = require('../mallwallet/security/verifyAdr036');
+const auth = require('../middleware/auth');
 const authController = require('../controllers/authController');
 
 const VALID_ADDRESS = 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg';
@@ -36,18 +43,27 @@ function authHeader(userId = 'user-1') {
   return { Authorization: `Bearer ${token}` };
 }
 
+// The `auth` middleware looks the caller up by id (separately from
+// linkWallet's own User.findByIdAndUpdate call below) to populate req.user.
+function mockAuthenticatedUser(userId = 'user-1') {
+  User.findById.mockReturnValue({
+    select: jest.fn().mockResolvedValue({ _id: userId, email: 'a@b.com' }),
+  });
+}
+
 describe('POST /api/auth/link-wallet', () => {
   let app;
 
   beforeAll(() => {
     app = express();
     app.use(express.json());
-    app.post('/api/auth/link-wallet', authController.linkWallet);
+    app.post('/api/auth/link-wallet', auth, authController.linkWallet);
     app.get('/api/auth/me', authController.me);
   });
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAuthenticatedUser();
   });
 
   test('rejects a request with no token', async () => {
