@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { api } from './api';
 import { config } from './config';
+import { authService } from './auth';
 import { toast } from '../components/ui';
 
 // Mock the toast function
@@ -34,10 +35,13 @@ describe('API Service - Error Handling Integration', () => {
     vi.clearAllMocks();
     mockFetch.mockClear();
     localStorage.clear();
+    // CSRF token fetching goes through authService — stub it so mutating
+    // requests in this file don't consume mockFetch's queued responses.
+    vi.spyOn(authService, 'getCsrfToken').mockResolvedValue('test-csrf-token');
   });
 
   afterEach(() => {
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe('Network error handling', () => {
@@ -139,8 +143,8 @@ describe('API Service - Error Handling Integration', () => {
   });
 
   describe('401 error handling', () => {
-    it('should clear token on 401', async () => {
-      localStorage.setItem('token', 'test-token');
+    it('should clear the session marker on 401', async () => {
+      authService.setSession(Math.floor(Date.now() / 1000) + 3600);
 
       mockFetch.mockResolvedValueOnce({
         ok: false,
@@ -156,8 +160,8 @@ describe('API Service - Error Handling Integration', () => {
 
       await api.get('/test');
 
-      // Token should be cleared
-      expect(localStorage.getItem('token')).toBeNull();
+      // Session marker should be cleared
+      expect(authService.isAuthenticated()).toBe(false);
 
       // Should show toast
       expect(mockToast).toHaveBeenCalledWith(
@@ -166,16 +170,14 @@ describe('API Service - Error Handling Integration', () => {
       );
 
       // Redirect happens after a small delay in error handler
-      // This test verifies the immediate effects (token cleared, toast shown)
+      // This test verifies the immediate effects (session cleared, toast shown)
 
       window.location = originalLocation;
     });
   });
 
-  describe('Authorization header', () => {
-    it('should include token in Authorization header when present', async () => {
-      localStorage.setItem('token', 'test-token-123');
-
+  describe('Cookie auth (no Authorization header)', () => {
+    it('should send credentials: include and never an Authorization header', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -187,14 +189,13 @@ describe('API Service - Error Handling Integration', () => {
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining('/protected'),
         expect.objectContaining({
-          headers: expect.objectContaining({
-            'Authorization': 'Bearer test-token-123',
-          }),
+          credentials: 'include',
+          headers: expect.not.objectContaining({ Authorization: expect.any(String) }),
         })
       );
     });
 
-    it('should not include Authorization header when token is missing', async () => {
+    it('should never include an Authorization header, session or not', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,

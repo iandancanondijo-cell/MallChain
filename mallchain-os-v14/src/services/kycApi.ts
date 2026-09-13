@@ -2,17 +2,14 @@
  * KYC document upload — a dedicated fetch() call, not api.post(), because
  * api.post() (services/api.ts) unconditionally sets Content-Type:
  * application/json, which breaks a multipart FormData boundary.
+ *
+ * Auth is the httpOnly auth_token cookie (credentials: 'include'); the
+ * mutating call additionally carries an X-CSRF-Token header, same as
+ * api.ts — see its comment for why cookie auth needs that.
  */
 import { config } from './config';
+import { authService } from './auth';
 import type { ApiResult } from './api';
-
-function getToken(): string | null {
-  try {
-    return localStorage.getItem('token');
-  } catch {
-    return null;
-  }
-}
 
 export interface UploadDocumentResponse {
   ok: boolean;
@@ -36,11 +33,8 @@ export interface KycStatusResponse {
 export const kycApi = {
   async getStatus(): Promise<ApiResult<KycStatusResponse>> {
     const base = config.apiBaseUrl.replace(/\/$/, '');
-    const token = getToken();
     try {
-      const res = await fetch(`${base}/api/kyc/status`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
+      const res = await fetch(`${base}/api/kyc/status`, { credentials: 'include' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return { ok: false, error: data.error || `Failed to load KYC status (${res.status})` };
       return { ok: true, data };
@@ -51,14 +45,15 @@ export const kycApi = {
 
   async uploadDocument(file: File): Promise<ApiResult<UploadDocumentResponse>> {
     const base = config.apiBaseUrl.replace(/\/$/, '');
-    const token = getToken();
+    const csrfToken = await authService.getCsrfToken();
     const form = new FormData();
     form.append('document', file);
 
     try {
       const res = await fetch(`${base}/api/kyc/document`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: 'include',
+        headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : undefined,
         body: form,
       });
       const data = await res.json().catch(() => ({}));
@@ -74,12 +69,9 @@ export const kycApi = {
   /** Fetches an uploaded document as a blob URL for display (auth-gated, not a public link). */
   async fetchDocumentBlobUrl(kycId: string, reason?: string): Promise<ApiResult<string>> {
     const base = config.apiBaseUrl.replace(/\/$/, '');
-    const token = getToken();
     const qs = reason?.trim() ? `?reason=${encodeURIComponent(reason.trim())}` : '';
     try {
-      const res = await fetch(`${base}/api/kyc/document/${kycId}${qs}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
+      const res = await fetch(`${base}/api/kyc/document/${kycId}${qs}`, { credentials: 'include' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         return { ok: false, error: data.error || `Failed to load document (${res.status})` };

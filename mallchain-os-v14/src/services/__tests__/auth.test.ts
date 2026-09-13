@@ -1,166 +1,117 @@
 /**
  * Unit tests for Authentication service (auth.ts)
- * Tests token storage, retrieval, expiration, and lifecycle management
+ *
+ * The JWT itself lives in an httpOnly cookie set by the backend — this
+ * service never sees it. What it tracks is: (1) a non-secret
+ * `{authedUntil}` session marker used as a same-origin UI hint, and (2) the
+ * CSRF token used to protect cookie-authenticated mutating requests.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { authService, type JwtPayload } from '../auth';
+import { authService, SESSION_KEY } from '../auth';
 import { store, OS_KEY } from '../../store/store';
 
 describe('AuthService', () => {
   beforeEach(() => {
-    // Clear localStorage before each test
     localStorage.clear();
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
+    // authService is a module-level singleton — its in-memory CSRF cache
+    // otherwise leaks between tests within this file.
+    authService.invalidateCsrfToken();
   });
 
   afterEach(() => {
     localStorage.clear();
+    vi.unstubAllGlobals();
   });
 
-  describe('token storage', () => {
-    it('should store token in localStorage', () => {
-      const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1ZjdhZGE4ZDdlOWQ4MDAwMTZhMWFiYzEiLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwiZXhwIjozMDAwMDAwMDAwfQ.lkmAkQR-YkpVCqXd8Y_DFhXr0VVMYbR5m8vGw6AUeLU';
-      authService.storeToken(token);
-      
-      expect(localStorage.getItem('token')).toBe(token);
+  describe('session marker', () => {
+    it('should store the session marker in localStorage', () => {
+      const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+      authService.setSession(expiresAt);
+
+      const raw = localStorage.getItem(SESSION_KEY);
+      expect(raw).not.toBeNull();
+      expect(JSON.parse(raw!)).toEqual({ authedUntil: expiresAt });
     });
 
-    it('should throw error when storing empty token', () => {
-      expect(() => {
-        authService.storeToken('');
-      }).toThrow();
+    it('should clear the session marker', () => {
+      authService.setSession(Math.floor(Date.now() / 1000) + 3600);
+      authService.clearSession();
+
+      expect(localStorage.getItem(SESSION_KEY)).toBeNull();
     });
 
-    it('should retrieve stored token', () => {
-      const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1ZjdhZGE4ZDdlOWQ4MDAwMTZhMWFiYzEiLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwiZXhwIjozMDAwMDAwMDAwfQ.lkmAkQR-YkpVCqXd8Y_DFhXr0VVMYbR5m8vGw6AUeLU';
-      authService.storeToken(token);
-      
-      expect(authService.getToken()).toBe(token);
-    });
+    it('should not throw when localStorage is unavailable on write', () => {
+      const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+        throw new Error('localStorage is full');
+      });
 
-    it('should return null when no token stored', () => {
-      expect(authService.getToken()).toBeNull();
-    });
+      expect(() => authService.setSession(Math.floor(Date.now() / 1000) + 3600)).not.toThrow();
 
-    it('should clear token from localStorage', () => {
-      const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1ZjdhZGE4ZDdlOWQ4MDAwMTZhMWFiYzEiLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwiZXhwIjozMDAwMDAwMDAwfQ.lkmAkQR-YkpVCqXd8Y_DFhXr0VVMYbR5m8vGw6AUeLU';
-      authService.storeToken(token);
-      authService.clearToken();
-      
-      expect(localStorage.getItem('token')).toBeNull();
+      spy.mockRestore();
     });
   });
 
   describe('authentication status', () => {
-    it('should be unauthenticated when no token stored', () => {
+    it('should be unauthenticated when no session marker stored', () => {
       expect(authService.isAuthenticated()).toBe(false);
     });
 
-    it('should be authenticated with valid unexpired token', () => {
-      // Token with expiration 1 hour in the future
-      const futureExp = Math.floor(Date.now() / 1000) + 3600;
-      const payload = {
-        userId: '5f7ada8d7e9d800016a1abc1',
-        username: 'testuser',
-        exp: futureExp,
-      };
-      const token = createMockToken(payload);
-      authService.storeToken(token);
-      
+    it('should be authenticated with an unexpired session marker', () => {
+      authService.setSession(Math.floor(Date.now() / 1000) + 3600);
       expect(authService.isAuthenticated()).toBe(true);
     });
 
-    it('should be unauthenticated with expired token', () => {
-      // Token with expiration 1 hour in the past
-      const pastExp = Math.floor(Date.now() / 1000) - 3600;
-      const payload = {
-        userId: '5f7ada8d7e9d800016a1abc1',
-        username: 'testuser',
-        exp: pastExp,
-      };
-      const token = createMockToken(payload);
-      authService.storeToken(token);
-      
+    it('should be unauthenticated with an expired session marker, and clear it', () => {
+      authService.setSession(Math.floor(Date.now() / 1000) - 3600);
+
       expect(authService.isAuthenticated()).toBe(false);
-      // Expired token should be cleared
-      expect(authService.getToken()).toBeNull();
+      expect(localStorage.getItem(SESSION_KEY)).toBeNull();
     });
 
-    it('should be unauthenticated with malformed token', () => {
-      authService.storeToken('invalid.token.format');
+    it('should be unauthenticated with a corrupted session marker', () => {
+      localStorage.setItem(SESSION_KEY, 'not-json');
       expect(authService.isAuthenticated()).toBe(false);
     });
   });
 
-  describe('token expiration', () => {
+  describe('session expiration', () => {
     it('should calculate time until expiration', () => {
-      const futureExp = Math.floor(Date.now() / 1000) + 3600; // 1 hour
-      const payload = {
-        userId: '5f7ada8d7e9d800016a1abc1',
-        username: 'testuser',
-        exp: futureExp,
-      };
-      const token = createMockToken(payload);
-      authService.storeToken(token);
-      
-      const expiresIn = authService.getTokenExpiresIn();
+      const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+      authService.setSession(expiresAt);
+
+      const expiresIn = authService.getSessionExpiresIn();
       expect(expiresIn).not.toBeNull();
       expect(typeof expiresIn).toBe('number');
       if (expiresIn !== null) {
-        // Should be approximately 3600 seconds (allowing small time drift)
         expect(expiresIn).toBeGreaterThan(3590);
         expect(expiresIn).toBeLessThanOrEqual(3600);
       }
     });
 
-    it('should return null for expiration when no token', () => {
-      expect(authService.getTokenExpiresIn()).toBeNull();
+    it('should return null for expiration when no session marker', () => {
+      expect(authService.getSessionExpiresIn()).toBeNull();
     });
 
-    it('should return null for expired token', () => {
-      const pastExp = Math.floor(Date.now() / 1000) - 3600;
-      const payload = {
-        userId: '5f7ada8d7e9d800016a1abc1',
-        username: 'testuser',
-        exp: pastExp,
-      };
-      const token = createMockToken(payload);
-      authService.storeToken(token);
-      
-      expect(authService.getTokenExpiresIn()).toBeNull();
+    it('should return null for an already-expired marker', () => {
+      authService.setSession(Math.floor(Date.now() / 1000) - 3600);
+      expect(authService.getSessionExpiresIn()).toBeNull();
     });
 
-    it('should detect token expiring soon', () => {
-      // Token expiring in 60 seconds
-      const soonExp = Math.floor(Date.now() / 1000) + 60;
-      const payload = {
-        userId: '5f7ada8d7e9d800016a1abc1',
-        username: 'testuser',
-        exp: soonExp,
-      };
-      const token = createMockToken(payload);
-      authService.storeToken(token);
-      
-      expect(authService.isTokenExpiringSoon(300)).toBe(true);
+    it('should detect a session expiring soon', () => {
+      authService.setSession(Math.floor(Date.now() / 1000) + 60);
+      expect(authService.isSessionExpiringSoon(300)).toBe(true);
     });
 
-    it('should not flag token expiring soon if plenty of time', () => {
-      // Token expiring in 1 hour
-      const futureExp = Math.floor(Date.now() / 1000) + 3600;
-      const payload = {
-        userId: '5f7ada8d7e9d800016a1abc1',
-        username: 'testuser',
-        exp: futureExp,
-      };
-      const token = createMockToken(payload);
-      authService.storeToken(token);
-      
-      expect(authService.isTokenExpiringSoon(300)).toBe(false);
+    it('should not flag a session expiring soon if plenty of time remains', () => {
+      authService.setSession(Math.floor(Date.now() / 1000) + 3600);
+      expect(authService.isSessionExpiringSoon(300)).toBe(false);
     });
 
-    it('should treat missing token as expiring soon', () => {
-      expect(authService.isTokenExpiringSoon()).toBe(true);
+    it('should treat a missing session marker as expiring soon', () => {
+      expect(authService.isSessionExpiringSoon()).toBe(true);
     });
   });
 
@@ -169,38 +120,100 @@ describe('AuthService', () => {
     // `localStorage.setItem = fn` silently no-ops (the Proxy trap ignores it),
     // and Storage.prototype.* is also not what real calls resolve through.
     // vi.spyOn is the only thing that reliably intercepts calls here.
-    it('should handle localStorage unavailable gracefully', () => {
-      const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
-        throw new Error('localStorage is full');
-      });
-
-      expect(() => {
-        authService.storeToken('test-token');
-      }).toThrow();
-
-      spy.mockRestore();
-    });
-
-    it('should handle localStorage getItem error gracefully', () => {
-      const spy = vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
-        throw new Error('localStorage access denied');
-      });
-
-      const token = authService.getToken();
-      expect(token).toBeNull();
-
-      spy.mockRestore();
-    });
-
     it('should handle localStorage removeItem error gracefully', () => {
       const spy = vi.spyOn(localStorage, 'removeItem').mockImplementation(() => {
         throw new Error('localStorage access denied');
       });
 
-      // Should not throw
-      authService.clearToken();
+      expect(() => authService.clearSession()).not.toThrow();
 
       spy.mockRestore();
+    });
+  });
+
+  describe('CSRF token management', () => {
+    it('fetches and caches the CSRF token from GET /api/csrf-token', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ csrfToken: 'abc123' }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const token = await authService.getCsrfToken();
+      expect(token).toBe('abc123');
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/csrf-token'),
+        expect.objectContaining({ credentials: 'include' })
+      );
+
+      // Second call must be served from cache, not a second fetch.
+      const token2 = await authService.getCsrfToken();
+      expect(token2).toBe('abc123');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('deduplicates concurrent callers into a single in-flight fetch', async () => {
+      let resolveFetch: (v: unknown) => void;
+      const fetchMock = vi.fn().mockReturnValue(
+        new Promise((resolve) => { resolveFetch = resolve; })
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const p1 = authService.getCsrfToken();
+      const p2 = authService.getCsrfToken();
+      resolveFetch!({ ok: true, json: async () => ({ csrfToken: 'xyz' }) });
+
+      expect(await p1).toBe('xyz');
+      expect(await p2).toBe('xyz');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns null and does not cache on a failed fetch', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
+
+      const token = await authService.getCsrfToken();
+      expect(token).toBeNull();
+    });
+
+    it('returns null without throwing on a network error', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
+
+      const token = await authService.getCsrfToken();
+      expect(token).toBeNull();
+    });
+
+    it('invalidateCsrfToken() forces the next call to fetch again', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ csrfToken: 'first' }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await authService.getCsrfToken();
+      authService.invalidateCsrfToken();
+
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ csrfToken: 'second' }) });
+      const token = await authService.getCsrfToken();
+
+      expect(token).toBe('second');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('clearSession() also discards the cached CSRF token', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ csrfToken: 'before-logout' }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await authService.getCsrfToken();
+      authService.clearSession();
+
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ csrfToken: 'after-logout' }) });
+      const token = await authService.getCsrfToken();
+
+      expect(token).toBe('after-logout');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -209,10 +222,10 @@ describe('AuthService', () => {
       store.reset();
     });
 
-    it('clears the token', () => {
-      authService.storeToken(createMockToken({ userId: '1', username: 'x', exp: Math.floor(Date.now() / 1000) + 3600 }));
+    it('clears the session marker', () => {
+      authService.setSession(Math.floor(Date.now() / 1000) + 3600);
       authService.logout();
-      expect(authService.getToken()).toBeNull();
+      expect(authService.isAuthenticated()).toBe(false);
     });
 
     it('fully resets the store, not just the auth flag', () => {
@@ -248,49 +261,4 @@ describe('AuthService', () => {
       expect(persisted.balances.MALL).toBe(0);
     });
   });
-
-  describe('token payload parsing', () => {
-    it('should correctly parse valid JWT token', () => {
-      const payload = {
-        userId: '5f7ada8d7e9d800016a1abc1',
-        username: 'testuser',
-        exp: Math.floor(Date.now() / 1000) + 3600,
-        iat: Math.floor(Date.now() / 1000),
-      };
-      const token = createMockToken(payload);
-      authService.storeToken(token);
-      
-      expect(authService.isAuthenticated()).toBe(true);
-    });
-
-    it('should reject token with invalid format', () => {
-      authService.storeToken('not.a.jwt');
-      expect(authService.isAuthenticated()).toBe(false);
-    });
-
-    it('should reject token with missing exp claim', () => {
-      const invalidPayload = {
-        userId: '5f7ada8d7e9d800016a1abc1',
-        username: 'testuser',
-      };
-      // Create token without exp (will fail when parsed)
-      const token = createMockToken(invalidPayload as any);
-      authService.storeToken(token);
-      
-      // Should fail because exp is missing/undefined
-      const expiresIn = authService.getTokenExpiresIn();
-      expect(expiresIn).toBeNull();
-    });
-  });
 });
-
-/**
- * Helper function to create a mock JWT token with given payload
- * Note: This creates a token-like string; signature is not validated in these tests
- */
-function createMockToken(payload: JwtPayload | Record<string, any>): string {
-  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payloadStr = btoa(JSON.stringify(payload));
-  const signature = 'mock-signature';
-  return `${header}.${payloadStr}.${signature}`;
-}

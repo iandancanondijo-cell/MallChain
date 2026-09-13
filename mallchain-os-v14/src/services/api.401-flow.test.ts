@@ -1,16 +1,15 @@
 /**
  * Integration test for 401 authentication flow
- * 
+ *
  * This test demonstrates the complete flow:
- * 1. User makes authenticated request with token
- * 2. Backend returns 401 (token expired/invalid)
- * 3. Frontend clears token from localStorage
+ * 1. User makes an authenticated request (httpOnly session cookie, invisible
+ *    to this code — represented here by authService's local session marker)
+ * 2. Backend returns 401 (session expired/invalid)
+ * 3. Frontend clears the local session marker
  * 4. Frontend redirects to login page
- * 
- * Validates Requirement 4.3: Token Storage and Usage
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock modules
 vi.mock('./config', () => ({
@@ -45,6 +44,7 @@ vi.mock('../store/store', () => ({
 }));
 
 import { api } from './api';
+import { authService } from './auth';
 
 describe('401 Authentication Flow Integration Test', () => {
   let originalFetch: typeof global.fetch;
@@ -54,24 +54,26 @@ describe('401 Authentication Flow Integration Test', () => {
     originalFetch = global.fetch;
     mockFetch = vi.fn();
     global.fetch = mockFetch;
-    
+
     localStorage.clear();
 
     delete (window as any).location;
     (window as any).location = { href: '', hash: '' };
+
+    // CSRF token fetching goes through authService — stub it so mutating
+    // requests in this file don't consume mockFetch's queued responses.
+    vi.spyOn(authService, 'getCsrfToken').mockResolvedValue('test-csrf-token');
   });
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
-  it('should complete full 401 flow: detect -> clear token -> redirect', async () => {
-    // SETUP: User has an expired token
-    const expiredToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.expired';
-    localStorage.setItem('token', expiredToken);
-    
-    // Verify token is stored
-    expect(localStorage.getItem('token')).toBe(expiredToken);
+  it('should complete full 401 flow: detect -> clear session -> redirect', async () => {
+    // SETUP: User has a (soon to be rejected) session
+    authService.setSession(Math.floor(Date.now() / 1000) + 3600);
+    expect(authService.isAuthenticated()).toBe(true);
 
     // SCENARIO: User tries to access protected resource
     mockFetch.mockResolvedValueOnce({
@@ -83,18 +85,17 @@ describe('401 Authentication Flow Integration Test', () => {
     // ACTION: Make authenticated request
     const result = await api.get('/api/wallets/mall1abc123/balances');
 
-    // VERIFICATION 1: Request included the token
+    // VERIFICATION 1: Request carried credentials, not an Authorization header
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/wallets'),
       expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: `Bearer ${expiredToken}`,
-        }),
+        credentials: 'include',
+        headers: expect.not.objectContaining({ Authorization: expect.any(String) }),
       })
     );
 
-    // VERIFICATION 2: Token was cleared from localStorage
-    expect(localStorage.getItem('token')).toBeNull();
+    // VERIFICATION 2: Session marker was cleared
+    expect(authService.isAuthenticated()).toBe(false);
 
     // VERIFICATION 3: User was redirected to login
     // handle401Error() delays the redirect by 1s (to let the toast show),
@@ -111,10 +112,10 @@ describe('401 Authentication Flow Integration Test', () => {
   });
 
   it('should handle 401 in transaction flow', async () => {
-    // SETUP: User has token but it expires during transaction
-    localStorage.setItem('token', 'valid-but-about-to-expire');
+    // SETUP: User has a session but it's rejected by the time the request lands
+    authService.setSession(Math.floor(Date.now() / 1000) + 3600);
 
-    // SCENARIO: User submits transaction but token expires between UI and backend
+    // SCENARIO: User submits transaction but the session is rejected between UI and backend
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 401,
@@ -131,8 +132,8 @@ describe('401 Authentication Flow Integration Test', () => {
     };
     const result = await api.mutate(tx);
 
-    // VERIFICATION: Token cleared and redirect happened
-    expect(localStorage.getItem('token')).toBeNull();
+    // VERIFICATION: Session cleared and redirect happened
+    expect(authService.isAuthenticated()).toBe(false);
     await new Promise(resolve => setTimeout(resolve, 1100));
     expect(window.location.hash).toBe('#/landing');
     expect(result.ok).toBe(false);
@@ -140,7 +141,7 @@ describe('401 Authentication Flow Integration Test', () => {
   }, 10000);
 
   it('should handle 401 on any HTTP method (GET, POST, etc.)', async () => {
-    localStorage.setItem('token', 'expired');
+    authService.setSession(Math.floor(Date.now() / 1000) + 3600);
 
     // Test POST request
     mockFetch.mockResolvedValueOnce({
@@ -151,12 +152,12 @@ describe('401 Authentication Flow Integration Test', () => {
 
     await api.post('/api/auth/logout', {});
 
-    expect(localStorage.getItem('token')).toBeNull();
+    expect(authService.isAuthenticated()).toBe(false);
     await new Promise(resolve => setTimeout(resolve, 1100));
     expect(window.location.hash).toBe('#/landing');
 
     // Reset for next test
-    localStorage.setItem('token', 'expired');
+    authService.setSession(Math.floor(Date.now() / 1000) + 3600);
     (window as any).location.hash = '';
 
     // Test GET request
@@ -168,7 +169,7 @@ describe('401 Authentication Flow Integration Test', () => {
 
     await api.get('/api/notifications');
 
-    expect(localStorage.getItem('token')).toBeNull();
+    expect(authService.isAuthenticated()).toBe(false);
     await new Promise(resolve => setTimeout(resolve, 1100));
     expect(window.location.hash).toBe('#/landing');
   }, 10000);
@@ -177,22 +178,25 @@ describe('401 Authentication Flow Integration Test', () => {
     // SCENARIO: Complete flow from 401 to re-login
 
     // Step 1: User gets 401
-    localStorage.setItem('token', 'old-expired-token');
+    authService.setSession(Math.floor(Date.now() / 1000) + 3600);
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 401,
       json: async () => ({}),
     });
     await api.get('/api/data');
-    
-    expect(localStorage.getItem('token')).toBeNull();
 
-    // Step 2: User logs in again (simulated)
+    expect(authService.isAuthenticated()).toBe(false);
+
+    // Step 2: User logs in again (simulated) — the JWT itself would be set
+    // as an httpOnly cookie by this same response; the JSON body only ever
+    // carries the non-secret expiresAt hint.
+    const newExpiresAt = Math.floor(Date.now() / 1000) + 7200;
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: async () => ({
-        token: 'new-fresh-token',
+        expiresAt: newExpiresAt,
         user: { id: 'user123', username: 'testuser' },
       }),
     });
@@ -203,11 +207,12 @@ describe('401 Authentication Flow Integration Test', () => {
     });
 
     expect(loginResult.ok).toBe(true);
-    
-    // Step 3: Store new token (this would be done by login component)
-    localStorage.setItem('token', (loginResult.data as any).token);
 
-    // Step 4: Make new authenticated request with fresh token
+    // Step 3: Record the new session marker (this would be done by the login component)
+    authService.setSession((loginResult.data as any).expiresAt);
+    expect(authService.isAuthenticated()).toBe(true);
+
+    // Step 4: Make new authenticated request
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -219,17 +224,13 @@ describe('401 Authentication Flow Integration Test', () => {
     expect(retryResult.ok).toBe(true);
     expect(mockFetch).toHaveBeenLastCalledWith(
       expect.any(String),
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer new-fresh-token',
-        }),
-      })
+      expect.objectContaining({ credentials: 'include' })
     );
   });
 
   it('should handle race condition: multiple concurrent requests all get 401', async () => {
-    // SCENARIO: User has multiple tabs/components making requests, token expires
-    localStorage.setItem('token', 'expired-token');
+    // SCENARIO: User has multiple tabs/components making requests, session expires
+    authService.setSession(Math.floor(Date.now() / 1000) + 3600);
 
     // All requests return 401
     mockFetch.mockResolvedValue({
@@ -251,8 +252,8 @@ describe('401 Authentication Flow Integration Test', () => {
       expect(result.code).toBe(401);
     });
 
-    // Token should be cleared (only once, but multiple attempts are safe)
-    expect(localStorage.getItem('token')).toBeNull();
+    // Session should be cleared (only once, but multiple attempts are safe)
+    expect(authService.isAuthenticated()).toBe(false);
 
     // Redirect happened
     await new Promise(resolve => setTimeout(resolve, 1100));

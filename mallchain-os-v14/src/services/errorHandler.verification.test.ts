@@ -20,6 +20,7 @@ import {
   withErrorHandling,
 } from './errorHandler';
 import type { ApiResult } from './api';
+import { authService, SESSION_KEY } from './auth';
 
 // Mock the toast function
 vi.mock('../components/ui', () => ({
@@ -274,8 +275,8 @@ describe('Task 6.2: User-Friendly Error Messages for Common Scenarios', () => {
   });
 
   describe('Unauthorized (401)', () => {
-    it('should clear token and redirect on 401', () => {
-      localStorage.setItem('token', 'test-token');
+    it('should clear the session marker and redirect on 401', () => {
+      authService.setSession(Math.floor(Date.now() / 1000) + 3600);
       const redirectFn = vi.fn();
 
       handle401Error(
@@ -291,7 +292,7 @@ describe('Task 6.2: User-Friendly Error Messages for Common Scenarios', () => {
 
       // Wait for async redirect
       setTimeout(() => {
-        expect(localStorage.getItem('token')).toBeNull();
+        expect(localStorage.getItem(SESSION_KEY)).toBeNull();
         expect(redirectFn).toHaveBeenCalled();
       }, 1100);
     });

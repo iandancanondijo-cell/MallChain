@@ -21,6 +21,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { api } from '../api';
 import { config } from '../config';
+import { authService } from '../auth';
 import type { ApiResult } from '../api';
 
 describe('Correctness Properties Verification', () => {
@@ -32,12 +33,16 @@ describe('Correctness Properties Verification', () => {
     mockFetchCalls = [];
     // Reset localStorage
     localStorage.clear();
+    // CSRF token fetching goes through authService, not the fetch calls
+    // these properties are actually asserting on.
+    vi.spyOn(authService, 'getCsrfToken').mockResolvedValue('test-csrf-token');
   });
 
   afterEach(() => {
     global.fetch = originalFetch;
     localStorage.clear();
     mockFetchCalls = [];
+    vi.restoreAllMocks();
   });
 
   // ============================================================================
@@ -117,14 +122,14 @@ describe('Correctness Properties Verification', () => {
   // ============================================================================
   // Property 3: Authentication Token Validity
   // ============================================================================
-  describe('Property 3: Authentication Token Validity', () => {
-    it('should include JWT token in Authorization header when available', async () => {
-      // Property: Protected endpoints require valid JWT token
-      
+  describe('Property 3: Authentication Session Validity', () => {
+    it('should send credentials: include (cookie auth) rather than an Authorization header', async () => {
+      // Property: Protected endpoints are authorized via the httpOnly
+      // session cookie — the JWT itself is never readable by, or attached
+      // manually by, this code.
+
       if (config.apiBaseUrl) {
-        // Setup: Store a valid JWT token
-        const validToken = 'test-valid-token-123';
-        localStorage.setItem('token', validToken);
+        authService.setSession(Math.floor(Date.now() / 1000) + 3600);
 
         global.fetch = vi.fn(async (url: string, options: any) => {
           mockFetchCalls.push({ url, options, headers: options?.headers });
@@ -137,17 +142,18 @@ describe('Correctness Properties Verification', () => {
         // Verify: Request succeeded
         expect(result.ok).toBe(true);
 
-        // Verify: Authorization header was included
+        // Verify: credentials were included, and no Authorization header was sent
         if (mockFetchCalls.length > 0) {
           const firstCall = mockFetchCalls[0];
-          expect(firstCall.headers?.['Authorization']).toContain('Bearer');
+          expect(firstCall.options?.credentials).toBe('include');
+          expect(firstCall.headers?.['Authorization']).toBeUndefined();
         }
       }
     });
 
     it('should handle 401 Unauthorized response', async () => {
-      // Property: 401 response indicates missing or invalid token
-      
+      // Property: 401 response indicates a missing or invalid session
+
       if (config.apiBaseUrl) {
         global.fetch = vi.fn(async () => {
           return new Response(
@@ -156,8 +162,8 @@ describe('Correctness Properties Verification', () => {
           );
         });
 
-        // Make request without token
-        localStorage.removeItem('token');
+        // Make request without a session
+        authService.clearSession();
         const result = await api.get('/api/protected');
 
         // Verify: 401 error returned

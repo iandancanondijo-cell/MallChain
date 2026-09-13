@@ -87,9 +87,10 @@ router.post('/login-username',
 
 /**
  * Task 4.1: GET /api/auth/me
- * Returns current authenticated user profile
- * Requires valid JWT token in Authorization header
- * Protected by auth middleware (applied in controller or route)
+ * Returns current authenticated user profile.
+ * Accepts either an Authorization: Bearer header or the httpOnly session
+ * cookie — see authController.js's me() (does its own inline jwt.verify
+ * rather than the shared auth middleware, so it can support both).
  */
 router.get('/me', authCtrl.me);
 
@@ -97,8 +98,13 @@ router.get('/me', authCtrl.me);
  * POST /api/auth/link-wallet — associate the logged-in account with an
  * on-chain address (see authController.js's linkWallet for the full
  * rationale). Frontend calls this once after wallet creation/import.
+ *
+ * Uses the shared auth middleware (rather than an inline jwt.verify, like
+ * this file's other non-me routes used to) so it accepts the httpOnly
+ * session cookie, gets CSRF-checked when cookie-authenticated, and honors
+ * the token denylist/banned-user checks like every other protected route.
  */
-router.post('/link-wallet', authCtrl.linkWallet);
+router.post('/link-wallet', auth, authCtrl.linkWallet);
 
 /**
  * POST /api/auth/logout — revokes this token server-side (see

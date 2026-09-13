@@ -11,10 +11,34 @@ const User = require('../models/user');
 const { markActiveToday } = require('../utils/activityTracker');
 const { getCachedUser, setCachedUser } = require('./authCache');
 const { isRevoked } = require('./tokenDenylist');
+const { csrfProtection } = require('./csrf');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   console.error('JWT_SECRET must be configured for authentication');
+}
+
+const AUTH_COOKIE_NAME = 'auth_token';
+
+/**
+ * Runs the shared csrfProtection instance and resolves/rejects instead of
+ * taking an Express next() — lets requireAuth `await` it inline rather
+ * than threading a nested-middleware callback through the rest of this
+ * function.
+ *
+ * Only matters for a COOKIE-authenticated request: a Bearer header can't
+ * be attached by a page on another origin, so a request auth'd that way
+ * was never forgeable cross-site to begin with. A cookie IS attached
+ * automatically by the browser regardless of which site triggered the
+ * request, which is exactly what CSRF protection exists to close.
+ */
+function checkCsrf(req, res) {
+  return new Promise((resolve, reject) => {
+    csrfProtection(req, res, (err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
 }
 
 function requireAuth(role) {
@@ -22,12 +46,21 @@ function requireAuth(role) {
     if (!JWT_SECRET) return res.status(500).json({ error: 'server configuration error' });
 
     const auth = req.headers.authorization;
-    if (!auth) return res.status(401).json({ error: 'missing auth token' });
+    let token = null;
+    let authMethod = null;
 
-    const parts = auth.split(' ');
-    if (parts.length !== 2) return res.status(401).json({ error: 'bad auth header' });
+    if (auth) {
+      const parts = auth.split(' ');
+      if (parts.length !== 2) return res.status(401).json({ error: 'bad auth header' });
+      token = parts[1];
+      authMethod = 'bearer';
+    } else if (req.cookies && req.cookies[AUTH_COOKIE_NAME]) {
+      token = req.cookies[AUTH_COOKIE_NAME];
+      authMethod = 'cookie';
+    }
 
-    const token = parts[1];
+    if (!token) return res.status(401).json({ error: 'missing auth token' });
+
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
       const userId = decoded.userId || decoded.id;
@@ -68,7 +101,25 @@ function requireAuth(role) {
 
       req.user = user;
       req.tokenPayload = decoded; // exposes jti/exp for routes/auth.js's logout handlers
+      req.authMethod = authMethod;
       if (!role) markActiveToday(user._id); // fire-and-forget — feeds the badge streak, never blocks the request
+
+      // Only a cookie-authenticated request needs the CSRF check — see
+      // checkCsrf's comment above. Runs on every request (not just
+      // mutating ones) so the secret cookie gets established on an
+      // ordinary GET too; csrfProtection only actually verifies the token
+      // on state-changing methods internally.
+      if (authMethod === 'cookie') {
+        try {
+          await checkCsrf(req, res);
+        } catch (csrfErr) {
+          if (csrfErr.code === 'EBADCSRFTOKEN') {
+            return res.status(403).json({ error: 'invalid or missing CSRF token' });
+          }
+          throw csrfErr;
+        }
+      }
+
       next();
     } catch (err) {
       console.error(err);

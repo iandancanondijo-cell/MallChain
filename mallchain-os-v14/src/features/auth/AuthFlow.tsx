@@ -42,9 +42,15 @@ type KycData = {
   acceptTerms: boolean;
 };
 
-/** Shape of authController.js's toPublicUser(), returned by /api/auth/{register,login,me}. */
+/**
+ * Shape of authController.js's toPublicUser(), returned by
+ * /api/auth/{register,login,me}. The JWT itself is never in this body — it's
+ * set as an httpOnly cookie by the same response; `expiresAt` is just a
+ * non-secret hint the frontend uses to know roughly how long the session is
+ * expected to last (authService.setSession()).
+ */
 interface AuthResponse {
-  token: string;
+  expiresAt: number;
   requires2fa?: boolean;
   user?: { id: string; email: string; role: 'user' | 'admin' | 'superadmin'; banned: boolean; kycLevel: number; name?: string | null; username?: string | null };
 }
@@ -284,9 +290,10 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         referralCode: referralCode.trim() || undefined,
       });
 
-      if (res.ok && res.data?.token) {
-        // Store token in localStorage
-        authService.storeToken(res.data.token);
+      if (res.ok && res.data) {
+        // The JWT was set as an httpOnly cookie by this same response —
+        // only the non-secret expiry hint is recorded client-side.
+        authService.setSession(res.data.expiresAt);
 
         // A brand-new account must start from a clean slate — reset first,
         // so any stale local data left over from a previous session/account
@@ -356,9 +363,10 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         return;
       }
 
-      if (res.ok && res.data?.token) {
-        // Store token in localStorage
-        authService.storeToken(res.data.token);
+      if (res.ok && res.data) {
+        // The JWT was set as an httpOnly cookie by this same response —
+        // only the non-secret expiry hint is recorded client-side.
+        authService.setSession(res.data.expiresAt);
 
         const u = res.data.user;
         // Only reset if this browser's cached local data belongs to a

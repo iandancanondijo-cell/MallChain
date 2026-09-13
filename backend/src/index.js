@@ -4,6 +4,7 @@ if (process.env.DOTENVX_LOADED) {
 }
 require('dotenv').config();
 const express = require('express');
+const cookieParser = require('cookie-parser');
 const mongoose = require('mongoose');
 const morgan = require('morgan');
 const cors = require('cors');
@@ -12,6 +13,7 @@ const { config, getAllowedOrigins, validateRuntimeSecrets } = require('./config'
 const passport = require('passport');
 const session = require('express-session');
 const jwt = require('jsonwebtoken');
+const cookie = require('cookie');
 const User = require('./models/user');
 const Conversation = require('./models/Conversation');
 const { createLimiter, limiters } = require('./middleware/rateLimiter')
@@ -64,9 +66,7 @@ const axios = require('axios');
 const http = require('http')
 const net = require('net')
 const { Server } = require('socket.io')
-// csurf itself is deprecated/unmaintained; @dr.pogodin/csurf is an
-// actively-maintained fork with an identical API, so this is a drop-in swap.
-const csurf = require('@dr.pogodin/csurf')
+const { csrfProtection } = require('./middleware/csrf')
 
 // Real-time services
 const { startBlockListener } = require('../services/blockListener');
@@ -199,6 +199,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser());
 const sanitizeSensitive = require('./middleware/sanitizeSensitive');
 app.use(sanitizeSensitive);
 app.use(morgan(config.isProduction ? 'combined' : 'dev'));
@@ -288,12 +289,13 @@ app.use(passport.initialize());
 app.use(passport.session());
 require('./utils/passport');
 
-// CSRF protection - only apply to specific session-based routes
-// Disabled globally to prevent issues with public API endpoints
-// CSRF can be applied to specific routes that need session protection (e.g., OAuth callbacks)
-const csrfProtection = csurf({ cookie: true });
-
-// CSRF token endpoint for frontend (if needed for session-based auth)
+// CSRF token endpoint — the frontend fetches this once per session and
+// attaches the result as X-CSRF-Token on every mutating request. Actual
+// enforcement now lives in middleware/requireAuth.js (every authenticated
+// route checks it automatically); this endpoint just establishes the
+// secret cookie and hands back a matching token to start from. Previously
+// this csrfProtection instance was defined but never applied to any real
+// route, so nothing was actually CSRF-protected despite the scaffolding.
 app.get('/api/csrf-token', csrfProtection, (req, res) => {
   res.json({ csrfToken: req.csrfToken() });
 });
@@ -888,7 +890,23 @@ global.io = io
 // guessed a format-valid) address/id could subscribe to another account's
 // balance updates, notifications, or private messages.
 io.use((socket, next) => {
-  const token = socket.handshake.auth?.token
+  // The JWT now normally lives in an httpOnly cookie, invisible to the
+  // frontend JS that used to hand it to socket.io-client via `auth.token`.
+  // The initial Socket.IO handshake is a plain HTTP request, so the browser
+  // attaches cookies to it the same as any other request — as long as the
+  // client connects with `withCredentials: true` (matching fetch's
+  // `credentials: 'include'`) and this origin is in the CORS allowlist above
+  // (it can't be `*` for a credentialed request; it already isn't). Still
+  // honors `auth.token` first for any non-browser client that authenticates
+  // via bearer token instead.
+  let token = socket.handshake.auth?.token
+  if (!token && socket.handshake.headers.cookie) {
+    try {
+      token = cookie.parse(socket.handshake.headers.cookie).auth_token
+    } catch {
+      // malformed cookie header — fall through, connection stays anonymous
+    }
+  }
   if (token) {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET)

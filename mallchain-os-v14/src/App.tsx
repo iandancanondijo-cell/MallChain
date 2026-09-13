@@ -37,29 +37,31 @@ export default function App() {
     const initializeAuth = async () => {
       try {
         // Google OAuth (backend/src/controllers/authController.js's
-        // googleCallback) redirects back here as `${frontend}/?token=...` —
-        // pick that up before anything else so the token-driven restoration
-        // below (GET /api/auth/me) picks it up like any other stored token.
-        const oauthToken = new URLSearchParams(window.location.search).get('token');
-        if (oauthToken) {
-          authService.storeToken(oauthToken);
-          store.state.user.authed = true;
-          store.commit();
+        // googleCallback) redirects back here as `${frontend}/?authed=1` —
+        // just a hint that a fresh session cookie was set server-side during
+        // the redirect (the JWT itself is httpOnly and never appears in this
+        // URL). Strip it, and force the /me check below even though the
+        // local session marker hasn't been set yet for this brand-new session.
+        const cameFromOAuthRedirect = new URLSearchParams(window.location.search).get('authed') === '1';
+        if (cameFromOAuthRedirect) {
           window.history.replaceState({}, '', window.location.pathname + window.location.hash);
         }
 
-        // Cross-tab store synchronization (auth token + whole app state)
+        // Cross-tab store synchronization (session marker + whole app state)
         storeSync.initialize();
-        // Give storeSync a moment to restore token from localStorage
-        await new Promise(resolve => setTimeout(resolve, 100));
 
-        // Refresh frozen/role/kycLevel from the real backend on every boot —
-        // login/register only set these at the moment of auth, so a reload
-        // (or an admin ban/KYC decision since then) would otherwise show stale data.
-        if (authService.getToken()) {
-          const res = await api.get<{ user?: { id: string; banned: boolean; banReason?: string | null; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string; hasBadge?: boolean } }>('/api/auth/me');
+        // The JWT lives in an httpOnly cookie this code can't read, so the
+        // local `authedUntil` marker (authService.isAuthenticated()) is only
+        // ever a same-origin hint — GET /api/auth/me against the real cookie
+        // is the actual source of truth. Still gated (not called
+        // unconditionally) so a first-time, never-authenticated visitor
+        // doesn't trigger a spurious 401 → "session expired" toast.
+        if (authService.isAuthenticated() || cameFromOAuthRedirect) {
+          const res = await api.get<{ user?: { id: string; banned: boolean; banReason?: string | null; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string; hasBadge?: boolean }; expiresAt?: number }>('/api/auth/me');
           if (res.ok && res.data?.user) {
             const u = res.data.user;
+            if (res.data.expiresAt) authService.setSession(res.data.expiresAt);
+            store.state.user.authed = true;
             store.state.user.id = u.id;
             store.state.user.frozen = !!u.banned;
             store.state.user.frozenReason = u.banned ? (u.banReason || null) : null;
@@ -85,17 +87,18 @@ export default function App() {
             // "Subscriptions: 0" on every fresh dashboard load).
             socketManager.subscribeUser(u.id);
           } else {
-            // Token exists but the backend rejected/couldn't confirm it —
-            // don't leave a stale "authed" flag with no real identity behind
-            // it (that's exactly what renders as a ghost "Guest" session).
+            // No cookie, or the backend rejected/couldn't confirm it — don't
+            // leave a stale "authed" flag with no real session behind it
+            // (that's exactly what renders as a ghost "Guest" session).
+            authService.clearSession();
             store.state.user.authed = false;
             store.commit();
           }
         } else if (store.state.user.authed) {
-          // No token at all, yet the persisted store still says authed —
-          // can happen if a token was cleared (e.g. on a 401) but the full
-          // store reset that normally follows didn't complete before this
-          // tab reloaded. Don't trust a stale flag with no token behind it.
+          // No local session marker, yet the persisted store still says
+          // authed — can happen if the marker was cleared (e.g. on a 401)
+          // but the full store reset that normally follows didn't complete
+          // before this tab reloaded. Don't trust a stale flag.
           store.state.user.authed = false;
           store.commit();
         }

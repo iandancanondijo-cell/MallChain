@@ -12,6 +12,7 @@ import {
   withErrorHandling,
 } from './errorHandler';
 import { toast } from '../components/ui';
+import { authService, SESSION_KEY } from './auth';
 
 // Mock the toast function
 vi.mock('../components/ui', () => ({
@@ -225,16 +226,16 @@ describe('errorHandler', () => {
       vi.useRealTimers();
     });
 
-    it('should remove token from localStorage', () => {
+    it('should remove the session marker from localStorage', () => {
       vi.useFakeTimers();
 
-      localStorage.setItem('token', 'test-token');
+      authService.setSession(Math.floor(Date.now() / 1000) + 3600);
 
       handle401Error({ action: 'test' });
 
       vi.advanceTimersByTime(1000);
 
-      expect(localStorage.getItem('token')).toBeNull();
+      expect(localStorage.getItem(SESSION_KEY)).toBeNull();
 
       vi.useRealTimers();
     });

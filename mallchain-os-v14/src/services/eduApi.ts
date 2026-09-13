@@ -7,14 +7,7 @@
  */
 import { config } from './config';
 import { api, type ApiResult } from './api';
-
-function getToken(): string | null {
-  try {
-    return localStorage.getItem('token');
-  } catch {
-    return null;
-  }
-}
+import { authService } from './auth';
 
 export type EduCategory =
   | 'blockchain-basics'
@@ -83,7 +76,7 @@ export const eduApi = {
   },
 
   async post(input: { file: File; title: string; description?: string; category: EduCategory; previousResourceId?: string }): Promise<ApiResult<{ resource: EduResource }>> {
-    const token = getToken();
+    const csrfToken = await authService.getCsrfToken();
     const form = new FormData();
     form.append('file', input.file);
     form.append('title', input.title);
@@ -94,7 +87,8 @@ export const eduApi = {
     try {
       const res = await fetch(`${apiBase()}/api/edu`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: 'include',
+        headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : undefined,
         body: form,
       });
       const data = await res.json().catch(() => ({}));

@@ -3,17 +3,19 @@
  *
  * Contract: keeps the in-memory `store.state` consistent with what's on disk
  * when another tab/window changes it, and keeps `store.user.authed` in sync
- * with the JWT token specifically. Ensures the UI reflects reality even when:
+ * with the session marker specifically. Ensures the UI reflects reality even when:
  * - localStorage is modified externally (other tabs, browser extension, DevTools)
- * - The token is cleared (e.g., on 401 response, logout in another tab)
+ * - The session ends (e.g., on 401 response, logout in another tab)
  * - The whole app state (OS_KEY) is changed in another tab — balances, wallet,
  *   in-progress flows, everything, not just the login flag
  * - App is initialized/refreshed
  *
- * Historically this only watched the `token` key, so two tabs would agree on
- * "am I logged in" but silently diverge on everything else (balances, wallet
- * address, KYC state, cart, in-progress wizards...) until a manual reload.
- * It now also watches OS_KEY (the whole serialized AppState) and applies
+ * Historically this only watched a raw JWT in the `token` key; the JWT now
+ * lives in an httpOnly cookie this code can't read at all, so what's watched
+ * instead is authService's non-secret `{authedUntil}` session marker
+ * (SESSION_KEY) — same role (a same-origin hint for cross-tab UI sync), just
+ * backed by a value that was never actually a bearer credential.
+ * It also watches OS_KEY (the whole serialized AppState) and applies
  * externally-written snapshots via `store.applyExternalState`, which merges
  * into memory and notifies subscribers WITHOUT re-persisting (the snapshot is
  * already on disk — re-persisting would just be a redundant write).
@@ -29,16 +31,15 @@
  *
  * Implementation details:
  * - Listens to 'storage' event to detect changes in other tabs/windows
- * - Uses a sync timer to check *token* validity periodically, since JWT
+ * - Uses a sync timer to check session validity periodically, since cookie
  *   expiry isn't something the browser fires an event for, and the `storage`
  *   event never fires in the tab that made the change
  */
 
 import { store, OS_KEY, type AppState } from '../store/store';
-import { authService } from './auth';
+import { authService, SESSION_KEY } from './auth';
 
-const TOKEN_KEY = 'token';
-const SYNC_INTERVAL_MS = 3000; // Check token validity every 3 seconds
+const SYNC_INTERVAL_MS = 3000; // Check session validity every 3 seconds
 
 export class StoreSync {
   private syncIntervalId: number | null = null;
@@ -55,13 +56,13 @@ export class StoreSync {
 
     console.log('[StoreSync] Initializing cross-tab store synchronization');
 
-    // Read token from localStorage on app startup
-    this.syncAuthStateFromToken();
+    // Read session marker from localStorage on app startup
+    this.syncAuthStateFromSession();
 
     // Listen for external localStorage changes (other tabs, browser extensions, DevTools)
     window.addEventListener('storage', this.handleStorageChange);
 
-    // Start periodic sync to catch token expiration and validity changes
+    // Start periodic sync to catch session expiration and validity changes
     this.startPeriodicSync();
 
     this.isInitialized = true;
@@ -78,36 +79,33 @@ export class StoreSync {
   }
 
   /**
-   * Synchronize auth state from current token status.
-   * This ensures store.user.authed reflects the current token validity.
+   * Synchronize auth state from the current session marker.
+   * This ensures store.user.authed reflects the current session validity.
    *
    * Cases handled:
-   * 1. Valid token in localStorage → set user.authed = true
-   * 2. No token in localStorage → set user.authed = false
-   * 3. Expired/invalid token → set user.authed = false and clear token
+   * 1. Valid session marker → set user.authed = true
+   * 2. No session marker → set user.authed = false
+   * 3. Expired session marker → set user.authed = false and clear it
    */
-  private syncAuthStateFromToken = (): void => {
+  private syncAuthStateFromSession = (): void => {
     try {
-      const token = authService.getToken();
       const isAuth = authService.isAuthenticated();
 
-      if (isAuth && token) {
-        // Token exists and is valid
+      if (isAuth) {
         if (!store.state.user.authed) {
-          console.log('[StoreSync] Token found and valid, updating auth state');
+          console.log('[StoreSync] Session found and valid, updating auth state');
           store.state.user.authed = true;
           store.commit();
         }
       } else {
-        // No token or token is invalid/expired
         if (store.state.user.authed) {
-          console.log('[StoreSync] Token missing or invalid, clearing auth state');
+          console.log('[StoreSync] Session missing or invalid, clearing auth state');
           store.state.user.authed = false;
           store.commit();
         }
       }
     } catch (error) {
-      console.error('[StoreSync] Error syncing auth state from token:', error);
+      console.error('[StoreSync] Error syncing auth state from session:', error);
       // If sync fails, ensure auth state is cleared for safety
       if (store.state.user.authed) {
         store.state.user.authed = false;
@@ -159,18 +157,18 @@ export class StoreSync {
       return;
     }
 
-    if (event.key === TOKEN_KEY) {
-      console.log('[StoreSync] Token changed in external window/tab, syncing auth state');
-      this.syncAuthStateFromToken();
+    if (event.key === SESSION_KEY) {
+      console.log('[StoreSync] Session marker changed in external window/tab, syncing auth state');
+      this.syncAuthStateFromSession();
     }
   };
 
   /**
-   * Start periodic sync to detect token changes in the current tab.
+   * Start periodic sync to detect session changes in the current tab.
    * This catches cases like:
-   * - Token expiration
-   * - Programmatic token changes in DevTools
-   * - Token being manually modified via localStorage API
+   * - Session expiration
+   * - Programmatic changes in DevTools
+   * - Session marker being manually modified via localStorage API
    */
   private startPeriodicSync(): void {
     if (this.syncIntervalId !== null) {
@@ -178,7 +176,7 @@ export class StoreSync {
     }
 
     this.syncIntervalId = window.setInterval(() => {
-      this.syncAuthStateFromToken();
+      this.syncAuthStateFromSession();
     }, SYNC_INTERVAL_MS);
 
     console.log(`[StoreSync] Periodic sync started (every ${SYNC_INTERVAL_MS}ms)`);
@@ -200,16 +198,15 @@ export class StoreSync {
    */
   getStatus(): {
     initialized: boolean;
-    tokenValid: boolean;
+    sessionValid: boolean;
     authStateMatches: boolean;
   } {
-    const token = authService.getToken();
     const isAuth = authService.isAuthenticated();
     const stateAuthed = store.state.user.authed;
 
     return {
       initialized: this.isInitialized,
-      tokenValid: isAuth && !!token,
+      sessionValid: isAuth,
       authStateMatches: isAuth === stateAuthed,
     };
   }

@@ -1,25 +1,33 @@
 /**
  * Mallchain Mission Control v14 — Authentication service.
  *
- * Contract: Manages JWT token storage and retrieval from localStorage.
- * Provides functions for token lifecycle management on login/logout/expiration.
+ * Contract: Tracks client-visible session state and manages the CSRF token
+ * used to protect cookie-authenticated mutating requests.
  *
- * Features:
- * - Task 4.3: Store JWT token in localStorage on login success
- * - Task 4.3: Retrieve token from localStorage for API requests
- * - Task 4.3: Clear token from localStorage on logout/401 response
- * - Token expiration checking
- * - Type-safe token access
+ * The actual JWT lives in an httpOnly `auth_token` cookie set by the backend
+ * (authController.js) — it is never readable by this code, which is the
+ * entire point (an XSS payload can no longer exfiltrate a live session).
+ * What this module keeps client-side is just a non-secret hint,
+ * `{authedUntil}` (a unix-seconds timestamp echoed back by the backend on
+ * login/register), used to drive UI state (e.g. "are we logged in") without
+ * a round trip. It is never trusted for authorization — every real
+ * request still lives or dies on the server validating the actual cookie.
  */
 
-import { Secp256k1HdWallet, makeSignDoc } from '@cosmjs/amino';
-import { toBase64, toUtf8 } from '@cosmjs/encoding';
 import { store } from '../store/store';
 import { api } from './api';
-import { chain } from './config';
+import { chain, config } from './config';
+import { Secp256k1HdWallet, makeSignDoc } from '@cosmjs/amino';
+import { toBase64, toUtf8 } from '@cosmjs/encoding';
 import { requestMnemonic } from './mnemonicAccess';
 
-const TOKEN_KEY = 'token';
+/** Exported so storeSync.ts can recognize this key in cross-tab 'storage' events without duplicating the literal. */
+export const SESSION_KEY = 'session';
+
+interface SessionMeta {
+  /** Unix seconds — when the backend expects the auth cookie to expire. */
+  authedUntil: number;
+}
 
 /** Must match backend/src/mallwallet/security/verifyAdr036.js's linkWalletMessage() exactly. */
 function linkWalletMessage(address: string, timestamp: string): string {
@@ -27,150 +35,126 @@ function linkWalletMessage(address: string, timestamp: string): string {
 }
 
 /**
- * JWT payload structure
- */
-export interface JwtPayload {
-  userId: string;
-  username: string;
-  exp: number;
-  iat?: number;
-}
-
-/**
- * Authentication service for token management
+ * Authentication service: session-state tracking + CSRF token management.
  */
 class AuthService {
   /**
-   * Task 4.3: Store JWT token in localStorage
-   * Throws error if localStorage is unavailable (e.g., private browsing mode)
+   * In-memory only — the CSRF secret cookie backing this token is itself
+   * non-httpOnly by design (the whole double-submit scheme requires JS to
+   * read it back), but there's no reason to also persist the token value
+   * itself to localStorage: a fresh fetch on first use per page load is
+   * cheap and avoids holding onto a stale token across tabs/reloads.
    */
-  storeToken(token: string): void {
+  private csrfToken: string | null = null;
+  private csrfFetchPromise: Promise<string | null> | null = null;
+
+  /**
+   * Record that the backend just authenticated us and set the session
+   * cookie. `expiresAt` is the unix-seconds value the backend returns
+   * alongside every login/register/OAuth response.
+   */
+  setSession(expiresAt: number): void {
     try {
-      if (!token) {
-        throw new Error('Token cannot be empty');
-      }
-      localStorage.setItem(TOKEN_KEY, token);
-      console.log('[Auth] Token stored in localStorage');
+      const meta: SessionMeta = { authedUntil: expiresAt };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(meta));
     } catch (error) {
-      console.error('[Auth] Failed to store token in localStorage:', (error as Error).message);
-      throw error;
+      console.warn('[Auth] Failed to persist session marker:', (error as Error).message);
     }
   }
 
-  /**
-   * Task 4.3: Retrieve JWT token from localStorage
-   * Returns null if token doesn't exist or localStorage is unavailable
-   */
-  getToken(): string | null {
+  private readSession(): SessionMeta | null {
     try {
-      const token = localStorage.getItem(TOKEN_KEY);
-      return token ? String(token) : null;
-    } catch (error) {
-      console.warn('[Auth] Failed to access localStorage for token:', (error as Error).message);
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as SessionMeta;
+      return typeof parsed?.authedUntil === 'number' ? parsed : null;
+    } catch {
       return null;
     }
   }
 
-  /**
-   * Task 4.3: Clear token from localStorage
-   * Called on logout or when receiving 401 response
-   */
-  clearToken(): void {
+  /** Clears the local session marker and CSRF token. Does not by itself revoke the server-side session — see logout(). */
+  clearSession(): void {
     try {
-      localStorage.removeItem(TOKEN_KEY);
-      console.log('[Auth] Token cleared from localStorage');
+      localStorage.removeItem(SESSION_KEY);
     } catch (error) {
-      console.warn('[Auth] Failed to clear token from localStorage:', (error as Error).message);
+      console.warn('[Auth] Failed to clear session marker:', (error as Error).message);
     }
+    this.csrfToken = null;
+    this.csrfFetchPromise = null;
   }
 
   /**
-   * Check if user is authenticated
-   * Returns true if token exists and is not expired
+   * Check if the browser believes it holds a live session. This is a UI
+   * hint only (derived from the non-secret `authedUntil` marker) — it
+   * cannot be spoofed into granting access, since every actual request is
+   * authorized server-side against the real (httpOnly) cookie.
    */
   isAuthenticated(): boolean {
-    const token = this.getToken();
-    if (!token) {
+    const session = this.readSession();
+    if (!session) return false;
+
+    const now = Math.floor(Date.now() / 1000);
+    if (session.authedUntil <= now) {
+      this.clearSession();
       return false;
     }
-
-    try {
-      const payload = this.decodeToken(token);
-      if (!payload) {
-        return false;
-      }
-
-      // Check if token is expired
-      const now = Math.floor(Date.now() / 1000);
-      if (payload.exp <= now) {
-        console.log('[Auth] Token expired, clearing');
-        this.clearToken();
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      console.error('[Auth] Error checking token validity:', (error as Error).message);
-      this.clearToken();
-      return false;
-    }
+    return true;
   }
 
-  /**
-   * Decode JWT token payload (without verification)
-   * Note: This is only for client-side parsing. Token signature verification happens on the backend.
-   */
-  private decodeToken(token: string): JwtPayload | null {
-    try {
-      // JWT format: header.payload.signature
-      const parts = token.split('.');
-      if (parts.length !== 3) {
-        throw new Error('Invalid token format');
-      }
-
-      // Decode payload (second part)
-      const payload = JSON.parse(atob(parts[1])) as JwtPayload;
-      return payload;
-    } catch (error) {
-      console.error('[Auth] Failed to decode token:', (error as Error).message);
-      return null;
-    }
+  /** Seconds until the session marker says the cookie should expire, or null if not authenticated. */
+  getSessionExpiresIn(): number | null {
+    const session = this.readSession();
+    if (!session) return null;
+    const now = Math.floor(Date.now() / 1000);
+    const expiresIn = session.authedUntil - now;
+    return expiresIn > 0 ? expiresIn : null;
   }
 
-  /**
-   * Get token expiration time in seconds from now
-   * Returns null if token doesn't exist or is invalid
-   */
-  getTokenExpiresIn(): number | null {
-    const token = this.getToken();
-    if (!token) {
-      return null;
-    }
-
-    try {
-      const payload = this.decodeToken(token);
-      if (!payload) {
-        return null;
-      }
-
-      const now = Math.floor(Date.now() / 1000);
-      const expiresIn = payload.exp - now;
-      return expiresIn > 0 ? expiresIn : null;
-    } catch (error) {
-      console.error('[Auth] Error calculating token expiry:', (error as Error).message);
-      return null;
-    }
-  }
-
-  /**
-   * Check if token will expire soon (within timeoutSeconds)
-   */
-  isTokenExpiringSoon(timeoutSeconds: number = 300): boolean {
-    const expiresIn = this.getTokenExpiresIn();
-    if (expiresIn === null) {
-      return true; // Token doesn't exist or is invalid, treat as expiring
-    }
+  /** Whether the session marker says the cookie will expire within timeoutSeconds. */
+  isSessionExpiringSoon(timeoutSeconds: number = 300): boolean {
+    const expiresIn = this.getSessionExpiresIn();
+    if (expiresIn === null) return true;
     return expiresIn < timeoutSeconds;
+  }
+
+  /**
+   * Returns the CSRF token to attach as `X-CSRF-Token` on a mutating
+   * request, fetching (and caching) it from GET /api/csrf-token on first
+   * use. That endpoint also establishes the CSRF secret cookie the backend
+   * validates the token against (@dr.pogodin/csurf's double-submit
+   * scheme) — so this call matters even the first time a mutating request
+   * happens right after login.
+   *
+   * Deduplicates concurrent callers into a single in-flight fetch rather
+   * than racing multiple requests for the same token.
+   */
+  async getCsrfToken(): Promise<string | null> {
+    if (this.csrfToken) return this.csrfToken;
+    if (this.csrfFetchPromise) return this.csrfFetchPromise;
+
+    this.csrfFetchPromise = (async () => {
+      try {
+        const base = config.apiBaseUrl.replace(/\/$/, '');
+        const res = await fetch(`${base}/api/csrf-token`, { credentials: 'include' });
+        if (!res.ok) return null;
+        const data = (await res.json()) as { csrfToken?: string };
+        this.csrfToken = data.csrfToken || null;
+        return this.csrfToken;
+      } catch (error) {
+        console.warn('[Auth] Failed to fetch CSRF token:', (error as Error).message);
+        return null;
+      } finally {
+        this.csrfFetchPromise = null;
+      }
+    })();
+
+    return this.csrfFetchPromise;
+  }
+
+  /** Discards the cached CSRF token so the next mutating request fetches a fresh one — used after a 403 EBADCSRFTOKEN response, in case the secret cookie rotated or expired. */
+  invalidateCsrfToken(): void {
+    this.csrfToken = null;
   }
 
   /**
@@ -206,7 +190,7 @@ class AuthService {
    * is best-effort background sync, never something that should block the UI.
    */
   async linkWallet(address: string): Promise<void> {
-    if (!address || !this.getToken()) return;
+    if (!address || !this.isAuthenticated()) return;
     try {
       const mnemonic = await requestMnemonic();
       if (!mnemonic) return;
@@ -232,28 +216,24 @@ class AuthService {
   }
 
   /**
-   * Canonical logout: clears the token, fully resets the app store (balances,
-   * wallet, in-progress flows — everything), and navigates to the landing page.
-   * The single source of truth for both manual "sign out" actions and forced
-   * logout on a 401. Pass `navigate` when called from within a routed
-   * component; otherwise falls back to setting the hash directly (the app's
-   * router is itself just a `hashchange` listener, so this is equivalent).
+   * Canonical logout: revokes the session (server clears the cookie and
+   * denylists the JWT's jti), clears the local session marker, fully
+   * resets the app store (balances, wallet, in-progress flows —
+   * everything), and navigates to the landing page. The single source of
+   * truth for both manual "sign out" actions and forced logout on a 401.
+   * Pass `navigate` when called from within a routed component; otherwise
+   * falls back to setting the hash directly (the app's router is itself
+   * just a `hashchange` listener, so this is equivalent).
    *
-   * Also revokes the token server-side (POST /api/auth/logout) — previously
-   * this only ever cleared the token client-side, leaving the JWT itself
-   * valid on the backend until it naturally expired. Fired in the
-   * background (not awaited): the local sign-out must happen instantly
-   * regardless of network conditions, and there's nothing left to roll back
-   * once the token's already been cleared here.
+   * The revocation call is fired in the background (not awaited): the
+   * local sign-out must happen instantly regardless of network conditions,
+   * and there's nothing left to roll back once local state is cleared here.
    */
   logout(navigate?: (path: string) => void): void {
-    const token = this.getToken();
-    if (token) {
-      api.post('/api/auth/logout', {}).catch(() => {
-        // best-effort — the token is discarded client-side either way
-      });
-    }
-    this.clearToken();
+    api.post('/api/auth/logout', {}).catch(() => {
+      // best-effort — local state is cleared either way
+    });
+    this.clearSession();
     store.reset();
     if (navigate) {
       navigate('/landing');

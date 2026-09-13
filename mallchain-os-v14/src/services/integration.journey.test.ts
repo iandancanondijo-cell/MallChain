@@ -1,37 +1,44 @@
 /**
  * Task 14.1: Complete User Journey Integration Test
- * 
+ *
  * Tests the full flow: register → login → view wallet → send transaction
  * This test verifies all components work together correctly:
  * 1. User Registration: Frontend form → validation → backend API
- * 2. User Login: Credentials → JWT token → localStorage → authenticated state
+ * 2. User Login: Credentials → httpOnly session cookie → authenticated state
  * 3. View Wallet: Protected route → real-time socket subscription → balance display
  * 4. Send Transaction: Form submission → validation → broadcast → balance update
- * 
+ *
  * Test Strategy:
  * - Mock fetch() to simulate backend API responses
  * - Mock Socket.IO for real-time updates
  * - Verify full request/response cycle for each step
  * - Verify error handling and recovery
  * - Measure performance (response times)
- * 
+ *
+ * The JWT itself lives in an httpOnly cookie set by the backend — never
+ * readable by this code and never present in a JSON response body. What
+ * this test tracks client-side is authService's non-secret `{authedUntil}`
+ * session marker (populated from the backend's `expiresAt` field) and the
+ * fact that every request carries `credentials: 'include'` with no
+ * Authorization header at all.
+ *
  * Success Criteria:
  * ✓ User can register with valid credentials
  * ✓ Registration validation prevents weak passwords and invalid emails
- * ✓ POST to /api/auth/register succeeds and returns user data
+ * ✓ POST to /api/auth/register succeeds and returns user data + expiresAt
  * ✓ User can login with registered credentials
- * ✓ JWT token returned from /api/auth/login and stored in localStorage
- * ✓ Token included in Authorization header for protected requests
+ * ✓ Session established via httpOnly cookie; expiresAt recorded client-side
+ * ✓ Every request carries credentials: 'include', never an Authorization header
  * ✓ Wallet page accessible after login (authenticated)
  * ✓ GET /api/wallets/address/balances returns balance data
  * ✓ Socket.IO subscribes to wallet:address room
  * ✓ Real-time balance updates received via socket
  * ✓ User can send transaction with valid recipient and amount
  * ✓ Transaction validation prevents invalid amounts/addresses
- * ✓ POST to /api/tx succeeds and broadcasts transaction
+ * ✓ POST to /api/tx succeeds and broadcasts transaction (with CSRF token)
  * ✓ Balance updated after transaction
  * ✓ Socket.IO broadcasts wallet:update event
- * ✓ Error recovery: 401 clears token and redirects to login
+ * ✓ Error recovery: 401 clears the session marker and redirects to login
  * ✓ Performance: API responses < 500ms, socket events < 100ms
  */
 
@@ -57,10 +64,9 @@ const mockUsers = {
   },
 };
 
-const mockTokens = {
-  valid: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1MDdmMWY3N2JjZjg2Y2Q3OTk0MzkwMTEiLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwiZXhwIjozMDAwMDAwMDAwfQ.signature',
-  expired: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1MDdmMWY3N2JjZjg2Y2Q3OTk0MzkwMTEiLCJ1c2VybmFtZSI6InRlc3R1c2VyIiwiZXhwIjoxfQ.signature',
-};
+function futureExpiry(seconds = 7200): number {
+  return Math.floor(Date.now() / 1000) + seconds;
+}
 
 const mockWalletAddress = 'mall1qypqxpq4xufqq2hefx33146laut3dcvpn2cfye7';
 
@@ -87,17 +93,15 @@ const mockTransactionData = {
 /**
  * Global test state
  */
-let userAuthToken: string | null = null;
 let fetchMock: typeof global.fetch;
 
 /**
  * Setup before each test
  */
 beforeEach(() => {
-  // Clear localStorage and token state
+  // Clear localStorage and session state
   localStorage.clear();
-  authService.clearToken();
-  userAuthToken = null;
+  authService.clearSession();
 
   // Mock fetch globally
   fetchMock = vi.fn();
@@ -105,6 +109,10 @@ beforeEach(() => {
 
   // Clear all mocks
   vi.clearAllMocks();
+
+  // CSRF token fetching goes through authService, not the fetchMock queue
+  // these tests are asserting call counts against.
+  vi.spyOn(authService, 'getCsrfToken').mockResolvedValue('test-csrf-token');
 });
 
 /**
@@ -112,8 +120,7 @@ beforeEach(() => {
  */
 afterEach(() => {
   localStorage.clear();
-  authService.clearToken();
-  userAuthToken = null;
+  authService.clearSession();
   vi.restoreAllMocks();
 });
 
@@ -126,7 +133,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
     it('should validate email format before sending to backend', async () => {
       // Note: Frontend validation is defense-in-depth, backend also validates
       // This test demonstrates client-side validation logic
-      
+
       const invalidEmails = [
         'notanemail',
         'missing@domain',
@@ -152,9 +159,9 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       ];
 
       const isStrongPassword = (pwd: string) => {
-        return pwd.length >= 8 && 
-               /[A-Z]/.test(pwd) && 
-               /[a-z]/.test(pwd) && 
+        return pwd.length >= 8 &&
+               /[A-Z]/.test(pwd) &&
+               /[a-z]/.test(pwd) &&
                /\d/.test(pwd);
       };
 
@@ -166,10 +173,12 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
     });
 
     it('should POST to /api/auth/register with valid credentials', async () => {
-      // Mock successful registration response
+      // Mock successful registration response — the JWT is set as an
+      // httpOnly cookie by this same response; the JSON body only ever
+      // carries the non-secret expiresAt hint alongside the user object.
       const registrationData = {
         user: mockUsers.authenticatedUser,
-        token: mockTokens.valid,
+        expiresAt: futureExpiry(),
       };
 
       fetchMock.mockResolvedValueOnce({
@@ -190,11 +199,12 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       const callArgs = fetchMock.mock.calls[0];
       expect(callArgs[0]).toContain('/api/auth/register');
       expect(callArgs[1].method).toBe('POST');
+      expect(callArgs[1].credentials).toBe('include');
 
       // Verify response structure
       expect(result.ok).toBe(true);
-      expect(result.data?.user).toBeDefined();
-      expect(result.data?.token).toBeDefined();
+      expect((result.data as any)?.user).toBeDefined();
+      expect((result.data as any)?.expiresAt).toBeDefined();
     });
 
     it('should handle registration validation errors from backend', async () => {
@@ -230,10 +240,10 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       expect(result.error).toContain('Failed to fetch');
     });
 
-    it('should verify success response contains user data and token', async () => {
+    it('should verify success response contains user data and expiresAt', async () => {
       const registrationData = {
         user: mockUsers.authenticatedUser,
-        token: mockTokens.valid,
+        expiresAt: futureExpiry(),
       };
 
       fetchMock.mockResolvedValueOnce({
@@ -249,21 +259,20 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       });
 
       expect(result.ok).toBe(true);
-      expect(result.data?.user?.userId).toBeDefined();
-      expect(result.data?.token).toBeDefined();
+      expect((result.data as any)?.user?.userId).toBeDefined();
+      expect((result.data as any)?.expiresAt).toBeDefined();
     });
   });
 
   /**
    * STEP 2: USER LOGIN
-   * Test authentication flow: credentials → JWT → localStorage → authenticated state
+   * Test authentication flow: credentials → httpOnly cookie → session marker → authenticated state
    */
   describe('Step 2: User Login', () => {
     it('should POST to /api/auth/login with email and password', async () => {
-      // Mock successful login response
       const loginData = {
         user: mockUsers.authenticatedUser,
-        token: mockTokens.valid,
+        expiresAt: futureExpiry(),
       };
 
       fetchMock.mockResolvedValueOnce({
@@ -285,43 +294,37 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
 
       // Verify response
       expect(result.ok).toBe(true);
-      expect(result.data?.token).toBe(mockTokens.valid);
+      expect((result.data as any)?.expiresAt).toBe(loginData.expiresAt);
     });
 
-    it('should store JWT token in localStorage on successful login', async () => {
-      // Mock login response
+    it('should record the session marker on successful login', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: true,
         status: 200,
         json: async () => ({
           user: mockUsers.authenticatedUser,
-          token: mockTokens.valid,
+          expiresAt: futureExpiry(),
         }),
       } as Response);
 
-      // Perform login
       const result = await api.post('/api/auth/login', {
         email: mockUsers.newUser.email,
         password: mockUsers.newUser.password,
       });
 
       expect(result.ok).toBe(true);
-      // Store token (simulating what real app does after login)
-      if (result.ok && result.data?.token) {
-        authService.storeToken(result.data.token);
-        userAuthToken = result.data.token;
+      // Record the session marker (simulating what AuthFlow.tsx does after login)
+      if (result.ok && (result.data as any)?.expiresAt) {
+        authService.setSession((result.data as any).expiresAt);
       }
 
-      // Verify token was stored
-      const storedToken = authService.getToken();
-      expect(storedToken).toBe(mockTokens.valid);
+      expect(authService.isAuthenticated()).toBe(true);
     });
 
-    it('should include Authorization header with JWT token in subsequent requests', async () => {
-      // First, store token (simulating successful login)
-      authService.storeToken(mockTokens.valid);
+    it('should send credentials: include and never an Authorization header on subsequent requests', async () => {
+      // First, establish a session (simulating successful login)
+      authService.setSession(futureExpiry());
 
-      // Mock API response for protected endpoint
       fetchMock.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -334,36 +337,30 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       // Make request to protected endpoint
       await api.get(`/api/wallets/${mockWalletAddress}/balances`);
 
-      // Verify Authorization header was included
       expect(fetchMock).toHaveBeenCalledOnce();
-      const callHeaders = fetchMock.mock.calls[0][1]?.headers as Record<string, string>;
-      expect(callHeaders['Authorization']).toBe(`Bearer ${mockTokens.valid}`);
+      const callInit = fetchMock.mock.calls[0][1];
+      expect(callInit?.credentials).toBe('include');
+      expect((callInit?.headers as Record<string, string>)?.Authorization).toBeUndefined();
     });
 
     it('should redirect to login on 401 Unauthorized response', async () => {
-      // Store a token first
-      authService.storeToken(mockTokens.valid);
+      authService.setSession(futureExpiry());
 
-      // Mock 401 response (token expired or invalid)
+      // Mock 401 response (session rejected by the backend)
       fetchMock.mockResolvedValueOnce({
         ok: false,
         status: 401,
         json: async () => ({ error: 'Invalid or expired token' }),
       } as Response);
 
-      // Make request that returns 401
       const result = await api.get('/api/wallets/balances');
 
-      // Verify 401 response handled
       expect(result.ok).toBe(false);
       expect(result.code).toBe(401);
-
-      // Verify error message is present
       expect(result.error).toContain('expired');
     });
 
     it('should handle login with invalid credentials', async () => {
-      // Mock 401 response for wrong password
       fetchMock.mockResolvedValueOnce({
         ok: false,
         status: 401,
@@ -379,8 +376,8 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       expect(result.code).toBe(401);
       expect(result.error).toBeDefined();
 
-      // Verify token was NOT stored
-      expect(authService.getToken()).toBeNull();
+      // Verify no session was established
+      expect(authService.isAuthenticated()).toBe(false);
     });
 
     it('should handle login network errors', async () => {
@@ -395,27 +392,16 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       expect(result.error).toContain('Network error');
     });
 
-    it('should verify token is decodable and contains user info', async () => {
-      authService.storeToken(mockTokens.valid);
-
-      // Get token and verify it's retrievable
-      const token = authService.getToken();
-      expect(token).toBe(mockTokens.valid);
-
-      // Verify token has correct structure (JWT has 3 parts separated by dots)
-      expect(token?.split('.').length).toBe(3);
-    });
-
     it('should check authentication status correctly', async () => {
-      // Not authenticated: no token
+      // Not authenticated: no session marker
       expect(authService.isAuthenticated()).toBe(false);
 
-      // Store valid token
-      authService.storeToken(mockTokens.valid);
+      // Establish session
+      authService.setSession(futureExpiry());
       expect(authService.isAuthenticated()).toBe(true);
 
-      // Clear token
-      authService.clearToken();
+      // Clear session
+      authService.clearSession();
       expect(authService.isAuthenticated()).toBe(false);
     });
   });
@@ -427,14 +413,14 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
   describe('Step 3: View Wallet', () => {
     beforeEach(() => {
       // Authenticate user before accessing wallet
-      authService.storeToken(mockTokens.valid);
+      authService.setSession(futureExpiry());
     });
 
-    it('should fetch wallet balances only when authenticated', async () => {
-      // Clear authentication
-      authService.clearToken();
+    it('should still attempt to fetch wallet balances even without a local session marker (backend decides)', async () => {
+      // Clear the local marker — the real authority is the httpOnly cookie,
+      // which this code can't see, so api.ts never gates a request on it.
+      authService.clearSession();
 
-      // Attempt to fetch wallet without token
       fetchMock.mockResolvedValueOnce({
         ok: false,
         status: 401,
@@ -457,9 +443,9 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       const result = await api.get(`/api/wallets/${mockWalletAddress}/balances`);
 
       expect(result.ok).toBe(true);
-      expect(result.data?.balances).toBeDefined();
-      expect(result.data?.balances?.mallcoin).toBe(1000);
-      expect(result.data?.balances?.gold).toBe(50);
+      expect((result.data as any)?.balances).toBeDefined();
+      expect((result.data as any)?.balances?.mallcoin).toBe(1000);
+      expect((result.data as any)?.balances?.gold).toBe(50);
     });
 
     it('should verify response contains wallet address and timestamp', async () => {
@@ -471,14 +457,13 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
 
       const result = await api.get(`/api/wallets/${mockWalletAddress}/balances`);
 
-      expect(result.data?.address).toBe(mockWalletAddress);
-      expect(result.data?.timestamp).toBeDefined();
-      expect(typeof result.data?.timestamp).toBe('number');
+      expect((result.data as any)?.address).toBe(mockWalletAddress);
+      expect((result.data as any)?.timestamp).toBeDefined();
+      expect(typeof (result.data as any)?.timestamp).toBe('number');
     });
 
-    it('should include Authorization header with token in wallet request', async () => {
-      const token = authService.getToken();
-      expect(token).toBe(mockTokens.valid);
+    it('should send credentials: include with the wallet request', async () => {
+      expect(authService.isAuthenticated()).toBe(true);
 
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -488,8 +473,9 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
 
       await api.get(`/api/wallets/${mockWalletAddress}/balances`);
 
-      const callHeaders = fetchMock.mock.calls[0][1]?.headers as Record<string, string>;
-      expect(callHeaders['Authorization']).toBe(`Bearer ${mockTokens.valid}`);
+      const callInit = fetchMock.mock.calls[0][1];
+      expect(callInit?.credentials).toBe('include');
+      expect((callInit?.headers as Record<string, string>)?.Authorization).toBeUndefined();
     });
 
     it('should subscribe to Socket.IO wallet:address room on wallet view', async () => {
@@ -551,14 +537,6 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       const listenerSpy = vi.fn();
       socketManager.onWalletUpdate(listenerSpy);
 
-      // Simulate receiving wallet update from socket
-      // In real implementation, this would be emitted by backend
-      const updateData = {
-        address: mockWalletAddress,
-        balances: { mallcoin: 1100, gold: 50, mlcoin: 250 },
-        timestamp: Date.now(),
-      };
-
       // Note: This is testing the listener registration, not actual socket event
       // In real scenario, backend would emit this event
       expect(socketManager.onWalletUpdate).toBeDefined();
@@ -582,10 +560,10 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
 
       const result = await api.get(`/api/wallets/${mockWalletAddress}/balances`);
 
-      expect(result.data?.balances?.mallcoin).toBe(1000);
-      expect(result.data?.balances?.gold).toBe(50);
-      expect(result.data?.balances?.mlcoin).toBe(250);
-      expect(result.data?.balances?.points).toBe(5000);
+      expect((result.data as any)?.balances?.mallcoin).toBe(1000);
+      expect((result.data as any)?.balances?.gold).toBe(50);
+      expect((result.data as any)?.balances?.mlcoin).toBe(250);
+      expect((result.data as any)?.balances?.points).toBe(5000);
     });
   });
 
@@ -596,7 +574,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
   describe('Step 4: Send Transaction', () => {
     beforeEach(() => {
       // Authenticate user before sending transactions
-      authService.storeToken(mockTokens.valid);
+      authService.setSession(futureExpiry());
     });
 
     it('should validate recipient address format before sending', async () => {
@@ -678,12 +656,11 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
 
       // Verify response
       expect(result.ok).toBe(true);
-      expect(result.data?.hash).toBeDefined();
+      expect((result.data as any)?.hash).toBeDefined();
     });
 
-    it('should include Authorization header with token in transaction request', async () => {
-      const token = authService.getToken();
-      expect(token).toBe(mockTokens.valid);
+    it('should attach the CSRF token on a mutating transaction request', async () => {
+      expect(authService.isAuthenticated()).toBe(true);
 
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -697,8 +674,10 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
         asset: mockTransactionData.asset,
       });
 
+      expect(authService.getCsrfToken).toHaveBeenCalled();
       const callHeaders = fetchMock.mock.calls[0][1]?.headers as Record<string, string>;
-      expect(callHeaders['Authorization']).toBe(`Bearer ${mockTokens.valid}`);
+      expect(callHeaders['X-CSRF-Token']).toBe('test-csrf-token');
+      expect(callHeaders['Authorization']).toBeUndefined();
     });
 
     it('should verify transaction response contains hash and status', async () => {
@@ -715,9 +694,9 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       });
 
       expect(result.ok).toBe(true);
-      expect(result.data?.hash).toBeDefined();
-      expect(result.data?.status).toBe('confirmed');
-      expect(result.data?.amount).toBe(100);
+      expect((result.data as any)?.hash).toBeDefined();
+      expect((result.data as any)?.status).toBe('confirmed');
+      expect((result.data as any)?.amount).toBe(100);
     });
 
     it('should handle transaction validation errors from backend', async () => {
@@ -769,7 +748,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
     });
 
     it('should require authentication to send transaction', async () => {
-      authService.clearToken();
+      authService.clearSession();
 
       fetchMock.mockResolvedValueOnce({
         ok: false,
@@ -791,17 +770,6 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       // Setup wallet update listener
       const listenerSpy = vi.fn();
       socketManager.onWalletUpdate(listenerSpy);
-
-      // After transaction broadcast, backend would emit wallet:update
-      const updatedBalance = {
-        address: mockWalletAddress,
-        balances: {
-          mallcoin: 900, // 1000 - 100 sent
-          gold: 50,
-          mlcoin: 250,
-        },
-        timestamp: Date.now(),
-      };
 
       // Verify listener was registered
       expect(socketManager.onWalletUpdate).toBeDefined();
@@ -827,7 +795,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
         });
 
         expect(result.ok).toBe(true);
-        expect(result.data?.asset).toBe(asset);
+        expect((result.data as any)?.asset).toBe(asset);
       }
     });
 
@@ -876,7 +844,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
         status: 200,
         json: async () => ({
           user: mockUsers.authenticatedUser,
-          token: mockTokens.valid,
+          expiresAt: futureExpiry(),
         }),
       } as Response);
 
@@ -887,7 +855,6 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       });
 
       expect(registerResult.ok).toBe(true);
-      const registeredToken = registerResult.data?.token;
 
       // Step 2: Login
       fetchMock.mockResolvedValueOnce({
@@ -895,7 +862,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
         status: 200,
         json: async () => ({
           user: mockUsers.authenticatedUser,
-          token: mockTokens.valid,
+          expiresAt: futureExpiry(),
         }),
       } as Response);
 
@@ -905,7 +872,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       });
 
       expect(loginResult.ok).toBe(true);
-      authService.storeToken(loginResult.data?.token || '');
+      authService.setSession((loginResult.data as any)?.expiresAt || futureExpiry());
 
       // Step 3: View Wallet
       fetchMock.mockResolvedValueOnce({
@@ -917,7 +884,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       const walletResult = await api.get(`/api/wallets/${mockWalletAddress}/balances`);
 
       expect(walletResult.ok).toBe(true);
-      expect(walletResult.data?.balances?.mallcoin).toBe(1000);
+      expect((walletResult.data as any)?.balances?.mallcoin).toBe(1000);
 
       // Step 4: Send Transaction
       fetchMock.mockResolvedValueOnce({
@@ -933,20 +900,22 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       });
 
       expect(txResult.ok).toBe(true);
-      expect(txResult.data?.hash).toBeDefined();
+      expect((txResult.data as any)?.hash).toBeDefined();
 
-      // Verify complete journey succeeded
+      // Verify complete journey succeeded — exactly 4 real fetch calls
+      // (the CSRF token fetches for the 3 mutating requests are stubbed via
+      // authService.getCsrfToken and never touch fetchMock).
       expect(fetchMock).toHaveBeenCalledTimes(4);
     });
 
     it('should handle authentication error during journey and allow recovery', async () => {
-      // Register and login
+      // Login
       fetchMock.mockResolvedValueOnce({
         ok: true,
         status: 200,
         json: async () => ({
           user: mockUsers.authenticatedUser,
-          token: mockTokens.valid,
+          expiresAt: futureExpiry(),
         }),
       } as Response);
 
@@ -955,9 +924,9 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
         password: mockUsers.newUser.password,
       });
 
-      authService.storeToken(loginResult.data?.token || '');
+      authService.setSession((loginResult.data as any)?.expiresAt || futureExpiry());
 
-      // Attempt to view wallet but token expired (401)
+      // Attempt to view wallet but the session is rejected (401)
       fetchMock.mockResolvedValueOnce({
         ok: false,
         status: 401,
@@ -974,7 +943,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
         status: 200,
         json: async () => ({
           user: mockUsers.authenticatedUser,
-          token: mockTokens.valid,
+          expiresAt: futureExpiry(),
         }),
       } as Response);
 
@@ -984,7 +953,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
       });
 
       expect(reAuthResult.ok).toBe(true);
-      authService.storeToken(reAuthResult.data?.token || '');
+      authService.setSession((reAuthResult.data as any)?.expiresAt || futureExpiry());
 
       // Retry wallet access
       fetchMock.mockResolvedValueOnce({
@@ -1004,7 +973,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
         status: 200,
         json: async () => ({
           user: mockUsers.authenticatedUser,
-          token: mockTokens.valid,
+          expiresAt: futureExpiry(),
         }),
       } as Response);
 
@@ -1032,7 +1001,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
         status: 200,
         json: async () => ({
           user: mockUsers.authenticatedUser,
-          token: mockTokens.valid,
+          expiresAt: futureExpiry(),
         }),
       } as Response);
 
@@ -1051,7 +1020,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
    */
   describe('Performance Metrics', () => {
     beforeEach(() => {
-      authService.storeToken(mockTokens.valid);
+      authService.setSession(futureExpiry());
     });
 
     it('should measure registration API response time', async () => {
@@ -1060,7 +1029,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
         status: 200,
         json: async () => ({
           user: mockUsers.authenticatedUser,
-          token: mockTokens.valid,
+          expiresAt: futureExpiry(),
         }),
       } as Response);
 
@@ -1084,7 +1053,7 @@ describe('14.1 Complete User Journey: Register → Login → View Wallet → Sen
         status: 200,
         json: async () => ({
           user: mockUsers.authenticatedUser,
-          token: mockTokens.valid,
+          expiresAt: futureExpiry(),
         }),
       } as Response);
 

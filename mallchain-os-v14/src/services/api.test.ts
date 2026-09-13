@@ -5,9 +5,12 @@
  * - Network failure scenarios (fetch throws error)
  * - HTTP error scenarios (404, 500, etc. with proper code)
  * - Request formation (headers, query params, body)
- * - Token inclusion when present in localStorage
+ * - Cookie-based auth: every request carries credentials: 'include', never
+ *   an Authorization header (the JWT lives in an httpOnly cookie now)
+ * - CSRF token attachment on mutating requests, and retry-once on a
+ *   CSRF-rejected 403
  * - Request deduplication
- * - 401 handling (token clearing and redirect)
+ * - 401 handling (session clearing and redirect)
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -43,6 +46,7 @@ vi.mock('../store/store', () => ({
 // Import after mocks are set up
 import { api } from './api';
 import { config } from './config';
+import { authService } from './auth';
 
 describe('API Service - Real Backend Mode', () => {
   let originalFetch: typeof global.fetch;
@@ -51,26 +55,32 @@ describe('API Service - Real Backend Mode', () => {
   beforeEach(() => {
     // Save original fetch
     originalFetch = global.fetch;
-    
+
     // Create mock fetch
     mockFetch = vi.fn();
     global.fetch = mockFetch;
-    
+
     // Set real backend mode
     (config as any).apiBaseUrl = 'http://localhost:4000';
-    
+
     // Clear localStorage
     localStorage.clear();
-    
+
     // Reset location mock
     delete (window as any).location;
     (window as any).location = { href: '', hash: '' };
+
+    // CSRF token fetching goes through authService, not the api.ts fetch
+    // path under test — stub it directly so it never competes with
+    // mockFetch's queued responses for the request actually being tested.
+    vi.spyOn(authService, 'getCsrfToken').mockResolvedValue('test-csrf-token');
+    vi.spyOn(authService, 'invalidateCsrfToken');
   });
 
   afterEach(() => {
     // Restore original fetch
     global.fetch = originalFetch;
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe('Success Scenarios', () => {
@@ -92,6 +102,7 @@ describe('API Service - Real Backend Mode', () => {
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:4000/api/balances',
         expect.objectContaining({
+          credentials: 'include',
           headers: expect.objectContaining({
             'Content-Type': 'application/json',
           }),
@@ -119,6 +130,7 @@ describe('API Service - Real Backend Mode', () => {
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify(body),
+          credentials: 'include',
           headers: expect.objectContaining({
             'Content-Type': 'application/json',
           }),
@@ -212,10 +224,8 @@ describe('API Service - Real Backend Mode', () => {
     });
   });
 
-  describe('Token Inclusion', () => {
-    it('should include Authorization header when token exists in localStorage', async () => {
-      localStorage.setItem('token', 'jwt-token-abc123');
-
+  describe('Cookie Auth', () => {
+    it('should send credentials: include on every request, never an Authorization header', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -227,28 +237,7 @@ describe('API Service - Real Backend Mode', () => {
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          headers: expect.objectContaining({
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer jwt-token-abc123',
-          }),
-        })
-      );
-    });
-
-    it('should NOT include Authorization header when token does not exist', async () => {
-      // localStorage is already clear from beforeEach
-
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({}),
-      });
-
-      await api.get('/api/public');
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
+          credentials: 'include',
           headers: expect.not.objectContaining({
             Authorization: expect.any(String),
           }),
@@ -256,25 +245,119 @@ describe('API Service - Real Backend Mode', () => {
       );
     });
 
-    it('should handle localStorage access failure gracefully', async () => {
-      // Mock localStorage.getItem to throw
-      const originalGetItem = Storage.prototype.getItem;
-      Storage.prototype.getItem = vi.fn(() => {
-        throw new Error('localStorage disabled');
-      });
-
+    it('should send credentials: include on mutating requests too', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
         json: async () => ({}),
       });
 
-      const result = await api.get('/api/test');
+      await api.post('/api/data', { a: 1 });
 
-      expect(result.ok).toBe(true);
-      
-      // Restore
-      Storage.prototype.getItem = originalGetItem;
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ credentials: 'include' })
+      );
+    });
+  });
+
+  describe('CSRF Token Handling', () => {
+    it('should attach X-CSRF-Token on POST requests', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+      });
+
+      await api.post('/api/data', {});
+
+      expect(authService.getCsrfToken).toHaveBeenCalled();
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'X-CSRF-Token': 'test-csrf-token' }),
+        })
+      );
+    });
+
+    it('should attach X-CSRF-Token on PUT and DELETE requests', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+      });
+
+      await api.put('/api/data/1', { a: 1 });
+      await api.del('/api/data/1');
+
+      for (const call of mockFetch.mock.calls) {
+        expect(call[1].headers).toEqual(expect.objectContaining({ 'X-CSRF-Token': 'test-csrf-token' }));
+      }
+    });
+
+    it('should NOT attach X-CSRF-Token on GET requests', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+      });
+
+      await api.get('/api/data');
+
+      expect(authService.getCsrfToken).not.toHaveBeenCalled();
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.not.objectContaining({ 'X-CSRF-Token': expect.any(String) }),
+        })
+      );
+    });
+
+    it('should transparently refresh the CSRF token and retry once on a CSRF-rejected 403', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 403,
+          json: async () => ({ error: 'invalid or missing CSRF token' }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true }),
+        });
+
+      const result = await api.post('/api/data', {});
+
+      expect(result).toEqual({ ok: true, data: { success: true } });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(authService.invalidateCsrfToken).toHaveBeenCalled();
+    });
+
+    it('should only retry once on a persistent CSRF-rejected 403', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: 'invalid or missing CSRF token' }),
+      });
+
+      const result = await api.post('/api/data', {});
+
+      expect(result).toEqual({ ok: false, code: 403, error: 'invalid or missing CSRF token' });
+      // One original attempt + exactly one retry, not an infinite loop.
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not retry a 403 that is not CSRF-related', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: 'admin access required' }),
+      });
+
+      const result = await api.post('/api/admin/action', {});
+
+      expect(result).toEqual({ ok: false, code: 403, error: 'admin access required' });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -423,8 +506,8 @@ describe('API Service - Real Backend Mode', () => {
   });
 
   describe('401 Unauthorized Handling', () => {
-    it('should clear token and redirect to login on 401', async () => {
-      localStorage.setItem('token', 'expired-token');
+    it('should clear the session and redirect to login on 401', async () => {
+      authService.setSession(Math.floor(Date.now() / 1000) + 3600);
 
       mockFetch.mockResolvedValueOnce({
         ok: false,
@@ -439,16 +522,15 @@ describe('API Service - Real Backend Mode', () => {
         code: 401,
         error: 'Session expired. Please log in again.',
       });
-      expect(localStorage.getItem('token')).toBeNull();
-      
+      expect(authService.isAuthenticated()).toBe(false);
+
       // The redirect happens asynchronously in the error handler
-      // Verify the token is cleared immediately
       await new Promise(resolve => setTimeout(resolve, 1500));
       expect(window.location.hash).toBe('#/landing');
     });
 
     it('should handle 401 for POST requests', async () => {
-      localStorage.setItem('token', 'bad-token');
+      authService.setSession(Math.floor(Date.now() / 1000) + 3600);
 
       mockFetch.mockResolvedValueOnce({
         ok: false,
@@ -458,16 +540,15 @@ describe('API Service - Real Backend Mode', () => {
 
       await api.post('/api/data', { test: 'data' });
 
-      expect(localStorage.getItem('token')).toBeNull();
-      
-      // The redirect happens asynchronously in the error handler
+      expect(authService.isAuthenticated()).toBe(false);
+
       await new Promise(resolve => setTimeout(resolve, 1500));
       expect(window.location.hash).toBe('#/landing');
     });
 
     it('should handle localStorage removal failure on 401', async () => {
-      localStorage.setItem('token', 'token123');
-      
+      authService.setSession(Math.floor(Date.now() / 1000) + 3600);
+
       // Mock removeItem to throw
       const originalRemoveItem = Storage.prototype.removeItem;
       Storage.prototype.removeItem = vi.fn(() => {
@@ -484,7 +565,7 @@ describe('API Service - Real Backend Mode', () => {
 
       expect(result.ok).toBe(false);
       expect(result.code).toBe(401);
-      
+
       // Restore
       Storage.prototype.removeItem = originalRemoveItem;
     });
@@ -640,7 +721,7 @@ describe('API Service - Real Backend Mode', () => {
     it('should handle apiBaseUrl with trailing slash (should be removed)', async () => {
       // Config should validate and reject trailing slash, but test the normalization
       (config as any).apiBaseUrl = 'http://localhost:4000/';
-      
+
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -682,4 +763,3 @@ describe('API Service - Real Backend Mode', () => {
     });
   });
 });
-

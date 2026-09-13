@@ -6,21 +6,31 @@
  * config.apiBaseUrl.
  *
  * Features:
- * - Task 2.1: Token-based authentication: Automatically adds Authorization: Bearer header when JWT exists in localStorage
+ * - Session auth: the JWT lives in an httpOnly cookie set by the backend, so
+ *   every request goes out with `credentials: 'include'` and no
+ *   Authorization header — the browser attaches the cookie automatically.
+ * - CSRF protection: mutating requests (POST/PUT/PATCH/DELETE) attach an
+ *   `X-CSRF-Token` header, fetched/cached via authService.getCsrfToken() —
+ *   required because cookie auth (unlike a manually-attached bearer header)
+ *   is forgeable cross-site without it.
  * - Task 2.4: Network vs HTTP error distinction: Network errors return {ok: false, error: ...}, HTTP errors include status code
- * - Task 2.3: 401 interceptor: Clears token and redirects to login on 401 Unauthorized
+ * - Task 2.3: 401 interceptor: Clears session and redirects to login on 401 Unauthorized
  * - Task 2.5: Request deduplication: Prevents duplicate concurrent requests to same endpoint
  * - Task 6.1: Network error display with user-friendly messages and console logging
  * - Task 6.2-6.3: Error handling with user notifications (429, network errors, etc.)
  *
  * Error handling flow:
  * 1. Network error (fetch fails): handleNetworkError() shows toast to user
- * 2. 401 (Unauthorized): handle401Error() clears token, shows message, redirects to login
- * 3. Other HTTP errors (4xx, 5xx): Returns error code and message, caller decides if toast needed
- * 4. Success (2xx): Returns {ok: true, data: parsed JSON response}
+ * 2. 401 (Unauthorized): handle401Error() clears session, shows message, redirects to login
+ * 3. 403 with an invalid/missing CSRF token: transparently refreshes the token and retries once
+ * 4. Other HTTP errors (4xx, 5xx): Returns error code and message, caller decides if toast needed
+ * 5. Success (2xx): Returns {ok: true, data: parsed JSON response}
  */
 import { config } from './config';
 import { handleNetworkError, handle401Error } from './errorHandler';
+import { authService } from './auth';
+
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export interface ApiResult<T = unknown> {
   ok: boolean;
@@ -29,29 +39,6 @@ export interface ApiResult<T = unknown> {
   code?: number;
   /** Structured extra context on an error response (e.g. rule-specific fields on a 4xx) — see performRequest's errorResult below. */
   details?: unknown;
-}
-
-/**
- * Task 2.2: Retrieve JWT token from localStorage safely
- * 
- * localStorage might be unavailable in:
- * - Private browsing mode (some browsers block it)
- * - Cross-origin iframes (browser security restriction)
- * - Offline scenarios
- * - Older browsers with storage disabled
- * 
- * Returns null if localStorage is unavailable or token doesn't exist
- * Logs warning if localStorage access fails (helps debugging)
- */
-function getToken(): string | null {
-  try {
-    const token = localStorage.getItem('token');
-    return token ? String(token) : null;
-  } catch (e) {
-    // localStorage access failed (e.g., private browsing, error)
-    console.warn('Failed to access localStorage for token:', (e as Error).message);
-    return null;
-  }
 }
 
 class Api {
@@ -122,28 +109,33 @@ class Api {
 
   /**
    * Perform the actual HTTP request with comprehensive error handling
-   * 
+   *
    * Request flow:
-   * 1. Add Authorization header with JWT if available
+   * 1. Attach X-CSRF-Token for mutating methods; send cookies via credentials: 'include'
    * 2. Perform fetch() call
    * 3. Handle network errors (fetch itself fails)
    * 4. Parse response JSON
-   * 5. Handle 401 by clearing token and redirecting
-   * 6. Handle other HTTP errors (4xx, 5xx)
-   * 7. Return success with parsed data
+   * 5. Handle 401 by clearing session and redirecting
+   * 6. Handle a CSRF-rejected 403 by refreshing the token and retrying once
+   * 7. Handle other HTTP errors (4xx, 5xx)
+   * 8. Return success with parsed data
    */
-  private async performRequest<T>(path: string, base: string, init?: RequestInit): Promise<ApiResult<T>> {
+  private async performRequest<T>(path: string, base: string, init?: RequestInit, isCsrfRetry = false): Promise<ApiResult<T>> {
     try {
-      // Task 2.1: Add Authorization header if token exists
-      // This header tells backend we're authenticated
-      // Format: "Authorization: Bearer eyJhbGc..."
-      const token = getToken();
+      const method = (init?.method || 'GET').toUpperCase();
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         ...(init?.headers ? Object.fromEntries(Object.entries(init.headers)) : {}),
       };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+
+      // Cookie auth is auto-attached by the browser regardless of which
+      // site triggered the request — unlike a manually-set Authorization
+      // header, that reintroduces CSRF risk, so every mutating request
+      // must carry a token the backend can check against its secret
+      // cookie (middleware/requireAuth.js's checkCsrf).
+      if (MUTATING_METHODS.has(method)) {
+        const csrfToken = await authService.getCsrfToken();
+        if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
       }
 
       // Perform the fetch request
@@ -156,12 +148,18 @@ class Api {
         // carrying a `headers` key at all — even explicitly `undefined`,
         // which post()'s optional third argument now does on every call
         // that doesn't pass one — clobbered the real, merged headers with
-        // `undefined`, stripping Content-Type and Authorization from every
+        // `undefined`, stripping Content-Type and CSRF headers from every
         // such request. Caught by the frontend's own test suite the moment
         // it ran, not by anything downstream.
+        //
+        // credentials: 'include' is what makes the browser send the
+        // httpOnly auth_token cookie (and the CSRF secret cookie) at all —
+        // without it, cross-origin requests (frontend on :5173, backend on
+        // :4000) go out cookie-less regardless of what's stored client-side.
         res = await fetch(base + path, {
           ...init,
           headers,
+          credentials: 'include',
         });
       } catch (fetchError) {
         // Task 2.4: Network error (fetch failed)
@@ -195,6 +193,19 @@ class Api {
         });
 
         return { ok: false, code: 401, error: 'Session expired. Please log in again.' };
+      }
+
+      // A 403 specifically caused by a stale/missing CSRF token (rather than
+      // a genuine authorization failure) is transient — the secret cookie
+      // backing it can rotate or not have existed yet on the very first
+      // mutating request of a session. Refresh the token once and retry
+      // before surfacing this as an error to the caller.
+      if (res.status === 403 && !isCsrfRetry && MUTATING_METHODS.has(method)) {
+        const rawError = (json as { error?: string } | null)?.error;
+        if (rawError === 'invalid or missing CSRF token') {
+          authService.invalidateCsrfToken();
+          return this.performRequest<T>(path, base, init, true);
+        }
       }
 
       // Task 2.4: HTTP error (status >= 400)

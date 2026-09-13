@@ -41,7 +41,6 @@
 
 import { io, Socket } from 'socket.io-client';
 import { config } from './config';
-import { authService } from './auth';
 
 /**
  * Wallet data structure received from socket events
@@ -192,11 +191,12 @@ class SocketManager {
         reconnectionDelayMax: this.maxReconnectDelay,
         reconnectionAttempts: Infinity,
         transports: ['websocket', 'polling'],
-        // A function (not a static object) so the backend's io.use()
-        // middleware gets the *current* token on every (re)connect —
-        // including reconnects that happen long after this initial
-        // connect() call, when the token may not have existed yet.
-        auth: (cb) => cb({ token: authService.getToken() || undefined }),
+        // The auth JWT lives in an httpOnly `auth_token` cookie now, not
+        // somewhere readable by this code — `withCredentials` makes the
+        // Socket.IO handshake (a plain HTTP request) send it the same way
+        // `fetch(..., {credentials:'include'})` does, and the backend's
+        // io.use() middleware reads it straight off that cookie.
+        withCredentials: true,
       });
 
       // Task 5.1: Socket lifecycle management - connection

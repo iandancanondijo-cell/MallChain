@@ -381,22 +381,26 @@ class Store {
       /* corrupted store — start fresh */
     }
     const fresh = emptyState();
-    
-    // Task 4.8: Sync auth state with localStorage token on initial load
+
+    // Task 4.8: Sync auth state with the session marker on initial load.
+    // The JWT itself lives in an httpOnly cookie this code can't read — this
+    // is just a same-origin hint (services/auth.ts's non-secret
+    // `{authedUntil}` marker, SESSION_KEY = 'session') so the UI doesn't
+    // flash "logged out" before App.tsx's GET /api/auth/me hydration call
+    // resolves — that call is the actual source of truth and will correct
+    // this if it's wrong. Reads the marker directly rather than importing
+    // authService: auth.ts imports `store` from this file, so a top-level
+    // import the other way would be circular, and this constructor runs
+    // as part of module evaluation, before a circularly-imported auth.ts's
+    // own exports would be initialized.
     try {
-      const token = localStorage.getItem('token');
-      if (token) {
-        // Token exists in localStorage, mark user as authenticated
-        fresh.user.authed = true;
-      } else {
-        // No token in localStorage, ensure auth state is false
-        fresh.user.authed = false;
-      }
+      const raw = localStorage.getItem('session');
+      const authedUntil = raw ? (JSON.parse(raw) as { authedUntil?: number }).authedUntil : undefined;
+      fresh.user.authed = typeof authedUntil === 'number' && authedUntil > Math.floor(Date.now() / 1000);
     } catch {
-      /* localStorage unavailable — leave auth state as default (false) */
       fresh.user.authed = false;
     }
-    
+
     this.persist();
     return fresh;
   }

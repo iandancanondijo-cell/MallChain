@@ -5,17 +5,13 @@
  * for the document upload — same reason as kycApi.ts: api.post() forces
  * Content-Type: application/json, which breaks a multipart FormData
  * boundary.
+ *
+ * Auth is the httpOnly auth_token cookie (credentials: 'include'); mutating
+ * calls additionally carry an X-CSRF-Token header, same as api.ts.
  */
 import { config } from './config';
+import { authService } from './auth';
 import type { ApiResult } from './api';
-
-function getToken(): string | null {
-  try {
-    return localStorage.getItem('token');
-  } catch {
-    return null;
-  }
-}
 
 export type FundsSource =
   | 'mining_staking_rewards' | 'mallpoints_conversion' | 'referral_bonus'
@@ -47,11 +43,8 @@ export interface DeclareResponse {
 export const withdrawalAmlApi = {
   async getStatus(): Promise<ApiResult<AmlStatusResponse>> {
     const base = config.apiBaseUrl.replace(/\/$/, '');
-    const token = getToken();
     try {
-      const res = await fetch(`${base}/api/withdrawals/aml/status`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
+      const res = await fetch(`${base}/api/withdrawals/aml/status`, { credentials: 'include' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return { ok: false, error: data.error?.message || data.error || `Failed to load status (${res.status})` };
       return { ok: true, data };
@@ -62,13 +55,14 @@ export const withdrawalAmlApi = {
 
   async uploadDocument(file: File): Promise<ApiResult<UploadAmlDocumentResponse>> {
     const base = config.apiBaseUrl.replace(/\/$/, '');
-    const token = getToken();
+    const csrfToken = await authService.getCsrfToken();
     const form = new FormData();
     form.append('document', file);
     try {
       const res = await fetch(`${base}/api/withdrawals/aml/document`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: 'include',
+        headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : undefined,
         body: form,
       });
       const data = await res.json().catch(() => ({}));
@@ -86,13 +80,14 @@ export const withdrawalAmlApi = {
     estimatedKes: number;
   }): Promise<ApiResult<DeclareResponse>> {
     const base = config.apiBaseUrl.replace(/\/$/, '');
-    const token = getToken();
+    const csrfToken = await authService.getCsrfToken();
     try {
       const res = await fetch(`${base}/api/withdrawals/aml/declare`, {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
         },
         body: JSON.stringify(params),
       });
@@ -111,12 +106,9 @@ export const withdrawalAmlApi = {
   /** Fetches an uploaded AML document as a blob URL for admin review display (auth-gated, not a public link). */
   async fetchDocumentBlobUrl(reviewId: string, reason?: string): Promise<ApiResult<string>> {
     const base = config.apiBaseUrl.replace(/\/$/, '');
-    const token = getToken();
     const qs = reason?.trim() ? `?reason=${encodeURIComponent(reason.trim())}` : '';
     try {
-      const res = await fetch(`${base}/api/withdrawals/aml/${reviewId}/document${qs}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
+      const res = await fetch(`${base}/api/withdrawals/aml/${reviewId}/document${qs}`, { credentials: 'include' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         return { ok: false, error: data.error?.message || data.error || `Failed to load document (${res.status})` };

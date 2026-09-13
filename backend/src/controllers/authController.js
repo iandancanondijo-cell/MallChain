@@ -96,7 +96,7 @@ function signToken(user) {
   // /logout and middleware/tokenDenylist.js) without needing to invalidate
   // every other token this user holds.
   const sessionTtlMin = parseInt(process.env.SESSION_TTL_MIN || '120', 10);
-  return jwt.sign(
+  const token = jwt.sign(
     {
       userId: String(user._id),
       username: user.username || user.email,
@@ -105,6 +105,37 @@ function signToken(user) {
     getJwtSecret(),
     { expiresIn: `${sessionTtlMin}m` }
   );
+  return { token, sessionTtlMin, expiresAt: Math.floor(Date.now() / 1000) + sessionTtlMin * 60 };
+}
+
+// The JWT itself now lives ONLY in an httpOnly cookie — never in a JSON
+// response body, and never in localStorage/JS-reachable storage on the
+// frontend (see mallchain-os-v14/src/services/auth.ts). A script running
+// via XSS can still make authenticated requests (the browser attaches the
+// cookie automatically either way), but it can no longer read the token
+// itself or make it usable somewhere the attacker actually controls, which
+// closes the "steal it once, replay it from your own server" persistence
+// XSS otherwise buys — CSRF protection (see requireAuth.js) is what closes
+// the cookie's own new risk (a request auto-authenticating from anywhere).
+const AUTH_COOKIE_NAME = 'auth_token';
+
+function authCookieOptions(maxAgeMs) {
+  return {
+    httpOnly: true,
+    secure: config.isProduction,
+    sameSite: 'strict',
+    path: '/',
+    ...(maxAgeMs !== undefined ? { maxAge: maxAgeMs } : {}),
+    ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
+  };
+}
+
+function setAuthCookie(res, token, sessionTtlMin) {
+  res.cookie(AUTH_COOKIE_NAME, token, authCookieOptions(sessionTtlMin * 60 * 1000));
+}
+
+function clearAuthCookie(res) {
+  res.clearCookie(AUTH_COOKIE_NAME, authCookieOptions());
 }
 
 function toPublicUser(user) {
@@ -192,8 +223,9 @@ exports.register = async (req, res) => {
   const u = await User.create({ email, password: hash });
   await assignReferralCode(u, referralCode);
 
-  const token = signToken(u);
-  res.json({ token, user: toPublicUser(u) });
+  const { token, sessionTtlMin, expiresAt } = signToken(u);
+  setAuthCookie(res, token, sessionTtlMin);
+  res.json({ expiresAt, user: toPublicUser(u) });
 };
 
 exports.login = async (req, res) => {
@@ -219,8 +251,9 @@ exports.login = async (req, res) => {
   await clearFailedLogins(email);
   u.lastLoginAt = new Date();
   await u.save();
-  const token = signToken(u);
-  res.json({ token, user: toPublicUser(u) });
+  const { token, sessionTtlMin, expiresAt } = signToken(u);
+  setAuthCookie(res, token, sessionTtlMin);
+  res.json({ expiresAt, user: toPublicUser(u) });
 };
 
 exports.registerUsername = async (req, res) => {
@@ -245,8 +278,9 @@ exports.registerUsername = async (req, res) => {
   const u = await User.create({ username, email: syntheticEmail, password: hash });
   await assignReferralCode(u, req.body?.referralCode);
 
-  const token = signToken(u);
-  res.json({ token, user: toPublicUser(u) });
+  const { token, sessionTtlMin, expiresAt } = signToken(u);
+  setAuthCookie(res, token, sessionTtlMin);
+  res.json({ expiresAt, user: toPublicUser(u) });
 };
 
 exports.loginUsername = async (req, res) => {
@@ -276,15 +310,19 @@ exports.loginUsername = async (req, res) => {
   u.lastLoginAt = new Date();
   await u.save();
 
-  const token = signToken(u);
-  res.json({ token, user: toPublicUser(u) });
+  const { token, sessionTtlMin, expiresAt } = signToken(u);
+  setAuthCookie(res, token, sessionTtlMin);
+  res.json({ expiresAt, user: toPublicUser(u) });
 };
 
 exports.me = async (req, res) => {
+  // Prefers the Authorization header (still accepted for now — e.g. any
+  // remaining direct API callers) but falls back to the httpOnly cookie,
+  // which is the ONLY thing the web frontend sends since it no longer
+  // holds the raw token in JS-reachable storage at all.
   const auth = req.headers.authorization
-  if (!auth) return res.status(401).json({ error: 'missing token' })
-  const token = auth.split(' ')[1]
-  if (!token) return res.status(401).json({ error: 'bad auth header' })
+  const token = auth ? auth.split(' ')[1] : req.cookies?.[AUTH_COOKIE_NAME]
+  if (!token) return res.status(401).json({ error: 'missing token' })
   try {
     const decoded = jwt.verify(token, getJwtSecret())
     // Task 4.1: Handle both old (id) and new (userId) token formats for compatibility
@@ -301,7 +339,11 @@ exports.me = async (req, res) => {
       publicUser.hasBadge = false;
     }
 
-    return res.json({ user: publicUser })
+    // decoded.exp lets the frontend refresh its non-secret `authedUntil` UI
+    // marker (authService.setSession()) from a value the server actually
+    // just verified, rather than only ever setting it once at login and
+    // trusting it silently thereafter.
+    return res.json({ user: publicUser, expiresAt: decoded.exp })
   } catch (e) {
     return res.status(401).json({ error: 'invalid token' })
   }
@@ -319,18 +361,10 @@ exports.me = async (req, res) => {
  * it does not grant any spending/signing authority over that address).
  */
 exports.linkWallet = async (req, res) => {
-  const auth = req.headers.authorization
-  if (!auth) return res.status(401).json({ error: 'missing token' })
-  const token = auth.split(' ')[1]
-  if (!token) return res.status(401).json({ error: 'bad auth header' })
-
-  let userId;
-  try {
-    const decoded = jwt.verify(token, getJwtSecret())
-    userId = decoded.userId || decoded.id;
-  } catch (e) {
-    return res.status(401).json({ error: 'invalid token' })
-  }
+  // Auth (bearer or cookie), CSRF, denylist and banned-user checks all
+  // already ran in the shared `auth` middleware (routes/auth.js) — it
+  // populates req.user, which is all this handler needs.
+  const userId = req.user._id;
 
   const { address, timestamp, pubKey, signature } = req.body || {};
   const bech32 = require('bech32');
@@ -405,21 +439,27 @@ exports.googleCallback = async (req, res) => {
     const referralCode = typeof req.query.state === 'string' ? req.query.state : undefined;
     await assignReferralCode(user, referralCode);
   }
-  const token = signToken(user);
-  // redirect to frontend with token
+  const { token, sessionTtlMin } = signToken(user);
+  setAuthCookie(res, token, sessionTtlMin);
+  // Redirect with no token in the URL — it lives only in the cookie just
+  // set above now. `?authed=1` is a non-secret signal so the frontend
+  // knows to immediately hydrate session state (GET /api/auth/me) rather
+  // than needing a token value to detect "did OAuth just complete".
   const frontend = process.env.FRONTEND_URL || 'http://localhost:5173';
-  return res.redirect(`${frontend}/?token=${token}`);
+  return res.redirect(`${frontend}/?authed=1`);
 };
 
-// POST /api/auth/logout — revokes just this token (by jti). Without this,
-// "logging out" only ever cleared the token client-side; the JWT itself
-// stayed valid server-side until it naturally expired (SESSION_TTL_MIN).
+// POST /api/auth/logout — revokes just this token (by jti) and clears the
+// cookie. Without the revoke, "logging out" only ever cleared the token
+// client-side; the JWT itself stayed valid server-side until it naturally
+// expired (SESSION_TTL_MIN).
 exports.logout = async (req, res) => {
   const payload = req.tokenPayload;
   if (payload?.jti && payload?.exp) {
     const ttlSeconds = payload.exp - Math.floor(Date.now() / 1000);
     await revokeToken(payload.jti, ttlSeconds);
   }
+  clearAuthCookie(res);
   return res.json({ ok: true });
 };
 
@@ -429,5 +469,6 @@ exports.logout = async (req, res) => {
 // any other device holding a token for this account stayed fully logged in.
 exports.logoutEverywhere = async (req, res) => {
   await revokeAllUserTokens(String(req.user._id));
+  clearAuthCookie(res);
   return res.json({ ok: true });
 };

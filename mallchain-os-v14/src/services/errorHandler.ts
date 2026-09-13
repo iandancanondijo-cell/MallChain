@@ -154,19 +154,20 @@ export function handle401Error(context: ErrorContext, onRedirect?: () => void): 
 
   console.warn(`[Unauthorized] ${action}`, { endpoint });
 
-  // Clear the token immediately, synchronously — a 401 means it's already
-  // invalid, so any other in-flight/concurrent request must not keep
-  // sending it while we wait for the toast to display.
-  authService.clearToken();
+  // Clear the local session marker immediately, synchronously — a 401 means
+  // the session is already invalid, so the UI must not keep assuming it's
+  // authenticated while we wait for the toast to display.
+  authService.clearSession();
 
   toast('Your session has expired. Redirecting to login...', false);
 
   // Give time for the toast to display, then finish logging out: reset the
   // store (so no stale balances/wallet/etc. linger past the forced logout)
   // and navigate via the app's own hash router rather than a hard page
-  // reload. authService.logout() clears the token again — a harmless no-op
-  // at this point. `onRedirect` is an optional extra hook for callers that
-  // need to react to the logout (e.g. tests).
+  // reload. authService.logout() clears the session marker again — a
+  // harmless no-op at this point — and best-effort revokes the (already
+  // presumably dead) cookie server-side. `onRedirect` is an optional extra
+  // hook for callers that need to react to the logout (e.g. tests).
   setTimeout(() => {
     authService.logout();
     onRedirect?.();

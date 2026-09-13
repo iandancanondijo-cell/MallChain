@@ -18,6 +18,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { api } from '../api';
 import { config } from '../config';
+import { authService } from '../auth';
 import type { ApiResult } from '../api';
 
 // Mock configuration to enable real API mode
@@ -48,10 +49,12 @@ describe('Frontend Failover Scenarios Integration Tests (Task 14.6)', () => {
     vi.clearAllMocks();
     mockFetch.mockClear();
     localStorage.clear();
+    // CSRF token fetching goes through authService, not mockFetch's queue.
+    vi.spyOn(authService, 'getCsrfToken').mockResolvedValue('test-csrf-token');
   });
 
   afterEach(() => {
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe('Scenario 1: Backend Server Down', () => {
@@ -199,9 +202,9 @@ describe('Frontend Failover Scenarios Integration Tests (Task 14.6)', () => {
     });
   });
 
-  describe('Scenario 4: 401 Unauthorized (Token Issues)', () => {
-    it('should handle 401 and clear token', async () => {
-      localStorage.setItem('token', 'invalid-token-123');
+  describe('Scenario 4: 401 Unauthorized (Session Issues)', () => {
+    it('should handle 401 and clear the session marker', async () => {
+      authService.setSession(Math.floor(Date.now() / 1000) + 3600);
 
       mockFetch.mockResolvedValueOnce({
         ok: false,
@@ -214,8 +217,8 @@ describe('Frontend Failover Scenarios Integration Tests (Task 14.6)', () => {
 
       expect(result.ok).toBe(false);
       expect(result.code).toBe(401);
-      // Token should be cleared
-      expect(localStorage.getItem('token')).toBeNull();
+      // Session marker should be cleared
+      expect(authService.isAuthenticated()).toBe(false);
     });
 
     it('should trigger redirect to login on 401', async () => {
