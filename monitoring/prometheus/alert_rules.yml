@@ -161,3 +161,277 @@ groups:
         annotations:
           summary: 'Backend process RSS above 1.5GB'
           description: 'Resident memory has stayed above 1.5GB for 10 minutes — check for a leak before it hits the container/host memory limit.'
+
+      - alert: OperatorWalletStakeLow
+        expr: operator_stake_balance{wallet="operator"} < 2000000
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Operator wallet stake balance is low'
+          description: 'The operator wallet (badge issuance, Mallpoints awards, EDU chain anchoring) has less than 2,000,000 stake for 15 minutes. jobs/operatorStakeWatcher.js should auto-top-up from the treasury — this warning means either that has not run yet or usage is outpacing it.'
+          runbook: 'docs/runbooks/11-operator-stake-depleted.md'
+
+      - alert: TreasuryWalletStakeLow
+        expr: operator_stake_balance{wallet="treasury"} < 10000000
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Treasury wallet stake balance is low'
+          description: 'The treasury wallet — the source jobs/operatorStakeWatcher.js draws from to top up the operator — has less than 10,000,000 stake for 15 minutes. If it keeps depleting, operator top-ups will start failing outright (see OperatorStakeTopUpFailed).'
+          runbook: 'docs/runbooks/11-operator-stake-depleted.md'
+
+      - alert: OperatorStakeTopUpFailed
+        expr: increase(operator_stake_topup_total{status!="success"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Automatic operator stake top-up failed'
+          description: 'jobs/operatorStakeWatcher.js attempted to refill the operator wallet and failed (label status={{ $labels.status }}) — this is the one failure mode the automation cannot recover from on its own (most commonly the treasury itself running dry). Badge issuance, Mallpoints awards, and EDU chain anchoring will start failing once the operator balance actually hits zero.'
+          runbook: 'docs/runbooks/11-operator-stake-depleted.md'
+
+---
+groups:
+  - name: mallchain-node.rules
+    rules:
+      - alert: NodeCPUHigh80
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[10m])) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Node CPU usage above 80%'
+          description: '{{ $labels.instance }} has had CPU usage at {{ $value | humanize }}% for over 10 minutes.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/node-cpu-high.md'
+
+      - alert: NodeRAMHigh90
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Node RAM usage above 90%'
+          description: '{{ $labels.instance }} has reached {{ $value | humanize }}% memory usage for over 10 minutes.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/node-ram-high.md'
+
+      - alert: NodeDiskFull90
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Root filesystem less than 10% available'
+          description: 'Mountpoint {{ $labels.mountpoint }} on {{ $labels.instance }} has only {{ $value | humanize }}% disk space remaining.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/node-disk-full.md'
+
+      - alert: NodeDiskReadOnly
+        expr: node_filesystem_readonly == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Filesystem remounted read-only'
+          description: '{{ $labels.mountpoint }} on {{ $labels.instance }} has been remounted read-only — check for disk failure or kernel errors.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/node-disk-readonly.md'
+
+      - alert: NodeHighLoadAvg5m
+        expr: node_load5 > 2 * count by(instance) (node_cpu_seconds_total{mode="idle"})
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: '5-minute load average exceeds 2x CPU count'
+          description: '{{ $labels.instance }} has a 5m load average of {{ $value | humanize }}, which is more than double the available CPU cores for 15 minutes.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/node-load-average.md'
+
+---
+groups:
+  - name: mallchain-database.rules
+    rules:
+      - alert: MongoReplicationLagSeconds
+        expr: mongodb_mongod_replset_member_replication_lag > 30
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'MongoDB replication lag exceeds 30 seconds (primary → secondary)'
+          description: 'MongoDB secondary on {{ $labels.instance }} is lagging the primary by {{ $value | humanize }}s for over 10 minutes.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/mongo-rollback-pitr.md'
+
+      - alert: MongoConnectionsHigh
+        expr: (mongodb_connections_current / mongodb_connections_available) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'MongoDB connection usage above 80% of max'
+          description: '{{ $labels.instance }} is using {{ $value | humanizePercentage }} of the maximum configured MongoDB connections for over 10 minutes.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/mongo-connections-high.md'
+
+      - alert: PostgresReplicationByteLag
+        expr: pg_replication_lag_bytes > 1048576
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'PostgreSQL replication byte lag exceeds 1MB'
+          description: 'PostgreSQL standby on {{ $labels.instance }} is lagging by {{ $value | humanize }} bytes (over 1MB) for over 10 minutes.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/postgres-replication-lag.md'
+
+      - alert: PostgresDeadlocks
+        expr: increase(pg_stat_database_deadlocks[1h]) > 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'PostgreSQL deadlocks exceed 2 per hour'
+          description: 'Database {{ $labels.datname }} has recorded {{ $value | humanize }} deadlocks in the last hour for over 15 minutes.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/postgres-deadlocks.md'
+
+      - alert: RedisMemoryFragmentationRatio
+        expr: redis_memory_fragmentation_ratio > 1.8
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Redis memory fragmentation ratio above 1.8'
+          description: 'Redis instance {{ $labels.instance }} shows a memory fragmentation ratio of {{ $value | humanize }} for over 30 minutes — consider restarting the instance during low traffic.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/redis-memory-fragmentation.md'
+
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Redis instance is unreachable'
+          description: 'Prometheus failed to scrape {{ $labels.instance }} (job=redis) for 2 minutes — the caching and queue layer is likely down.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/redis-down.md'
+
+---
+groups:
+  - name: mallchain-nginx.rules
+    rules:
+      - alert: NginxUpstream5xxRate
+        expr: |
+          sum(rate(nginx_upstream_responses_total{status_code=~"5.."}[5m]))
+          /
+          sum(rate(nginx_upstream_responses_total[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Nginx upstream 5xx rate exceeds 5%'
+          description: '{{ $value | humanizePercentage }} of upstream responses over the last 5m returned a 5xx status.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/nginx-tls-renewal.md'
+
+      - alert: NginxHighLatencyP99
+        expr: |
+          histogram_quantile(0.99, sum(rate(nginx_http_request_duration_seconds_bucket[5m])) by (le)) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Nginx p99 latency exceeds 3000ms'
+          description: 'p99 request latency through Nginx has been above 3000ms for 5 minutes (current: {{ $value | humanize }}s).'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/nginx-high-latency.md'
+
+      - alert: NginxSSLCertExpiryDaysWarning
+        expr: (nginx_ssl_expiry - time()) / 86400 < 21
+        for: 7d
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Nginx SSL certificate expires in less than 21 days'
+          description: 'SSL certificate for {{ $labels.host }} expires in {{ $value | humanize }} days — schedule a renewal before it reaches the critical threshold.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/nginx-tls-renewal.md'
+
+      - alert: NginxSSLCertExpiryDaysCritical
+        expr: (nginx_ssl_expiry - time()) / 86400 < 7
+        for: 7d
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Nginx SSL certificate expires in less than 7 days'
+          description: 'SSL certificate for {{ $labels.host }} expires in only {{ $value | humanize }} days — renew IMMEDIATELY to avoid an outage.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/nginx-tls-renewal.md'
+
+---
+groups:
+  - name: mallchain-vault.rules
+    rules:
+      - alert: VaultSealed
+        expr: vault_core_unsealed == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Vault cluster is sealed'
+          description: 'Vault instance {{ $labels.instance }} reports sealed status for over 1 minute — the secrets backend is unavailable until unsealed with the shard keys.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/vault-seal-recovery.md'
+
+      - alert: VaultAuditFailureRate
+        expr: |
+          rate(vault_audit_request_errors_total[10m])
+          /
+          rate(vault_audit_request_total[10m])
+          > 0.01
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Vault audit failure rate exceeds 1%'
+          description: '{{ $value | humanizePercentage }} of Vault audit log writes have failed over the last 10 minutes — check audit device health and disk space.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/vault-audit-failures.md'
+
+---
+groups:
+  - name: mallchain-slo-load.rules
+    rules:
+      - alert: SloPaymentsSuccessRate30d
+        expr: |
+          (
+            sum(increase(payments_total{status="success"}[30d]))
+            /
+            sum(increase(payments_total[30d]))
+          ) * 100 < 99.9
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: '30-day payments success SLO breached (< 99.9%)'
+          description: 'The rolling 30-day payments success rate has dropped to {{ $value | humanize }}%, below the 99.9% SLO target.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/payments-slo-breach.md'
+
+      - alert: K6LoadTestP95Breached
+        expr: k6_http_req_duration_p95 > 2
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: 'k6 load test p95 latency breached (> 2000ms)'
+          description: 'Latest k6 load test summary reports p95 of {{ $value | humanize }}s, which exceeds the 2000ms threshold over the last hour.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/k6-load-test-analysis.md'
+
+      - alert: K6LoadTestErrorRateBreached
+        expr: k6_http_req_failed_rate > 0.05
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: 'k6 load test error rate breached (> 5%)'
+          description: 'Latest k6 load test reports an error rate of {{ $value | humanizePercentage }}, exceeding the 5% threshold over the last hour.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/k6-load-test-analysis.md'
+
+      - alert: HighTxThroughputQueued
+        expr: marketplace_tx_queue > 200
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Marketplace transaction queue backlog exceeds 200'
+          description: 'marketplace_tx_queue gauge reports {{ $value | humanize }} pending transactions queued for over 10 minutes — the transaction worker pool may be saturated.'
+          runbook: 'https://github.com/iandancanondijo-cell/MallChain/blob/main/docs/runbooks/tx-queue-backlog.md'

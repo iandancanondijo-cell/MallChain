@@ -1,0 +1,282 @@
+openapi: 3.0.3
+info:
+  title: Mallchain Backend API
+  version: '1.0'
+  description: |
+    Covers the core public/self-service surface: health checks, auth, GDPR
+    data-subject rights, maintenance status, and the M-Pesa buy/withdraw
+    flows. **Not exhaustive** — the admin panel (`/api/admin/*`), messaging,
+    mines/validators, and several other route groups aren't modeled here
+    yet. Extend this file route-group by route-group, checking the actual
+    Joi schema in `backend/src/middleware/validation.js` (or
+    `utils/validationSchemas.js`) against what's written here rather than
+    assuming this file is current — request bodies here were hand-written
+    against the schemas as of when this was created, and will drift as
+    those schemas change.
+servers:
+  - url: http://localhost:4000
+    description: Local dev
+
+paths:
+  /api/health:
+    get:
+      summary: Liveness + dependency health (chain/db/redis)
+      tags: [System]
+      responses:
+        '200':
+          description: All dependencies healthy
+        '503':
+          description: One or more dependencies degraded — response body still lists per-dependency status
+
+  /api/ready:
+    get:
+      summary: Readiness probe (can this instance accept traffic)
+      tags: [System]
+      responses:
+        '200': { description: Ready }
+        '503': { description: Not ready (blockchain stale/unavailable, or database unavailable) }
+
+  /api/live:
+    get:
+      summary: Liveness probe (process is running)
+      tags: [System]
+      responses:
+        '200': { description: Alive }
+
+  /api/maintenance:
+    get:
+      summary: Public, read-only maintenance kill-switch status
+      description: No auth required — this is what the frontend banner polls.
+      tags: [System]
+      responses:
+        '200':
+          description: Current maintenance state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  global: { type: boolean }
+                  scopes:
+                    type: object
+                    additionalProperties: { type: boolean }
+                  reason: { type: string }
+
+  /api/auth/register:
+    post:
+      summary: Create an account (email + password)
+      tags: [Auth]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+      responses:
+        '200': { description: Account created, token issued }
+        '400': { description: Validation error }
+        '409': { description: Email already registered }
+
+  /api/auth/login:
+    post:
+      summary: Log in with email + password
+      tags: [Auth]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200': { description: JWT issued }
+        '401': { description: Invalid credentials }
+
+  /api/auth/me:
+    get:
+      summary: Current session's user profile
+      tags: [Auth]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: User profile (includes banned/kycLevel/role/hasBadge) }
+        '401': { description: Missing/invalid/expired token }
+
+  /api/auth/logout:
+    post:
+      summary: Revoke the current session's token
+      tags: [Auth]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Token revoked }
+
+  /api/auth/logout-everywhere:
+    post:
+      summary: Revoke every token issued to this account
+      tags: [Auth]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: All sessions revoked }
+
+  /api/auth/link-wallet:
+    post:
+      summary: Associate an on-chain wallet address with this account
+      description: Requires an ADR-036 off-chain signature proving ownership of the address.
+      tags: [Auth]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address, timestamp, pubKey, signature]
+              properties:
+                address: { type: string }
+                timestamp: { type: string, format: date-time }
+                pubKey: { type: string, description: base64-encoded public key }
+                signature: { type: string, description: base64-encoded ADR-036 signature }
+      responses:
+        '200': { description: Wallet linked }
+        '401': { description: Signature verification failed, or timestamp expired }
+
+  /api/gdpr/export:
+    get:
+      summary: Export every record linked to the current account (GDPR Article 15)
+      tags: [GDPR]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Full data export as a JSON attachment
+          content:
+            application/json: {}
+
+  /api/gdpr/delete:
+    post:
+      summary: Request account erasure (GDPR Article 17)
+      description: |
+        Irreversible. Password-based accounts must re-confirm their current
+        password; Google-only accounts (no password set) do not. See
+        docs/compliance/gdpr.md for exactly what gets redacted vs. retained.
+      tags: [GDPR]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password: { type: string, description: Required only if the account has a password set }
+      responses:
+        '200': { description: Account erased }
+        '400': { description: Password confirmation required but missing }
+        '401': { description: Incorrect password }
+
+  /api/buy/config:
+    get:
+      summary: Buy-flow configuration (provider mode, current rates, callback URLs)
+      tags: [Buy]
+      responses:
+        '200': { description: Config and current buy/sell rates }
+
+  /api/buy/reserve:
+    post:
+      summary: Reserve a fiat-buy quote
+      tags: [Buy]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, fiat, walletAddress, phone]
+              properties:
+                amount: { type: number, description: MLCNS amount }
+                fiat: { type: string, description: 'e.g. "4200 KES"' }
+                currency: { type: string, default: KES }
+                walletAddress: { type: string }
+                phone: { type: string, pattern: '^254\d{9}$' }
+      responses:
+        '200': { description: Quote reserved }
+
+  /api/buy/mpesa:
+    post:
+      summary: Initiate an M-Pesa STK push for a reserved quote
+      description: Idempotent against a double-submit for the same quote — a retry after the first push already went out returns the existing state instead of firing a second prompt.
+      tags: [Buy]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quoteId, phone, amount]
+              properties:
+                quoteId: { type: string }
+                phone: { type: string, pattern: '^254\d{9}$' }
+                amount: { type: number }
+                description: { type: string }
+      responses:
+        '200': { description: "STK push sent (or the quote's existing state, if already past pending)" }
+        '404': { description: Quote not found }
+
+  /api/buy/status/{paymentId}:
+    get:
+      summary: Check a buy payment's status
+      tags: [Buy]
+      parameters:
+        - { name: paymentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Payment status }
+
+  /api/withdraw/config:
+    get:
+      summary: Withdrawal/cash-out configuration
+      tags: [Withdraw]
+      responses:
+        '200': { description: Config, including whether auto-payout is enabled }
+
+  /api/withdraw/mpesa:
+    post:
+      summary: Request a cash-out payout via M-Pesa
+      description: Requires an Idempotency-Key header. May be held for manual review if it exceeds the configured per-tx/daily payout caps (see docs/security/treasury-controls.md).
+      tags: [Withdraw]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [walletAddress, phone, amountMlcns, amountKes, currency]
+              properties:
+                walletAddress: { type: string }
+                phone: { type: string }
+                amountMlcns: { type: number }
+                amountKes: { type: number }
+                currency: { type: string, default: KES }
+      responses:
+        '202': { description: 'Accepted — either paid out immediately or queued for manual review (status field distinguishes the two)' }
+        '502': { description: Payout initiation genuinely failed (not a cap hold) }
+
+  /api/withdraw/status/{withdrawalId}:
+    get:
+      summary: Check a withdrawal's status
+      tags: [Withdraw]
+      parameters:
+        - { name: withdrawalId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Withdrawal status }
+        '404': { description: Not found }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
