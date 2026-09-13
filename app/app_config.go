@@ -7,6 +7,8 @@ import (
 	badgemoduletypes "marketplace/x/badge/types"
 	crosschainmoduletypes "marketplace/x/crosschain/types"
 	dexmoduletypes "marketplace/x/dex/types"
+	_ "marketplace/x/edu/module"
+	edumoduletypes "marketplace/x/edu/types"
 	governancemoduletypes "marketplace/x/governance/types"
 	_ "marketplace/x/mallcoin/module"
 	mallcoinmoduletypes "marketplace/x/mallcoin/types"
@@ -100,6 +102,15 @@ var (
 		// governance burns a passed proposal's deposit (see
 		// x/governance/keeper/proposal_execution.go's ExecuteTreasuryTransfer).
 		{Account: governancemoduletypes.ModuleName, Permissions: []string{authtypes.Burner}},
+		// mlcoin's EndBlocker (end_blocker.go's DistributeFees) sends
+		// accumulated fees from this module's own account to stakers/
+		// treasury — SendCoinsFromModuleToAccount PANICS (not just errors)
+		// if the sender module account isn't registered here, which is
+		// exactly what crashed chain replay at height 12000 the first time
+		// DistributeFees ever had a nonzero amount to send (this module's
+		// EndBlocker was itself only wired up in an earlier fix this
+		// session — see module/module.go's EndBlock).
+		{Account: mlcoinmoduletypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner}},
 	}
 
 	blockAccAddrs = []string{
@@ -134,11 +145,12 @@ var (
 						mlcoinmoduletypes.ModuleName,
 						mallpointsmoduletypes.ModuleName,
 						badgemoduletypes.ModuleName,
-						// vault, wasm, and wasmbridge implement
+						// vault, wasm, wasmbridge, and edu implement
 						// appmodule.HasBeginBlocker (no-op bodies, but the
 						// interface is satisfied), so SetOrderBeginBlockers
 						// requires them listed too — same reasoning as
 						// InitGenesis/EndBlockers above.
+						edumoduletypes.ModuleName,
 						vaultmoduletypes.ModuleName,
 						wasmmoduletypes.ModuleName,
 						wasmbridgemoduletypes.ModuleName,
@@ -163,8 +175,9 @@ var (
 						// appmodule.HasEndBlocker is missing from it.
 						crosschainmoduletypes.ModuleName,
 						governancemoduletypes.ModuleName,
-						// vault, wasm, and wasmbridge implement
+						// vault, wasm, wasmbridge, and edu implement
 						// appmodule.HasEndBlocker too (no-op bodies).
+						edumoduletypes.ModuleName,
 						vaultmoduletypes.ModuleName,
 						wasmmoduletypes.ModuleName,
 						wasmbridgemoduletypes.ModuleName,
@@ -201,6 +214,7 @@ var (
 						mlcoinmoduletypes.ModuleName,
 						mallpointsmoduletypes.ModuleName,
 						badgemoduletypes.ModuleName,
+						edumoduletypes.ModuleName,
 						// Same requirement as EndBlockers above, for modules
 						// registered manually in registerCustomModules() that
 						// implement HasGenesis/HasABCIGenesis. (wasmbridge and
@@ -250,6 +264,7 @@ var (
 			{Name: mlcoinmoduletypes.ModuleName, Config: appconfig.WrapAny(&mlcoinmoduletypes.Module{})},
 			{Name: mallpointsmoduletypes.ModuleName, Config: appconfig.WrapAny(&mallpointsmoduletypes.Module{})},
 			{Name: badgemoduletypes.ModuleName, Config: appconfig.WrapAny(&badgemoduletypes.Module{})},
+			{Name: edumoduletypes.ModuleName, Config: appconfig.WrapAny(&edumoduletypes.Module{})},
 			// Note: crosschain, governance, dex, marketplace, wasmbridge, wasm,
 			// and vault are all registered manually in registerCustomModules()
 			// (app/custom_modules.go). The others here predate/don't use the

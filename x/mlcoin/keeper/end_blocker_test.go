@@ -383,6 +383,62 @@ func TestRecordActivity(t *testing.T) {
 	require.Equal(t, uint64(2), metrics.ActiveUsers)
 }
 
-func TestDistributeFeesNoActiveStakers(t *testing.T) {
-	t.Skip("DistributeFees requires a fully initialized BankKeeper - integration test")
+// DistributeFees itself is now covered with a real bank+auth keeper in
+// distribute_fees_integration_test.go (TestDistributeFees_*) — this file's
+// keeperWithDeps fixture uses a zero-value types.BankKeeper{}, which can't
+// actually execute a mint/send without panicking, which is why that
+// coverage lives in its own file instead of here.
+
+// TestEndBlockerEmissionScheduleAnchorsToFirstTick guards against a
+// regression where updateEmissionSchedule fed GetMonthlyEmission the raw
+// absolute calendar month (year*12+month, e.g. ~24321 for 2026) instead of
+// a small months-since-genesis counter. That pushed the halving phase index
+// past 64, and a uint64 right-shift that far is defined as zero in Go — so
+// DailyLimit collapsed to 0 on the very first tick and stayed there forever,
+// permanently blocking MintToWallet (both BuyMallcoin and Mallpoints
+// conversion check amount > DailyLimit).
+func TestEndBlockerEmissionScheduleAnchorsToFirstTick(t *testing.T) {
+	k, ctx := keeperWithDeps(t)
+
+	require.NoError(t, k.SetModuleIntervals(ctx, types.ModuleIntervals{
+		DynamicPricingBlocks: 100,
+		EmissionTickBlocks:   100,
+		ConversionTickBlocks: 100,
+		StakingLockBlocks:    50,
+		RewardDivisor:        10,
+		// BlocksPerDay left at 0 (disabled) so EndBlocker skips
+		// RecordTreasurySnapshot, which needs a fully wired BankKeeper —
+		// same pre-existing constraint as TestDistributeFeesNoActiveStakers.
+	}))
+
+	// First tick, at an ordinary present-day calendar date — exactly the
+	// scenario that used to zero DailyLimit immediately.
+	ctx1 := ctx.WithBlockHeight(100).WithBlockTime(time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, k.EndBlocker(sdk.WrapSDKContext(ctx1)))
+
+	emission, err := k.EmissionState.Get(ctx1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), emission.CurrentMonth, "first tick should anchor to month 1, not the raw absolute calendar month")
+	require.Equal(t, uint64(100000), emission.DailyLimit, "phase-1 monthly cap (3,000,000) / 30 days in September")
+
+	// One calendar month later: CurrentMonth should advance to 2 (not jump
+	// to another huge absolute number), and the daily limit must stay live.
+	ctx2 := ctx.WithBlockHeight(200).WithBlockTime(time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, k.EndBlocker(sdk.WrapSDKContext(ctx2)))
+
+	emission, err = k.EmissionState.Get(ctx2)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), emission.CurrentMonth)
+	require.NotZero(t, emission.DailyLimit)
+
+	// Years into the future (well past any real deployment horizon): the
+	// phase index must still stay small since it's now relative to the
+	// anchor, so the emission rate keeps halving on schedule instead of
+	// vanishing to zero.
+	ctx3 := ctx.WithBlockHeight(300).WithBlockTime(time.Date(2030, 1, 3, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, k.EndBlocker(sdk.WrapSDKContext(ctx3)))
+
+	emission, err = k.EmissionState.Get(ctx3)
+	require.NoError(t, err)
+	require.NotZero(t, emission.DailyLimit, "daily limit must never permanently collapse to zero")
 }

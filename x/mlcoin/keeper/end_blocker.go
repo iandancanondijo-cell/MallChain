@@ -2,11 +2,13 @@ package keeper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"marketplace/x/mlcoin/types"
 
+	"cosmossdk.io/collections"
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/math"
 
@@ -258,16 +260,34 @@ func (k Keeper) updateEmissionSchedule(ctx context.Context) error {
 		return errorsmod.Wrap(types.ErrInvalidSupply, "emission state not initialized")
 	}
 
-	// Get current month (UTC)
-	currentMonth := uint64(currentTime.Year()*12 + int(currentTime.Month()))
+	// Absolute calendar month (UTC), only used to measure elapsed months —
+	// GetMonthlyEmission expects a small months-since-genesis counter, not
+	// this raw value (feeding it directly shifts the phase index past 64
+	// bits and zeroes the emission rate forever).
+	absoluteMonth := uint64(currentTime.Year()*12 + int(currentTime.Month()))
+
+	anchor, err := k.EmissionMonthAnchor.Get(ctx)
+	if err != nil {
+		if !errors.Is(err, collections.ErrNotFound) {
+			return err
+		}
+		// First tick ever: anchor to now, and treat this run as month 1 so
+		// it lines up with the CurrentMonth=1 genesis already set.
+		anchor = absoluteMonth
+		if err := k.EmissionMonthAnchor.Set(ctx, anchor); err != nil {
+			return err
+		}
+	}
+
+	monthsSinceGenesis := absoluteMonth - anchor + 1
 
 	// Calculate monthly emission for current phase
-	monthlyEmission := types.GetMonthlyEmission(currentMonth)
+	monthlyEmission := types.GetMonthlyEmission(monthsSinceGenesis)
 	dailyEmission := monthlyEmission / types.DaysInMonth(currentTime.Month(), currentTime.Year())
 
 	// Check if we've entered a new month - update emission schedule
-	if emission.CurrentMonth != currentMonth {
-		emission.CurrentMonth = currentMonth
+	if emission.CurrentMonth != monthsSinceGenesis {
+		emission.CurrentMonth = monthsSinceGenesis
 		emission.EmittedTotal = 0
 	}
 
@@ -326,6 +346,21 @@ func (k Keeper) DistributeFees(ctx context.Context) error {
 
 	if totalFees == 0 {
 		return nil
+	}
+
+	// AccumulateFees only ever deducted this amount from senders' custom
+	// WalletBalance ledger entries — it never minted any real x/bank
+	// "mlcoin" coins to back it, so every SendCoinsFromModuleToAccount call
+	// below (which moves real bank coins) had nothing to send: fees were
+	// silently destroyed every distribution cycle (the reset at the bottom
+	// of this function ran regardless of whether the sends actually
+	// succeeded). Minting the total here, into this module's own account,
+	// is what "collecting" the fee actually requires — GetTreasuryBalance
+	// (query_treasury.go) already reads real bank balance for this same
+	// module/denom, confirming that was always the intended design.
+	if err := k.bankKeeper.MintCoins(sdkCtx, types.ModuleName, sdk.NewCoins(sdk.NewCoin("mlcoin", math.NewIntFromUint64(totalFees)))); err != nil {
+		sdkCtx.Logger().Error("Failed to mint accumulated fees for distribution", "error", err)
+		return err
 	}
 
 	// Distribute fees: 50% to stakers, 50% to treasury
