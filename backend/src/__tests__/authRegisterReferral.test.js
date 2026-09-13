@@ -60,7 +60,13 @@ describe('POST /api/auth/register — user payload + referral bonus', () => {
     const res = await request(app).post('/api/auth/register').send({ email: 'new@x.com', password: 'pw123456' });
 
     expect(res.status).toBe(200);
-    expect(res.body.token).toBe('signed.jwt.token');
+    // The signed token now travels only via httpOnly cookie, never in the
+    // JSON body (see the localStorage -> cookie migration) — the body just
+    // carries the non-secret expiry marker the frontend uses for UI state.
+    expect(res.body.token).toBeUndefined();
+    expect(res.body.expiresAt).toBeDefined();
+    const setCookie = res.headers['set-cookie'] || [];
+    expect(setCookie.some((c) => c.startsWith('auth_token=signed.jwt.token'))).toBe(true);
     expect(res.body.user).toMatchObject({ email: 'new@x.com', role: 'user', banned: false, kycLevel: 1 });
     expect(created.referralCode).toMatch(/^MALL-/);
     expect(created.save).toHaveBeenCalled();
