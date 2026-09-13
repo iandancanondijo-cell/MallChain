@@ -291,7 +291,13 @@ When `config.apiBaseUrl` is set to the backend URL:
    - URL: `{apiBaseUrl}{path}` (e.g., `http://localhost:4000/api/wallets/mall1abc.../balances`)
    - Headers: 
      - `Content-Type: application/json`
-     - `Authorization: Bearer {token}` (if token exists in localStorage)
+     - No Authorization header — the session token travels in an httpOnly
+       `auth_token` cookie the browser attaches automatically
+       (`credentials: 'include'`), never touched by frontend JS. A
+       `Bearer` header is still accepted for non-browser API callers, but
+       the web app itself no longer holds the raw token anywhere.
+     - `X-CSRF-Token` (mutating requests only, cookie-authenticated
+       requests only) — double-submit token issued on any GET
    - Body: JSON payload for POST/PATCH requests
 
 2. **Backend Processing**
@@ -349,25 +355,42 @@ When `config.apiBaseUrl` is empty:
 - Requires maintaining parallel data models
 - Ensures frontend can work independently of backend
 
-### 2. Authentication via JWT Tokens
+### 2. Authentication via JWT Tokens (httpOnly cookie)
 
-**Decision**: Backend issues JWT tokens upon successful login, frontend stores in localStorage and includes in Authorization header.
+**Decision**: Backend issues JWT tokens upon successful login and sets them as an
+httpOnly cookie; the frontend never reads or stores the raw token.
 
 **Rationale**:
 - Standard approach for REST API authentication
-- Stateless server (no server-side session storage)
-- Token expires after configurable TTL (sessionTtlMin)
+- Stateless server (no server-side session storage — the JWT itself is the
+  session, revocation is handled via a Redis denylist keyed by the token's
+  `jti`, not by looking up a server-side session record)
+- Token expires after configurable TTL (sessionTtlMin); `POST /api/auth/refresh`
+  rotates it (new `jti`, old one denylisted) before expiry
 
 **Implementation**:
-- Login POST `/api/auth/login` → receives JWT
-- Frontend stores token: `localStorage.setItem('token', jwt)`
-- For each protected request: `Authorization: Bearer {jwt}`
-- On 401 response: clear token and redirect to login
+- Login POST `/api/auth/login` → backend sets `Set-Cookie: auth_token=<jwt>;
+  HttpOnly; SameSite=Strict; Secure` (in production) and returns
+  `{ expiresAt, user }` in the body — no token in the JSON
+- Frontend stores only the non-secret `expiresAt` (used to know when to call
+  `/api/auth/refresh`, purely a UI concern) — never the token itself
+- For each protected request: the cookie is attached automatically by the
+  browser (`credentials: 'include'`); the shared `auth` middleware also
+  still accepts an `Authorization: Bearer {jwt}` header for non-browser
+  callers
+- On 401 response: session state cleared client-side and user redirected to
+  login (there is no client-held token to clear — the cookie is cleared
+  server-side via `POST /api/auth/logout`)
 
 **Security Considerations**:
-- localStorage is vulnerable to XSS attacks
-- Mitigation: Content Security Policy headers
-- Token expiration provides time-bound access
+- httpOnly means frontend JS cannot read the token at all, closing the XSS
+  token-theft vector localStorage had
+- `SameSite=Strict` + a double-submit CSRF token (`X-CSRF-Token` header,
+  checked on every cookie-authenticated mutating request) close the CSRF
+  gap a cookie-based session would otherwise reopen
+- Token expiration provides time-bound access; revocation (logout, "sign
+  out everywhere") is enforced server-side via the `jti` denylist, not just
+  client-side token deletion
 - Server validates signature on every request
 
 ### 3. Room-Based WebSocket Subscriptions
@@ -464,7 +487,8 @@ if (result.ok) {
 **Responsibilities**:
 1. Detect operation mode (real backend vs demo)
 2. Construct HTTP requests with proper headers
-3. Include JWT token from localStorage when available
+3. Send requests with `credentials: 'include'` so the browser attaches the
+   httpOnly session cookie automatically (no token handled in JS)
 4. Handle network and HTTP errors
 5. Return consistent ApiResult format
 6. Support request deduplication
@@ -705,32 +729,37 @@ io.to(`wallet:${address}`).emit('wallet:update', updatedWallet);
 ```
 1. User Login
    POST /api/auth/login
-   {username, password}
+   {email, password}
         ↓
    Backend verifies credentials against MongoDB
         ↓
 2. Token Generation
    Backend creates JWT payload:
-   {userId, username, exp: now + sessionTtlMin}
+   {userId, jti, exp: now + sessionTtlMin}
         ↓
    Signed with JWT_SECRET
         ↓
-   Response: {ok: true, data: {token, user}}
+   Response: Set-Cookie: auth_token=<jwt>; HttpOnly; SameSite=Strict; Secure
+             Body: {expiresAt, user}   (no token in the JSON body)
         ↓
 3. Frontend Storage
-   localStorage.setItem('token', token)
+   Only `expiresAt` is kept client-side (a UI-only marker for when to
+   proactively call /api/auth/refresh) — the token itself is never
+   readable from JS
         ↓
 4. Subsequent Requests
-   Authorization: Bearer {token}
+   Cookie attached automatically by the browser (credentials: 'include');
+   mutating requests also carry X-CSRF-Token (double-submit cookie check)
         ↓
-   Backend extracts & verifies token
+   Backend extracts & verifies token, checks it isn't in the jti denylist
         ↓
-5. Token Expiration
-   When exp < current time, token is invalid
-   Backend returns 403 Forbidden
+5. Token Expiration / Revocation
+   When exp < current time, or the jti has been denylisted (logout /
+   "sign out everywhere" / refresh-rotation of an older token), the token
+   is invalid — backend returns 401
         ↓
-   Frontend clears localStorage['token']
-   Frontend redirects to login page
+   Frontend clears local session state and redirects to login;
+   POST /api/auth/logout clears the cookie server-side
 ```
 
 ### CORS Security
@@ -824,24 +853,32 @@ Backend: Returns 401 with {error: "Invalid token"}
     ↓
 Frontend API interceptor detects 401
     ↓
-localStorage.removeItem('token')
+Local session state cleared (there is no client-held token to remove —
+the httpOnly cookie is only cleared server-side, via /api/auth/logout)
     ↓
 Redirect to login page
     ↓
 User must re-authenticate
 ```
 
-**403 Forbidden** (expired token)
+**Session nearing expiry** (proactive refresh, not an error path)
 
 ```
-Backend: Returns 403 with {error: "Token expired"}
+Frontend checks: is authedUntil within the next 10 minutes?
     ↓
-Frontend clears token
+POST /api/auth/refresh (cookie-authenticated)
     ↓
-Redirects to login with message: "Your session expired"
+Backend issues a new token (new jti), denylists the old jti, sets the
+new cookie, returns {expiresAt}
     ↓
-User logs in again to get new token
+Frontend updates its local expiresAt marker — no user-visible interruption
 ```
+
+If the token has already actually expired (or was denylisted) by the time
+a request is made, that request gets a 401 and falls into the
+Authentication Error Handling flow above — there is no separate 403
+"expired token" response; 403 is reserved for role/ban checks (e.g.
+`{error: "admin access required"}`, `{error: "account is banned"}`).
 
 ### Rate Limit Error Handling
 
@@ -1080,9 +1117,14 @@ npm run dev
 **Test 3: Authentication Flow**
 1. Click login
 2. Enter credentials
-3. Verify token in localStorage: `localStorage.getItem('token')`
+3. Verify the response: DevTools → Network → login request → Response
+   Headers should show `Set-Cookie: auth_token=...; HttpOnly` (the cookie
+   itself is deliberately invisible to `document.cookie` / JS — that's the
+   point of HttpOnly)
 4. Make API request
-5. Verify Authorization header: `Authorization: Bearer {token}`
+5. Verify DevTools → Network → request → Request Headers shows the
+   `Cookie: auth_token=...` header sent automatically by the browser (not
+   an `Authorization` header — the web app no longer sets one)
 
 **Test 4: Real-time Updates**
 1. Login successfully
@@ -1146,15 +1188,22 @@ npm run dev
 **Error**: "Invalid or expired token" (401 response)
 
 **Causes**:
-1. Token missing from localStorage
+1. `auth_token` cookie missing (never issued, or blocked — check
+   `SameSite`/`Secure` settings against how the frontend is actually being
+   served; a `Secure` cookie is silently dropped over plain HTTP)
 2. Token corrupted
-3. Token expired
-4. JWT_SECRET changed (invalidates all tokens)
+3. Token expired (and the proactive `/api/auth/refresh` call, fired when
+   under 10 minutes of session life remain, didn't run or itself failed)
+4. Token's `jti` was denylisted (logout, "sign out everywhere", or a
+   refresh already rotated past it)
+5. JWT_SECRET changed (invalidates all tokens)
 
 **Solution**:
-1. Clear localStorage: `localStorage.clear()`
+1. DevTools → Application → Cookies → confirm `auth_token` is present and
+   not flagged `Secure` while testing over plain `http://`
 2. Log out and log back in
-3. Check token not too old: `localStorage.getItem('token')`
+3. Confirm `/api/auth/refresh` isn't itself erroring (Network tab) —
+   frontend logs a console.warn on failure but otherwise degrades silently
 4. Verify JWT_SECRET not changed in backend
 
 ### WebSocket Connection Failed
@@ -1453,7 +1502,8 @@ socket.on('block:new', (data) => {
 ```javascript
 POST /api/tx
 Content-Type: application/json
-Authorization: Bearer {token}
+Cookie: auth_token=<jwt>   (attached automatically by the browser)
+X-CSRF-Token: <csrf-token>
 
 {
   "type": "transfer",
