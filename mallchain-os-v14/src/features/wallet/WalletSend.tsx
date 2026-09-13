@@ -6,6 +6,7 @@ import { isValidMallAddress } from '../../services/wallet';
 import { faucetApi } from '../../services/faucetApi';
 import { requestMnemonic } from '../../services/mnemonicAccess';
 import { useWizard } from '../../hooks/useWizard';
+import { useWalletData } from '../../hooks/useWalletData';
 import { loadAddressBook } from '../../services/addressBookStore';
 
 const SEND_STEPS = ['recipient', 'review', 'authorize', 'broadcast'] as const;
@@ -23,6 +24,7 @@ const INITIAL_SEND_DATA: SendData = { addr: '', amount: '', fee: 0.05 };
 export default function WalletSend() {
   useStoreVersion();
   const st = store.state;
+  useWalletData(st.wallet.address || null);
 
   // Draft (recipient/amount/fee) persists via the durable tier — losing a
   // partially-filled send to an accidental reload is bad UX and there's no

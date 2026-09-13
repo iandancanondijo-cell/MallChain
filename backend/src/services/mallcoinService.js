@@ -113,6 +113,7 @@ async function getWalletBalance(address) {
     const balance = BigInt(wb.balance || 0);
     const locked = BigInt(wb.locked || 0);
     const available = balance > locked ? balance - locked : 0n;
+    const unlockTimeSec = Number(wb.unlock_time || wb.unlockTime || 0);
     const result = {
       address,
       balance: balance.toString(),
@@ -120,6 +121,8 @@ async function getWalletBalance(address) {
       available: available.toString(),
       balanceDisplay: fromBaseUnits(balance),
       availableDisplay: fromBaseUnits(available),
+      lockedDisplay: fromBaseUnits(locked),
+      unlockTime: unlockTimeSec > 0 ? unlockTimeSec * 1000 : null,
       denom: 'MLCNS',
       exists: true,
     };

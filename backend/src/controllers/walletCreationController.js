@@ -24,9 +24,13 @@ async function getWalletBalance(req, res) {
     }
 
     let mall = 0;
+    let mallLocked = 0;
+    let mallUnlockTime = null;
     try {
       const mlcns = await mallcoinService.getWalletBalance(address);
       mall = mlcns.availableDisplay || 0;
+      mallLocked = mlcns.lockedDisplay || 0;
+      mallUnlockTime = mlcns.unlockTime || null;
     } catch (chainErr) {
       console.warn('[Wallet Balance] MLCoin module unavailable, using fallback:', chainErr.message);
       return res.json({
@@ -54,6 +58,8 @@ async function getWalletBalance(req, res) {
     res.json({
       address,
       MALL: mall,
+      MALL_LOCKED: mallLocked,
+      MALL_UNLOCK_TIME: mallUnlockTime,
       MLPTS: mlpts,
       USD_M: 0, // no USD-M stablecoin module on this chain
       KES: 0,

@@ -109,6 +109,14 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   const [retrievePassword, setRetrievePassword] = useState('');
   const [selectedVaultIndex, setSelectedVaultIndex] = useState(0);
   const [retrievedSeed, setRetrievedSeed] = useState<string[] | null>(null);
+  // True when the import screen was reached via "Forgot your password?" —
+  // purely cosmetic (swaps the banner copy). The actual reset mechanism is
+  // just a normal re-import: handleImportPhrase already replaces any
+  // existing vault entry for the same derived address, so re-entering the
+  // recovery phrase with a new password is the whole fix — there is no
+  // separate "reset" code path, because the device password can't be
+  // recovered (nor should it be) without the phrase that proves ownership.
+  const [passwordResetMode, setPasswordResetMode] = useState(false);
 
   // Holds the plaintext mnemonic + derived address between "wallet created/
   // imported/retrieved" and "PIN set" — never written to the durable store
@@ -382,6 +390,10 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
         localStorage.setItem('mallchain_vault', JSON.stringify(newVault));
       }
 
+      if (passwordResetMode) {
+        toast('Password reset — this wallet now unlocks with your new password.');
+        setPasswordResetMode(false);
+      }
       setPendingWallet({ mnemonic: words.join(' '), address });
       goTo('set-pin');
     } catch (err) {
@@ -1443,6 +1455,28 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
                 }}
               />
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                setError('');
+                setRetrievePassword('');
+                setPasswordResetMode(true);
+                goTo('connect-import');
+              }}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--txt-3)',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 600,
+                marginTop: 8,
+                padding: 0,
+                textDecoration: 'underline'
+              }}
+            >
+              Forgot your password?
+            </button>
           </div>
 
           <button
@@ -1532,7 +1566,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   const renderConnectImport = () => (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
       <button
-        onClick={() => goTo('connect-method')}
+        onClick={() => { setPasswordResetMode(false); goTo('connect-method'); }}
         style={{
           background: 'transparent',
           border: 'none',
@@ -1553,9 +1587,13 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 700, color: 'var(--gold)', letterSpacing: 1, textTransform: 'uppercase' }}>
         Step 2 of 2
       </div>
-      <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Enter your recovery phrase</h1>
+      <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>
+        {passwordResetMode ? 'Reset your password' : 'Enter your recovery phrase'}
+      </h1>
       <p style={{ color: 'var(--txt-3)', fontSize: 14, marginBottom: 24 }}>
-        Type or paste it below, separated by single spaces, exactly as it was given to you.
+        {passwordResetMode
+          ? "We can't recover a forgotten device password — it's not stored anywhere, by design. Re-enter the same recovery phrase below to prove it's your wallet, then choose a new password. This replaces the old locked entry for that wallet."
+          : 'Type or paste it below, separated by single spaces, exactly as it was given to you.'}
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

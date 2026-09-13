@@ -5,17 +5,30 @@
  * services (dexApi.ts/dexProto.ts/dexTx.ts, routes/dex.js) are what
  * actually wire it up end to end for the first time.
  */
-import { useEffect, useState } from 'react';
-import { store } from '../../store/store';
+import { useEffect, useMemo, useState } from 'react';
+import { store, type Balance } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { requestMnemonic } from '../../services/mnemonicAccess';
 import { listPools, estimateSwap, type DexPool } from '../../services/dexApi';
 import { swap, DexTxError } from '../../services/dexTx';
 import { Tooltip } from '../../components/Tooltip';
+import { useWalletData } from '../../hooks/useWalletData';
 
 const DECIMALS = 6;
 const SLIPPAGE_PRESETS_BPS = [10, 50, 100]; // 0.1% / 0.5% / 1%
 const DEFAULT_SLIPPAGE_BPS = 100;
+
+const DENOM_TO_STORE: Record<string, keyof Balance | undefined> = {
+  umall: 'MALL',
+  umallcoin: 'MALL',
+  umallpoints: 'MLPTS',
+  umallpoint: 'MLPTS',
+  uusd_m: 'USD_M',
+  uusdm: 'USD_M',
+  ukes: 'KES',
+  ueur: 'EUR',
+  ugbp: 'GBP',
+};
 
 function toBaseUnits(amount: string): string {
   const n = parseFloat(amount);
@@ -32,6 +45,7 @@ function fromBaseUnits(amount: string): string {
 export default function WalletSwap() {
   useStoreVersion();
   const st = store.state;
+  useWalletData(st.wallet.address || null);
 
   const [pools, setPools] = useState<DexPool[] | null>(null);
   const [poolId, setPoolId] = useState<number | null>(null);
@@ -59,6 +73,21 @@ export default function WalletSwap() {
   const denomOut = pool ? (direction === 'AtoB' ? pool.tokenBDenom : pool.tokenADenom) : '';
   const reserveIn = pool ? Number((direction === 'AtoB' ? pool.tokenAReserve : pool.tokenBReserve).amount) : 0;
   const reserveOut = pool ? Number((direction === 'AtoB' ? pool.tokenBReserve : pool.tokenAReserve).amount) : 0;
+
+  const assetIn = useMemo<keyof Balance | null>(() => {
+    if (!denomIn) return null;
+    return DENOM_TO_STORE[denomIn.toLowerCase()] ?? null;
+  }, [denomIn]);
+  const assetOut = useMemo<keyof Balance | null>(() => {
+    if (!denomOut) return null;
+    return DENOM_TO_STORE[denomOut.toLowerCase()] ?? null;
+  }, [denomOut]);
+
+  const balanceIn = assetIn ? st.balances[assetIn] : null;
+  const amtInNum = parseFloat(amountIn);
+  const feeNum = estimate ? Number(fromBaseUnits(estimate.fee)) : 0;
+  const balanceInsufficient =
+    balanceIn !== null && Number.isFinite(amtInNum) && amtInNum + feeNum > balanceIn;
 
   const priceImpactPct = (() => {
     if (!estimate || reserveIn <= 0 || reserveOut <= 0) return null;
@@ -102,6 +131,11 @@ export default function WalletSwap() {
 
   const doSwap = async () => {
     if (!pool || !estimate) return;
+    if (balanceInsufficient) {
+      const have = balanceIn !== null ? balanceIn.toFixed(2) : '?';
+      setErr(`Insufficient balance — you have ${have} ${assetIn || denomIn}. This swap needs ${(amtInNum + feeNum).toFixed(2)} (including fee).`);
+      return;
+    }
     setSwapping(true);
     setErr('');
     try {
@@ -118,6 +152,34 @@ export default function WalletSwap() {
         tokenOutDenom: denomOut,
         minTokenOut: { denom: denomOut, amount: minTokenOut },
       });
+
+      const amountDisplay = Number.isFinite(amtInNum) ? amtInNum : 0;
+      const amountOutDisplay = estimate ? Number(fromBaseUnits(estimate.tokenOut)) : 0;
+
+      if (assetIn && amountDisplay > 0) {
+        store.applyTx({
+          type: 'swap',
+          amount: amountDisplay + feeNum,
+          asset: assetIn,
+          kind: 'debit',
+          fee: feeNum,
+          note: `Swapped ${amountDisplay} ${assetIn} for ${amountOutDisplay.toFixed(6)} ${assetOut || denomOut} on pool #${pool.id}`,
+          notifTitle: `Swapped ${amountDisplay} ${assetIn || denomIn}`,
+          notifKind: 'tx',
+          activityText: `Swapped ${amountDisplay} ${assetIn || denomIn} → ${amountOutDisplay.toFixed(6)} ${assetOut || denomOut}`,
+          status: 'pending',
+        });
+      }
+      if (assetOut && amountOutDisplay > 0) {
+        store.applyTx({
+          type: 'swap',
+          amount: amountOutDisplay,
+          asset: assetOut,
+          kind: 'credit',
+          note: `Received from swap on pool #${pool.id}`,
+          status: 'pending',
+        });
+      }
 
       setTxHash(result.txHash);
       setAmountIn('');
@@ -190,8 +252,28 @@ export default function WalletSwap() {
             </div>
 
             <div className="field mb">
-              <label>Amount ({denomIn})</label>
-              <input className="input" inputMode="decimal" placeholder="0.00" value={amountIn} onChange={(e) => setAmountIn(e.target.value)} disabled={swapping} />
+              <label>
+                Amount ({denomIn})
+                {balanceIn !== null && (
+                  <span className="tiny muted" style={{ float: 'right', fontWeight: 400 }}>
+                    Available: {balanceIn.toFixed(2)} {assetIn || denomIn}
+                  </span>
+                )}
+              </label>
+              <input
+                className="input"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={amountIn}
+                onChange={(e) => setAmountIn(e.target.value)}
+                disabled={swapping}
+                style={balanceInsufficient ? { borderColor: 'var(--red)' } : undefined}
+              />
+              {balanceInsufficient && (
+                <div className="tiny" style={{ color: 'var(--red)', marginTop: 4 }}>
+                  Insufficient balance — required {(amtInNum + feeNum).toFixed(2)}, you have {balanceIn?.toFixed(2) ?? '—'}
+                </div>
+              )}
             </div>
 
             <div className="field mb">
@@ -253,8 +335,8 @@ export default function WalletSwap() {
             {err && <div className="error-message mb">{err}</div>}
             {txHash && <div className="tiny mb">✓ Broadcast — tx <span className="mono">{txHash}</span></div>}
 
-            <button className="btn btn-primary btn-block" onClick={doSwap} disabled={swapping || !estimate || !amountIn}>
-              {swapping ? 'Swapping…' : 'Swap'}
+            <button className="btn btn-primary btn-block" onClick={doSwap} disabled={swapping || !estimate || !amountIn || balanceInsufficient}>
+              {swapping ? 'Swapping…' : balanceInsufficient ? 'Insufficient balance' : 'Swap'}
             </button>
           </>
         )}

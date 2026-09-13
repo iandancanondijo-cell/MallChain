@@ -62,8 +62,20 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
     USD_M: st.balances.USD_M,
   };
 
+  const mallLocked = balance?.MALL_LOCKED ?? 0;
+  const mallUnlockTime = balance?.MALL_UNLOCK_TIME ?? null;
+
   const assets = [
-    { sym: 'MALL', name: 'Mallcoin', val: realBalance.MALL, usd: mallPrice !== null ? realBalance.MALL * mallPrice : null, color: 'var(--gold)' },
+    {
+      sym: 'MALL',
+      name: 'Mallcoin',
+      val: realBalance.MALL,
+      usd: mallPrice !== null ? realBalance.MALL * mallPrice : null,
+      color: 'var(--gold)',
+      note: mallLocked > 0
+        ? `🔒 ${fmtNum(mallLocked)} more locked${mallUnlockTime ? ` until ${new Date(mallUnlockTime).toLocaleDateString()}` : ''}`
+        : null,
+    },
     { sym: 'MLPTS', name: 'Mallpoints', val: realBalance.MLPTS, usd: null, color: 'var(--cyan)' },
     { sym: 'USD-M', name: 'USD stablecoin', val: realBalance.USD_M, usd: realBalance.USD_M, color: 'var(--green)' },
   ];
@@ -180,6 +192,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
                 <div className="card-label">{a.name} ({a.sym})</div>
                 <div className="card-value" style={{ color: a.color }}>{fmtNum(a.val)}</div>
                 <div className="card-sub">{a.usd !== null ? (disp(a.usd) !== null ? `≈ ${fmtMoney(disp(a.usd)!, cur)}` : '…') : 'value unavailable'}</div>
+                {a.note && <div className="card-sub" style={{ color: 'var(--txt-3)' }}>{a.note}</div>}
               </div>
             ))}
           </>

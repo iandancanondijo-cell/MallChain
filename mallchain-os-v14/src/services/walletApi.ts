@@ -22,6 +22,10 @@ import { type ApiResult } from './api';
 export interface WalletBalance {
   address: string;
   MALL: number;
+  /** Portion of MALL that exists but can't be spent yet (e.g. a vesting lock) — already excluded from MALL. */
+  MALL_LOCKED?: number;
+  /** Epoch ms when MALL_LOCKED unlocks, or null if nothing is locked. */
+  MALL_UNLOCK_TIME?: number | null;
   MLPTS: number;
   USD_M: number;
   KES?: number;
