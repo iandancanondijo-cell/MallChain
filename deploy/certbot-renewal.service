@@ -1,0 +1,14 @@
+[Unit]
+Description=Certbot Certificate Renewal
+Documentation=https://certbot.eff.org/docs/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/certbot renew --deploy-hook scripts/nginx-reload-tls.sh
+WorkingDirectory=/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/etc/letsencrypt /var/log/letsencrypt

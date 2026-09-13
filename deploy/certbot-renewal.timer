@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Certbot Certificate Renewal Timer
+Requires=certbot-renewal.service
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+Unit=certbot-renewal.service
+
+[Install]
+WantedBy=timers.target

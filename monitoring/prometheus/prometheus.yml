@@ -26,4 +26,56 @@ scrape_configs:
     http_headers:
       x-api-key:
         secrets:
-          - '<ADMIN_API_KEY — inject via secret store, never commit the real value>'
+          - '<MONITORING_API_KEY — inject via secret store, never commit the real value. ADMIN_API_KEY also accepted by the scoped middleware for convenience during a transition, but prefer MONITORING_API_KEY to uphold least privilege.>'
+
+  - job_name: 'nginx-exporter'
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+    scrape_interval: 15s
+
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'node_cpu_seconds_total|node_memory_MemAvailable_bytes|node_filesystem_avail_bytes|node_filesystem_size_bytes|node_filesystem_readonly|node_load5|machine_cpu_cores'
+        action: keep
+
+  - job_name: 'mongo-exporter'
+    static_configs:
+      - targets: ['mongo-exporter:9216']
+    scrape_interval: 30s
+
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 30s
+
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 15s
+
+  - job_name: 'vault-exporter'
+    static_configs:
+      - targets: ['vault-exporter:9410']
+    scrape_interval: 30s
+    # Vault's /metrics requires the X-Vault-Token header on vault-exporter's
+    # own scrape target — vault-exporter should fetch it from a VAULT_TOKEN
+    # env, not from Prometheus, so nothing needed here beyond the target.
+
+  - job_name: 'prometheus-remote-write-k6'
+    # When k6 is invoked with:
+    #   K6_OUT=experimental-prometheus-rw \
+    #   K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write \
+    #   k6 run load-tests/payment-sustained.js
+    # the k6 runtime pushes k6_* metrics (k6_http_req_duration, k6_vus,
+    # k6_http_req_failed, etc.) directly into Prometheus via the
+    # --web.enable-remote-write-receiver flag. We scrape Prometheus's own
+    # /metrics endpoint for the standard prometheus_* counters and leave
+    # k6_* alone — they enter the TSDB directly via write.
+    honor_labels: true
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['localhost:9090']

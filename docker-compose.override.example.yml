@@ -1,0 +1,343 @@
+version: '3.8'
+
+# ── docker-compose.override.example.yml ───────────────────────────────────────
+# Staging / development override for docker-compose.prod.yml.
+# Copy to docker-compose.override.yml in the same directory to activate.
+# This file demonstrates:
+#   • fewer replicas / single-node equivalents for databases (no need for
+#     3-node Redis Sentinel, 3-node Mongo replica set, or 3-node Redis
+#     cluster in a single-host staging environment)
+#   • relaxed resource limits (memory/cpu) for smaller hosts
+#   • local bind mounts in place of some named volumes for easier debugging
+#   • direct port binds (not just 127.0.0.1) for QA access
+#   • NODE_ENV=staging instead of production
+# ───────────────────────────────────────────────────────────────────────────────
+
+x-staging-restart: &staging-restart
+  restart: unless-stopped
+
+services:
+  # ── Vault: relax memory, dev-mode-ish single node ──────────────────────────
+  vault:
+    <<: *staging-restart
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: staging-root-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    command: server -dev
+    cap_add: []
+    ports:
+      - "127.0.0.1:8200:8200"
+
+  # ── Postgres: keep but shrink memory; expose for debugging ─────────────────
+  postgres:
+    <<: *staging-restart
+    mem_limit: 1G
+    mem_reservation: 256M
+    cpus: "1.0"
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - ./tmp/postgres-logs:/var/log/postgresql
+
+  # ── Redis: single node replaces 3-node cluster + 3 sentinels ──────────────
+  redis-node-1:
+    <<: *staging-restart
+    command: >
+      redis-server
+      --appendonly yes
+      --port 6379
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1 --save 300 10
+    mem_limit: 512M
+    mem_reservation: 128M
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  redis-node-2:
+    entrypoint: ["echo", "staging: redis-node-2 disabled (single-node redis)"]
+    command: ""
+    restart: "no"
+    deploy:
+      replicas: 0
+
+  redis-node-3:
+    entrypoint: ["echo", "staging: redis-node-3 disabled (single-node redis)"]
+    command: ""
+    restart: "no"
+    deploy:
+      replicas: 0
+
+  redis-sentinel-1:
+    entrypoint: ["echo", "staging: redis-sentinel disabled (single-node redis)"]
+    command: ""
+    restart: "no"
+    deploy:
+      replicas: 0
+
+  redis-sentinel-2:
+    entrypoint: ["echo", "staging: redis-sentinel disabled (single-node redis)"]
+    command: ""
+    restart: "no"
+    deploy:
+      replicas: 0
+
+  redis-sentinel-3:
+    entrypoint: ["echo", "staging: redis-sentinel disabled (single-node redis)"]
+    command: ""
+    restart: "no"
+    deploy:
+      replicas: 0
+
+  # ── Mongo: single-node replica set replaces 3-node RS ─────────────────────
+  mongo-rs-1:
+    <<: *staging-restart
+    command: >
+      --replSet mallchain-rs
+      --bind_ip_all
+      --port 27017
+      --wiredTigerCacheSizeGB 0.5
+    mem_limit: 1G
+    mem_reservation: 256M
+    cpus: "1.0"
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data-1:/data/db
+      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+      - ./tmp/mongo-logs:/var/log/mongodb
+
+  mongo-rs-2:
+    entrypoint: ["echo", "staging: mongo-rs-2 disabled (single-node RS)"]
+    command: ""
+    restart: "no"
+    deploy:
+      replicas: 0
+
+  mongo-rs-3:
+    entrypoint: ["echo", "staging: mongo-rs-3 disabled (single-node RS)"]
+    command: ""
+    restart: "no"
+    deploy:
+      replicas: 0
+
+  # ── Nginx: expose 8080/8443 on all interfaces for QA VMs ──────────────────
+  nginx:
+    <<: *staging-restart
+    mem_limit: 256M
+    mem_reservation: 64M
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./deploy/nginx/conf.d.staging:/etc/nginx/conf.d:ro
+      - ssl-certs:/etc/nginx/ssl
+      - certbot-www:/var/www/certbot:ro
+      - nginx-cache:/var/cache/nginx
+      - ./tmp/nginx-logs:/var/log/nginx
+
+  # ── Exporters / monitoring: keep but lower limits, expose UI ports ────────
+  nginx-exporter:
+    <<: *staging-restart
+    mem_limit: 128M
+    mem_reservation: 32M
+
+  node-exporter:
+    <<: *staging-restart
+    mem_limit: 64M
+    mem_reservation: 16M
+
+  prometheus:
+    <<: *staging-restart
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.wal-compression
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+      - --web.listen-address=:9090
+      - --query.max-concurrency=10
+      - --query.timeout=1m
+    mem_limit: 2G
+    mem_reservation: 512M
+    cpus: "1.0"
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  alertmanager:
+    <<: *staging-restart
+    mem_limit: 128M
+    mem_reservation: 32M
+    ports:
+      - "127.0.0.1:9093:9093"
+
+  grafana:
+    <<: *staging-restart
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_USERS_ALLOW_SIGN_UP: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_LOG_MODE: console
+      GF_LOG_LEVEL: info
+    mem_limit: 512M
+    mem_reservation: 128M
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  # ── Backend: staging env, bind source for hot reload, debug port ──────────
+  backend:
+    <<: *staging-restart
+    image: ghcr.io/mallchain/backend:staging
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: deps
+    environment:
+      NODE_ENV: staging
+      PORT: 4000
+      DEBUG: mallchain:*
+      MONGO_URI: mongodb://mallchain:${MONGO_APP_PASSWORD:-staging-mongo-pass}@mongo-rs-1:27017/marketplace?authSource=admin&replicaSet=mallchain-rs&readPreference=primaryPreferred
+      REDIS_HOST: redis-node-1
+      REDIS_PORT: 6379
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_USER: explorer
+      PG_DATABASE: mallchain_explorer
+      CHAIN_RPC: http://chain-sentry:26657
+      CHAIN_REST: http://chain-sentry:1317
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: staging-root-token
+      TRUST_PROXY: 10.30.0.0/16,172.0.0.0/8
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    ports:
+      - "127.0.0.1:4000:4000"
+      - "127.0.0.1:9229:9229"
+    command: ["node", "--inspect=0.0.0.0:9229", "-r", "./src/tracing.js", "src/index.js"]
+
+  # ── Frontend: build from local Dockerfile with staging API URL ────────────
+  frontend:
+    <<: *staging-restart
+    image: ghcr.io/mallchain/frontend:staging
+    build:
+      context: ./mallchain-os-v14
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:4000}
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+
+  # ── Chain sentry: shrink limits, expose RPC for debugging ─────────────────
+  chain-sentry:
+    <<: *staging-restart
+    image: ghcr.io/mallchain/marketplaced:staging
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+        reservations:
+          cpus: "1.0"
+          memory: 1G
+    command: >
+      start
+      --home=/home/marketplaced/.marketplaced
+      --minimum-gas-prices=0.01umal
+      --rpc.laddr=tcp://0.0.0.0:26657
+      --p2p.laddr=tcp://0.0.0.0:26656
+      --api.enable
+      --api.address=tcp://0.0.0.0:1317
+      --grpc.address=0.0.0.0:9090
+      --pruning=nothing
+      --log_level=info
+    ports:
+      - "127.0.0.1:26656:26656"
+      - "127.0.0.1:26657:26657"
+      - "127.0.0.1:1317:1317"
+      - "127.0.0.1:9090:9090"
+
+  # ── DB exporters: keep but relax limits ───────────────────────────────────
+  mongo-exporter:
+    <<: *staging-restart
+    mem_limit: 128M
+    mem_reservation: 32M
+
+  postgres-exporter:
+    <<: *staging-restart
+    mem_limit: 128M
+    mem_reservation: 32M
+
+  redis-exporter:
+    <<: *staging-restart
+    mem_limit: 128M
+    mem_reservation: 32M
+
+  vault-exporter:
+    <<: *staging-restart
+    mem_limit: 128M
+    mem_reservation: 32M
+
+volumes:
+  postgres-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./tmp/staging/postgres
+  redis-data-1:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./tmp/staging/redis-1
+  mongo-data-1:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./tmp/staging/mongo-1
+  prometheus-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./tmp/staging/prometheus
+  grafana-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./tmp/staging/grafana
+  chain-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./tmp/staging/chain

@@ -9,6 +9,14 @@ terraform {
       source  = "hashicorp/tls"
       version = "~> 4.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.5"
+    }
+    template = {
+      source  = "hashicorp/template"
+      version = "~> 2.2"
+    }
   }
 
   # State should live in a real remote backend (S3 + DynamoDB lock table, or

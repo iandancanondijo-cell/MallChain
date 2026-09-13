@@ -1,0 +1,777 @@
+version: '3.8'
+
+x-restart-policy: &restart-always
+  restart: always
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "100m"
+    max-file: "10"
+
+services:
+  vault:
+    image: hashicorp/vault:1.15
+    <<: *restart-always
+    container_name: mallchain-vault
+    hostname: vault
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_ADDR: http://127.0.0.1:8200
+      VAULT_LOCAL_CONFIG: |
+        {
+          "listener": [{
+            "tcp": {
+              "address": "0.0.0.0:8200",
+              "tls_disable": 1
+            }
+          }],
+          "storage": {
+            "file": {
+              "path": "/vault/file"
+            }
+          },
+          "default_lease_ttl": "168h",
+          "max_lease_ttl": "720h",
+          "ui": true
+        }
+    volumes:
+      - vault-file:/vault/file
+      - vault-logs:/vault/logs
+      - vault-config:/vault/config
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    command: server
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    logging: *default-logging
+
+  postgres:
+    image: postgres:16-alpine
+    <<: *restart-always
+    container_name: mallchain-postgres
+    hostname: postgres
+    environment:
+      POSTGRES_USER: explorer
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_DB: mallchain_explorer
+      PGDATA: /var/lib/postgresql/data/pgdata
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    shm_size: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U explorer -d mallchain_explorer"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    mem_limit: 2G
+    mem_reservation: 512M
+    cpus: "2.0"
+    logging: *default-logging
+
+  redis-node-1:
+    image: redis:7-alpine
+    <<: *restart-always
+    container_name: mallchain-redis-node-1
+    hostname: redis-node-1
+    command: >
+      redis-server
+      --appendonly yes
+      --replica-announce-ip redis-node-1
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --port 6379
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1 --save 300 10 --save 60 10000
+    volumes:
+      - redis-data-1:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    mem_limit: 1G
+    mem_reservation: 256M
+    logging: *default-logging
+
+  redis-node-2:
+    image: redis:7-alpine
+    <<: *restart-always
+    container_name: mallchain-redis-node-2
+    hostname: redis-node-2
+    command: >
+      redis-server
+      --appendonly yes
+      --replica-announce-ip redis-node-2
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --port 6380
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1 --save 300 10 --save 60 10000
+    volumes:
+      - redis-data-2:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    mem_limit: 1G
+    mem_reservation: 256M
+    logging: *default-logging
+
+  redis-node-3:
+    image: redis:7-alpine
+    <<: *restart-always
+    container_name: mallchain-redis-node-3
+    hostname: redis-node-3
+    command: >
+      redis-server
+      --appendonly yes
+      --replica-announce-ip redis-node-3
+      --cluster-enabled yes
+      --cluster-config-file nodes.conf
+      --cluster-node-timeout 5000
+      --port 6381
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1 --save 300 10 --save 60 10000
+    volumes:
+      - redis-data-3:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6381", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    mem_limit: 1G
+    mem_reservation: 256M
+    logging: *default-logging
+
+  redis-sentinel-1:
+    image: redis:7-alpine
+    <<: *restart-always
+    container_name: mallchain-redis-sentinel-1
+    hostname: redis-sentinel-1
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+    command: >
+      redis-sentinel /usr/local/etc/redis/sentinel.conf
+      --sentinel monitor mymaster redis-node-1 6379 2
+      --sentinel down-after-milliseconds mymaster 5000
+      --sentinel parallel-syncs mymaster 1
+      --sentinel failover-timeout mymaster 10000
+      --sentinel resolve-hostnames yes
+      --sentinel announce-ip redis-sentinel-1
+      --port 26379
+    volumes:
+      - sentinel-conf-1:/usr/local/etc/redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    mem_limit: 256M
+    mem_reservation: 64M
+    logging: *default-logging
+
+  redis-sentinel-2:
+    image: redis:7-alpine
+    <<: *restart-always
+    container_name: mallchain-redis-sentinel-2
+    hostname: redis-sentinel-2
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+    command: >
+      redis-sentinel /usr/local/etc/redis/sentinel.conf
+      --sentinel monitor mymaster redis-node-1 6379 2
+      --sentinel down-after-milliseconds mymaster 5000
+      --sentinel parallel-syncs mymaster 1
+      --sentinel failover-timeout mymaster 10000
+      --sentinel resolve-hostnames yes
+      --sentinel announce-ip redis-sentinel-2
+      --port 26380
+    volumes:
+      - sentinel-conf-2:/usr/local/etc/redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26380", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    mem_limit: 256M
+    mem_reservation: 64M
+    logging: *default-logging
+
+  redis-sentinel-3:
+    image: redis:7-alpine
+    <<: *restart-always
+    container_name: mallchain-redis-sentinel-3
+    hostname: redis-sentinel-3
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+    command: >
+      redis-sentinel /usr/local/etc/redis/sentinel.conf
+      --sentinel monitor mymaster redis-node-1 6379 2
+      --sentinel down-after-milliseconds mymaster 5000
+      --sentinel parallel-syncs mymaster 1
+      --sentinel failover-timeout mymaster 10000
+      --sentinel resolve-hostnames yes
+      --sentinel announce-ip redis-sentinel-3
+      --port 26381
+    volumes:
+      - sentinel-conf-3:/usr/local/etc/redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26381", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    mem_limit: 256M
+    mem_reservation: 64M
+    logging: *default-logging
+
+  mongo-rs-1:
+    image: mongo:7
+    <<: *restart-always
+    container_name: mallchain-mongo-rs-1
+    hostname: mongo-rs-1
+    command: >
+      --replSet mallchain-rs
+      --bind_ip_all
+      --keyFile /etc/mongo-keyfile
+      --port 27017
+      --wiredTigerCacheSizeGB 1.5
+      --oplogSize 1024
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/mongo_root_password
+      MONGO_INITDB_DATABASE: marketplace
+    secrets:
+      - mongo_root_password
+    volumes:
+      - mongo-data-1:/data/db
+      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh admin --quiet --eval 'try { rs.status().ok } catch (e) { 0 }'"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    mem_limit: 4G
+    mem_reservation: 1G
+    cpus: "2.0"
+    logging: *default-logging
+
+  mongo-rs-2:
+    image: mongo:7
+    <<: *restart-always
+    container_name: mallchain-mongo-rs-2
+    hostname: mongo-rs-2
+    command: >
+      --replSet mallchain-rs
+      --bind_ip_all
+      --keyFile /etc/mongo-keyfile
+      --port 27018
+      --wiredTigerCacheSizeGB 1.5
+      --oplogSize 1024
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/mongo_root_password
+    secrets:
+      - mongo_root_password
+    volumes:
+      - mongo-data-2:/data/db
+      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --port 27018 admin --quiet --eval 'try { rs.status().ok } catch (e) { 0 }'"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    mem_limit: 4G
+    mem_reservation: 1G
+    cpus: "2.0"
+    logging: *default-logging
+
+  mongo-rs-3:
+    image: mongo:7
+    <<: *restart-always
+    container_name: mallchain-mongo-rs-3
+    hostname: mongo-rs-3
+    command: >
+      --replSet mallchain-rs
+      --bind_ip_all
+      --keyFile /etc/mongo-keyfile
+      --port 27019
+      --wiredTigerCacheSizeGB 1.5
+      --oplogSize 1024
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/mongo_root_password
+    secrets:
+      - mongo_root_password
+    volumes:
+      - mongo-data-3:/data/db
+      - ./mongo-keyfile:/etc/mongo-keyfile:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --port 27019 admin --quiet --eval 'try { rs.status().ok } catch (e) { 0 }'"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    mem_limit: 4G
+    mem_reservation: 1G
+    cpus: "2.0"
+    logging: *default-logging
+
+  nginx:
+    image: nginx:1.27-alpine
+    <<: *restart-always
+    container_name: mallchain-nginx
+    hostname: nginx
+    volumes:
+      - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ssl-certs:/etc/nginx/ssl
+      - certbot-www:/var/www/certbot:ro
+      - nginx-cache:/var/cache/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - backend
+      - frontend
+    mem_limit: 512M
+    mem_reservation: 128M
+    cpus: "1.0"
+    logging: *default-logging
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.1
+    <<: *restart-always
+    container_name: mallchain-nginx-exporter
+    hostname: nginx-exporter
+    command:
+      - -nginx.scrape-uri=http://nginx:8080/stub_status
+      - -web.listen-address=:9113
+    ports:
+      - "127.0.0.1:9113:9113"
+    depends_on:
+      - nginx
+    mem_limit: 256M
+    mem_reservation: 64M
+    logging: *default-logging
+
+  node-exporter:
+    image: prom/node-exporter:v1.8
+    <<: *restart-always
+    container_name: mallchain-node-exporter
+    hostname: node-exporter
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns)($$|/)
+      - --collector.systemd
+      - --no-collector.arp
+      - --no-collector.nfs
+    mem_limit: 128M
+    mem_reservation: 32M
+    logging: *default-logging
+
+  prometheus:
+    image: prom/prometheus:v2.53
+    <<: *restart-always
+    container_name: mallchain-prometheus
+    hostname: prometheus
+    user: "65534:65534"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./monitoring/prometheus:/etc/prometheus:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --storage.tsdb.wal-compression
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+      - --web.listen-address=:9090
+      - --web.external-url=http://prometheus:9090
+      - --query.max-concurrency=20
+      - --query.timeout=2m
+    ports:
+      - "127.0.0.1:9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 4G
+    mem_reservation: 1G
+    cpus: "2.0"
+    logging: *default-logging
+
+  alertmanager:
+    image: prom/alertmanager:v0.27
+    <<: *restart-always
+    container_name: mallchain-alertmanager
+    hostname: alertmanager
+    user: "65534:65534"
+    volumes:
+      - alertmanager-data:/alertmanager
+      - ./monitoring/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --data.retention=120h
+      - --web.listen-address=:9093
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9093/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    mem_limit: 256M
+    mem_reservation: 64M
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:11.1
+    <<: *restart-always
+    container_name: mallchain-grafana
+    hostname: grafana
+    user: "472"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+      GF_SERVER_ROOT_URL: http://grafana:3000
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_LOG_MODE: console
+      GF_LOG_LEVEL: warn
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/dashboard.json
+    secrets:
+      - grafana_admin_password
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      - prometheus
+    mem_limit: 1G
+    mem_reservation: 256M
+    logging: *default-logging
+
+  backend:
+    image: ghcr.io/mallchain/backend:latest
+    <<: *restart-always
+    container_name: mallchain-backend
+    hostname: backend
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      MONGO_URI: mongodb://mallchain:${MONGO_APP_PASSWORD}@mongo-rs-1:27017,mongo-rs-2:27018,mongo-rs-3:27019/marketplace?authSource=admin&replicaSet=mallchain-rs&readPreference=primaryPreferred
+      REDIS_HOST: redis-node-1
+      REDIS_PORT: 6379
+      REDIS_SENTINEL_HOSTS: redis-sentinel-1:26379,redis-sentinel-2:26380,redis-sentinel-3:26381
+      REDIS_SENTINEL_MASTER: mymaster
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_USER: explorer
+      PG_DATABASE: mallchain_explorer
+      CHAIN_RPC: http://chain-sentry:26657
+      CHAIN_REST: http://chain-sentry:1317
+      VAULT_ADDR: http://vault:8200
+      TRUST_PROXY: 10.30.0.0/16
+    secrets:
+      - postgres_password
+    volumes:
+      - backend-logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-node-1:
+        condition: service_healthy
+      mongo-rs-1:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 4G
+        reservations:
+          cpus: "1.0"
+          memory: 1G
+    logging: *default-logging
+
+  frontend:
+    image: ghcr.io/mallchain/frontend:latest
+    <<: *restart-always
+    container_name: mallchain-frontend
+    hostname: frontend
+    env_file: .env
+    environment:
+      NODE_ENV: production
+    volumes:
+      - frontend-cache:/var/cache/nginx
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    logging: *default-logging
+
+  chain-sentry:
+    image: ghcr.io/mallchain/marketplaced:latest
+    <<: *restart-always
+    container_name: mallchain-chain-sentry
+    hostname: chain-sentry
+    env_file: .env
+    environment:
+      HOME: /home/marketplaced
+    volumes:
+      - chain-data:/home/marketplaced/.marketplaced
+      - chain-logs:/home/marketplaced/logs
+    command: >
+      start
+      --home=/home/marketplaced/.marketplaced
+      --minimum-gas-prices=0.01umal
+      --rpc.laddr=tcp://0.0.0.0:26657
+      --p2p.laddr=tcp://0.0.0.0:26656
+      --api.enable
+      --api.address=tcp://0.0.0.0:1317
+      --grpc.address=0.0.0.0:9090
+      --pruning=custom
+      --pruning-keep-recent=362880
+      --pruning-interval=100
+    depends_on:
+      - redis-node-1
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:26657/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 8G
+        reservations:
+          cpus: "2.0"
+          memory: 2G
+    logging: *default-logging
+
+  mongo-exporter:
+    image: percona/mongodb_exporter:0.40
+    <<: *restart-always
+    container_name: mallchain-mongo-exporter
+    hostname: mongo-exporter
+    environment:
+      MONGODB_URI: mongodb://admin:${MONGO_ROOT_PASSWORD}@mongo-rs-1:27017,mongo-rs-2:27018,mongo-rs-3:27019/admin?replicaSet=mallchain-rs&authSource=admin
+    command:
+      - --collect-all
+      - --compatible-mode
+      - --web.listen-address=:9216
+    ports:
+      - "127.0.0.1:9216:9216"
+    depends_on:
+      mongo-rs-1:
+        condition: service_healthy
+    mem_limit: 256M
+    mem_reservation: 64M
+    logging: *default-logging
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    <<: *restart-always
+    container_name: mallchain-postgres-exporter
+    hostname: postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: postgresql://explorer:${POSTGRES_PASSWORD}@postgres:5432/mallchain_explorer?sslmode=disable
+      PG_EXPORTER_EXCLUDE_DATABASES: template0,template1
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "true"
+    ports:
+      - "127.0.0.1:9187:9187"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 256M
+    mem_reservation: 64M
+    logging: *default-logging
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.59.0
+    <<: *restart-always
+    container_name: mallchain-redis-exporter
+    hostname: redis-exporter
+    command:
+      - --redis.addr=redis://redis-node-1:6379
+      - --redis.addr=redis://redis-node-2:6380
+      - --redis.addr=redis://redis-node-3:6381
+      - --web.listen-address=:9121
+    ports:
+      - "127.0.0.1:9121:9121"
+    depends_on:
+      redis-node-1:
+        condition: service_healthy
+      redis-node-2:
+        condition: service_healthy
+      redis-node-3:
+        condition: service_healthy
+    mem_limit: 256M
+    mem_reservation: 64M
+    logging: *default-logging
+
+  vault-exporter:
+    image: prometheuscommunity/vault-exporter:v1.7.0
+    <<: *restart-always
+    container_name: mallchain-vault-exporter
+    hostname: vault-exporter
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN}
+    command:
+      - --web.listen-address=:9410
+      - --vault.insecure
+    ports:
+      - "127.0.0.1:9410:9410"
+    depends_on:
+      vault:
+        condition: service_healthy
+    mem_limit: 256M
+    mem_reservation: 64M
+    logging: *default-logging
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  mongo_root_password:
+    file: ./secrets/mongo_root_password.txt
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password.txt
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.30.0.0/16
+          gateway: 10.30.0.1
+
+volumes:
+  vault-file:
+    driver: local
+  vault-logs:
+    driver: local
+  vault-config:
+    driver: local
+  postgres-data:
+    driver: local
+  redis-data-1:
+    driver: local
+  redis-data-2:
+    driver: local
+  redis-data-3:
+    driver: local
+  sentinel-conf-1:
+    driver: local
+  sentinel-conf-2:
+    driver: local
+  sentinel-conf-3:
+    driver: local
+  mongo-data-1:
+    driver: local
+  mongo-data-2:
+    driver: local
+  mongo-data-3:
+    driver: local
+  ssl-certs:
+    driver: local
+  certbot-www:
+    driver: local
+  nginx-cache:
+    driver: local
+  prometheus-data:
+    driver: local
+  alertmanager-data:
+    driver: local
+  grafana-data:
+    driver: local
+  backend-logs:
+    driver: local
+  frontend-cache:
+    driver: local
+  chain-data:
+    driver: local
+  chain-logs:
+    driver: local

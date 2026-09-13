@@ -32,6 +32,12 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
+      - name: Install gosec
+        run: go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+      - name: Run gosec (Go SAST)
+        run: $(go env GOPATH)/bin/gosec -severity medium -confidence medium -exclude-dir=testutil ./...
+        continue-on-error: false
+
   backend-node:
     runs-on: ubuntu-latest
     steps:
@@ -49,6 +55,12 @@ jobs:
 
       - name: Lint backend
         run: cd backend && npx eslint src/ --max-warnings=0
+
+      - name: Run njsscan (Node.js SAST)
+        uses: opensecurity/njsscan-action@d41d41b01f5eb4af6da451f55e028571a8872e68 # v1
+        with:
+          scan-path: 'backend/src'
+          args: '--json -o njsscan-report.json'
 
       - name: Run backend tests
         run: cd backend && npm test -- --coverage
