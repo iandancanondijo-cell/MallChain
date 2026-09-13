@@ -12,6 +12,16 @@ FROM node:20-alpine
 # a package refresh at build time rather than wait on the next base image
 # publish.
 RUN apk upgrade --no-cache
+# node:20-alpine bundles a global npm CLI install that this image never
+# invokes at runtime (CMD calls `node` directly) — but Trivy's Node.js
+# scanner still picks up npm's OWN vendored dependencies (pacote, sigstore,
+# tar, glob, minimatch, cross-spawn, ip-address, brace-expansion — npm
+# 10.8.2's actual dependency closure) as if they were this app's. They
+# were never reachable from backend/package-lock.json; confirmed via
+# `npm view npm@10.8.2 dependencies.pacote` matching the exact flagged
+# version. Deleting the unused CLI removes both the noise and the
+# (admittedly inert) extra attack surface.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 WORKDIR /app
 COPY --from=deps /app/package*.json ./
