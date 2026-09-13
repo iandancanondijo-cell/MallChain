@@ -12,8 +12,17 @@ paths = [
   '''\.env\.example$''',
   '''package-lock\.json$''',
   '''go\.sum$''',
+  # Cosmos SDK genesis file: every "key" here is a pub_key under
+  # @type: /cosmos.crypto.secp256k1.PubKey — public by construction (the
+  # chain hands these back to anyone who queries an account over REST/gRPC
+  # anyway), never a private key. Confirmed by inspecting the actual flagged
+  # lines before adding this — see the commit that added this entry.
+  '''blockchain_working/config/genesis\.json$''',
 ]
 regexes = [
   # .env.example's placeholders — never real secrets, just instructive names.
   '''REPLACE_WITH_[A-Z0-9_]+''',
+  # Idempotency-Key test fixtures (e.g. backend/src/__tests__/withdrawIdempotency.test.js)
+  # — literal fake strings like 'withdraw-key-1', not real credentials.
+  '''withdraw-key-\d+''',
 ]

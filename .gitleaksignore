@@ -1,0 +1,16 @@
+# Fingerprint-based gitleaks baseline (gitleaks docs: "baseline" support).
+# Use this only for findings already reviewed and confirmed NOT a real
+# secret, where the flagged content lives in a commit's diff (git history),
+# not the current file content — .gitleaks.toml's path/regex allowlist
+# already covers current-content patterns; this covers historical ones that
+# rewriting history to remove isn't worth the disruption for.
+#
+# docs/INTEGRATION_ARCHITECTURE.md, introduced in 18cd582 (2026-09-13):
+# a documentation example showing the *shape* of a JWT
+# ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."), truncated with "...", never a
+# real issued token. The current file content (see docs commit after this
+# one) no longer includes it at all — replaced with an accurate description
+# of the httpOnly-cookie auth flow — but the old commit's diff still
+# contains the original line, which .gitleaks.toml's content-based
+# allowlist can't retroactively suppress.
+18cd5823198df384baebe1d0e3b012ea694cb039:docs/INTEGRATION_ARCHITECTURE.md:generic-api-key:127

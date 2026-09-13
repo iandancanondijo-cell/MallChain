@@ -111,33 +111,42 @@ Component updates state/UI
 
 #### Example: Authentication Request
 
+The JWT itself is never present in the request or response body — it's set
+as an httpOnly `auth_token` cookie by the server (invisible to frontend JS,
+so an XSS payload can't exfiltrate it). The response body only carries a
+non-secret `expiresAt` hint the frontend uses to drive UI state.
+
 ```
 POST /api/auth/login
 Content-Type: application/json
 
 {
-  "username": "user@example.com",
+  "email": "user@example.com",
   "password": "secure_password"
 }
 
 Response (200 OK):
+Set-Cookie: auth_token=<jwt>; HttpOnly; SameSite=Strict; Path=/
 {
-  "ok": true,
-  "data": {
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "user": {
-      "userId": "507f1f77bcf86cd799439011",
-      "username": "user@example.com"
-    }
+  "expiresAt": 1789279452,
+  "user": {
+    "id": "507f1f77bcf86cd799439011",
+    "email": "user@example.com"
   }
 }
 ```
 
 #### Example: Protected Route Request
 
+Every request carries `credentials: 'include'` so the browser attaches the
+session cookie automatically — there is no Authorization header. Because
+cookie auth is forgeable cross-site (unlike a manually-attached bearer
+header), mutating requests (POST/PUT/PATCH/DELETE) also carry an
+`X-CSRF-Token` header, fetched once from `GET /api/csrf-token`.
+
 ```
 GET /api/wallets/mall1abc.../balances
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Cookie: auth_token=<jwt>
 Content-Type: application/json
 
 Response (200 OK):
