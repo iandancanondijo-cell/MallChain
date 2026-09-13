@@ -63,7 +63,7 @@ jobs:
           GOFLAGS: "-buildvcs=false"
 
       - name: Delete the "latest" Release
-        uses: dev-drprasad/delete-tag-and-release@5eafd8668311bf3e4d6c1e9898f32a317103de68 # v0.2.1
+        uses: dev-drprasad/delete-tag-and-release@82600feb9527126eca69833f07bafe53279bd9b4 # v1.1
         if: ${{ steps.vars.outputs.is_release_type_latest == 'true' }}
         with:
           tag_name: ${{ steps.vars.outputs.tag_name }}
