@@ -29,25 +29,77 @@ export const Careers = () => {
   );
 };
 
+const LESSONS = [
+  {
+    t: 'What is Mallcoin (MALL)?',
+    d: 'Core token economics',
+    body: [
+      'MALL has a fixed total supply of 670,000,000 — nothing beyond that ever gets minted. New coins enter circulation on a fixed emission schedule, not on demand.',
+      'Emission runs in 36-month phases. Phase 1 releases 3,000,000 MALL per month; every phase after that halves the previous rate (phase 2 = 1,500,000/month, phase 3 = 750,000/month, and so on). Nobody can speed this up — it\'s a fixed schedule, not a market decision.',
+      'A separate token, MLCNS, is what you actually hold and spend day to day (buy/sell, send, stake) — it\'s the liquid, tradable form backed by the MALL emission above.',
+      'Transfers carry a small fee (currently 1% at time of writing). Half goes to active stakers, split proportionally to how much they\'ve staked; half goes to the treasury. This is what "staking rewards" actually are on this chain — a share of real transaction activity, not tokens created from nothing.',
+    ],
+  },
+  {
+    t: 'Mining vs participation',
+    d: 'Campaign Participants model',
+    body: [
+      'There\'s no proof-of-work mining here — "Mines" is this app\'s name for its content/task-review system, unrelated to how the underlying chain reaches consensus (see the next lesson for that).',
+      'A Campaign Participant completes tasks from active campaigns (the Mines tab) and submits proof of completion. A separate pool of reviewers — a random 6 per submission — votes to approve or reject it.',
+      'Each reviewer\'s vote is weighted by their own reputation score (0–100, starting at 50 for a brand-new reviewer), not counted equally — a reviewer with a track record of careful, responsive voting carries more weight than one who doesn\'t.',
+      'A submission is approved once the reputation-weighted "yes" votes clear 60% of the total weight cast. Reviewers who never show up to vote lose reputation, and three consecutive no-shows suspends their reviewer stake — the incentive is to actually review, not just hold the role.',
+    ],
+  },
+  {
+    t: 'Validators & consensus',
+    d: 'How blocks actually get produced',
+    body: [
+      'This is a completely different "validator" from the reviewers in the previous lesson — this one is about how the blockchain itself reaches agreement on every block, using the standard Cosmos SDK proof-of-stake model (Tendermint/CometBFT consensus).',
+      'A validator runs a node and bonds `stake` (this chain\'s native gas/staking token — see the runbook on operator funding if you want the full "where does stake come from" answer). Delegators can add their own stake behind a validator they trust, sharing in that validator\'s rewards minus its commission.',
+      'Missing blocks past a configured threshold (currently: signing fewer than 50% of the last 100 blocks) gets a validator jailed — temporarily removed from duty, earning nothing, until it un-jails itself. Double-signing (the same validator signing two conflicting blocks, usually from running the same key on two machines by mistake) is slashed — a real, non-refundable loss of 5% of that validator\'s stake. Ordinary downtime is a smaller 1% slash on top of the jailing.',
+      'Anyone can become a validator — see the "Become a Validator" guide for the actual step-by-step (it\'s a technical, operator-level task, not something done through this app\'s UI).',
+    ],
+  },
+  {
+    t: 'Escrow & marketplace safety',
+    d: 'How a marketplace purchase is actually protected',
+    body: [
+      'When a buyer pays for something through the marketplace, their funds move into an on-chain escrow — not directly to the seller — where they\'re held until the deal is confirmed.',
+      'The buyer releases funds once they\'re satisfied (only the buyer can trigger a release), or the seller can refund the buyer (only the seller can trigger a refund) if the deal falls through. Neither side can unilaterally take the other\'s side of that decision.',
+      'If something\'s wrong, the buyer can open a dispute during the escrow\'s dispute window, freezing the funds until it\'s resolved rather than letting a release happen on autopilot.',
+      'Every one of these actions — create, release, refund, dispute — is validated on-chain before anything moves: real addresses, a real positive amount, a real (non-empty) escrow reference. Malformed or malicious-looking requests get rejected before they ever touch anyone\'s balance.',
+    ],
+  },
+];
+
 export const Learning = () => {
   useStoreVersion();
   const st = store.state;
   const toggle = (i: number) => { st.learning[i] = !st.learning[i]; store.commit(); };
-  const lessons = [
-    { t: 'What is Mallcoin (MALL)?', d: 'Core token economics', done: st.learning[0] },
-    { t: 'Mining vs participation', d: 'Campaign Participants model', done: st.learning[1] },
-    { t: 'Validators & consensus', d: '80% threshold, blind review', done: st.learning[2] },
-    { t: 'Escrow & marketplace safety', d: 'Dispute resolution', done: st.learning[3] },
-  ];
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const lessons = LESSONS.map((l, i) => ({ ...l, done: st.learning[i] }));
   return (
     <div>
       <div className="view-head"><h1>Learning</h1><span className="sub">Mallchain Academy</span></div>
       {lessons.map((l, i) => (
         <div key={l.t} className="card mb">
-          <div className="row">
+          <div className="row" style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === i ? null : i)}>
             <div className="grow"><b>{l.t}</b><div className="tiny">{l.d}</div></div>
-            <button className="btn btn-ghost btn-sm" onClick={() => toggle(i)}>{l.done ? '✓ Completed' : 'Mark complete'}</button>
+            <span className="tiny muted" style={{ marginRight: 8 }}>{expanded === i ? '▲' : '▼'}</span>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={(e) => { e.stopPropagation(); toggle(i); }}
+            >
+              {l.done ? '✓ Completed' : 'Mark complete'}
+            </button>
           </div>
+          {expanded === i && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {l.body.map((p, pi) => (
+                <p key={pi} className="tiny" style={{ margin: 0, lineHeight: 1.6 }}>{p}</p>
+              ))}
+            </div>
+          )}
         </div>
       ))}
       <div className="tiny">Progress {lessons.filter((l) => l.done).length}/{lessons.length} lessons.</div>
