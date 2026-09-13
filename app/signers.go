@@ -16,7 +16,6 @@ import (
 
 	badgetypes "marketplace/x/badge/types"
 	crosschaintypes "marketplace/x/crosschain/types"
-	dextypes "marketplace/x/dex/types"
 	governancetypes "marketplace/x/governance/types"
 	mallcointypes "marketplace/x/mallcoin/types"
 	mallpointstypes "marketplace/x/mallpoints/types"
@@ -28,57 +27,19 @@ import (
 // This is called by depinject to provide signing information for messages without proto annotations
 func ProvideCustomGetSigners() []signing.CustomGetSigner {
 	return []signing.CustomGetSigner{
-		// DEX module
-		{
-			MsgType: protoreflect.FullName("marketplace.dex.v1.MsgCreatePool"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*dextypes.MsgCreatePool](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgCreatePool, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-		{
-			MsgType: protoreflect.FullName("marketplace.dex.v1.MsgAddLiquidity"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*dextypes.MsgAddLiquidity](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgAddLiquidity, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-		{
-			MsgType: protoreflect.FullName("marketplace.dex.v1.MsgRemoveLiquidity"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*dextypes.MsgRemoveLiquidity](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgRemoveLiquidity, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-		{
-			MsgType: protoreflect.FullName("marketplace.dex.v1.MsgSwap"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*dextypes.MsgSwap](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgSwap, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
-		{
-			MsgType: protoreflect.FullName("marketplace.dex.v1.MsgUpdateParams"),
-			Fn: func(msg proto.Message) ([][]byte, error) {
-				m, ok := safeCast[*dextypes.MsgUpdateParams](msg)
-				if !ok {
-					return nil, fmt.Errorf("expected MsgUpdateParams, got %T", msg)
-				}
-				return sdkAddressesToBytes(m.GetSigners()), nil
-			},
-		},
+		// DEX module: intentionally NOT registered here. All five dex Msg
+		// types (MsgCreatePool, MsgAddLiquidity, MsgRemoveLiquidity, MsgSwap,
+		// MsgUpdateParams) already declare `option (cosmos.msg.v1.signer)` in
+		// their .proto files — cosmos-sdk resolves signers from that
+		// declaration automatically, and registering a CustomGetSigner here
+		// too is a duplicate registration for the same message, which
+		// ProvideInterfaceRegistry rejects outright: "a custom signer
+		// function has been defined for message ... which already has a
+		// signer field defined". x/dex/types/msg_signer.go's GetSigners()
+		// methods (now unused by this list) do the exact same
+		// bech32-decode-of-the-named-field the proto option already
+		// produces, so nothing changes signer-resolution-wise by relying on
+		// the declarative path instead.
 
 		// Governance module
 		{
