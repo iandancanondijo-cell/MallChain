@@ -251,6 +251,28 @@ func (k Keeper) AddVote(ctx context.Context, proposalID uint64, voter string, op
 		return types.ErrVotingPeriodEnded
 	}
 
+	// Defense-in-depth re-check of the weighted-vote invariant enforced in
+	// MsgVoteWeighted.ValidateBasic (unbounded/unvalidated weights here let
+	// a single zero-stake vote outweigh a proposal's entire real tally —
+	// see TallyVotes below for the matching fix). Kept in sync with that
+	// validation so AddVote is safe even if ever called from a path that
+	// doesn't run ValidateBasic first.
+	seen := make(map[types.VoteOption]bool, len(options))
+	totalWeight := math.LegacyZeroDec()
+	for _, wo := range options {
+		if wo.Option == types.VoteOption_VOTE_OPTION_UNSPECIFIED || seen[wo.Option] {
+			return types.ErrInvalidVote
+		}
+		seen[wo.Option] = true
+		if wo.Weight.IsNil() || wo.Weight.LTE(math.LegacyZeroDec()) || wo.Weight.GT(math.LegacyOneDec()) {
+			return types.ErrInvalidVote
+		}
+		totalWeight = totalWeight.Add(wo.Weight)
+	}
+	if !totalWeight.Equal(math.LegacyOneDec()) {
+		return types.ErrInvalidVote
+	}
+
 	// Create vote
 	vote := types.NewVote(proposalID, voter, options, metadata)
 
@@ -298,8 +320,15 @@ func (k Keeper) TallyVotes(ctx context.Context, proposalID uint64) (types.TallyR
 		for _, d := range delegations {
 			stakeWeight = stakeWeight.Add(d.GetShares().TruncateInt())
 		}
+		// C-critical: this used to floor zero-stake voters to 1 "share" of
+		// voting power. Combined with unvalidated option weights (now fixed
+		// in MsgVoteWeighted.ValidateBasic/AddVote), a single zero-stake
+		// account could out-vote the chain's entire real bonded stake. This
+		// is stake-weighted voting: no delegated stake means no voting
+		// power, full stop — skip the voter entirely rather than crediting
+		// a floor.
 		if stakeWeight.IsZero() {
-			stakeWeight = math.OneInt()
+			return false, nil
 		}
 
 		for _, option := range vote.Options {

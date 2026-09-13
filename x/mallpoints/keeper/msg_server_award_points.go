@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/binary"
+	"math"
 	"math/bits"
 
 	"marketplace/x/mallpoints/types"
@@ -14,6 +15,14 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
+// safeAdd computes a+b as uint64 with an explicit overflow guard.
+func safeAdd(a, b uint64) (uint64, error) {
+	if a > math.MaxUint64-b {
+		return 0, errorsmod.Wrap(types.ErrInvalidRequest, "safeAdd: arithmetic overflow")
+	}
+	return a + b, nil
+}
+
 func (k msgServer) AwardPoints(ctx context.Context, msg *types.MsgAwardPoints) (*types.MsgAwardPointsResponse, error) {
 	if _, err := k.addressCodec.StringToBytes(msg.Creator); err != nil {
 		return nil, errorsmod.Wrap(err, "invalid creator address")
@@ -21,6 +30,22 @@ func (k msgServer) AwardPoints(ctx context.Context, msg *types.MsgAwardPoints) (
 
 	if _, err := k.addressCodec.StringToBytes(msg.Recipient); err != nil {
 		return nil, errorsmod.Wrap(err, "invalid recipient address")
+	}
+
+	// C-critical: AwardPoints previously had no authorization check at all —
+	// any account could credit itself arbitrary Mallpoints (which convert
+	// 1:3.2 into real MLCN via ConvertToMallcoin) for any task_type other
+	// than "engagement". points_issuer mirrors x/badge's badge_issuer:
+	// deliberately separate from the module's governance `authority` so an
+	// operator hot-wallet can award points routinely without a vote per
+	// award, but empty (the default) fails closed — no address can award
+	// points until governance sets one via MsgUpdateParams.
+	params, err := k.Keeper.Params.Get(ctx)
+	if err != nil {
+		return nil, errorsmod.Wrap(types.ErrUnauthorized, "points issuer not configured")
+	}
+	if params.PointsIssuer == "" || msg.Creator != params.PointsIssuer {
+		return nil, errorsmod.Wrap(types.ErrUnauthorized, "creator is not the configured points issuer")
 	}
 
 	// Get or create user points record
@@ -45,7 +70,13 @@ func (k msgServer) AwardPoints(ctx context.Context, msg *types.MsgAwardPoints) (
 	if err != nil {
 		monthlyIssued = 0
 	}
-	if monthlyIssued+msg.Amount > types.MonthlyPointsCap {
+	// C-critical: raw uint64 addition let msg.Amount near math.MaxUint64 wrap
+	// the sum past zero, defeating this cap check entirely.
+	newMonthlyIssued, err := safeAdd(monthlyIssued, msg.Amount)
+	if err != nil {
+		return nil, errorsmod.Wrap(types.ErrInvalidRequest, "award amount overflow")
+	}
+	if newMonthlyIssued > types.MonthlyPointsCap {
 		return nil, errorsmod.Wrap(types.ErrMonthlyCapExceeded, "monthly Mallpoints issuance cap exceeded")
 	}
 
@@ -90,7 +121,11 @@ func (k msgServer) AwardPoints(ctx context.Context, msg *types.MsgAwardPoints) (
 		}
 	}
 
-	userPoints.Points += msg.Amount
+	newPoints, err := safeAdd(userPoints.Points, msg.Amount)
+	if err != nil {
+		return nil, errorsmod.Wrap(types.ErrInvalidRequest, "recipient points balance overflow")
+	}
+	userPoints.Points = newPoints
 	userPoints.TasksCompleted += 1
 	// Set LastEarned to current block time (seconds since epoch)
 	sdkCtx = sdk.UnwrapSDKContext(ctx)
@@ -100,8 +135,7 @@ func (k msgServer) AwardPoints(ctx context.Context, msg *types.MsgAwardPoints) (
 		return nil, err
 	}
 
-	monthlyIssued += msg.Amount
-	if err := k.Keeper.MonthlyPointsIssued.Set(ctx, currentMonthKey, monthlyIssued); err != nil {
+	if err := k.Keeper.MonthlyPointsIssued.Set(ctx, currentMonthKey, newMonthlyIssued); err != nil {
 		return nil, err
 	}
 

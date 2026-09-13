@@ -3,6 +3,7 @@ package marketplace.mallpoints.v1;
 
 import "amino/amino.proto";
 import "gogoproto/gogo.proto";
+import "cosmos_proto/cosmos.proto";
 
 option go_package = "github.com/tmp/marketplace/x/mallpoints/types";
 
@@ -10,4 +11,13 @@ option go_package = "github.com/tmp/marketplace/x/mallpoints/types";
 message Params {
   option (amino.name) = "marketplace/x/mallpoints/Params";
   option (gogoproto.equal) = true;
+
+  // points_issuer is the only address MsgAwardPoints will accept as
+  // `creator`. Empty means point issuance is disabled (no address can award
+  // points) until a governance MsgUpdateParams sets one. Deliberately
+  // separate from the module's `authority` (which defaults to the gov
+  // module account and has no private key) so a regular operator hot-wallet
+  // can award points routinely without a governance vote per award —
+  // mirrors x/badge's badge_issuer.
+  string points_issuer = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
 }

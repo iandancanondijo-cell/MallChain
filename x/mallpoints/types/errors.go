@@ -16,4 +16,5 @@ var (
 	ErrNoBadge                = errors.Register(ModuleName, 1105, "user does not have a badge")
 	ErrInvalidRequest         = errors.Register(ModuleName, 1106, "invalid request")
 	ErrMonthlyCapExceeded     = errors.Register(ModuleName, 1107, "monthly issuance cap exceeded")
+	ErrUnauthorized           = errors.Register(ModuleName, 1108, "unauthorized")
 )

@@ -30,6 +30,8 @@ import (
 	ibckeeper "github.com/cosmos/ibc-go/v10/modules/core/keeper"
 	solomachine "github.com/cosmos/ibc-go/v10/modules/light-clients/06-solomachine"
 	ibctm "github.com/cosmos/ibc-go/v10/modules/light-clients/07-tendermint"
+
+	crosschainibc "marketplace/x/crosschain/ibc"
 )
 
 // registerIBCModules register IBC keepers and non dependency inject modules.
@@ -100,8 +102,16 @@ func (app *App) registerIBCModules(appOpts servertypes.AppOptions) error {
 	)
 
 	// create IBC module from bottom to top of stack
+	//
+	// C-critical: transferStack must be wrapped with x/crosschain/ibc's
+	// middleware, not the bare ibctransfer module. Without it,
+	// HandleOutboundIBCAck (the only thing that marks a BridgeTransfer
+	// "completed" after a real successful send) never fires, so
+	// crosschain's EndBlocker unconditionally refunds every transfer once
+	// its timeout elapses — including ones that already succeeded — paying
+	// the sender twice out of the shared crosschain module escrow account.
 	var (
-		transferStack      porttypes.IBCModule = ibctransfer.NewIBCModule(app.TransferKeeper)
+		transferStack      porttypes.IBCModule = crosschainibc.NewIBCModule(app.CrosschainKeeper, ibctransfer.NewIBCModule(app.TransferKeeper))
 		transferStackV2    ibcapi.IBCModule    = ibctransferv2.NewIBCModule(app.TransferKeeper)
 		icaControllerStack porttypes.IBCModule = icacontroller.NewIBCMiddleware(app.ICAControllerKeeper)
 		icaHostStack       porttypes.IBCModule = icahost.NewIBCModule(app.ICAHostKeeper)

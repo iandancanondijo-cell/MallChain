@@ -77,6 +77,29 @@ func (mockStakingKeeper) Slash(ctx context.Context, consAddr sdk.ConsAddress, in
 	return math.ZeroInt(), nil
 }
 
+// stakedVoterKeeper is mockStakingKeeper plus one real delegation, for tests
+// that need TallyVotes' actual stake-weighted math to run rather than the
+// vulnerable "zero stake still counts" floor that used to live there (see
+// keeper.go's TallyVotes) — a zero-stake voter now correctly contributes
+// zero tally weight, so tests asserting a real pass/reject outcome need a
+// voter who genuinely holds stake, same as a real chain would require.
+type stakedVoterKeeper struct {
+	mockStakingKeeper
+	voter  string
+	shares math.LegacyDec
+}
+
+func (m stakedVoterKeeper) GetDelegatorDelegations(ctx context.Context, delegator sdk.AccAddress, maxRetrieve uint16) ([]stakingtypes.Delegation, error) {
+	if delegator.String() != m.voter {
+		return nil, nil
+	}
+	return []stakingtypes.Delegation{{DelegatorAddress: m.voter, Shares: m.shares}}, nil
+}
+
+func (m stakedVoterKeeper) TotalBondedTokens(ctx context.Context) (math.Int, error) {
+	return m.shares.TruncateInt(), nil
+}
+
 func initFixture(t *testing.T) *fixture {
 	t.Helper()
 	return initFixtureWithStakingKeeper(t, mockStakingKeeper{})

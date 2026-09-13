@@ -30,6 +30,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	authante "github.com/cosmos/cosmos-sdk/x/auth/ante"
+	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	authsims "github.com/cosmos/cosmos-sdk/x/auth/simulation"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
@@ -328,16 +329,26 @@ func New(
 		if storeKey != nil && !simulate {
 			store := ctx.KVStore(storeKey)
 
-			// Get sender address for per-sender rate limiting
-			msgs := tx.GetMsgs()
+			// Get sender address for per-sender rate limiting.
+			//
+			// C-medium/high: this used to type-assert msgs[0] against a
+			// legacy Amino-style `GetSigners() []sdk.AccAddress` interface
+			// that most real message types here (MsgTransferMallcoin,
+			// MsgBuyMallcoin/SellMallcoin, MsgStake/Unstake, wasmbridge's
+			// MsgExecuteAction, CosmWasm MsgExecuteContract, standard bank/
+			// staking/gov/IBC messages) don't implement — only a handful of
+			// admin-only messages hand-implement it. Every other message
+			// silently fell back to sender="unknown", collapsing "10
+			// tx/block/sender" into "10 tx/block total" across every real
+			// user. authsigning.SigVerifiableTx.GetSigners() is the same
+			// resolution the real SDK signature-verification ante decorator
+			// uses (proto cosmos.msg.v1.signer annotations plus this app's
+			// own CustomGetSigner registrations in signers.go), so it
+			// correctly covers every message type instead of a handful.
 			var sender string
-			if len(msgs) > 0 {
-				// Extract sender from first message
-				if signers, ok := msgs[0].(interface{ GetSigners() []sdk.AccAddress }); ok {
-					s := signers.GetSigners()
-					if len(s) > 0 {
-						sender = s[0].String()
-					}
+			if svt, ok := tx.(authsigning.SigVerifiableTx); ok {
+				if signers, err := svt.GetSigners(); err == nil && len(signers) > 0 {
+					sender = sdk.AccAddress(signers[0]).String()
 				}
 			}
 

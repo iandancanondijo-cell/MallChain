@@ -2,6 +2,7 @@ package types
 
 import (
 	errorsmod "cosmossdk.io/errors"
+	"cosmossdk.io/math"
 	"github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
@@ -78,7 +79,16 @@ func (m *MsgVoteWeighted) GetSigners() []sdk.AccAddress {
 	return []sdk.AccAddress{voter}
 }
 
-// ValidateBasic performs basic validation for MsgVoteWeighted
+// ValidateBasic performs basic validation for MsgVoteWeighted.
+//
+// C-critical: this previously only checked the options slice was non-empty.
+// Weights were never bounded, so a single vote with e.g. weight "999999999"
+// on one option let TallyVotes count it as that many times a normal vote —
+// trivially defeating quorum/threshold and letting a proposal (which can
+// execute arbitrary messages, including bank sends, mints, and slashes) pass
+// with no real backing stake. Weights must now be valid probabilities over
+// the chosen options: each in (0, 1], no duplicate/unspecified options, and
+// the total exactly 1 — the standard Cosmos SDK weighted-vote invariant.
 func (m *MsgVoteWeighted) ValidateBasic() error {
 	if m.Voter == "" {
 		return errorsmod.Wrap(ErrInvalidVoter, "voter is required")
@@ -88,6 +98,26 @@ func (m *MsgVoteWeighted) ValidateBasic() error {
 	}
 	if len(m.WeightedOptions) == 0 {
 		return errorsmod.Wrap(ErrInvalidVote, "weighted options cannot be empty")
+	}
+
+	seen := make(map[VoteOption]bool, len(m.WeightedOptions))
+	totalWeight := math.LegacyZeroDec()
+	for _, wo := range m.WeightedOptions {
+		if wo.Option == VoteOption_VOTE_OPTION_UNSPECIFIED {
+			return errorsmod.Wrap(ErrInvalidVote, "vote option must be specified")
+		}
+		if seen[wo.Option] {
+			return errorsmod.Wrap(ErrInvalidVote, "duplicate vote option")
+		}
+		seen[wo.Option] = true
+
+		if wo.Weight.IsNil() || wo.Weight.LTE(math.LegacyZeroDec()) || wo.Weight.GT(math.LegacyOneDec()) {
+			return errorsmod.Wrap(ErrInvalidVote, "each option weight must be in (0, 1]")
+		}
+		totalWeight = totalWeight.Add(wo.Weight)
+	}
+	if !totalWeight.Equal(math.LegacyOneDec()) {
+		return errorsmod.Wrap(ErrInvalidVote, "option weights must sum to exactly 1")
 	}
 	return nil
 }

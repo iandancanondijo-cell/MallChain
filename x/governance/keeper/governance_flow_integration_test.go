@@ -22,10 +22,10 @@ import (
 // individually validates at every step but never actually reaches Passed
 // when driven end-to-end.
 func TestGovernanceFullLifecycle(t *testing.T) {
-	f := initFixture(t)
-	srv := keeper.NewMsgServerImpl(f.k)
 	proposer := sdk.AccAddress([]byte("integration_proposer")).String()
 	voter := sdk.AccAddress([]byte("integration_voter___")).String()
+	f := initFixtureWithStakingKeeper(t, stakedVoterKeeper{voter: voter, shares: math.LegacyOneDec()})
+	srv := keeper.NewMsgServerImpl(f.k)
 
 	start := time.Now().UTC()
 	f.ctx = f.ctx.WithBlockTime(start)
@@ -73,10 +73,10 @@ func TestGovernanceFullLifecycle(t *testing.T) {
 // so the happy-path test above isn't just exercising a keeper that always
 // passes regardless of votes.
 func TestGovernanceFullLifecycle_RejectedByVeto(t *testing.T) {
-	f := initFixture(t)
-	srv := keeper.NewMsgServerImpl(f.k)
 	proposer := sdk.AccAddress([]byte("veto_proposer_______")).String()
 	voter := sdk.AccAddress([]byte("veto_voter__________")).String()
+	f := initFixtureWithStakingKeeper(t, stakedVoterKeeper{voter: voter, shares: math.LegacyOneDec()})
+	srv := keeper.NewMsgServerImpl(f.k)
 
 	start := time.Now().UTC()
 	f.ctx = f.ctx.WithBlockTime(start)
