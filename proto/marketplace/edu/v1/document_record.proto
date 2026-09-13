@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package marketplace.edu.v1;
+
+option go_package = "github.com/tmp/marketplace/x/edu/types";
+
+// DocumentRecord is the on-chain anchor for one version of an off-chain
+// educational document: who uploaded it, its content hash, and (via
+// parent_record_id) its place in that document's version history. The
+// actual file never touches the chain — see backend/src/routes/edu.js,
+// which stores the file off-chain and calls MsgRegisterDocument with its
+// sha256_hash. Anyone who later downloads the file can recompute its hash
+// and compare it against this record to get a real "unmodified since
+// upload" guarantee that a database column alone can't provide (a database
+// row can be edited quietly; this record can't).
+message DocumentRecord {
+  string record_id = 1;
+  // doc_id is stable across every version of "the same" document — the
+  // link version 2 uses to point back at version 1's lineage.
+  string doc_id = 2;
+  // sha256_hash is hex-encoded, 64 chars.
+  string sha256_hash = 3;
+  uint32 version = 4;
+  string uploader = 5;
+  // parent_record_id is empty for a document's first version.
+  string parent_record_id = 6;
+  int64 timestamp = 7;
+}

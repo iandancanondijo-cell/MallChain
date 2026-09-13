@@ -55,6 +55,8 @@ const Settings = lazy(() => import('./features/settings/Settings'));
 const Profile = lazy(() => import('./features/profile/Profile'));
 const Contracts = lazy(() => import('./features/contracts/Contracts'));
 const DevHub = lazy(() => import('./features/devhub/DevHub'));
+const Economy = lazy(() => import('./features/economy/Economy'));
+const Edu = lazy(() => import('./features/edu/Edu'));
 const SearchResults = lazy(() => import('./features/search/SearchResults'));
 
 /* misc views — named exports from one shared module, so each gets its own .then() to pick the right export */
@@ -116,6 +118,8 @@ export const ROUTES: RouteDef[] = [
   { path: '/validators', title: 'Validators', render: (n) => <ValidatorsHome navigate={n} /> },
   /* explorer / messaging / referrals / admin / settings / profile / misc */
   { path: '/explorer', title: 'Blockchain Explorer', render: () => <BlockchainExplorer /> },
+  { path: '/economy', title: 'Economy', render: () => <Economy /> },
+  { path: '/edu', title: 'EDU', render: () => <Edu /> },
   { path: '/messaging', title: 'Messaging', render: () => <Messaging /> },
   { path: '/referrals', title: 'Referrals', render: () => <Referrals /> },
   { path: '/admin', title: 'Admin', render: () => <Admin /> },

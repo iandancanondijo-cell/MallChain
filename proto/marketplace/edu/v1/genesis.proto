@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package marketplace.edu.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+import "marketplace/edu/v1/document_record.proto";
+import "marketplace/edu/v1/params.proto";
+
+option go_package = "github.com/tmp/marketplace/x/edu/types";
+
+// GenesisState defines the edu module's genesis state.
+message GenesisState {
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+  repeated DocumentRecord document_record_map = 2 [(gogoproto.nullable) = false];
+}

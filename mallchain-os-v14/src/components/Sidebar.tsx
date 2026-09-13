@@ -18,7 +18,7 @@ import {
   ShoppingBag, Layers, Scale, Vote, SlidersHorizontal, Compass, Megaphone,
   CheckCircle, DollarSign, Trophy, BarChart3, ShieldCheck, Lock, Shield,
   ClipboardEdit, User, Search, MessageCircle, Link as LinkIcon, FileCode,
-  Code, Briefcase, Settings as SettingsIcon,
+  Code, Briefcase, Settings as SettingsIcon, PieChart, GraduationCap,
 } from 'lucide-react';
 import { store, type AppState } from '../store/store';
 import { useStoreVersion } from './ui';
@@ -100,12 +100,16 @@ const GROUPS: NavGroup[] = [
   },
   {
     title: 'Explorer',
-    items: [{ label: 'Blocks & Txs', path: '/explorer', icon: Search }],
+    items: [
+      { label: 'Blocks & Txs', path: '/explorer', icon: Search },
+      { label: 'Economy', path: '/economy', icon: PieChart },
+    ],
   },
   {
     title: 'Ecosystem',
     items: [
       { label: 'Messaging', path: '/messaging', icon: MessageCircle, badge: (s) => s.messaging.conversations.reduce((a, c) => a + c.unread, 0) },
+      { label: 'EDU', path: '/edu', icon: GraduationCap },
       { label: 'Referrals', path: '/referrals', icon: LinkIcon },
       { label: 'Smart Contracts', path: '/contracts', icon: FileCode },
       { label: 'Developer Hub', path: '/devhub', icon: Code },

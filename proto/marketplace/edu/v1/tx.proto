@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package marketplace.edu.v1;
+
+import "amino/amino.proto";
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+import "gogoproto/gogo.proto";
+import "marketplace/edu/v1/params.proto";
+
+option go_package = "github.com/tmp/marketplace/x/edu/types";
+
+// Msg defines the Msg service.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  // UpdateParams defines a (governance) operation for updating the module
+  // parameters. The authority defaults to the x/gov module account.
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+
+  // RegisterDocument anchors one version of an off-chain educational
+  // document: its content hash, uploader, and (if this isn't the first
+  // version) a link back to the previous version's record.
+  rpc RegisterDocument(MsgRegisterDocument) returns (MsgRegisterDocumentResponse);
+}
+
+// MsgUpdateParams is the Msg/UpdateParams request type.
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "marketplace/x/edu/MsgUpdateParams";
+
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  Params params = 2 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+}
+
+message MsgUpdateParamsResponse {}
+
+message MsgRegisterDocument {
+  option (cosmos.msg.v1.signer) = "creator";
+
+  // creator is the tx signer: the edu module's operator key (backend-held —
+  // see backend/src/services/eduTxBuilder.js), the same creator/recipient
+  // split x/badge's MsgIssueBadge uses. Wallets in this app are
+  // non-custodial (mnemonics never leave the browser), so the actual
+  // end-user account can't sign a chain tx directly without a much larger
+  // client-side-signing build-out; `uploader` below records who the
+  // document is really from without claiming their signature.
+  string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  // uploader identifies the real submitter (their wallet address if they
+  // have one, otherwise an app-internal id) — informational, not verified
+  // by a signature.
+  string uploader = 2;
+  string doc_id = 3;
+  string sha256_hash = 4;
+  // Empty for a document's first version; otherwise the record_id returned
+  // by the previous MsgRegisterDocument call for the same doc_id.
+  string parent_record_id = 5;
+}
+
+message MsgRegisterDocumentResponse {
+  string record_id = 1;
+  uint32 version = 2;
+}

@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package marketplace.edu.v1;
+
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+import "marketplace/edu/v1/document_record.proto";
+import "marketplace/edu/v1/params.proto";
+
+option go_package = "github.com/tmp/marketplace/x/edu/types";
+
+service Query {
+  // Params queries the module's parameters.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/tmp/marketplace/edu/v1/params";
+  }
+
+  // GetDocumentRecord returns one document version's on-chain record.
+  rpc GetDocumentRecord(QueryGetDocumentRecordRequest) returns (QueryGetDocumentRecordResponse) {
+    option (google.api.http).get = "/tmp/marketplace/edu/v1/record/{record_id}";
+  }
+
+  // GetVersionHistory walks a document's full version chain, oldest first.
+  rpc GetVersionHistory(QueryGetVersionHistoryRequest) returns (QueryGetVersionHistoryResponse) {
+    option (google.api.http).get = "/tmp/marketplace/edu/v1/history/{doc_id}";
+  }
+}
+
+message QueryParamsRequest {}
+message QueryParamsResponse {
+  Params params = 1 [(gogoproto.nullable) = false];
+}
+
+message QueryGetDocumentRecordRequest {
+  string record_id = 1;
+}
+message QueryGetDocumentRecordResponse {
+  DocumentRecord record = 1 [(gogoproto.nullable) = false];
+}
+
+message QueryGetVersionHistoryRequest {
+  string doc_id = 1;
+}
+message QueryGetVersionHistoryResponse {
+  repeated DocumentRecord records = 1 [(gogoproto.nullable) = false];
+}
