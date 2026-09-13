@@ -19,10 +19,18 @@ jobs:
           # (pulled in transitively) has hand-written runtime assembly that's
           # sensitive to exact Go patch versions — 1.24.0 hit
           # "link: ...invalid reference to runtime.lastmoduledatap", while
-          # 1.24.3 (what local dev actually uses) builds clean. '1.24' (no
-          # patch) has actions/setup-go always resolve the latest 1.24.x,
-          # avoiding pinning to a specific patch that can go stale like this.
-          go-version: '1.24'   # matches go.mod's `go 1.24.0` minimum
+          # 1.24.3 (what local dev actually uses) builds clean. Floating
+          # (no patch) has actions/setup-go always resolve the latest patch,
+          # avoiding pinning to a specific one that can go stale like this.
+          #
+          # Bumped 1.24 -> 1.25: govulncheck (below) flags ~18 real,
+          # reachable stdlib CVEs (net/url, html/template, crypto/tls,
+          # net/http, encoding/asn1, os, net/textproto, crypto/x509) that
+          # are only fixed by the Go toolchain itself moving to 1.25.x —
+          # verified clean via a full local `go build ./...` +
+          # `go test ./... -count=1` on 1.25.0 first (go.mod's `go 1.25.0`
+          # directive requires this floating version to resolve to >= that).
+          go-version: '1.25'   # matches go.mod's `go 1.25.0` minimum
 
       - name: Build blockchain binary
         run: go build -o /tmp/marketplaced ./cmd/marketplaced
