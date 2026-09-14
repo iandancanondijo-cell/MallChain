@@ -14,10 +14,23 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 // ============ MIDDLEWARE ============
 function verifyToken(req, res, next) {
+  // This predates the JWT->httpOnly-cookie migration and never got updated
+  // — it only ever checked the Authorization header, so every
+  // /api/task-assignment route has been unreachable from the actual web
+  // app (which stopped sending that header) since that migration shipped.
+  // Mirrors middleware/requireAuth.js's dual bearer/cookie extraction,
+  // minus the jti revocation check — see the identical fix + comment in
+  // routes/mines.js's verifyToken.
   const auth = req.headers.authorization || '';
-  if (!auth.startsWith('Bearer ')) return res.status(401).json({ ok: false, error: 'missing token' });
+  let token = null;
+  if (auth.startsWith('Bearer ')) {
+    token = auth.slice(7);
+  } else if (req.cookies && req.cookies.auth_token) {
+    token = req.cookies.auth_token;
+  }
+  if (!token) return res.status(401).json({ ok: false, error: 'missing token' });
   try {
-    const payload = jwt.verify(auth.slice(7), JWT_SECRET);
+    const payload = jwt.verify(token, JWT_SECRET);
     req.userId = payload.userId || payload.id;
     next();
   } catch (e) {

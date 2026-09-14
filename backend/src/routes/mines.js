@@ -22,10 +22,24 @@ function getJwtSecret() {
 }
 
 function verifyToken(req, res, next) {
+  // This predates the JWT->httpOnly-cookie migration and never got updated
+  // — it only ever checked the Authorization header, so every /api/mines
+  // route has been unreachable from the actual web app (which stopped
+  // sending that header) since that migration shipped. Mirrors
+  // middleware/requireAuth.js's dual bearer/cookie extraction, minus the
+  // jti revocation check (a smaller, separate gap — this endpoint group
+  // still trusts any signature-valid token even post-logout, same as
+  // before this fix, just no longer *always* rejecting first).
   const auth = req.headers.authorization || '';
-  if (!auth.startsWith('Bearer ')) return res.status(401).json({ ok: false, error: 'missing token' });
+  let token = null;
+  if (auth.startsWith('Bearer ')) {
+    token = auth.slice(7);
+  } else if (req.cookies && req.cookies.auth_token) {
+    token = req.cookies.auth_token;
+  }
+  if (!token) return res.status(401).json({ ok: false, error: 'missing token' });
   try {
-    const payload = jwt.verify(auth.slice(7), getJwtSecret());
+    const payload = jwt.verify(token, getJwtSecret());
     req.userId = payload.userId || payload.id;
     markActiveToday(req.userId); // fire-and-forget — feeds the badge streak, never blocks the request
     next();
@@ -194,6 +208,7 @@ router.post('/campaigns/create', verifyToken, async (req, res) => {
 router.put('/campaigns/:id', requireAdmin, async (req, res) => {
   try {
     const row = await Campaign.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true }).lean();
+    if (!row) return res.status(404).json(fail('campaign not found'));
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }
 });
@@ -228,7 +243,7 @@ router.put('/profile', verifyToken, async (req, res) => {
     const updates = {};
     if (req.body.username !== undefined) updates.username = req.body.username;
     if (req.body.phone !== undefined) updates.phone = req.body.phone;
-    const u = await User.findByIdAndUpdate(req.userId, { $set: updates }, { new: true }).lean();
+    const u = await User.findByIdAndUpdate(req.userId, { $set: updates }, { new: true }).select('-password').lean();
     res.json(ok(u));
   } catch (e) { res.status(400).json(fail(e)); }
 });
@@ -432,6 +447,7 @@ router.post('/submissions/:id/reject', requireAdmin, async (req, res) => {
       { $set: { status: 'rejected', rejection_note: note || null } },
       { new: true }
     ).lean();
+    if (!row) return res.status(404).json(fail('submission not found'));
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }
 });
