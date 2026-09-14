@@ -25,7 +25,6 @@ import type { ApiResult } from '../api';
 vi.mock('../config', () => ({
   config: {
     apiBaseUrl: 'http://localhost:4000',
-    demoMode: false,
     network: 'testnet',
     sessionTtlMin: 120,
   },

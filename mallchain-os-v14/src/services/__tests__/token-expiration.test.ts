@@ -32,7 +32,6 @@ import { authService } from '../auth';
 vi.mock('../config', () => ({
   config: {
     apiBaseUrl: 'http://localhost:4000',
-    demoMode: false,
     network: 'testnet',
     sessionTtlMin: 120, // Default session TTL
   },

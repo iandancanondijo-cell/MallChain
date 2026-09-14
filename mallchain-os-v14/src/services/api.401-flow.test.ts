@@ -15,7 +15,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 vi.mock('./config', () => ({
   config: {
     apiBaseUrl: 'http://localhost:4000',
-    demoMode: false,
     network: 'testnet',
     sessionTtlMin: 120,
   },

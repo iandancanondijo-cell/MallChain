@@ -102,7 +102,6 @@ vi.mock('socket.io-client', () => {
 vi.mock('../config', () => ({
   config: {
     apiBaseUrl: 'http://localhost:4000',
-    demoMode: false,
     network: 'testnet',
     sessionTtlMin: 120
   }
