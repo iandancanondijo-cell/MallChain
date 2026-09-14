@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This document describes the integration architecture between the mallchain-os-v14 React frontend and the Mallchain blockchain backend. The integration enables real-time blockchain data synchronization, secure authentication, and bidirectional communication through REST APIs and WebSocket connections. The frontend transitions from demo mode (local store simulation) to production mode (real backend calls) while maintaining fallback behavior for development.
+This document describes the integration architecture between the mallchain-os-v14 React frontend and the Mallchain blockchain backend. The integration enables real-time blockchain data synchronization, secure authentication, and bidirectional communication through REST APIs and WebSocket connections. The frontend always talks to the real backend — an earlier demo mode (local-store simulation, for frontend-only development) has since been removed.
 
 ## System Overview
 
@@ -39,7 +39,6 @@ The system consists of three primary layers:
 │ • API Service Layer             │
 │ • Configuration Module          │
 │ • Socket.IO Client              │
-│ • Local Store (Demo Mode)       │
 └──────────────┬──────────────────┘
                │
                │ HTTP/REST & WebSocket
@@ -85,7 +84,8 @@ Frontend Component
 API Service Layer
     ↓
     • Check config.apiBaseUrl
-    • Add Authorization header (JWT token if available)
+    • credentials: 'include' — browser attaches the auth_token cookie
+    • Add X-CSRF-Token header (mutating requests only)
     • Add Content-Type: application/json header
     ↓
 HTTP POST/GET to http://localhost:4000/api/endpoint
@@ -93,7 +93,7 @@ HTTP POST/GET to http://localhost:4000/api/endpoint
 Backend Express Server
     ↓
     • CORS Middleware validates origin
-    • Auth Middleware validates JWT token
+    • Auth Middleware validates JWT + CSRF token
     • Rate Limiter checks request count
     • Route Handler processes request
     • Returns response
@@ -238,7 +238,7 @@ Each wallet address has its own room (`wallet:address`). Sockets subscribed only
 
 ## Data Flow Architecture
 
-### Frontend Data Flow: API Service Mode
+### Frontend Data Flow: API Service
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -250,28 +250,15 @@ Each wallet address has its own room (`wallet:address`). Sockets subscribed only
         ┌───────────▼──────────────┐
         │ API Service Layer       │
         ├────────────────────────┤
-        │ Check config.apiBaseUrl│
+        │ HTTP GET to config.apiBaseUrl │
         └───────────┬────────────┘
                     │
-        ┌───────────┴──────────────┐
-        │                          │
-    ┌───▼──────┐          ┌───────▼──────┐
-    │Real Mode │          │Demo Mode     │
-    │(non-empty│          │(empty URL)   │
-    │URL)      │          │              │
-    └───┬──────┘          └───────┬──────┘
-        │                         │
-    ┌───▼───────────┐       ┌────▼────────┐
-    │HTTP GET to    │       │Resolve from │
-    │Backend API    │       │Local Store  │
-    └───┬───────────┘       └────┬────────┘
-        │                         │
-    ┌───▼──────────────────┐      │
-    │Backend processes     │      │
-    │& returns data        │      │
-    └───┬──────────────────┘      │
-        │                         │
-    ┌───▴─────────────────────────┴───┐
+    ┌───▼───────────────────┐
+    │Backend processes      │
+    │& returns data         │
+    └───┬────────────────────┘
+        │
+    ┌───▼─────────────────────────────┐
     │ Return ApiResult<T>             │
     │ {ok: true, data: {...}}        │
     └───┬─────────────────────────────┘
@@ -281,6 +268,12 @@ Each wallet address has its own room (`wallet:address`). Sockets subscribed only
     │ and updates state        │
     └────────────────────────┘
 ```
+
+There is no local-store/demo-mode fallback path — `config.apiBaseUrl` is
+always required and every request goes to the real backend. An earlier
+demo mode (simulated data, no network calls, for frontend-only
+development) existed but has since been removed entirely, in favor of
+running the real backend locally.
 
 ### Real Backend Mode Flow
 
@@ -313,47 +306,28 @@ When `config.apiBaseUrl` is set to the backend URL:
    - HTTP error: `{ok: false, code: 404, error: "Not found"}`
    - 401 response: Token cleared, user redirected to login
 
-### Demo Mode Flow
-
-When `config.apiBaseUrl` is empty:
-
-1. **Request Interception**
-   - API service detects empty apiBaseUrl
-   - Request is NOT sent over network
-   - Simulated delay is added (optional, for realistic UX)
-
-2. **Local Store Resolution**
-   - Data is resolved from local store (Redux/Context/etc.)
-   - Simulated data format matches backend responses
-   - Changes are applied to local store only
-
-3. **Limitations**
-   - No real blockchain interaction
-   - No persistence across page reloads (unless store is persisted)
-   - Useful for UI development without backend running
-
 
 
 ## Key Architectural Decisions and Patterns
 
-### 1. Dual-Mode API Service
+### 1. Real Backend Only (demo mode removed)
 
-**Decision**: Frontend API service supports both real backend mode and demo mode operation.
+**Decision**: The frontend talks to the real backend exclusively — there is
+no local-store simulation mode.
 
-**Rationale**: 
-- Enables frontend development to proceed without backend running
-- Simplifies testing (can switch modes via environment variable)
-- Provides fallback behavior for better UX
+**History**: An earlier dual-mode design (real backend vs. a demo mode that
+simulated responses from a local store, toggled via `VITE_DEMO_MODE` /
+`config.demoMode`) let frontend development proceed without a backend
+running. It was removed: the simulated data model had drifted from real
+responses in ways that read as untrustworthy/stale (including one demo
+seed that used a real genesis address mislabeled as "your wallet"), and
+maintaining two parallel data models added ongoing complexity for
+marginal benefit once the real backend was easy enough to run locally.
 
-**Implementation**:
-- `config.apiBaseUrl` is non-empty → use real backend
-- `config.apiBaseUrl` is empty → use local store simulation
-- Decision is made once at startup and remains constant during session
-
-**Trade-offs**:
-- Adds complexity to API service
-- Requires maintaining parallel data models
-- Ensures frontend can work independently of backend
+**Current state**: `config.apiBaseUrl` is always required; every request
+goes to the real backend. Frontend-only development now means running the
+real backend (see the root-level start scripts) rather than toggling a
+mode flag.
 
 ### 2. Authentication via JWT Tokens (httpOnly cookie)
 
@@ -521,25 +495,23 @@ const txResult = await api.mutate({
 
 **Purpose**: Centralized environment configuration with sensible defaults.
 
-**Location**: `mallchain-os-v14/src/config/index.ts`
+**Location**: `mallchain-os-v14/src/services/config.ts`
 
 **Responsibilities**:
 1. Load environment variables at build time
 2. Provide default values for missing variables
-3. Control simulation timers based on mode
-4. Validate configuration on startup
+3. Validate configuration on startup (throws at module load if
+   `VITE_API_BASE_URL` is missing/invalid in a production build —
+   fail-fast, since this app always talks to a real backend)
 
-**Configuration Properties**:
+**Configuration Properties** (`MallchainConfig`):
 ```typescript
 {
-  apiBaseUrl: string;        // Backend URL or empty for demo
-  demoMode: boolean;         // Simulation enabled
+  apiBaseUrl: string;
   network: 'mainnet' | 'testnet';
   sessionTtlMin: number;     // JWT expiration in minutes
 }
 ```
-
-**Precedence**: If `apiBaseUrl` is non-empty, backend mode takes precedence (demoMode is ignored).
 
 ### Component: Socket.IO Client Manager
 
@@ -993,10 +965,7 @@ Frontend re-subscribes to previously subscribed rooms
 **Variables**:
 ```bash
 # API Configuration
-VITE_API_BASE_URL=http://localhost:4000    # Leave empty for demo mode
-
-# Mode
-VITE_DEMO_MODE=false                       # Set to false when using real backend
+VITE_API_BASE_URL=http://localhost:4000    # Required for production builds
 
 # Network
 VITE_NETWORK=testnet                       # 'mainnet' or 'testnet'
@@ -1006,8 +975,10 @@ VITE_SESSION_TTL=120                       # JWT expiration in minutes
 ```
 
 **Defaults** (when environment variable not set):
-- `VITE_API_BASE_URL`: empty string (demo mode)
-- `VITE_DEMO_MODE`: true (use local store)
+- `VITE_API_BASE_URL`: `npm run build` throws at build time if this is
+  missing — it's not optional in production; dev/test runs tolerate it
+  being unset (empty string), but nothing in the app treats that as a
+  usable mode, so a running backend is effectively always required
 - `VITE_NETWORK`: 'testnet'
 - `VITE_SESSION_TTL`: 120 minutes
 
@@ -1102,19 +1073,13 @@ npm run dev
 
 ### Testing Scenarios
 
-**Test 1: Real Backend Mode**
+**Test 1: Real Backend Connectivity**
 - Set `VITE_API_BASE_URL=http://localhost:4000`
-- Set `VITE_DEMO_MODE=false`
 - Frontend makes real HTTP requests
-- Expected: Data from backend
+- Expected: Data from backend (there is no demo/simulated-data mode to
+  compare against — see "Real Backend Only" above)
 
-**Test 2: Demo Mode**
-- Set `VITE_API_BASE_URL=` (empty)
-- Set `VITE_DEMO_MODE=true`
-- Frontend uses local store
-- Expected: Simulated data
-
-**Test 3: Authentication Flow**
+**Test 2: Authentication Flow**
 1. Click login
 2. Enter credentials
 3. Verify the response: DevTools → Network → login request → Response
@@ -1126,20 +1091,20 @@ npm run dev
    `Cookie: auth_token=...` header sent automatically by the browser (not
    an `Authorization` header — the web app no longer sets one)
 
-**Test 4: Real-time Updates**
+**Test 3: Real-time Updates**
 1. Login successfully
 2. Subscribe to wallet updates
 3. Open browser console: should see socket events
 4. Make transaction
 5. Verify real-time wallet update
 
-**Test 5: CORS Validation**
+**Test 4: CORS Validation**
 1. Make request from allowed origin (localhost:5173)
 2. Verify: Response includes `Access-Control-Allow-Origin` header
 3. Make request from disallowed origin
 4. Verify: Browser blocks request (check console)
 
-**Test 6: Rate Limiting**
+**Test 5: Rate Limiting**
 1. Make rapid requests (> 120/minute) to general endpoint
 2. Verify: Response code 429 after limit exceeded
 3. Wait 60 seconds
@@ -1768,7 +1733,8 @@ This integration architecture provides a robust, secure foundation for real-time
 3. **Resilience**: Error handling, automatic reconnection, and graceful degradation
 4. **Performance**: Caching, request deduplication, and connection pooling
 5. **Scalability**: Multi-instance support via Redis adapter and load balancing
-6. **Developer Experience**: Dual-mode operation, clear API contracts, comprehensive error messages
+6. **Developer Experience**: Clear API contracts, comprehensive error messages
 
-The architecture supports both development (demo mode) and production (real backend) workflows, enabling efficient development without requiring all infrastructure running simultaneously.
+Local development and production both run against the same real backend —
+there is no simulated/demo-data path to keep in sync with actual behavior.
 
