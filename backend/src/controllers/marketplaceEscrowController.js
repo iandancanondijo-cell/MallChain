@@ -49,7 +49,14 @@ exports.getEscrow = async (req, res) => {
     const { data } = await axios.get(`${CHAIN_REST}/marketplace/marketplace/v1/escrow/${encodeURIComponent(id)}`, { timeout: 8000 });
     return res.json({ success: true, escrow: data.escrow || data });
   } catch (e) {
-    return res.status(e.response?.status || 503).json({ success: false, error: e.response?.data?.message || e.message });
+    const chainMessage = e.response?.data?.message || e.message;
+    // The chain's gRPC-gateway maps "not found" the same as any other
+    // internal error — HTTP 500, codespace-agnostic — so a nonexistent
+    // escrow id comes back indistinguishable from a real chain fault
+    // unless we read the message. Only escrow lookups hit this (listing
+    // never 404s), so a plain substring check is enough here.
+    const isNotFound = /not found/i.test(chainMessage);
+    return res.status(isNotFound ? 404 : (e.response?.status || 503)).json({ success: false, error: chainMessage });
   }
 };
 

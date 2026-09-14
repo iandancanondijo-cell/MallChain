@@ -76,6 +76,21 @@ exports.getPoolLiquidity = asyncHandler(async (req, res) => {
     return res.json({ success: true, ...r.data });
   } catch (err) {
     if (isChainGatewayUnavailable(err)) return sendDexNotReady(res, err, `getPoolLiquidity/${poolId}`);
+    // A nonexistent poolId doesn't reach the SDK's usual "not found"
+    // error path here — x/dex's query handler panics trying to resolve a
+    // denom for a pool that was never created ("invalid denom: : panic"),
+    // which the chain's baseapp recovers into a generic gRPC error rather
+    // than a clean not-found — a real bug in that query handler, not just
+    // an HTTP-status-mapping gap (unlike the same class of issue in
+    // marketplaceEscrowController, where the SDK does return a genuine
+    // "not found" message we can detect). Flagging it here rather than
+    // fixing the Go handler in this pass, but a client still shouldn't see
+    // a raw 500 for "this pool doesn't exist" — 404 fits the actual
+    // situation far better than leaking the chain's internal panic.
+    const chainMessage = err.response?.data?.message || err.message;
+    if (/invalid denom|panic/i.test(chainMessage)) {
+      return res.status(404).json({ success: false, error: 'pool not found', poolId });
+    }
     throw err;
   }
 });
