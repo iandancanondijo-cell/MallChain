@@ -142,7 +142,18 @@ router.post('/logout-everywhere', auth, authCtrl.logoutEverywhere);
  * - Additional CSRF middleware not required for OAuth callbacks
  * - Passport handles secure code exchange with Google
  */
-router.get('/google', (req, res, next) => {
+// utils/passport.js only registers the 'google' strategy when
+// GOOGLE_CLIENT_ID/SECRET are set — calling passport.authenticate('google')
+// without it registered throws synchronously ("Unknown authentication
+// strategy"), which crashed both routes below with a raw 500 rather than a
+// message saying Google login just isn't configured in this environment.
+function requireGoogleConfigured(req, res, next) {
+  if (!passport._strategy('google')) {
+    return res.status(501).json({ error: 'Google login is not configured on this server' });
+  }
+  next();
+}
+router.get('/google', requireGoogleConfigured, (req, res, next) => {
   // Carries the referral code through Google's redirect round-trip via the
   // OAuth `state` param — the only field Google echoes back verbatim to the
   // callback. Without this, a referral code in the URL when the user clicked
@@ -150,6 +161,6 @@ router.get('/google', (req, res, next) => {
   const state = req.query.ref ? String(req.query.ref).trim().slice(0, 64) : undefined;
   passport.authenticate('google', { scope: ['profile', 'email'], state })(req, res, next);
 });
-router.get('/google/callback', passport.authenticate('google', { session: false, failureRedirect: '/' }), authCtrl.googleCallback);
+router.get('/google/callback', requireGoogleConfigured, passport.authenticate('google', { session: false, failureRedirect: '/' }), authCtrl.googleCallback);
 
 module.exports = router;
