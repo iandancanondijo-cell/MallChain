@@ -210,7 +210,11 @@ exports.getRecentBlocks = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = Math.min(parseInt(req.query.limit) || 50, 500);
 
-    const url = `${CHAIN_REST}/cosmos/base/tendermint/v1beta1/blocks?`;
+    // Was calling /blocks? (no block identifier) — not a real Cosmos SDK
+    // REST route, and the chain gateway correctly 501s it, which then
+    // surfaced here as a 500. /blocks/latest is the real "current block"
+    // endpoint; confirmed directly against the chain before changing this.
+    const url = `${CHAIN_REST}/cosmos/base/tendermint/v1beta1/blocks/latest`;
     const response = await axios.get(url);
     const { block, block_id } = response.data;
 
