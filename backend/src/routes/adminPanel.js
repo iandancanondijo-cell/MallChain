@@ -180,6 +180,7 @@ router.put('/users/:id/role', requireSuperAdmin, limiters.strict, async (req, re
     }
 
     const user = await User.findByIdAndUpdate(req.params.id, { $set: { role } }, { new: true }).select('-password');
+    if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
     await invalidateCachedUser(req.params.id);
 
     await auditLog('user_role_change', req.user, { targetUserId: req.params.id, newRole: role });
@@ -517,6 +518,7 @@ router.post('/mining/submissions/:id/reject', limiters.strict, async (req, res) 
       { $set: { status: 'rejected', rejection_note: note || null } },
       { new: true }
     ).lean();
+    if (!row) return res.status(404).json({ ok: false, error: 'submission not found' });
 
     await auditLog('mining_submission_reject', req.user, { submissionId: req.params.id, note });
     return res.json({ ok: true, submission: row });

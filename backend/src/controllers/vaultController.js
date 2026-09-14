@@ -36,6 +36,7 @@ exports.update = async (req, res) => {
 };
 
 exports.remove = async (req, res) => {
-  await Vault.findByIdAndDelete(req.params.id);
+  const v = await Vault.findByIdAndDelete(req.params.id);
+  if (!v) return res.status(404).json({ error: 'not found' });
   res.json({ ok: true });
 };
