@@ -48,7 +48,7 @@
     "ioredis": "^6.0.0",
     "joi": "^18.2.8",
     "jsonwebtoken": "^9.0.3",
-    "mongoose": "^9.1.5",
+    "mongoose": "^9.10.0",
     "morgan": "^1.10.1",
     "multer": "^2.2.0",
     "node-cron": "^4.6.0",
