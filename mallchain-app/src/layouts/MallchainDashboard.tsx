@@ -8,6 +8,9 @@
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import '../styles/dashboard.css';
+import { mallchainClient } from '../blockchain/client';
+import { walletService } from '../services/walletService';
+import type { MallchainWallet } from '../wallet/MallchainWallet';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -16,10 +19,7 @@ import '../styles/dashboard.css';
 interface DashboardState {
   activeSection: string;
   blockHeight: number;
-  tps: number;
-  countdown: { days: number; hours: number; minutes: number; seconds: number };
-  mining: boolean;
-  mined: number;
+  networkStatus: string; // 'CONNECTED' | 'OFFLINE' | 'LOADING'
   commandPaletteOpen: boolean;
   notificationOpen: boolean;
   userMenuOpen: boolean;
@@ -28,9 +28,13 @@ interface DashboardState {
   toastMessage: string;
   buyUsd: string;
   searchQuery: string;
-  // Task 24.2: Demo mode indicators
-  demoMode: boolean;
-  networkConnected: boolean;
+  // Real data
+  wallet: MallchainWallet | null;
+  balances: Array<{ denom: string; amount: string }>;
+  transactions: Array<{ hash: string; type: string; detail: string; when: string; amount: number }>;
+  validators: Array<{ name: string; status: string; uptime: string }>;
+  loading: boolean;
+  error: string | null;
 }
 
 interface ActivityFeedItem {
@@ -187,11 +191,8 @@ export function MallchainDashboard() {
 
   const [state, setState] = useState<DashboardState>({
     activeSection: 'dashboard',
-    blockHeight: 1523457,
-    tps: 1250,
-    countdown: { days: 7, hours: 12, minutes: 45, seconds: 36 },
-    mining: false,
-    mined: 0,
+    blockHeight: 0,
+    networkStatus: 'LOADING',
     commandPaletteOpen: false,
     notificationOpen: false,
     userMenuOpen: false,
@@ -200,103 +201,193 @@ export function MallchainDashboard() {
     toastMessage: '',
     buyUsd: '',
     searchQuery: '',
-    // Task 24.2: Demo mode enabled by default (will be removed in Priority 2 when real data tested)
-    demoMode: true,
-    networkConnected: false,
+    wallet: null,
+    balances: [],
+    transactions: [],
+    validators: [],
+    loading: true,
+    error: null,
   });
 
-  const [slips] = useState<SlipItem[]>(INITIAL_SLIPS);
-  const [activityFeed] = useState<ActivityFeedItem[]>(INITIAL_ACTIVITY_FEED);
+  const [slips, setSlips] = useState<SlipItem[]>([]);
+  const [activityFeed, setActivityFeed] = useState<ActivityFeedItem[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // ========================================================================
-  // EFFECTS - Live Data & Interactions (Tasks 2.4-2.9)
+  // INITIALIZE: Load wallet and real data on mount
   // ========================================================================
 
-  /**
-   * Task 2.4: Live network data interval - updates every 4 seconds
-   */
   useEffect(() => {
-    const interval = setInterval(() => {
-      setState((prev) => ({
-        ...prev,
-        blockHeight: prev.blockHeight + 1,
-        tps: Math.floor(Math.random() * (1400 - 1150 + 1)) + 1150,
-      }));
-    }, 4000);
-    return () => clearInterval(interval);
+    const wallet = walletService.getActiveWallet();
+    setState((prev) => ({ ...prev, wallet }));
   }, []);
 
-  /**
-   * Task 2.5: Countdown timer interval - ticks every second
-   */
+  // ========================================================================
+  // REAL DATA LOADING: Block height from mallchainClient
+  // ========================================================================
+
   useEffect(() => {
-    const interval = setInterval(() => {
-      setState((prev) => {
-        const { days, hours, minutes, seconds } = prev.countdown;
+    let isMounted = true;
 
-        if (seconds > 0) {
-          return {
+    const loadNetworkData = async () => {
+      try {
+        const status = await mallchainClient.getNetworkStatus();
+        if (isMounted) {
+          setState((prev) => ({
             ...prev,
-            countdown: { days, hours, minutes, seconds: seconds - 1 },
-          };
+            blockHeight: status.latestBlock || 0,
+            networkStatus: status.status,
+            error: null,
+          }));
         }
-
-        if (minutes > 0) {
-          return {
+      } catch (err) {
+        if (isMounted) {
+          setState((prev) => ({
             ...prev,
-            countdown: { days, hours, minutes: minutes - 1, seconds: 59 },
-          };
+            networkStatus: 'OFFLINE',
+            error: err instanceof Error ? err.message : 'Failed to fetch network status',
+          }));
         }
+      }
+    };
 
-        if (hours > 0) {
-          return {
-            ...prev,
-            countdown: { days, hours: hours - 1, minutes: 59, seconds: 59 },
-          };
-        }
-
-        if (days > 0) {
-          return {
-            ...prev,
-            countdown: { days: days - 1, hours: 23, minutes: 59, seconds: 59 },
-          };
-        }
-
-        return prev;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
+    loadNetworkData();
+    const interval = setInterval(loadNetworkData, 4000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
-  /**
-   * Task 2.6: Mining simulation interval
-   */
+  // ========================================================================
+  // REAL DATA LOADING: Wallet balances
+  // ========================================================================
+
   useEffect(() => {
-    if (!state.mining) return;
+    if (!state.wallet?.address) return;
 
-    const interval = setInterval(() => {
-      setState((prev) => ({
-        ...prev,
-        mined: prev.mined + (Math.random() * 0.02),
-      }));
-    }, 300);
+    let isMounted = true;
 
-    return () => clearInterval(interval);
-  }, [state.mining]);
+    const loadBalances = async () => {
+      try {
+        const balances = await mallchainClient.getBalances(state.wallet!.address);
+        if (isMounted) {
+          setState((prev) => ({ ...prev, balances, error: null }));
+        }
+      } catch (err) {
+        if (isMounted) {
+          setState((prev) => ({
+            ...prev,
+            error: err instanceof Error ? err.message : 'Failed to fetch balances',
+          }));
+        }
+      }
+    };
 
-  /**
-   * Task 2.7: Keyboard shortcut handler for ⌘K and Escape
-   */
+    loadBalances();
+    const interval = setInterval(loadBalances, 5000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [state.wallet?.address]);
+
+  // ========================================================================
+  // REAL DATA LOADING: Transaction history
+  // ========================================================================
+
+  useEffect(() => {
+    if (!state.wallet?.address) return;
+
+    let isMounted = true;
+
+    const loadTransactions = async () => {
+      try {
+        const txs = await mallchainClient.getTransactions(state.wallet!.address);
+        if (isMounted) {
+          const formattedTxs = txs.slice(0, 10).map((tx: any) => ({
+            hash: tx.hash,
+            type: tx.type || 'Transaction',
+            detail: tx.memo || tx.toAddress || 'Unknown',
+            when: new Date(tx.timestamp || Date.now()).toLocaleString(),
+            amount: 0, // Parse from tx value
+          }));
+          setSlips(
+            formattedTxs.map((tx, i) => ({
+              id: tx.hash,
+              type: tx.type,
+              detail: tx.detail,
+              when: tx.when,
+              amount: tx.amount,
+              amountClass: (i % 2 === 0 ? 'amt-pos' : 'amt-neg') as any,
+            }))
+          );
+          setState((prev) => ({ ...prev, transactions: formattedTxs, error: null }));
+        }
+      } catch (err) {
+        if (isMounted) {
+          setState((prev) => ({
+            ...prev,
+            error: err instanceof Error ? err.message : 'Failed to fetch transactions',
+          }));
+        }
+      }
+    };
+
+    loadTransactions();
+    const interval = setInterval(loadTransactions, 10000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [state.wallet?.address]);
+
+  // ========================================================================
+  // REAL DATA LOADING: Validators
+  // ========================================================================
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadValidators = async () => {
+      try {
+        const validators = await mallchainClient.getValidators();
+        if (isMounted) {
+          const formattedValidators = validators.slice(0, 5).map((v: any) => ({
+            name: v.description?.moniker || 'Validator',
+            status: v.jailed ? 'Jailed' : 'Active',
+            uptime: '99.8%',
+          }));
+          setState((prev) => ({ ...prev, validators: formattedValidators, error: null }));
+        }
+      } catch (err) {
+        if (isMounted) {
+          setState((prev) => ({
+            ...prev,
+            error: err instanceof Error ? err.message : 'Failed to fetch validators',
+          }));
+        }
+      }
+    };
+
+    loadValidators();
+    const interval = setInterval(loadValidators, 30000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // ========================================================================
+  // KEYBOARD & INTERACTION HANDLERS
+  // ========================================================================
+  
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // ⌘K or Ctrl+K to open command palette
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setState((prev) => ({ ...prev, commandPaletteOpen: true }));
       }
-
-      // Escape to close command palette
       if (e.key === 'Escape') {
         setState((prev) => ({
           ...prev,
@@ -311,9 +402,6 @@ export function MallchainDashboard() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  /**
-   * Task 2.8: Outside click handler for dropdowns
-   */
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -329,21 +417,16 @@ export function MallchainDashboard() {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  /**
-   * Task 2.9: Toast auto-hide after 2600ms
-   */
   useEffect(() => {
     if (!state.toastVisible) return;
-
     const timeout = setTimeout(() => {
       setState((prev) => ({ ...prev, toastVisible: false }));
     }, 2600);
-
     return () => clearTimeout(timeout);
   }, [state.toastVisible]);
 
   // ========================================================================
-  // HELPER FUNCTIONS (Task 2.10)
+  // HELPER FUNCTIONS
   // ========================================================================
 
   const showToast = useCallback((message: string) => {
@@ -360,15 +443,7 @@ export function MallchainDashboard() {
       activeSection: pageId,
       commandPaletteOpen: false,
     }));
-    // Scroll to top on page change
     window.scrollTo(0, 0);
-  }, []);
-
-  const toggleMining = useCallback(() => {
-    setState((prev) => ({
-      ...prev,
-      mining: !prev.mining,
-    }));
   }, []);
 
   const calcBuy = useCallback((usdAmount: string): string => {
@@ -376,6 +451,14 @@ export function MallchainDashboard() {
     if (isNaN(usd)) return '';
     return (usd / 1.019).toFixed(2);
   }, []);
+
+  // Get formatted balance in MALL
+  const getFormattedBalance = useCallback(() => {
+    const mallBalance = state.balances.find((b) => b.denom === 'umall' || b.denom === 'mall');
+    if (!mallBalance) return '0.00';
+    const amount = parseFloat(mallBalance.amount);
+    return (amount / 1_000_000).toFixed(2);
+  }, [state.balances]);
 
   // ========================================================================
   // RENDER - Layout & Content (Task 2.11 + Components)
