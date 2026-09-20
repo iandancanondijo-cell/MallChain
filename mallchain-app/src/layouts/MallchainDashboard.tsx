@@ -28,6 +28,9 @@ interface DashboardState {
   toastMessage: string;
   buyUsd: string;
   searchQuery: string;
+  // Task 24.2: Demo mode indicators
+  demoMode: boolean;
+  networkConnected: boolean;
 }
 
 interface ActivityFeedItem {
@@ -197,6 +200,9 @@ export function MallchainDashboard() {
     toastMessage: '',
     buyUsd: '',
     searchQuery: '',
+    // Task 24.2: Demo mode enabled by default (will be removed in Priority 2 when real data tested)
+    demoMode: true,
+    networkConnected: false,
   });
 
   const [slips] = useState<SlipItem[]>(INITIAL_SLIPS);
@@ -665,7 +671,8 @@ function DashboardHeader({
         <div>
           <div className="header-greeting-text">Good afternoon, Ian</div>
           <div className="header-shortcut" style={{ fontSize: '12px', color: '#9ca3af' }}>
-            Mallchain mainnet • All systems healthy
+            Mallchain mainnet • {/* Task 24.2: Demo mode indicator */}
+            <span style={{ color: '#f59e0b', fontWeight: 600 }}>DEMO MODE</span> • All systems healthy
           </div>
         </div>
       </div>
@@ -736,7 +743,31 @@ function DashboardPage({
     <div className="banner">
       <div className="banner-status-dot"></div>
       <div className="banner-text">
-        <div className="banner-message">Building is open — all systems healthy</div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            marginBottom: '8px',
+          }}
+        >
+          <div className="banner-message">Building is open — all systems healthy</div>
+          {state.demoMode && (
+            <span
+              style={{
+                fontSize: '11px',
+                padding: '4px 10px',
+                background: 'rgba(245, 158, 11, 0.2)',
+                color: '#f59e0b',
+                borderRadius: '6px',
+                fontWeight: 600,
+                border: '1px solid rgba(245, 158, 11, 0.4)',
+              }}
+            >
+              DEMO MODE - Simulated Data
+            </span>
+          )}
+        </div>
         <div className="banner-stats">
           <div className="banner-stat">
             <div className="digit-strip">
@@ -772,10 +803,10 @@ function DashboardPage({
   const statCards = (
     <div className="grid-4col">
       {[
-        { label: 'Wallet Balance', value: '1,250.50 MALL', tag: 'green', icon: '💼' },
-        { label: "Today's Earnings", value: '+24.50 MALL', tag: 'amber', icon: '📊' },
-        { label: 'Sales Today', value: '3 orders', tag: 'red', icon: '🛒' },
-        { label: 'Waiting on You', value: '2 actions', tag: 'purple', icon: '✓' },
+        { label: 'Wallet Balance', value: '1,250.50 MALL', tag: 'green', icon: '💼', demo: true },
+        { label: "Today's Earnings", value: '+24.50 MALL', tag: 'amber', icon: '📊', demo: true },
+        { label: 'Sales Today', value: '3 orders', tag: 'red', icon: '🛒', demo: true },
+        { label: 'Waiting on You', value: '2 actions', tag: 'purple', icon: '✓', demo: true },
       ].map((card, i) => (
         <div key={i} className="card stat-card">
           <div className="stat-card-header">
@@ -786,7 +817,30 @@ function DashboardPage({
             <div className={`stat-card-tag ${card.tag}`}>●</div>
           </div>
           <div className="stat-card-value">{card.value}</div>
-          <div className="stat-card-subtitle">+2.5% from yesterday</div>
+          <div
+            className="stat-card-subtitle"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <span>+2.5% from yesterday</span>
+            {card.demo && state.demoMode && (
+              <span
+                style={{
+                  fontSize: '10px',
+                  padding: '2px 6px',
+                  background: 'rgba(245, 158, 11, 0.15)',
+                  color: '#f59e0b',
+                  borderRadius: '4px',
+                  fontWeight: 600,
+                }}
+              >
+                Demo
+              </span>
+            )}
+          </div>
         </div>
       ))}
     </div>
