@@ -113,5 +113,11 @@ backup-handwritten/
 # Wallet data (sensitive)
 wallet_data/
 
+# Mallchain App (separate application, but dashboard.css is tracked)
+# The CSS is specifically included for the Dark Glassmorphism Dashboard
+!mallchain-app/src/styles/dashboard.css
+mallchain-app/
+mallwallet/
+
 # Lighthouse CI local run artifacts (mallchain-os-v14/lighthouserc.cjs)
 .lighthouseci/
