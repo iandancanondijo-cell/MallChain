@@ -35,6 +35,11 @@ interface DashboardState {
   validators: Array<{ name: string; status: string; uptime: string }>;
   loading: boolean;
   error: string | null;
+  // UI state for pages/components
+  tps: number;
+  mining: boolean;
+  mined: number;
+  countdown: { days: number; hours: number; minutes: number; seconds: number };
 }
 
 interface ActivityFeedItem {
@@ -207,6 +212,10 @@ export function MallchainDashboard() {
     validators: [],
     loading: true,
     error: null,
+    tps: 0,
+    mining: false,
+    mined: 0,
+    countdown: { days: 0, hours: 0, minutes: 0, seconds: 0 },
   });
 
   const [slips, setSlips] = useState<SlipItem[]>([]);
@@ -444,6 +453,13 @@ export function MallchainDashboard() {
       commandPaletteOpen: false,
     }));
     window.scrollTo(0, 0);
+  }, []);
+
+  const toggleMining = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      mining: !prev.mining,
+    }));
   }, []);
 
   const calcBuy = useCallback((usdAmount: string): string => {
@@ -835,21 +851,6 @@ function DashboardPage({
           }}
         >
           <div className="banner-message">Building is open — all systems healthy</div>
-          {state.demoMode && (
-            <span
-              style={{
-                fontSize: '11px',
-                padding: '4px 10px',
-                background: 'rgba(245, 158, 11, 0.2)',
-                color: '#f59e0b',
-                borderRadius: '6px',
-                fontWeight: 600,
-                border: '1px solid rgba(245, 158, 11, 0.4)',
-              }}
-            >
-              DEMO MODE - Simulated Data
-            </span>
-          )}
         </div>
         <div className="banner-stats">
           <div className="banner-stat">
@@ -886,10 +887,10 @@ function DashboardPage({
   const statCards = (
     <div className="grid-4col">
       {[
-        { label: 'Wallet Balance', value: '1,250.50 MALL', tag: 'green', icon: '💼', demo: true },
-        { label: "Today's Earnings", value: '+24.50 MALL', tag: 'amber', icon: '📊', demo: true },
-        { label: 'Sales Today', value: '3 orders', tag: 'red', icon: '🛒', demo: true },
-        { label: 'Waiting on You', value: '2 actions', tag: 'purple', icon: '✓', demo: true },
+        { label: 'Wallet Balance', value: '0.00 MALL', tag: 'green', icon: '💼' },
+        { label: "Today's Earnings", value: '+0.00 MALL', tag: 'amber', icon: '📊' },
+        { label: 'Sales Today', value: '0 orders', tag: 'red', icon: '🛒' },
+        { label: 'Waiting on You', value: '0 actions', tag: 'purple', icon: '✓' },
       ].map((card, i) => (
         <div key={i} className="card stat-card">
           <div className="stat-card-header">
@@ -908,21 +909,7 @@ function DashboardPage({
               alignItems: 'center',
             }}
           >
-            <span>+2.5% from yesterday</span>
-            {card.demo && state.demoMode && (
-              <span
-                style={{
-                  fontSize: '10px',
-                  padding: '2px 6px',
-                  background: 'rgba(245, 158, 11, 0.15)',
-                  color: '#f59e0b',
-                  borderRadius: '4px',
-                  fontWeight: 600,
-                }}
-              >
-                Demo
-              </span>
-            )}
+            <span>+0% from yesterday</span>
           </div>
         </div>
       ))}
