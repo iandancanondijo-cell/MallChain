@@ -2,17 +2,18 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 21.0"
 
-  cluster_name    = "${var.cluster_name}-${var.environment}"
-  cluster_version = "1.31"
+  name               = "${var.cluster_name}-${var.environment}"
+  kubernetes_version = "1.31"
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
   # API server left reachable publicly for kubectl access, but node traffic
-  # stays in private subnets — tighten `cluster_endpoint_public_access_cidrs`
-  # to your office/VPN range for a real production cluster rather than
-  # leaving it open to 0.0.0.0/0.
-  cluster_endpoint_public_access = true
+  # stays in private subnets. Default allows all (0.0.0.0/0) for initial
+  # setup; override eks_endpoint_allowed_cidrs in terraform.tfvars to lock
+  # down to office/VPN ranges before production use.
+  endpoint_public_access       = true
+  endpoint_public_access_cidrs = var.eks_endpoint_allowed_cidrs
 
   eks_managed_node_groups = {
     default = {

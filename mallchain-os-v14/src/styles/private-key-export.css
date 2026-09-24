@@ -29,14 +29,14 @@
 
 .warning-content h4 {
   margin: 0 0 0.75rem 0;
-  color: #f3ba2f;
+  color: var(--gold);
   font-size: 1.1rem;
   font-weight: 600;
 }
 
 .warning-content p {
   margin: 0 0 1rem 0;
-  color: #a0aec0;
+  color: var(--txt-2);
   font-size: 0.95rem;
   line-height: 1.5;
 }
@@ -47,7 +47,7 @@
 
 .warning-list h5 {
   margin: 0.75rem 0 0.5rem 0;
-  color: #cbd5e0;
+  color: var(--txt-1);
   font-size: 0.9rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -63,7 +63,7 @@
 .warning-list li {
   margin: 0.4rem 0;
   padding-left: 1.5rem;
-  color: #a0aec0;
+  color: var(--txt-2);
   font-size: 0.9rem;
   line-height: 1.4;
   position: relative;
@@ -73,18 +73,18 @@
   content: '•';
   position: absolute;
   left: 0;
-  color: #f3ba2f;
+  color: var(--gold);
   font-weight: bold;
 }
 
 .warning-list h5:nth-child(1) ~ ul li::before {
   content: '✗';
-  color: #fc8181;
+  color: var(--red-2);
 }
 
 .warning-list h5:nth-of-type(2) ~ ul li::before {
   content: '✓';
-  color: #68d391;
+  color: var(--green-2);
 }
 
 /* Confirmation Checkbox */
@@ -100,7 +100,7 @@
   align-items: center;
   gap: 0.75rem;
   cursor: pointer;
-  color: #cbd5e0;
+  color: var(--txt-1);
   font-size: 0.95rem;
   user-select: none;
 }
@@ -109,17 +109,17 @@
   width: 1.25rem;
   height: 1.25rem;
   cursor: pointer;
-  accent-color: #f3ba2f;
+  accent-color: var(--gold);
 }
 
 .checkbox-label input[type='checkbox']:focus {
-  outline: 2px solid #f3ba2f;
+  outline: 2px solid var(--gold);
   outline-offset: 2px;
 }
 
 /* PIN Entry Section (Task 12.3) */
 .instruction-text {
-  color: #a0aec0;
+  color: var(--txt-2);
   margin: 1rem 0 1.5rem 0;
   font-size: 0.95rem;
   line-height: 1.5;
@@ -135,7 +135,7 @@
 }
 
 .private-key-warning strong {
-  color: #fc8181;
+  color: var(--red-2);
   display: block;
   margin-bottom: 0.5rem;
   font-size: 1rem;
@@ -149,7 +149,7 @@
 
 .private-key-warning li {
   margin: 0.35rem 0;
-  color: #cbd5e0;
+  color: var(--txt-1);
   font-size: 0.9rem;
   padding-left: 1.25rem;
   position: relative;
@@ -159,7 +159,7 @@
   content: '•';
   position: absolute;
   left: 0;
-  color: #fc8181;
+  color: var(--red-2);
   font-weight: bold;
 }
 
@@ -168,8 +168,8 @@
 }
 
 .private-key-container {
-  background: #0d111b;
-  border: 2px solid #1a1f2e;
+  background: var(--bg-1);
+  border: 2px solid var(--bg-2);
   border-radius: 8px;
   padding: 1.25rem;
   margin-bottom: 1rem;
@@ -191,19 +191,19 @@
   font-size: 0.85rem;
   line-height: 1.5;
   word-break: break-all;
-  color: #f3ba2f;
+  color: var(--gold);
   text-shadow: 0 0 8px rgba(243, 186, 47, 0.3);
 }
 
 .private-key-hidden {
-  color: #68d391;
+  color: var(--green-2);
   letter-spacing: 0.15em;
 }
 
 .toggle-visibility-btn {
   background: rgba(243, 186, 47, 0.15);
   border: 1px solid rgba(243, 186, 47, 0.3);
-  color: #f3ba2f;
+  color: var(--gold);
   padding: 0.75rem 1rem;
   border-radius: 6px;
   cursor: pointer;
@@ -229,7 +229,7 @@
   width: 100%;
   background: rgba(104, 211, 145, 0.15);
   border: 1px solid rgba(104, 211, 145, 0.3);
-  color: #68d391;
+  color: var(--green-2);
   transition: all 0.2s ease;
 }
 
@@ -253,7 +253,7 @@
 
 .download-section h4 {
   margin: 0 0 1rem 0;
-  color: #cbd5e0;
+  color: var(--txt-1);
   font-size: 1rem;
   font-weight: 600;
 }
@@ -263,7 +263,7 @@
   margin-bottom: 0.75rem;
   background: rgba(99, 179, 237, 0.15);
   border: 1px solid rgba(99, 179, 237, 0.3);
-  color: #63b3ed;
+  color: var(--cyan);
   transition: all 0.2s ease;
 }
 
@@ -275,7 +275,7 @@
 .backup-note {
   margin: 0;
   font-size: 0.85rem;
-  color: #a0aec0;
+  color: var(--txt-2);
   line-height: 1.4;
 }
 
@@ -291,17 +291,17 @@
 
 .qr-section h4 {
   margin: 0 0 1rem 0;
-  color: #cbd5e0;
+  color: var(--txt-1);
   font-size: 1rem;
   font-weight: 600;
 }
 
 .qr-placeholder {
-  background: #0d111b;
+  background: var(--bg-1);
   border: 2px dashed rgba(26, 31, 46, 0.8);
   border-radius: 6px;
   padding: 2rem 1.5rem;
-  color: #a0aec0;
+  color: var(--txt-2);
 }
 
 .qr-placeholder p {
@@ -327,19 +327,19 @@
 .modal-buttons .btn-secondary {
   background: rgba(45, 55, 72, 0.8);
   border: 1px solid rgba(45, 55, 72, 1);
-  color: #cbd5e0;
+  color: var(--txt-1);
   transition: all 0.2s ease;
 }
 
 .modal-buttons .btn-secondary:hover:not(:disabled) {
   background: rgba(45, 55, 72, 1);
-  border-color: #4a5568;
+  border-color: var(--line-2);
 }
 
 .modal-buttons .btn-danger {
   background: rgba(252, 129, 129, 0.15);
   border: 1px solid rgba(252, 129, 129, 0.3);
-  color: #fc8181;
+  color: var(--red-2);
   transition: all 0.2s ease;
 }
 
@@ -354,9 +354,9 @@
 }
 
 .modal-buttons .btn-primary {
-  background: linear-gradient(135deg, #f3ba2f, #e89e1e);
-  border: 1px solid #d68a0a;
-  color: #050810;
+  background: linear-gradient(135deg, var(--gold), #e89e1e);
+  border: 1px solid var(--gold-2);
+  color: var(--bg-0);
   font-weight: 600;
   transition: all 0.2s ease;
 }
@@ -374,8 +374,8 @@
 /* Error Messages */
 .error-message {
   background: rgba(252, 129, 129, 0.1);
-  border-left: 3px solid #fc8181;
-  color: #fc8181;
+  border-left: 3px solid var(--red-2);
+  color: var(--red-2);
   padding: 0.75rem 1rem;
   border-radius: 4px;
   margin-bottom: 1rem;
@@ -394,7 +394,7 @@
 .form-group label {
   display: block;
   margin-bottom: 0.5rem;
-  color: #cbd5e0;
+  color: var(--txt-1);
   font-size: 0.9rem;
   font-weight: 500;
 }
@@ -402,10 +402,10 @@
 .form-group input {
   width: 100%;
   padding: 0.75rem 1rem;
-  background: #0d111b;
-  border: 1px solid #2d3748;
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
   border-radius: 6px;
-  color: #e2e8f0;
+  color: var(--txt-1);
   font-size: 1rem;
   transition: all 0.2s ease;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
@@ -413,20 +413,20 @@
 
 .form-group input:focus {
   outline: none;
-  border-color: #f3ba2f;
+  border-color: var(--gold);
   box-shadow: 0 0 0 3px rgba(243, 186, 47, 0.1);
 }
 
 .form-group input:disabled {
-  background: #1a1f2e;
-  color: #718096;
+  background: var(--bg-2);
+  color: var(--txt-3);
   cursor: not-allowed;
 }
 
 .form-group small {
   display: block;
   margin-top: 0.4rem;
-  color: #a0aec0;
+  color: var(--txt-2);
   font-size: 0.8rem;
 }
 
@@ -434,7 +434,7 @@
 .private-key-export-modal h3 {
   margin-top: 0;
   margin-bottom: 1.5rem;
-  color: #e2e8f0;
+  color: var(--txt-1);
   font-size: 1.3rem;
   font-weight: 600;
 }
@@ -464,8 +464,8 @@
 }
 
 .modal {
-  background: #1a1f2e;
-  border: 1px solid #2d3748;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
   border-radius: 12px;
   padding: 2rem;
   max-height: 90vh;

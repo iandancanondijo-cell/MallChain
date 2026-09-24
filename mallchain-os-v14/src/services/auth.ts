@@ -266,9 +266,14 @@ class AuthService {
    * and there's nothing left to roll back once local state is cleared here.
    */
   logout(navigate?: (path: string) => void): void {
-    api.post('/api/auth/logout', {}).catch(() => {
-      // best-effort — local state is cleared either way
-    });
+    // Only attempt server-side session revocation if we have a valid local
+    // session marker. Without it, the POST would just get a 401 and trigger
+    // the same logout handler again (infinite loop on unauthenticated pages).
+    if (this.isAuthenticated()) {
+      api.post('/api/auth/logout', {}).catch(() => {
+        // best-effort — local state is cleared either way
+      });
+    }
     this.clearSession();
     store.reset();
     if (navigate) {

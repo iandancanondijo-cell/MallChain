@@ -92,7 +92,11 @@ export const eduApi = {
         body: form,
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) return { ok: false, error: data.error?.message || data.error || `Upload failed (${res.status})` };
+      if (!res.ok) {
+        const rawError = data?.error;
+        const errorMessage = typeof rawError === 'string' ? rawError : rawError?.message || `Upload failed (${res.status})`;
+        return { ok: false, error: errorMessage };
+      }
       return { ok: true, data };
     } catch (e) {
       return { ok: false, error: (e as Error).message || 'Upload failed' };

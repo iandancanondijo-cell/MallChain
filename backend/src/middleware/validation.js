@@ -1,5 +1,5 @@
 const Joi = require('joi');
-const bech32 = require('bech32');
+const { bech32 } = require('bech32');
 
 // Common validation schemas
 //

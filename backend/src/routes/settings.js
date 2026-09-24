@@ -7,6 +7,7 @@ const UserSettings = require('../models/UserSettings');
 const User = require('../models/user');
 const totp = require('../utils/totp');
 const { limiters } = require('../middleware/rateLimiter');
+const { config } = require('../config');
 
 function ok(data) { return { ok: true, data }; }
 function fail(err) {
@@ -39,6 +40,8 @@ router.put('/', auth, async (req, res) => {
     if (req.body.notifications) {
       if (req.body.notifications.email) Object.assign(settings.notifications.email, req.body.notifications.email);
       if (req.body.notifications.push) Object.assign(settings.notifications.push, req.body.notifications.push);
+      if (req.body.notifications.sms) Object.assign(settings.notifications.sms, req.body.notifications.sms);
+      if (req.body.notifications.whatsapp) Object.assign(settings.notifications.whatsapp, req.body.notifications.whatsapp);
       if (req.body.notifications.frequency) settings.notifications.frequency = req.body.notifications.frequency;
     }
     if (req.body.security) Object.assign(settings.security, req.body.security);
@@ -59,10 +62,168 @@ router.put('/notifications', auth, async (req, res) => {
 
     if (req.body.email) Object.assign(settings.notifications.email, req.body.email);
     if (req.body.push) Object.assign(settings.notifications.push, req.body.push);
+    if (req.body.sms) Object.assign(settings.notifications.sms, req.body.sms);
+    if (req.body.whatsapp) Object.assign(settings.notifications.whatsapp, req.body.whatsapp);
     if (req.body.frequency) settings.notifications.frequency = req.body.frequency;
 
     await settings.save();
     res.json(ok(settings.notifications));
+  } catch (e) {
+    res.status(500).json(fail(e));
+  }
+});
+
+// GET /api/settings/contact - Get contact info (phone, email verification status)
+router.get('/contact', auth, async (req, res) => {
+  try {
+    const settings = await getOrCreateSettings(req.user._id);
+    res.json(ok(settings.contactInfo || {}));
+  } catch (e) {
+    res.status(500).json(fail(e));
+  }
+});
+
+// PUT /api/settings/contact - Update contact info (phone number, etc.)
+router.put('/contact', auth, async (req, res) => {
+  try {
+    const settings = await getOrCreateSettings(req.user._id);
+    const { phoneNumber, whatsappOptIn } = req.body;
+
+    // Validate phone format (E.164: +<countrycode><number>)
+    if (phoneNumber !== undefined) {
+      if (phoneNumber === null) {
+        settings.contactInfo.phoneNumber = null;
+        settings.contactInfo.phoneVerified = false;
+        settings.contactInfo.phoneVerifiedAt = null;
+        settings.contactInfo.whatsappOptIn = false;
+        settings.contactInfo.whatsappOptInAt = null;
+      } else {
+        const e164Pattern = /^\+[1-9]\d{1,14}$/;
+        if (!e164Pattern.test(phoneNumber)) {
+          return res.status(400).json(fail('Phone number must be in E.164 format (e.g. +254712345678)'));
+        }
+        // Changing phone number invalidates verification
+        if (settings.contactInfo.phoneNumber !== phoneNumber) {
+          settings.contactInfo.phoneNumber = phoneNumber;
+          settings.contactInfo.phoneVerified = false;
+          settings.contactInfo.phoneVerifiedAt = null;
+        }
+      }
+    }
+
+    if (whatsappOptIn !== undefined) {
+      if (whatsappOptIn && !settings.contactInfo.phoneVerified) {
+        return res.status(400).json(fail('Phone number must be verified before opting into WhatsApp'));
+      }
+      settings.contactInfo.whatsappOptIn = whatsappOptIn;
+      settings.contactInfo.whatsappOptInAt = whatsappOptIn ? new Date() : null;
+    }
+
+    await settings.save();
+    res.json(ok(settings.contactInfo));
+  } catch (e) {
+    res.status(500).json(fail(e));
+  }
+});
+
+// POST /api/settings/contact/phone/send-otp - Send OTP to phone number
+// In production, this would integrate with an SMS gateway (Africa's Talking)
+// to deliver a real OTP. For now, returns the OTP in dev mode for testing.
+router.post('/contact/phone/send-otp', auth, async (req, res) => {
+  try {
+    const settings = await getOrCreateSettings(req.user._id);
+    if (!settings.contactInfo?.phoneNumber) {
+      return res.status(400).json(fail('Set a phone number first via PUT /contact'));
+    }
+
+    // Generate a 6-digit OTP
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Store OTP temporarily on the settings document
+    settings.contactInfo.pendingPhoneOtp = otp;
+    settings.contactInfo.pendingPhoneOtpExpiry = otpExpiry;
+    await settings.save();
+
+    // In production, send via SMS gateway. In dev, return it directly.
+    if (config.isProduction) {
+      const { sendSms } = require('../services/smsService');
+      await sendSms(
+        settings.contactInfo.phoneNumber,
+        `Your Mallchain verification code is: ${otp}. Valid for 10 minutes.`
+      );
+      res.json(ok({ sent: true, message: 'OTP sent to your phone' }));
+    } else {
+      // Dev mode: return OTP directly for testing convenience
+      res.json(ok({ sent: true, otp, message: 'OTP generated (dev mode — check response for code)' }));
+    }
+  } catch (e) {
+    res.status(500).json(fail(e));
+  }
+});
+
+// POST /api/settings/contact/phone/verify - Verify phone with OTP
+router.post('/contact/phone/verify', auth, async (req, res) => {
+  try {
+    const { otp } = req.body;
+    if (!otp) return res.status(400).json(fail('OTP is required'));
+
+    const settings = await getOrCreateSettings(req.user._id);
+    const pendingOtp = settings.contactInfo?.pendingPhoneOtp;
+    const otpExpiry = settings.contactInfo?.pendingPhoneOtpExpiry;
+
+    if (!pendingOtp) {
+      return res.status(400).json(fail('No pending OTP. Request a new one via /phone/send-otp'));
+    }
+    if (new Date() > otpExpiry) {
+      return res.status(400).json(fail('OTP has expired. Request a new one'));
+    }
+    if (pendingOtp !== String(otp).trim()) {
+      return res.status(400).json(fail('Invalid OTP'));
+    }
+
+    // OTP matches — mark phone as verified
+    settings.contactInfo.phoneVerified = true;
+    settings.contactInfo.phoneVerifiedAt = new Date();
+    settings.contactInfo.pendingPhoneOtp = undefined;
+    settings.contactInfo.pendingPhoneOtpExpiry = undefined;
+    await settings.save();
+
+    res.json(ok({ verified: true, phoneNumber: settings.contactInfo.phoneNumber }));
+  } catch (e) {
+    res.status(500).json(fail(e));
+  }
+});
+
+// POST /api/settings/contact/whatsapp/opt-in - Opt into WhatsApp notifications
+router.post('/contact/whatsapp/opt-in', auth, async (req, res) => {
+  try {
+    const settings = await getOrCreateSettings(req.user._id);
+
+    if (!settings.contactInfo?.phoneVerified) {
+      return res.status(400).json(fail('Phone number must be verified first'));
+    }
+
+    settings.contactInfo.whatsappOptIn = true;
+    settings.contactInfo.whatsappOptInAt = new Date();
+    await settings.save();
+
+    res.json(ok({ whatsappOptIn: true }));
+  } catch (e) {
+    res.status(500).json(fail(e));
+  }
+});
+
+// POST /api/settings/contact/whatsapp/opt-out - Opt out of WhatsApp notifications
+router.post('/contact/whatsapp/opt-out', auth, async (req, res) => {
+  try {
+    const settings = await getOrCreateSettings(req.user._id);
+
+    settings.contactInfo.whatsappOptIn = false;
+    settings.contactInfo.whatsappOptInAt = null;
+    await settings.save();
+
+    res.json(ok({ whatsappOptIn: false }));
   } catch (e) {
     res.status(500).json(fail(e));
   }

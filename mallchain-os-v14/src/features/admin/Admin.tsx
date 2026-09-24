@@ -36,12 +36,14 @@ type Tab = 'dashboard' | 'users' | 'kyc' | 'aml' | 'validators' | 'mining' | 'ba
  * validators" network stats, feature flags/announcements with no backend
  * model). Those last two had zero server-side representation, so they're
  * dropped rather than left as theater.
+ *
+ * Navigation is now driven by the AdminSidebar (activeTab/onTabChange props
+ * from App.tsx) instead of the horizontal mc-subnav bar that used to live here.
  */
-export default function Admin() {
+export default function Admin({ activeTab = 'dashboard', onTabChange = () => {} }: { activeTab?: Tab; onTabChange?: (tab: Tab) => void } = {}) {
   useStoreVersion();
 
   const [me, setMe] = useState<CurrentUser | null | undefined>(undefined); // undefined = loading
-  const [tab, setTab] = useState<Tab>('dashboard');
 
   useEffect(() => {
     adminApi.getMe().then((res) => setMe(res.ok && res.data ? res.data.user : null));
@@ -69,35 +71,19 @@ export default function Admin() {
         <span className="sub">signed in as {me.email} · {me.role}</span>
       </div>
 
-      <div className="mc-subnav" style={{ marginBottom: 16 }}>
-        <button className={tab === 'dashboard' ? 'on' : ''} onClick={() => setTab('dashboard')}>Dashboard</button>
-        <button className={tab === 'users' ? 'on' : ''} onClick={() => setTab('users')}>Users</button>
-        <button className={tab === 'kyc' ? 'on' : ''} onClick={() => setTab('kyc')}>KYC Review</button>
-        <button className={tab === 'aml' ? 'on' : ''} onClick={() => setTab('aml')}>AML Review</button>
-        <button className={tab === 'validators' ? 'on' : ''} onClick={() => setTab('validators')}>Validator Applications</button>
-        <button className={tab === 'mining' ? 'on' : ''} onClick={() => setTab('mining')}>Mining</button>
-        <button className={tab === 'badges' ? 'on' : ''} onClick={() => setTab('badges')}>Badges</button>
-        <button className={tab === 'liquidity' ? 'on' : ''} onClick={() => setTab('liquidity')}>Liquidity Activity</button>
-        <button className={tab === 'reconciliation' ? 'on' : ''} onClick={() => setTab('reconciliation')}>Reconciliation</button>
-        <button className={tab === 'withdrawals' ? 'on' : ''} onClick={() => setTab('withdrawals')}>Withdrawals</button>
-        <button className={tab === 'treasury' ? 'on' : ''} onClick={() => setTab('treasury')}>Treasury</button>
-        <button className={tab === 'audit' ? 'on' : ''} onClick={() => setTab('audit')}>Audit Log</button>
-        <button className={tab === 'local' ? 'on' : ''} onClick={() => setTab('local')}>Maintenance & Banners</button>
-      </div>
-
-      {tab === 'dashboard' && <DashboardTab />}
-      {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} />}
-      {tab === 'kyc' && <KycReviewTab />}
-      {tab === 'aml' && <AmlReviewTab />}
-      {tab === 'validators' && <ValidatorApplicationsTab />}
-      {tab === 'mining' && <MiningTab meId={me.id} />}
-      {tab === 'badges' && <BadgesTab />}
-      {tab === 'liquidity' && <LiquidityActivityTab />}
-      {tab === 'reconciliation' && <ReconciliationTab />}
-      {tab === 'withdrawals' && <WithdrawalsTab />}
-      {tab === 'treasury' && <TreasuryTab />}
-      {tab === 'audit' && <AuditTab />}
-      {tab === 'local' && <LocalBannersTab />}
+      {activeTab === 'dashboard' && <DashboardTab />}
+      {activeTab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} />}
+      {activeTab === 'kyc' && <KycReviewTab />}
+      {activeTab === 'aml' && <AmlReviewTab />}
+      {activeTab === 'validators' && <ValidatorApplicationsTab />}
+      {activeTab === 'mining' && <MiningTab meId={me.id} />}
+      {activeTab === 'badges' && <BadgesTab />}
+      {activeTab === 'liquidity' && <LiquidityActivityTab />}
+      {activeTab === 'reconciliation' && <ReconciliationTab />}
+      {activeTab === 'withdrawals' && <WithdrawalsTab />}
+      {activeTab === 'treasury' && <TreasuryTab />}
+      {activeTab === 'audit' && <AuditTab />}
+      {activeTab === 'local' && <LocalBannersTab />}
     </div>
   );
 }
@@ -362,20 +348,20 @@ function KycReviewTab() {
           return (
             <div key={s._id} className="list-row" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <div className="grow">
-                <div className="t">{s.firstName} {s.lastName}</div>
+                <div className="t">{s.firstName || 'Unknown'} {s.lastName || ''}</div>
                 <div className="m">
-                  {applicant?.email || 'unknown'} · {s.idType.replace('_', ' ')} #{revealed ? s.idNumber : maskIdNumber(s.idNumber)}
+                  {applicant?.email || 'unknown'} · {(s.idType || 'Unknown').replace('_', ' ')} #{revealed ? (s.idNumber || 'N/A') : maskIdNumber(s.idNumber || '')}
                   {' '}
                   <button
                     type="button"
                     className="link-btn"
                     style={{ fontSize: 11, verticalAlign: 'baseline' }}
                     onClick={() => setRevealedIds((r) => ({ ...r, [s._id]: !r[s._id] }))}
-                    aria-label={revealed ? `Hide ID number for ${s.firstName} ${s.lastName}` : `Show full ID number for ${s.firstName} ${s.lastName}`}
+                    aria-label={revealed ? `Hide ID number for ${s.firstName || 'user'}` : `Show full ID number for ${s.firstName || 'user'}`}
                   >
                     {revealed ? 'Hide' : 'Show'}
                   </button>
-                  {' '}· risk: {s.riskLevel} · submitted {new Date(s.submittedAt).toLocaleString()}
+                  {' '}· risk: {s.riskLevel || 'unknown'} · submitted {s.submittedAt ? new Date(s.submittedAt).toLocaleString() : 'unknown'}
                 </div>
                 <input
                   className="input input-sm"
@@ -396,7 +382,7 @@ function KycReviewTab() {
       {confirmTarget && (
         <Modal title="Sensitive PII access" onClose={() => setConfirmTarget(null)}>
           <p style={{ fontSize: 13.5, color: 'var(--txt-2)' }}>
-            🔒 You're about to view <b>{confirmTarget.firstName} {confirmTarget.lastName}</b>'s government ID document.
+            🔒 You're about to view <b>{confirmTarget.firstName || 'Unknown'} {confirmTarget.lastName || ''}</b>'s government ID document.
             This access is logged to your admin account regardless of what you enter below.
           </p>
           <div className="field mb">

@@ -661,6 +661,8 @@ if (EXPLORER_ENABLED && EXPLORER_BACKEND_URL) {
 app.use('/api/contracts', contractsRoutes);
 app.use('/api/devhub', devhubRoutes);
 app.use('/api/settings', settingsRoutes);
+const whatsappWebhookRoutes = require('./routes/whatsappWebhook');
+app.use('/api/whatsapp', whatsappWebhookRoutes);
 app.use('/api/rewards', rewardsRoutes);
 app.use('/api/address', addressMapRoutes);
 app.use('/api/search', limiters.standard, searchRoutes);
@@ -794,6 +796,7 @@ async function start() {
       serverSelectionTimeoutMS: Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS || 10000),
       socketTimeoutMS: Number(process.env.MONGO_SOCKET_TIMEOUT_MS || 45000),
       autoIndex: !config.isProduction,
+      retryWrites: false,
       ...mongoTlsOptions,
     });
     logger.info('Mongo connected', { mongo });
@@ -1107,47 +1110,51 @@ io.on('connection', socket => {
   })
 })
 
-  server.listen(PORT);
-  logger.info('Server listening', { port: PORT });
-  
-  // Start background workers (non-blocking)
-  startBackgroundWorkers().catch(err => logger.error('Background workers failed', { error: err }));
-  
-  // Start blockchain event listener (pulls from RPC)
-  const stopBlockListener = startBlockListener()
+  return new Promise((resolve) => {
+    server.listen(PORT, () => {
+      logger.info('Server listening', { port: PORT });
+      resolve();
+    });
+  }).then(() => {
+    // Start background workers (non-blocking)
+    startBackgroundWorkers().catch(err => logger.error('Background workers failed', { error: err }));
+    
+    // Start blockchain event listener (pulls from RPC)
+    const stopBlockListener = startBlockListener();
 
-  // Daily volume reset
-  setInterval(() => {
-    priceEngine.resetDailyVolume()
-    logger.info('Daily volume reset')
-  }, 24 * 60 * 60 * 1000)
+    // Daily volume reset
+    setInterval(() => {
+      priceEngine.resetDailyVolume()
+      logger.info('Daily volume reset')
+    }, 24 * 60 * 60 * 1000)
 
-  // Monthly badge snapshot (14th of each month, see jobs/badgeSnapshot.js).
-  // Not Redis-gated like startBackgroundWorkers() above — it's a plain
-  // node-cron schedule, and the streak check it depends on already
-  // degrades gracefully (reads as "no badge") when Redis is unavailable.
-  require('./jobs/badgeSnapshot').start();
+    // Monthly badge snapshot (14th of each month, see jobs/badgeSnapshot.js).
+    // Not Redis-gated like startBackgroundWorkers() above — it's a plain
+    // node-cron schedule, and the streak check it depends on already
+    // degrades gracefully (reads as "no badge") when Redis is unavailable.
+    require('./jobs/badgeSnapshot').start();
 
-  // Auto-tops-up the operator wallet's gas balance from the treasury before
-  // it runs dry (see jobs/operatorStakeWatcher.js) — badge issuance,
-  // Mallpoints awards, and EDU chain anchoring all sign with the operator
-  // key and fail together the moment it hits zero.
-  require('./jobs/operatorStakeWatcher').start();
+    // Auto-tops-up the operator wallet's gas balance from the treasury before
+    // it runs dry (see jobs/operatorStakeWatcher.js) — badge issuance,
+    // Mallpoints awards, and EDU chain anchoring all sign with the operator
+    // key and fail together the moment it hits zero.
+    require('./jobs/operatorStakeWatcher').start();
 
-  // Claims the treasury's staking rewards (x/mint inflation via
-  // x/distribution) back into its liquid balance — see
-  // jobs/treasuryRewardsSweeper.js. This is what makes the treasury a real
-  // ongoing source of stake in production rather than something that only
-  // ever depletes. No-ops harmlessly until scripts/delegate-treasury.js has
-  // bonded some treasury stake to a validator.
-  require('./jobs/treasuryRewardsSweeper').start();
+    // Claims the treasury's staking rewards (x/mint inflation via
+    // x/distribution) back into its liquid balance — see
+    // jobs/treasuryRewardsSweeper.js. This is what makes the treasury a real
+    // ongoing source of stake in production rather than something that only
+    // ever depletes. No-ops harmlessly until scripts/delegate-treasury.js has
+    // bonded some treasury stake to a validator.
+    require('./jobs/treasuryRewardsSweeper').start();
 
-  // Cleanup on shutdown
-  process.on('SIGINT', () => {
-    logger.info('Shutting down...')
-    if (stopBlockListener) stopBlockListener()
-    process.exit(0)
-  })
+    // Cleanup on shutdown
+    process.on('SIGINT', () => {
+      logger.info('Shutting down...')
+      if (stopBlockListener) stopBlockListener()
+      process.exit(0)
+    })
+  });
 }
 
 start().catch(err => { logger.error('Server startup failed', { error: err }); process.exit(1); });

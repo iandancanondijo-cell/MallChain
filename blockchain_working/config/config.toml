@@ -19,7 +19,7 @@ version = "0.38.19"
 proxy_app = "tcp://127.0.0.1:26658"
 
 # A custom human readable name for this node
-moniker = "validator1"
+moniker = "AvastaIan"
 
 # Database backend: goleveldb | cleveldb | boltdb | rocksdb | badgerdb
 # * goleveldb (github.com/syndtr/goleveldb - most popular implementation)
@@ -87,13 +87,11 @@ filter_peers = false
 [rpc]
 
 # TCP or UNIX socket address for the RPC server to listen on
-# SECURITY: Bound to localhost only to prevent external access
-# If external access is required, use a reverse proxy with authentication
 laddr = "tcp://127.0.0.1:26657"
 
 # A list of origins a cross-domain request can be executed from
 # Default value '[]' disables cors support
-# SECURITY: CORS disabled to prevent unauthorized cross-origin requests
+# Use '["*"]' to allow any origin
 cors_allowed_origins = []
 
 # A list of methods the client is allowed to use with cross-domain requests
@@ -389,6 +387,9 @@ chunk_request_timeout = "10s"
 
 # The number of concurrent chunk fetchers to run (default: 1).
 chunk_fetchers = "4"
+
+# Maximum number of chunks allowed in a snapshot (default: 100000).
+max_snapshot_chunks = 100000
 
 #######################################################
 ###       Block Sync Configuration Options          ###

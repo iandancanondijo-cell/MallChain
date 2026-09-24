@@ -123,7 +123,7 @@ function authCookieOptions(maxAgeMs) {
   return {
     httpOnly: true,
     secure: config.isProduction,
-    sameSite: 'strict',
+    sameSite: 'lax',
     path: '/',
     ...(maxAgeMs !== undefined ? { maxAge: maxAgeMs } : {}),
     ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
@@ -367,7 +367,7 @@ exports.linkWallet = async (req, res) => {
   const userId = req.user._id;
 
   const { address, timestamp, pubKey, signature } = req.body || {};
-  const bech32 = require('bech32');
+  const { bech32 } = require('bech32');
   let decoded;
   try {
     decoded = bech32.decode(String(address || ''));

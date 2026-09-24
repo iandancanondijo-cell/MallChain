@@ -56,6 +56,9 @@ async function notifyUser(user, { kind = 'system', title, body = '', category = 
 
   const emailEnabled = prefs?.notifications?.email?.[category] ?? true;
   const smsEnabled = prefs?.notifications?.sms?.[category] ?? false;
+  const whatsappEnabled = prefs?.notifications?.whatsapp?.[category] ?? false;
+  const phoneNumber = prefs?.contactInfo?.phoneNumber;
+  const whatsappOptIn = prefs?.contactInfo?.whatsappOptIn ?? false;
 
   if (emailEnabled && user.email) {
     const { sendEmail } = require('./emailService');
@@ -64,6 +67,12 @@ async function notifyUser(user, { kind = 'system', title, body = '', category = 
   if (smsEnabled && user.phone) {
     const { sendSms } = require('./smsService');
     await sendSms(user.phone, `${title} — ${body}`);
+  }
+  // WhatsApp requires both opt-in at the channel level AND per-category enable,
+  // plus a verified phone number on file.
+  if (whatsappEnabled && whatsappOptIn && phoneNumber) {
+    const { sendTransactionAlert } = require('./whatsappService');
+    await sendTransactionAlert(phoneNumber, title, body);
   }
 }
 

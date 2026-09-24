@@ -128,6 +128,51 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
   const kycStep = kyc.stepIndex; // 0=inactive .. 5=review, matches the legacy numeric steps below
   const kycData = kyc.data;
 
+  // Load saved KYC draft from backend on mount — lets a user resume their
+  // registration after closing the browser. Only runs once the user is
+  // authenticated (st.user.authed) and the KYC flow hasn't already started
+  // (kyc.stepIndex === 0, i.e. 'inactive'). The draft is merged into the
+  // local wizard state so the user picks up exactly where they left off.
+  useEffect(() => {
+    if (!st.user.authed || kyc.stepIndex !== 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get<{ ok: boolean; step: KycStep | null; data: Partial<KycData> | null; updatedAt: string | null }>('/api/kyc/draft');
+        if (cancelled) return;
+        if (res.ok && res.data?.step && res.data?.data) {
+          // Map backend step names to wizard step names (they match 1:1).
+          const step = res.data.step as KycStep;
+          if (KYC_STEPS.includes(step)) {
+            // Merge draft data into the wizard — only fields that are
+            // actually present, so we don't overwrite anything the user
+            // may have already typed in this session.
+            kyc.setData(res.data.data as Partial<KycData>);
+            kyc.goTo(step);
+          }
+        }
+      } catch (err) {
+        // Draft load failure is non-fatal — the user just starts fresh.
+        console.warn('Failed to load KYC draft:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [st.user.authed]);
+
+  // Auto-save draft progress to backend as the user moves through steps.
+  // Debounced by 500ms so rapid typing doesn't spam the API, and only
+  // fires for real KYC steps (not 'inactive' or 'review').
+  useEffect(() => {
+    if (!st.user.authed || kyc.stepIndex === 0 || kyc.stepIndex >= KYC_STEPS.length - 1) return;
+    const step = kyc.step as KycStep;
+    const timer = setTimeout(() => {
+      api.patch('/api/kyc/draft', { step, data: kycData }).catch((err) => {
+        console.warn('Failed to save KYC draft:', err);
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [kycData, kyc.step, st.user.authed]);
+
   // Required fields per step, matching backend/src/routes/kyc.js's Joi schema
   // exactly (every field there is .required()). Previously Next/Submit had no
   // client-side gating at all, so a user could click straight through empty
@@ -248,9 +293,18 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         // Every submission now requires a real admin decision — kycLevel
         // stays at 1 (unverified) until an admin approves it, regardless of
         // the automated risk signal.
-        toast('KYC submitted — under review');
+        toast('KYC submitted — under review. You can now access the dashboard with limited features.');
+        // Clear the saved draft — the user has completed the flow, so a
+        // stale "resume" prompt on next login would be confusing.
+        api.delete('/api/kyc/draft').catch(() => {});
         setBusy(false);
-        kyc.next(); // financial → review (AML)
+        // Reset the KYC wizard so the user doesn't get stuck in the flow
+        // when navigating to the dashboard — kycStep goes back to 0 ('inactive'),
+        // letting the dashboard render normally with the pending-KYC banner.
+        kyc.reset();
+        // Navigate to dashboard instead of keeping user in KYC flow — they
+        // can explore with limited functionality while KYC is pending.
+        navigate('/');
       } else {
         console.error('KYC submission error:', res);
         setErr(res.error || 'KYC submission failed');
@@ -1753,6 +1807,54 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
             </>
           )}
         </button>
+
+        {/* Prominent "Already have an account?" button — shown only in signup mode */}
+        {mode === 'signup' && (
+          <motion.div
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, delay: 0.1 }}
+            style={{
+              padding: 16,
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 12,
+              textAlign: 'center'
+            }}
+          >
+            <div style={{ fontSize: 14, color: 'var(--txt-2)', marginBottom: 10 }}>
+              Already have an account?
+            </div>
+            <button
+              onClick={() => { setMode('login'); setErr(''); setConfirmPass(''); setRequires2fa(false); setOtp(''); }}
+              style={{
+                padding: '10px 24px',
+                background: 'transparent',
+                border: '1px solid var(--gold)',
+                borderRadius: 8,
+                color: 'var(--gold)',
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--gold-dim)';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              Sign in to your account
+              <ArrowRight size={14} />
+            </button>
+          </motion.div>
+        )}
 
         {/* Footer Links */}
         <div style={{ textAlign: 'center', fontSize: 13 }}>

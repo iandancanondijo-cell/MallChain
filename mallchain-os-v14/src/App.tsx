@@ -2,9 +2,11 @@
  * App shell — fixed sidebar + topbar + routed content + global banners +
  * toasts + command palette.
  */
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, Suspense, lazy } from 'react';
 import Sidebar from './components/Sidebar';
 import AdminSidebar from './components/AdminSidebar';
+import AnimatedBackground from './components/AnimatedBackground';
+const Admin = lazy(() => import('./features/admin/Admin'));
 import TopBar from './components/TopBar';
 import CommandPalette from './components/CommandPalette';
 import { ToastHost, toast, toastKind } from './components/ui';
@@ -21,7 +23,32 @@ import { authService } from './services/auth';
 import { useMaintenanceStatus } from './services/maintenanceApi';
 import './styles/auth.css';
 import './styles/wallet-data.css';
+import './styles/wallet-ops.css';
 import './styles/explorer.css';
+import './styles/animated-background.css';
+
+/** Maps a route path to a section ID for per-section ambient theming via [data-section] in global.css. */
+function getSectionId(path: string): string {
+  const p = path.split('?')[0];
+  if (p === '/' || p === '/activity') return 'dashboard';
+  if (p.startsWith('/wallet') || p === '/transactions' || p === '/security') return 'wallet';
+  if (p.startsWith('/marketplace')) return 'marketplace';
+  if (p.startsWith('/staking')) return 'staking';
+  if (p.startsWith('/governance')) return 'governance';
+  if (p.startsWith('/mines')) return 'mines';
+  if (p.startsWith('/validators')) return 'validators';
+  if (p.startsWith('/explorer')) return 'explorer';
+  if (p.startsWith('/economy')) return 'economy';
+  if (p.startsWith('/messaging')) return 'messaging';
+  if (p.startsWith('/settings')) return 'settings';
+  if (p.startsWith('/profile')) return 'profile';
+  if (p.startsWith('/referrals')) return 'referrals';
+  if (p.startsWith('/admin')) return 'admin';
+  if (p.startsWith('/help') || p.startsWith('/edu')) return 'help';
+  if (p.startsWith('/analytics')) return 'dashboard';
+  if (p.startsWith('/notifications')) return 'messaging';
+  return 'dashboard';
+}
 
 export default function App() {
   const { path, navigate } = useHashRoute();
@@ -30,6 +57,7 @@ export default function App() {
   const [authInitialized, setAuthInitialized] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [expandedBanner, setExpandedBanner] = useState<'maintenance' | 'frozen' | null>(null);
+  const [adminTab, setAdminTab] = useState<'dashboard' | 'users' | 'kyc' | 'aml' | 'validators' | 'mining' | 'badges' | 'liquidity' | 'reconciliation' | 'withdrawals' | 'treasury' | 'audit' | 'local'>('dashboard');
   const maintenance = useMaintenanceStatus();
 
   useEffect(() => {
@@ -215,15 +243,17 @@ export default function App() {
   }, [path]);
 
   return (
-    <div className={'app-shell' + (isAdminRoute ? ' app-shell--admin' : '')}>
-      <a href="#main-content" className="skip-link">Skip to main content</a>
+    <>
+      <AnimatedBackground />
+      <div className={'app-shell' + (isAdminRoute ? ' app-shell--admin' : '')}>
+        <a href="#main-content" className="skip-link">Skip to main content</a>
       {!hiddenNav && (isAdminRoute
-        ? <AdminSidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+        ? <AdminSidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} activeTab={adminTab} onTabChange={setAdminTab} />
         : <Sidebar path={path} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />)}
       {!hiddenNav && mobileNavOpen && (
         <div className="sidebar-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />
       )}
-      <main className="main" id="main-content" style={hiddenNav ? { marginLeft: 0 } : undefined}>
+      <main className="main" id="main-content" data-section={getSectionId(path)} style={hiddenNav ? { marginLeft: 0 } : undefined}>
         {!hiddenNav && (
           <TopBar
             navigate={navigate}
@@ -302,7 +332,9 @@ export default function App() {
 
         <ErrorBoundary resetKey={path}>
           <Suspense fallback={<div className="tiny" role="status" style={{ padding: 20 }}>Loading…</div>}>
-            {route.render(navigate)}
+            {isAdminRoute
+              ? <Admin activeTab={adminTab} onTabChange={setAdminTab} />
+              : route.render(navigate)}
           </Suspense>
         </ErrorBoundary>
       </main>
@@ -310,6 +342,7 @@ export default function App() {
       <ToastHost />
       <PinChallengeHost />
       <CookieConsentBanner />
-    </div>
+      </div>
+    </>
   );
 }

@@ -21,6 +21,7 @@ if (!IS_TEST_ENV) {
   redis = new Redis({
     host: config.redis.host || '127.0.0.1',
     port: config.redis.port || 6379,
+    password: config.redis.password || undefined,
     lazyConnect: true,
     retryStrategy: () => null,
     ...redisTlsOptions(),

@@ -8,11 +8,14 @@ import { requestMnemonic } from '../../services/mnemonicAccess';
 import { useWizard } from '../../hooks/useWizard';
 import { useWalletData } from '../../hooks/useWalletData';
 import { loadAddressBook } from '../../services/addressBookStore';
+import {
+  ArrowUpRight, Send, CheckCircle2, AlertTriangle, Shield,
+  ArrowRight, User, Hash, Coins, Zap, ChevronRight, ExternalLink
+} from 'lucide-react';
 
 const SEND_STEPS = ['recipient', 'review', 'authorize', 'broadcast'] as const;
 type SendStep = typeof SEND_STEPS[number];
 
-/** Recipient/amount/fee draft — non-sensitive, worth resuming even across a full browser restart. */
 type SendData = {
   addr: string;
   amount: string;
@@ -20,17 +23,19 @@ type SendData = {
 };
 const INITIAL_SEND_DATA: SendData = { addr: '', amount: '', fee: 0.05 };
 
-/** Send MALL — full flow: address validation → amount + fee → review → sign → broadcast. */
+const STEP_META = [
+  { key: 'recipient', label: 'Recipient', icon: User },
+  { key: 'review', label: 'Review', icon: Hash },
+  { key: 'authorize', label: 'Sign', icon: Shield },
+  { key: 'broadcast', label: 'Sent', icon: CheckCircle2 },
+] as const;
+
+/** Send MALL — full flow with glassmorphism step wizard. */
 export default function WalletSend() {
   useStoreVersion();
   const st = store.state;
   useWalletData(st.wallet.address || null);
 
-  // Draft (recipient/amount/fee) persists via the durable tier — losing a
-  // partially-filled send to an accidental reload is bad UX and there's no
-  // secret in it. The mnemonic-word authorize answer below is never put in
-  // this wizard's data — it's read straight from the DOM at submit time and
-  // must never be persisted.
   const wizard = useWizard<SendStep, SendData>({
     key: 'walletSend',
     tier: 'durable',
@@ -48,19 +53,18 @@ export default function WalletSend() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [txHash, setTxHash] = useState('');
-
   const [gasError, setGasError] = useState(false);
 
   const validAddr = isValidMallAddress(addr);
   const max = st.balances.MALL;
-  // Read once per mount rather than on every render — this page doesn't
-  // need to react to address-book edits happening in another tab mid-flow.
   const addressBook = useMemo(() => loadAddressBook(), []);
+
+  const stepIdx = SEND_STEPS.indexOf(step);
 
   const review = () => {
     setErr('');
     const amt = parseFloat(amount);
-    if (!validAddr) { setErr('Invalid address — not a valid Mallchain (mall1…) address.'); return; }
+    if (!validAddr) { setErr('Invalid address — expected a mall1… bech32 address.'); return; }
     if (!amt || amt <= 0) { setErr('Enter a valid amount.'); return; }
     if (amt + fee > max) { setErr(`Insufficient balance — you have ${max.toFixed(2)} MALL.`); return; }
     wizard.next();
@@ -71,7 +75,6 @@ export default function WalletSend() {
       toast('No wallet loaded — import or create a wallet first', false);
       return;
     }
-
     const mnemonic = await requestMnemonic();
     if (!mnemonic) return;
 
@@ -124,17 +127,39 @@ export default function WalletSend() {
   if (step === 'broadcast') {
     const amt = parseFloat(amount);
     return (
-      <div className="view-head">
-        <h1>Transaction broadcast</h1>
-        <div className="card" style={{ maxWidth: 540, width: '100%', marginTop: 10 }}>
-          <div style={{ textAlign: 'center', padding: 18 }}>
-            <div style={{ fontSize: 42 }}>✅</div>
-            <h2 style={{ margin: '8px 0' }}>Sent {amt} MALL</h2>
-            <div className="muted mono" style={{ fontSize: 12 }}>tx {txHash}</div>
-            <div className="row" style={{ justifyContent: 'center', marginTop: 16 }}>
-              <button className="btn btn-ghost" onClick={() => { wizard.reset(); navigate('/explorer'); }}>View in Explorer</button>
-              <button className="btn btn-primary" onClick={() => { wizard.reset(); navigate('/wallet'); }}>Back to Wallet</button>
+      <div className="wo-page">
+        <div className="wo-hero">
+          <div className="wo-hero-icon" style={{ background: 'rgba(34, 197, 94, 0.12)' }}>
+            <CheckCircle2 size={24} style={{ color: 'var(--green)' }} />
+          </div>
+          <div className="wo-hero-body">
+            <h1 className="wo-hero-title">Transaction Broadcast</h1>
+            <div className="wo-hero-sub">Your transfer is pending confirmation on-chain</div>
+          </div>
+        </div>
+
+        <div className="wo-card wo-card--success">
+          <div className="wo-status">
+            <div className="wo-status-icon wo-status-icon--success">
+              <CheckCircle2 size={28} />
             </div>
+            <div className="wo-status-title">Sent {amt} MALL</div>
+            <div className="wo-status-text">
+              Your transaction has been submitted to the network and is awaiting confirmation.
+            </div>
+            {txHash && (
+              <div className="wo-hash" style={{ maxWidth: 360 }}>
+                {txHash}
+              </div>
+            )}
+          </div>
+          <div className="wo-actions" style={{ marginTop: 16 }}>
+            <button className="btn btn-ghost" onClick={() => { wizard.reset(); navigate('/explorer'); }}>
+              <ExternalLink size={13} style={{ marginRight: 6 }} /> Explorer
+            </button>
+            <button className="btn btn-primary" onClick={() => { wizard.reset(); navigate('/wallet'); }}>
+              Back to Wallet
+            </button>
           </div>
         </div>
       </div>
@@ -142,13 +167,51 @@ export default function WalletSend() {
   }
 
   return (
-    <div>
-      <div className="view-head"><h1>Send MALL</h1><span className="sub">Transfer Mallcoins to any address</span></div>
-      <div className="card" style={{ maxWidth: 560 }}>
+    <div className="wo-page">
+      {/* Hero */}
+      <div className="wo-hero">
+        <div className="wo-hero-icon" style={{ background: 'rgba(74, 222, 128, 0.12)' }}>
+          <ArrowUpRight size={24} style={{ color: 'var(--green-2)' }} />
+        </div>
+        <div className="wo-hero-body">
+          <h1 className="wo-hero-title">Send MALL</h1>
+          <div className="wo-hero-sub">Transfer Mallcoins to any bech32 address</div>
+        </div>
+      </div>
+
+      {/* Step Indicator */}
+      <div className="wo-steps">
+        {STEP_META.map((s, i) => {
+          const isActive = i === stepIdx;
+          const isDone = i < stepIdx;
+          const cls = isDone ? 'done' : isActive ? 'active' : '';
+          return (
+            <div key={s.key} style={{ display: 'contents' }}>
+              <div className={`wo-step ${cls}`}>
+                <div className="wo-step-dot">
+                  {isDone ? <CheckCircle2 size={13} /> : <s.icon size={13} />}
+                </div>
+                <span>{s.label}</span>
+              </div>
+              {i < STEP_META.length - 1 && (
+                <div className={`wo-step-line ${isDone ? 'done' : ''}`} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Step Content */}
+      <div className="wo-card">
         {step === 'recipient' && (
           <>
             <div className="field">
-              <label htmlFor="send-recipient">Recipient address</label>
+              <label htmlFor="send-recipient">
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <User size={13} style={{ color: 'var(--txt-3)' }} />
+                  Recipient address
+                </span>
+              </label>
               <input
                 id="send-recipient"
                 className={'input mono' + (addr && !validAddr ? ' err' : '')}
@@ -171,17 +234,59 @@ export default function WalletSend() {
                 </datalist>
               )}
               <div id="send-recipient-hint">
-                {addr && !validAddr && <div className="hint" style={{ color: 'var(--red-2)' }} role="alert">⚠ Invalid address format — expected mall1… bech32 address.</div>}
-                {validAddr && <div className="hint" style={{ color: 'var(--green-2)' }}>✓ Valid address</div>}
+                {addr && !validAddr && (
+                  <div className="hint" style={{ color: 'var(--red-2)', display: 'flex', alignItems: 'center', gap: 4 }} role="alert">
+                    <AlertTriangle size={11} /> Invalid address format
+                  </div>
+                )}
+                {validAddr && (
+                  <div className="hint" style={{ color: 'var(--green-2)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <CheckCircle2 size={11} /> Valid address
+                  </div>
+                )}
               </div>
             </div>
+
             <div className="field">
-              <label htmlFor="send-amount">Amount (MALL) — balance {max.toFixed(2)}</label>
-              <input id="send-amount" className="input" type="number" inputMode="decimal" min={0} step="any" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
-              <button className="btn btn-ghost btn-sm mt" onClick={() => setAmount(String(Math.max(0, max - fee)))}>Max</button>
+              <label htmlFor="send-amount">
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Coins size={13} style={{ color: 'var(--txt-3)' }} />
+                  Amount (MALL)
+                </span>
+                <span className="tiny muted" style={{ float: 'right', fontWeight: 400 }}>
+                  Balance: {max.toFixed(2)}
+                </span>
+              </label>
+              <input
+                id="send-amount"
+                className="input"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step="any"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+              <button
+                className="btn btn-ghost btn-sm mt"
+                onClick={() => setAmount(String(Math.max(0, max - fee)))}
+                style={{ alignSelf: 'flex-start' }}
+              >
+                <Zap size={11} style={{ marginRight: 4 }} /> Max
+              </button>
             </div>
+
             <div className="field">
-              <label htmlFor="send-fee">Network fee — {fee.toFixed(2)} MALL</label>
+              <label htmlFor="send-fee">
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Zap size={13} style={{ color: 'var(--txt-3)' }} />
+                  Network fee
+                </span>
+                <span className="tiny muted" style={{ float: 'right', fontWeight: 400 }}>
+                  {fee.toFixed(2)} MALL
+                </span>
+              </label>
               <input
                 id="send-fee"
                 type="range"
@@ -191,53 +296,108 @@ export default function WalletSend() {
                 value={fee}
                 aria-valuetext={`${fee.toFixed(2)} MALL`}
                 onChange={(e) => setFee(parseFloat(e.target.value))}
-                style={{ width: '100%', accentColor: 'var(--gold)' }}
+                style={{ width: '100%', accentColor: 'var(--section-accent)' }}
               />
             </div>
-            <div className="modal-actions">
-              <button className="btn btn-primary btn-block" onClick={review}>Review transaction →</button>
+
+            {err && (
+              <div className="wo-info wo-info--error" style={{ marginBottom: 12 }}>
+                <AlertTriangle size={14} className="wo-info-icon" />
+                <span>{err}</span>
+              </div>
+            )}
+
+            <div className="wo-actions">
+              <button className="btn btn-primary btn-block" onClick={review}>
+                Review transaction <ChevronRight size={14} style={{ marginLeft: 4 }} />
+              </button>
             </div>
           </>
         )}
+
         {step === 'review' && (
           <>
-            <div className="sec-title"><h2>Review</h2></div>
-            <table className="tbl">
-              <tbody>
-                <tr><td className="muted">Recipient</td><td className="mono" style={{ fontSize: 12 }}>{addr.slice(0, 10)}…{addr.slice(-6)}</td></tr>
-                <tr><td className="muted">Amount</td><td><b>{amount} MALL</b></td></tr>
-                <tr><td className="muted">Fee</td><td>{fee.toFixed(2)} MALL</td></tr>
-                <tr><td className="muted">Total</td><td><b className="gold">{(parseFloat(amount) + fee).toFixed(2)} MALL</b></td></tr>
-              </tbody>
-            </table>
-            <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => wizard.back()}>← Back</button>
-              <button className="btn btn-primary" onClick={() => wizard.next()}>Continue to authorize →</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <Hash size={16} style={{ color: 'var(--section-accent)' }} />
+              <h2 style={{ fontSize: 16, fontWeight: 700 }}>Transaction Summary</h2>
+            </div>
+
+            <div className="wo-summary">
+              <div className="wo-summary-row">
+                <span className="wo-summary-label">
+                  <User size={13} /> To
+                </span>
+                <span className="wo-summary-value mono" style={{ fontSize: 12 }}>
+                  {addr.slice(0, 10)}…{addr.slice(-6)}
+                </span>
+              </div>
+              <div className="wo-summary-row">
+                <span className="wo-summary-label">
+                  <Send size={13} /> Amount
+                </span>
+                <span className="wo-summary-value">{amount} MALL</span>
+              </div>
+              <div className="wo-summary-row">
+                <span className="wo-summary-label">
+                  <Zap size={13} /> Network fee
+                </span>
+                <span className="wo-summary-value">{fee.toFixed(2)} MALL</span>
+              </div>
+              <div className="wo-summary-row total">
+                <span className="wo-summary-label">Total</span>
+                <span className="wo-summary-value">
+                  {(parseFloat(amount) + fee).toFixed(2)} MALL
+                </span>
+              </div>
+            </div>
+
+            <div className="wo-actions" style={{ marginTop: 16 }}>
+              <button className="btn btn-ghost" onClick={() => wizard.back()}>
+                Back
+              </button>
+              <button className="btn btn-primary" onClick={() => wizard.next()}>
+                Continue to sign <ArrowRight size={14} style={{ marginLeft: 4 }} />
+              </button>
             </div>
           </>
         )}
+
         {step === 'authorize' && (
           <>
-            <div className="sec-title"><h2>Authorize transaction</h2><span className="sub">sign with your wallet PIN</span></div>
-            <div className="card" style={{ background: 'var(--bg-2)', textAlign: 'center', padding: 16 }}>
-              <div className="muted" style={{ fontSize: 12 }}>You'll be asked for your PIN to unlock your recovery phrase and sign this transaction.</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <Shield size={16} style={{ color: 'var(--section-accent)' }} />
+              <h2 style={{ fontSize: 16, fontWeight: 700 }}>Authorize Transaction</h2>
             </div>
-            {err && <div role="alert" style={{ color: 'var(--red-2)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
+
+            <div className="wo-info wo-info--tip" style={{ marginBottom: 16 }}>
+              <Shield size={14} className="wo-info-icon" />
+              <span>You'll be asked for your PIN to unlock your recovery phrase and sign this transaction securely.</span>
+            </div>
+
+            {err && (
+              <div className="wo-info wo-info--error" style={{ marginBottom: 12 }}>
+                <AlertTriangle size={14} className="wo-info-icon" />
+                <span>{err}</span>
+              </div>
+            )}
+
             {gasError && (
-              <div className="card" style={{ background: 'var(--bg-2)', borderColor: 'var(--gold)', marginTop: 10, padding: 14 }}>
-                <div style={{ fontSize: 13, color: 'var(--txt-2)' }}>
-                  Your wallet needs a small amount of network fee tokens before it can send — this is
-                  separate from your MALL balance and only needed once.
+              <div className="wo-card wo-card--warning" style={{ marginBottom: 12, padding: 14 }}>
+                <div style={{ fontSize: 13, color: 'var(--txt-2)', marginBottom: 10 }}>
+                  Your wallet needs network fee tokens before it can send — separate from your MALL balance and only needed once.
                 </div>
-                <button className="btn btn-primary btn-sm mt" disabled={gettingGas} onClick={getGas}>
-                  {gettingGas && <span className="spin" />} Get network fee tokens
+                <button className="btn btn-primary btn-sm" disabled={gettingGas} onClick={getGas}>
+                  {gettingGas && <span className="wo-spinner" style={{ width: 14, height: 14, marginRight: 6, display: 'inline-block' }} />}
+                  <Zap size={12} style={{ marginRight: 4 }} /> Get fee tokens
                 </button>
               </div>
             )}
-            <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => wizard.back()}>← Back</button>
+
+            <div className="wo-actions">
+              <button className="btn btn-ghost" onClick={() => wizard.back()}>Back</button>
               <button className="btn btn-primary" disabled={busy} onClick={authorize}>
-                {busy && <span className="spin" />} Authorize & broadcast
+                {busy && <span className="wo-spinner" style={{ width: 14, height: 14, marginRight: 6, display: 'inline-block' }} />}
+                <Shield size={14} style={{ marginRight: 6 }} /> Authorize & broadcast
               </button>
             </div>
           </>

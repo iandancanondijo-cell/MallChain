@@ -5,9 +5,20 @@ import { type ApiResult } from './api';
 export interface UserSettingsData {
   prefs: { accent: string; currency: string; lang: string; theme: string };
   notifications: {
-    email: { transactions: boolean; campaigns: boolean; governance: boolean; marketing: boolean; security: boolean };
-    push: { transactions: boolean; campaigns: boolean; governance: boolean; marketing: boolean; security: boolean };
+    email: { transactions: boolean; campaigns: boolean; governance: boolean; marketing: boolean; security: boolean; badgeAlerts: boolean };
+    push: { transactions: boolean; campaigns: boolean; governance: boolean; marketing: boolean; security: boolean; badgeAlerts: boolean };
+    sms: { transactions: boolean; campaigns: boolean; governance: boolean; marketing: boolean; security: boolean; badgeAlerts: boolean };
+    whatsapp: { transactions: boolean; campaigns: boolean; governance: boolean; marketing: boolean; security: boolean; badgeAlerts: boolean };
     frequency: string;
+  };
+  contactInfo: {
+    phoneNumber: string | null;
+    phoneVerified: boolean;
+    phoneVerifiedAt: string | null;
+    whatsappOptIn: boolean;
+    whatsappOptInAt: string | null;
+    emailVerified: boolean;
+    emailVerifiedAt: string | null;
   };
   security: {
     twoFactorEnabled: boolean;
@@ -18,6 +29,16 @@ export interface UserSettingsData {
   };
   privacy: { profileVisibility: string; showActivity: boolean; showBalance: boolean; allowMessages: boolean; dataSharing: boolean };
   display: { compactMode: boolean; showBalances: boolean; defaultView: string; itemsPerPage: number };
+}
+
+export interface ContactInfo {
+  phoneNumber: string | null;
+  phoneVerified: boolean;
+  phoneVerifiedAt: string | null;
+  whatsappOptIn: boolean;
+  whatsappOptInAt: string | null;
+  emailVerified: boolean;
+  emailVerifiedAt: string | null;
 }
 
 interface Envelope<T> { ok: boolean; data?: T; error?: string; }
@@ -57,6 +78,32 @@ class SettingsApi {
 
   async changePassword(currentPassword: string, newPassword: string): Promise<ApiResult<{ changed: boolean }>> {
     return unwrap(api.post('/api/settings/security/change-password', { currentPassword, newPassword }));
+  }
+
+  // ── Contact info & notification channels ──
+
+  async getContact(): Promise<ApiResult<ContactInfo>> {
+    return unwrap(api.get('/api/settings/contact'));
+  }
+
+  async updateContact(patch: { phoneNumber?: string | null; whatsappOptIn?: boolean }): Promise<ApiResult<ContactInfo>> {
+    return unwrap(api.put('/api/settings/contact', patch));
+  }
+
+  async sendPhoneOtp(): Promise<ApiResult<{ sent: boolean; otp?: string; message: string }>> {
+    return unwrap(api.post('/api/settings/contact/phone/send-otp', {}));
+  }
+
+  async verifyPhone(otp: string): Promise<ApiResult<{ verified: boolean; phoneNumber: string }>> {
+    return unwrap(api.post('/api/settings/contact/phone/verify', { otp }));
+  }
+
+  async optInWhatsApp(): Promise<ApiResult<{ whatsappOptIn: boolean }>> {
+    return unwrap(api.post('/api/settings/contact/whatsapp/opt-in', {}));
+  }
+
+  async optOutWhatsApp(): Promise<ApiResult<{ whatsappOptIn: boolean }>> {
+    return unwrap(api.post('/api/settings/contact/whatsapp/opt-out', {}));
   }
 }
 

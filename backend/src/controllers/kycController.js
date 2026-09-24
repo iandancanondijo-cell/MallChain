@@ -86,7 +86,7 @@ const performAMLCheck = async (kycData) => {
 };
 
 exports.submitKYC = asyncHandler(async (req, res) => {
-  const userId = req.user?.id || req.user?.userId;
+  const userId = req.user?._id || req.user?.id || req.user?.userId;
   if (!userId) {
     throw new AppError(ErrorCodes.UNAUTHORIZED, 'Unauthorized', 401);
   }
@@ -157,7 +157,7 @@ exports.submitKYC = asyncHandler(async (req, res) => {
 });
 
 exports.runAMLCheck = asyncHandler(async (req, res) => {
-  const userId = req.user?.id || req.user?.userId;
+  const userId = req.user?._id || req.user?.id || req.user?.userId;
   if (!userId) {
     throw new AppError(ErrorCodes.UNAUTHORIZED, 'Unauthorized', 401);
   }
@@ -193,7 +193,7 @@ exports.runAMLCheck = asyncHandler(async (req, res) => {
 });
 
 exports.getKYCStatus = asyncHandler(async (req, res) => {
-  const userId = req.user?.id || req.user?.userId;
+  const userId = req.user?._id || req.user?.id || req.user?.userId;
   if (!userId) {
     throw new AppError(ErrorCodes.UNAUTHORIZED, 'Unauthorized', 401);
   }
@@ -249,4 +249,101 @@ exports.getKYCStatus = asyncHandler(async (req, res) => {
       politicalExposure: kyc.politicalExposure,
     },
   });
+});
+
+/**
+ * PATCH /api/kyc/draft — save partial KYC progress so the user can resume
+ * after closing the browser. Only the fields present in req.body are
+ * merged; everything else is left untouched. The draft is stored on the
+ * user's most recent KYC record (created lazily if none exists yet) and
+ * cleared automatically on successful submit.
+ *
+ * Body: { step: 'personal'|'address'|'identity'|'financial'|'review', data: { ... } }
+ *
+ * Returns: { ok: true, step, updatedAt }
+ */
+exports.saveDraft = asyncHandler(async (req, res) => {
+  const userId = req.user?._id || req.user?.id || req.user?.userId;
+  if (!userId) {
+    throw new AppError(ErrorCodes.UNAUTHORIZED, 'Unauthorized', 401);
+  }
+
+  const { step, data } = req.body || {};
+  const VALID_STEPS = ['personal', 'address', 'identity', 'financial', 'review'];
+  if (!step || !VALID_STEPS.includes(step)) {
+    throw new AppError(ErrorCodes.INVALID_REQUEST_FORMAT, `step must be one of: ${VALID_STEPS.join(', ')}`, 400);
+  }
+  if (!data || typeof data !== 'object') {
+    throw new AppError(ErrorCodes.INVALID_REQUEST_FORMAT, 'data must be an object', 400);
+  }
+
+  // Upsert a draft record — if the user has no KYC record yet (hasn't
+  // submitted), create one with status 'draft' so we have somewhere to
+  // attach the progress. If they already have a pending/approved/rejected
+  // record, just update its draft field.
+  const kyc = await KYC.findOneAndUpdate(
+    { userId },
+    {
+      $set: {
+        'draft.step': step,
+        'draft.data': data,
+        'draft.updatedAt': new Date(),
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  res.json({ ok: true, step: kyc.draft.step, updatedAt: kyc.draft.updatedAt });
+});
+
+/**
+ * GET /api/kyc/draft — retrieve saved KYC draft progress. Returns null
+ * fields if no draft exists, so the frontend can decide whether to start
+ * fresh or resume.
+ *
+ * Returns: { ok: true, step, data, updatedAt } | { ok: true, step: null, data: null }
+ */
+exports.getDraft = asyncHandler(async (req, res) => {
+  const userId = req.user?._id || req.user?.id || req.user?.userId;
+  if (!userId) {
+    throw new AppError(ErrorCodes.UNAUTHORIZED, 'Unauthorized', 401);
+  }
+
+  const kyc = await KYC.findOne({ userId }).sort({ submittedAt: -1 });
+  if (!kyc || !kyc.draft || !kyc.draft.step) {
+    return res.json({ ok: true, step: null, data: null, updatedAt: null });
+  }
+
+  // Decrypt any PII fields that made it into the draft data — same set as
+  // the main record, since the draft mirrors the submit shape.
+  const decrypted = { ...kyc.draft.data };
+  const ENCRYPTED_FIELDS = ['idNumber', 'phoneNumber', 'address', 'city', 'postalCode'];
+  for (const field of ENCRYPTED_FIELDS) {
+    if (decrypted[field] != null) {
+      decrypted[field] = require('../utils/fieldEncryption').decryptField(decrypted[field]);
+    }
+  }
+
+  res.json({ ok: true, step: kyc.draft.step, data: decrypted, updatedAt: kyc.draft.updatedAt });
+});
+
+/**
+ * DELETE /api/kyc/draft — clear saved draft progress. Called after
+ * successful submit so a completed user doesn't see a stale "resume"
+ * prompt on next login.
+ *
+ * Returns: { ok: true }
+ */
+exports.clearDraft = asyncHandler(async (req, res) => {
+  const userId = req.user?._id || req.user?.id || req.user?.userId;
+  if (!userId) {
+    throw new AppError(ErrorCodes.UNAUTHORIZED, 'Unauthorized', 401);
+  }
+
+  await KYC.updateOne(
+    { userId },
+    { $unset: { draft: 1 } }
+  );
+
+  res.json({ ok: true });
 });

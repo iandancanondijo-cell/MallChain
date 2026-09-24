@@ -279,9 +279,19 @@ class Api {
     return this.request<T>(path, { method: 'PUT', body: JSON.stringify(body ?? {}) });
   }
 
+  /** PATCH request helper — same contract as post(), for REST endpoints that expect PATCH (e.g. KYC draft saves). */
+  patch<T = unknown>(path: string, body?: unknown): Promise<ApiResult<T>> {
+    return this.request<T>(path, { method: 'PATCH', body: JSON.stringify(body ?? {}) });
+  }
+
   /** DELETE request helper — same contract as post(), for REST endpoints that expect DELETE. */
   del<T = unknown>(path: string): Promise<ApiResult<T>> {
     return this.request<T>(path, { method: 'DELETE' });
+  }
+
+  /** DELETE alias — some callers prefer the full name; delegates to del(). */
+  delete<T = unknown>(path: string): Promise<ApiResult<T>> {
+    return this.del<T>(path);
   }
 
   /**

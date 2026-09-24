@@ -1,24 +1,28 @@
 const axios = require('axios');
 
 const CHAIN_REST = process.env.CHAIN_REST || 'http://127.0.0.1:1317';
+const CHAIN_RPC = process.env.CHAIN_RPC || 'http://127.0.0.1:26657';
 const Tx = require('../models/transaction');
 
 /**
  * Get all transactions from blockchain
+ * Uses RPC tx_search which is more reliable than REST for Cosmos SDK v0.38+
  * Query params: page, limit, order_by
  */
 exports.getAllBlockchainTxs = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = Math.min(parseInt(req.query.limit) || 50, 500);
-    const orderBy = req.query.order_by || 'desc'; // asc or desc
+    const orderBy = req.query.order_by || 'desc';
 
     console.log(`[BLOCKCHAIN] Fetching transactions: page=${page}, limit=${limit}`);
 
-    // Query blockchain for transactions
-    const url = `${CHAIN_REST}/cosmos/tx/v1beta1/txs?pagination.offset=${(page - 1) * limit}&pagination.limit=${limit}&order_by=${orderBy}`;
-    
-    const response = await axios.get(url, { timeout: 5000 }).catch(() => null);
+    // Use RPC tx_search instead of REST (more reliable for Cosmos SDK v0.38+)
+    const perPage = limit;
+    const rpcPage = orderBy === 'desc' ? page : page; // RPC doesn't support order_by directly
+    const url = `${CHAIN_RPC}/tx_search?query="tx.height>0"&per_page=${perPage}&page=${rpcPage}`;
+
+    const response = await axios.get(url, { timeout: 8000 }).catch(() => null);
     if (!response) {
       return res.json({
         transactions: [],
@@ -26,28 +30,50 @@ exports.getAllBlockchainTxs = async (req, res) => {
       });
     }
 
-    const { txs, pagination } = response.data;
+    const { total_count, txs } = response.data.result || {};
 
-    // Process transactions
-    const processedTxs = (txs || []).map(tx => ({
-      txHash: tx.txhash,
-      height: tx.height,
-      timestamp: tx.timestamp,
-      gas_used: tx.gas_used,
-      gas_wanted: tx.gas_wanted,
-      code: tx.code, // 0 = success
-      memo: tx.memo,
-      messages: tx.body?.messages || [],
-      signers: tx.signatures?.map(s => s.public_key) || []
-    }));
+    // Process transactions from RPC format
+    const processedTxs = (txs || []).map(tx => {
+      const txResult = tx.tx_result || {};
+      const txData = tx.tx || {};
+
+      // Try to decode transaction messages
+      let messages = [];
+      let memo = '';
+      try {
+        // tx.data is base64 encoded Tx protobuf
+        // For now, extract what we can from the raw data
+        messages = txData.body?.messages || [];
+        memo = txData.body?.memo || '';
+      } catch (e) {
+        // Ignore decode errors
+      }
+
+      return {
+        txHash: tx.hash || '',
+        height: parseInt(tx.height) || 0,
+        timestamp: txResult.timestamp || new Date().toISOString(),
+        gas_used: parseInt(txResult.gas_used) || 0,
+        gas_wanted: parseInt(txResult.gas_wanted) || 0,
+        code: parseInt(txResult.code) || 0,
+        memo,
+        messages,
+        success: parseInt(txResult.code) === 0
+      };
+    });
+
+    // Sort by height if needed (RPC returns in block order)
+    if (orderBy === 'desc') {
+      processedTxs.sort((a, b) => b.height - a.height);
+    }
 
     res.json({
       transactions: processedTxs,
       pagination: {
-        total: pagination?.total || 0,
+        total: parseInt(total_count) || 0,
         page,
         limit,
-        pages: Math.ceil((pagination?.total || 0) / limit)
+        pages: Math.ceil((parseInt(total_count) || 0) / limit)
       }
     });
   } catch (e) {
@@ -108,6 +134,7 @@ exports.getBlockchainTx = async (req, res) => {
 
 /**
  * Get blockchain transactions for a specific address
+ * Uses RPC tx_search with proper event filters for Cosmos SDK v0.38+
  * Query params: address, page, limit
  */
 exports.getAddressBlockchainTxs = async (req, res) => {
@@ -120,35 +147,73 @@ exports.getAddressBlockchainTxs = async (req, res) => {
 
     console.log(`[BLOCKCHAIN] Fetching txs for address: ${address.slice(0, 15)}...`);
 
-    // Query by sender (events: message.sender)
-    // This uses the Tendermint query syntax
-    const query = encodeURIComponent(`message.sender='${address}'`);
-    const url = `${CHAIN_REST}/cosmos/tx/v1beta1/txs?events=${query}&pagination.offset=${(page - 1) * limit}&pagination.limit=${limit}`;
+    // CometBFT tx_search doesn't support OR queries, so we query sender and recipient separately
+    // and merge/deduplicate the results
+    const senderQuery = `transfer.sender='${address}'`;
+    const recipientQuery = `transfer.recipient='${address}'`;
 
-    const response = await axios.get(url);
-    const { txs, pagination } = response.data;
+    const [senderRes, recipientRes] = await Promise.all([
+      axios.get(`${CHAIN_RPC}/tx_search?query="${senderQuery}"&per_page=${limit}&page=${page}`, { timeout: 8000 }).catch(() => null),
+      axios.get(`${CHAIN_RPC}/tx_search?query="${recipientQuery}"&per_page=${limit}&page=${page}`, { timeout: 8000 }).catch(() => null)
+    ]);
 
-    const processedTxs = (txs || []).map(tx => {
-      // Try to extract transfer info from messages
-      const transfers = [];
-      (tx.body?.messages || []).forEach(msg => {
-        if (msg['@type']?.includes('MsgSend') || msg['@type']?.includes('Transfer')) {
-          transfers.push({
-            from: msg.from_address || msg.sender,
-            to: msg.to_address || msg.recipient,
-            amount: msg.amount
-          });
-        }
+    if (!senderRes && !recipientRes) {
+      return res.json({
+        address,
+        transactions: [],
+        pagination: { total: 0, page, limit, pages: 0 }
       });
+    }
+
+    // Merge and deduplicate by tx hash
+    const senderTxs = senderRes?.data?.result?.txs || [];
+    const recipientTxs = recipientRes?.data?.result?.txs || [];
+    const senderTotal = parseInt(senderRes?.data?.result?.total_count) || 0;
+    const recipientTotal = parseInt(recipientRes?.data?.result?.total_count) || 0;
+
+    const txMap = new Map();
+    [...senderTxs, ...recipientTxs].forEach(tx => {
+      if (!txMap.has(tx.hash)) {
+        txMap.set(tx.hash, tx);
+      }
+    });
+
+    const mergedTxs = Array.from(txMap.values());
+    const totalCount = senderTotal + recipientTotal; // Approximate (may double-count)
+
+    const processedTxs = mergedTxs.map(tx => {
+      const txResult = tx.tx_result || {};
+      const txData = tx.tx || {};
+
+      // Extract transfer events
+      const transfers = [];
+      const events = txResult.events || [];
+      for (const event of events) {
+        if (event.type === 'transfer') {
+          const attrs = {};
+          for (const attr of event.attributes || []) {
+            attrs[attr.key] = attr.value;
+          }
+          if (attrs.sender && attrs.recipient) {
+            transfers.push({
+              from: attrs.sender,
+              to: attrs.recipient,
+              amount: attrs.amount
+            });
+          }
+        }
+      }
 
       return {
-        txHash: tx.txhash,
-        height: tx.height,
-        timestamp: tx.timestamp,
-        gas_used: tx.gas_used,
-        code: tx.code,
+        txHash: tx.hash || '',
+        height: parseInt(tx.height) || 0,
+        timestamp: txResult.timestamp || new Date().toISOString(),
+        gas_used: parseInt(txResult.gas_used) || 0,
+        gas_wanted: parseInt(txResult.gas_wanted) || 0,
+        code: parseInt(txResult.code) || 0,
+        success: parseInt(txResult.code) === 0,
         transfers,
-        messages: tx.body?.messages || []
+        messages: txData.body?.messages || []
       };
     });
 
@@ -156,10 +221,10 @@ exports.getAddressBlockchainTxs = async (req, res) => {
       address,
       transactions: processedTxs,
       pagination: {
-        total: pagination?.total || 0,
+        total: totalCount,
         page,
         limit,
-        pages: Math.ceil((pagination?.total || 0) / limit)
+        pages: Math.ceil(totalCount / limit)
       }
     });
   } catch (e) {
@@ -183,7 +248,7 @@ exports.getAddressBalance = async (req, res) => {
     const { address } = req.query;
     if (!address) return res.status(400).json({ error: 'address required' });
 
-    const url = `${CHAIN_REST}/cosmos/bank/v1/balances/${address}`;
+    const url = `${CHAIN_REST}/cosmos/bank/v1beta1/balances/${address}`;
     const response = await axios.get(url);
     const { balances } = response.data;
 

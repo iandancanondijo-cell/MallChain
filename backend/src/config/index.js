@@ -96,6 +96,7 @@ const config = {
   redis: {
     host: process.env.REDIS_HOST || '127.0.0.1',
     port: Number(process.env.REDIS_PORT || 6379),
+    password: process.env.REDIS_PASSWORD || null,
   },
 
   secrets: {
@@ -210,6 +211,21 @@ const config = {
       username: process.env.AFRICASTALKING_USERNAME || '',
       senderId: process.env.AFRICASTALKING_SENDER_ID || '',
       apiBaseUrl: process.env.AFRICASTALKING_API_BASE_URL || 'https://api.africastalking.com',
+    },
+  },
+
+  // WhatsApp Business API (Meta Cloud API). Template messages only —
+  // see services/whatsappService.js. Best-effort like email/sms.
+  whatsapp: {
+    meta: {
+      phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+      accessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
+      businessAccountId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '',
+      apiVersion: process.env.WHATSAPP_API_VERSION || 'v19.0',
+      // Webhook verification token — Meta sends this in the webhook
+      // subscription challenge. Must match the value configured in the
+      // WhatsApp Business Manager's webhook settings.
+      webhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || '',
     },
   },
 

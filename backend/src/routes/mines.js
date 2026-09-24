@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
 const { requireAdmin } = require('../middleware/adminAuth');
+const requireAuth = require('../middleware/requireAuth');
 const logger = require('../utils/logger');
 const idempotency = require('../middleware/idempotency');
 
@@ -15,37 +15,23 @@ const { PLATFORMS, DEFAULT_DAILY_CAP_MLPTS, getDailyCapMlpts } = require('../con
 const { computeCampaignRate, clampMultiplier, MIN_CAMPAIGN_MULTIPLIER, MAX_CAMPAIGN_MULTIPLIER } = require('../services/rewardEngineService');
 const { markActiveToday } = require('../utils/activityTracker');
 
-function getJwtSecret() {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error('JWT_SECRET not configured');
-  return secret;
+const SUBMISSION_CREATE_FIELDS = ['campaign_id', 'title', 'task_type', 'description', 'proof_url'];
+const SUBMISSION_UPDATE_FIELDS = ['title', 'task_type', 'description', 'proof_url'];
+
+function pick(obj, fields) {
+  const out = {};
+  for (const f of fields) {
+    if (obj[f] !== undefined) out[f] = obj[f];
+  }
+  return out;
 }
 
-function verifyToken(req, res, next) {
-  // This predates the JWT->httpOnly-cookie migration and never got updated
-  // — it only ever checked the Authorization header, so every /api/mines
-  // route has been unreachable from the actual web app (which stopped
-  // sending that header) since that migration shipped. Mirrors
-  // middleware/requireAuth.js's dual bearer/cookie extraction, minus the
-  // jti revocation check (a smaller, separate gap — this endpoint group
-  // still trusts any signature-valid token even post-logout, same as
-  // before this fix, just no longer *always* rejecting first).
-  const auth = req.headers.authorization || '';
-  let token = null;
-  if (auth.startsWith('Bearer ')) {
-    token = auth.slice(7);
-  } else if (req.cookies && req.cookies.auth_token) {
-    token = req.cookies.auth_token;
-  }
-  if (!token) return res.status(401).json({ ok: false, error: 'missing token' });
-  try {
-    const payload = jwt.verify(token, getJwtSecret());
-    req.userId = payload.userId || payload.id;
-    markActiveToday(req.userId); // fire-and-forget — feeds the badge streak, never blocks the request
+const _requireAuth = requireAuth();
+function minesAuth(req, res, next) {
+  _requireAuth(req, res, () => {
+    req.userId = req.user?._id?.toString();
     next();
-  } catch (e) {
-    return res.status(401).json({ ok: false, error: 'invalid token' });
-  }
+  });
 }
 
 function ok(data) { return { ok: true, data }; }
@@ -129,7 +115,7 @@ router.post('/campaigns', requireAdmin, async (req, res) => {
 // never trusted from the client — so a creator can't just declare an
 // arbitrary payout. budget_mlpts is escrowed out of the creator's balance
 // immediately so a campaign can never promise more than it can pay.
-router.post('/campaigns/create', verifyToken, async (req, res) => {
+router.post('/campaigns/create', minesAuth, async (req, res) => {
   const { platform, activity_type, content_link, description, directive, multiplier, budget_mlpts } = req.body || {};
 
   const platformDef = PLATFORMS[platform];
@@ -213,7 +199,7 @@ router.put('/campaigns/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(400).json(fail(e)); }
 });
 
-router.get('/profile/me', verifyToken, async (req, res) => {
+router.get('/profile/me', minesAuth, async (req, res) => {
    try {
      const u = await User.findById(req.userId).lean();
      if (!u) return res.status(404).json(fail('user not found'));
@@ -238,7 +224,7 @@ router.get('/profile/me', verifyToken, async (req, res) => {
    } catch (e) { res.status(500).json(fail(e)); }
  });
 
-router.put('/profile', verifyToken, async (req, res) => {
+router.put('/profile', minesAuth, async (req, res) => {
   try {
     const updates = {};
     if (req.body.username !== undefined) updates.username = req.body.username;
@@ -248,7 +234,7 @@ router.put('/profile', verifyToken, async (req, res) => {
   } catch (e) { res.status(400).json(fail(e)); }
 });
 
-router.get('/transactions', verifyToken, async (req, res) => {
+router.get('/transactions', minesAuth, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit || '30', 10), 100);
     const rows = await WalletTransaction.find({ user_id: req.userId }).sort({ created_at: -1 }).limit(limit).lean();
@@ -256,14 +242,15 @@ router.get('/transactions', verifyToken, async (req, res) => {
   } catch (e) { res.status(500).json(fail(e)); }
 });
 
-router.post('/transactions', verifyToken, async (req, res) => {
+router.post('/transactions', minesAuth, async (req, res) => {
   try {
-    const row = await WalletTransaction.create({ ...req.body, user_id: req.userId });
+    const allowed = pick(req.body, ['type', 'amount', 'currency', 'description', 'reference_id', 'reference_type']);
+    const row = await WalletTransaction.create({ ...allowed, user_id: req.userId });
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }
 });
 
-router.get('/submissions/me', verifyToken, async (req, res) => {
+router.get('/submissions/me', minesAuth, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
     const page = Math.max(parseInt(req.query.page || '0', 10), 0);
@@ -340,7 +327,7 @@ async function checkCampaignAbuseLimits(userId, campaignId, session) {
   return { ok: true };
 }
 
-router.post('/submissions', verifyToken, async (req, res) => {
+router.post('/submissions', minesAuth, async (req, res) => {
   // The check-then-create below must be atomic: without a transaction,
   // concurrent requests for the same campaign can all read the same
   // under-limit submission count before any of their creates land,
@@ -356,7 +343,7 @@ router.post('/submissions', verifyToken, async (req, res) => {
         throw err;
       }
 
-      const body = { ...req.body, miner_id: req.userId };
+      const body = { ...pick(req.body, SUBMISSION_CREATE_FIELDS), miner_id: req.userId };
       [row] = await TaskSubmission.create([body], { session });
     });
     // Randomly assign up to 6 staked reviewers; if none are eligible yet the
@@ -371,13 +358,20 @@ router.post('/submissions', verifyToken, async (req, res) => {
   }
 });
 
-router.put('/submissions/:id', verifyToken, async (req, res) => {
+router.put('/submissions/:id', minesAuth, async (req, res) => {
   try {
     const sub = await TaskSubmission.findById(req.params.id).lean();
     if (!sub) return res.status(404).json(fail('submission not found'));
-    if (sub.miner_id !== req.userId) return res.status(403).json(fail('forbidden: not your submission'));
-    
-    const row = await TaskSubmission.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true }).lean();
+    if (sub.miner_id.toString() !== req.userId) return res.status(403).json(fail('forbidden: not your submission'));
+    if (!['manual_review', 'pending_assignment'].includes(sub.status)) {
+      return res.status(409).json(fail('submission can no longer be edited'));
+    }
+
+    const row = await TaskSubmission.findByIdAndUpdate(
+      req.params.id,
+      { $set: pick(req.body, SUBMISSION_UPDATE_FIELDS) },
+      { new: true }
+    ).lean();
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }
 });

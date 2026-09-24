@@ -7,7 +7,7 @@
 /* global require, module */
 
 const Joi = require('joi')
-const bech32 = require('bech32')
+const { bech32 } = require('bech32')
 
 const ADDRESS_PREFIXES = ['cosmos', 'mall', 'tmp']
 

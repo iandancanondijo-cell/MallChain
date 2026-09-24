@@ -148,7 +148,10 @@ async function initiateMpesaRequest(purchase, phone, amount, description) {
       throw err;
     }
 
-    const stkBody = buildStkBody(purchase, phone, amount, description);
+    // STK push Amount must be the fiat (KES) amount, not the MLCNS amount.
+    // The `amount` parameter here is MLCNS (from the frontend), but Safaricom
+    // charges in KES. Use purchase.fiatAmount which was set during /reserve.
+    const stkBody = buildStkBody(purchase, phone, purchase.fiatAmount, description);
     const stkRes = await paymentBackoff.execute(async () => {
       try {
         return await axios.post(
@@ -523,7 +526,7 @@ router.post('/mpesa', limiters.financial, idempotency({ required: true }), requi
 // Check payment status
 router.get('/status/:paymentId', async (req, res) => {
   try {
-    const { error, value } = schemas.buyStatusParamSchema.validate(req.params);
+    const { error, value } = schemas.buyStatusParam.validate(req.params);
     if (error) {
       return res.status(400).json({ error: error.details?.[0]?.message || 'Invalid payment id' });
     }

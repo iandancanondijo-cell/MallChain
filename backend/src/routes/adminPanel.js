@@ -6,6 +6,8 @@ const User = require('../models/user');
 const AuditLog = require('../models/AuditLog');
 const ValidatorApplication = require('../models/ValidatorApplication');
 const KYC = require('../models/kyc');
+const WithdrawalAmlReview = require('../models/WithdrawalAmlReview');
+const WithdrawalStructuringFlag = require('../models/WithdrawalStructuringFlag');
 const TaskSubmission = require('../models/TaskSubmission');
 const LiquidityReconciliation = require('../models/LiquidityReconciliation');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
@@ -55,7 +57,10 @@ router.post('/bootstrap', limiters.strict, async (req, res) => {
     const bcrypt = require('bcryptjs');
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const user = await User.create({ email, password: hashedPassword, role: 'superadmin' });
+    // Admin/superadmin accounts are pre-verified (kycLevel: 2) — they
+    // manage KYC for other users, so showing them an "Under Review" banner
+    // would be confusing and incorrect.
+    const user = await User.create({ email, password: hashedPassword, role: 'superadmin', kycLevel: 2 });
     const publicUser = user.toObject();
     delete publicUser.password;
 
@@ -332,6 +337,104 @@ router.post('/kyc/:id/review', limiters.strict, async (req, res) => {
 
     await auditLog('kyc_review', req.user, { kycId: req.params.id, action, applicantId: String(kyc.userId) });
     return res.json({ ok: true, kyc });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ============ AML REVIEW ============
+router.get('/aml-reviews/pending', async (req, res) => {
+  try {
+    const { page = 0, limit = 50 } = req.query;
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const skip = Math.max(Number(page) || 0, 0) * safeLimit;
+    const query = { status: 'pending' };
+
+    const [rawReviews, total] = await Promise.all([
+      WithdrawalAmlReview.find(query)
+        .populate('userId', 'email username')
+        .sort({ submittedAt: 1 })
+        .skip(skip)
+        .limit(safeLimit)
+        .lean(),
+      WithdrawalAmlReview.countDocuments(query),
+    ]);
+
+    // .lean() bypasses the model's decrypt helper — decrypt the encrypted
+    // narrative field explicitly before it reaches an admin, same pattern
+    // as the KYC pending list above.
+    const reviews = rawReviews.map((r) => WithdrawalAmlReview.decryptAmlPii(r));
+
+    await auditLog('aml_pending_view', req.user, { resultCount: reviews.length });
+    return res.json({ ok: true, reviews, total });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/aml-reviews/:id/review', limiters.strict, async (req, res) => {
+  try {
+    const { action, notes } = req.body;
+    if (!['approved', 'rejected'].includes(action)) {
+      return res.status(400).json({ ok: false, error: 'action must be approved or rejected' });
+    }
+
+    const review = await WithdrawalAmlReview.findById(req.params.id);
+    if (!review) return res.status(404).json({ ok: false, error: 'AML review not found' });
+
+    review.status = action;
+    review.reviewedAt = new Date();
+    review.reviewedBy = req.user._id;
+    review.reviewNotes = notes || '';
+    await review.save();
+
+    await auditLog('aml_review', req.user, { reviewId: req.params.id, action, userId: String(review.userId) });
+    return res.json({ ok: true, review: WithdrawalAmlReview.decryptAmlPii(review) });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ============ STRUCTURING FLAGS ============
+router.get('/structuring-flags', async (req, res) => {
+  try {
+    const { acknowledged, page = 0, limit = 50 } = req.query;
+    const query = {};
+    if (acknowledged !== undefined) query.acknowledged = acknowledged === 'true';
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const skip = Math.max(Number(page) || 0, 0) * safeLimit;
+
+    const [flags, total] = await Promise.all([
+      WithdrawalStructuringFlag.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(safeLimit)
+        .lean(),
+      WithdrawalStructuringFlag.countDocuments(query),
+    ]);
+
+    return res.json({ ok: true, flags, total });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/structuring-flags/:id/acknowledge', limiters.strict, async (req, res) => {
+  try {
+    const flag = await WithdrawalStructuringFlag.findById(req.params.id);
+    if (!flag) return res.status(404).json({ ok: false, error: 'Structuring flag not found' });
+    if (flag.acknowledged) {
+      return res.status(409).json({ ok: false, error: 'This flag has already been acknowledged' });
+    }
+
+    flag.acknowledged = true;
+    flag.acknowledgedBy = req.user._id;
+    flag.acknowledgedAt = new Date();
+    await flag.save();
+
+    await auditLog('structuring_flag_acknowledge', req.user, { flagId: req.params.id, walletAddress: flag.walletAddress });
+    return res.json({ ok: true, flag });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
@@ -895,7 +998,15 @@ router.post('/maintenance', requireSuperAdmin, limiters.strict, async (req, res)
       return res.status(400).json({ ok: false, error: 'must provide either global or scope' });
     }
 
-    const update = { reason: reason || '', updatedBy: req.user.email || String(req.user._id) };
+    // Preserve the existing reason when the caller doesn't supply a new one —
+    // otherwise every scope toggle would wipe the reason the admin set when
+    // enabling global pause (or a previous scope), leaving users with a blank
+    // banner even though maintenance is still active.
+    const existing = await MaintenanceMode.findById('singleton').lean();
+    const update = {
+      reason: reason !== undefined ? reason : (existing?.reason || ''),
+      updatedBy: req.user.email || String(req.user._id),
+    };
     if (global !== undefined) update.global = !!global;
     if (scope !== undefined) update[`scopes.${scope}`] = !!paused;
 
@@ -909,7 +1020,14 @@ router.post('/maintenance', requireSuperAdmin, limiters.strict, async (req, res)
 
     await auditLog('maintenance_mode_change', req.user, { global, scope, paused, reason }, 'success');
 
-    return res.json({ ok: true, global: state.global, scopes: state.scopes, reason: state.reason });
+    return res.json({
+      ok: true,
+      global: state.global,
+      scopes: state.scopes,
+      reason: state.reason,
+      updatedBy: state.updatedBy || null,
+      updatedAt: state.updatedAt || null,
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err) });
   }

@@ -1,6 +1,16 @@
 const router = require('express').Router();
 const explorer = require('../services/explorerService');
 
+router.get('/blocks', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+    const blocks = await explorer.getRecentBlocks(limit);
+    res.json({ blocks });
+  } catch (error) {
+    res.status(503).json({ success: false, error: error.message });
+  }
+});
+
 router.get('/latest', async (_req, res) => {
   try {
     const data = await explorer.getLatest();

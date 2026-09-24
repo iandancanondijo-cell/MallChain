@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
+import { ArrowDownLeft, Copy, Share2, Bell, CheckCircle2, Wallet, QrCode, Shield } from 'lucide-react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { useWalletData } from '../../hooks/useWalletData';
 
-/** Receive — real address + real QR + copy + live "awaiting payment" via socket balance updates. */
+/** Receive — QR showcase + copy/share + live "awaiting payment" via socket balance updates. */
 export default function WalletReceive() {
   useStoreVersion();
   const st = store.state;
@@ -13,21 +14,19 @@ export default function WalletReceive() {
   const [paid, setPaid] = useState(false);
   const [startBalance, setStartBalance] = useState<number | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
-  // Keeps st.balances live via real-time socket push updates while this page is open —
-  // the same mechanism WalletHub already relies on (hooks/useWalletData.ts).
   useWalletData(addr || null);
 
   useEffect(() => {
     if (!addr) { setQrDataUrl(null); return; }
     let cancelled = false;
-    QRCode.toDataURL(addr, { width: 132, margin: 1 })
+    QRCode.toDataURL(addr, { width: 160, margin: 1 })
       .then((url) => { if (!cancelled) setQrDataUrl(url); })
       .catch((err) => console.error('[WalletReceive] Failed to generate QR code:', err));
     return () => { cancelled = true; };
   }, [addr]);
 
-  // A push-driven balance increase while awaiting counts as "paid" — no fake timer.
   useEffect(() => {
     if (awaiting && startBalance !== null && st.balances.MALL > startBalance) {
       const received = st.balances.MALL - startBalance;
@@ -50,20 +49,18 @@ export default function WalletReceive() {
       document.execCommand('copy');
       ta.remove();
     }
+    setCopied(true);
     toast('Address copied to clipboard');
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const share = async () => {
     if (!addr) return;
-    // Distinct from "Copy address": use the native share sheet when
-    // available (mobile browsers, most desktop browsers over HTTPS) so the
-    // address can go straight into a messaging app, not just the clipboard.
     if (navigator.share) {
       try {
         await navigator.share({ title: 'My Mallchain address', text: addr });
         return;
       } catch (err) {
-        // AbortError = user dismissed the share sheet, not a failure.
         if (err instanceof Error && err.name === 'AbortError') return;
       }
     }
@@ -80,9 +77,23 @@ export default function WalletReceive() {
   if (!addr) {
     return (
       <div>
-        <div className="view-head"><h1>Receive MALL</h1><span className="sub">Share your address to receive Mallcoins</span></div>
-        <div className="card" style={{ maxWidth: 560 }}>
-          <div className="empty-state"><div className="es-ico">📥</div><div className="es-t">No wallet connected</div><div className="es-m">Connect a wallet to see your receive address.</div></div>
+        <div className="wo-hero">
+          <div className="wo-hero-icon" style={{ background: 'rgba(34, 211, 238, 0.1)', color: 'var(--cyan)' }}>
+            <ArrowDownLeft size={22} />
+          </div>
+          <div className="wo-hero-body">
+            <div className="wo-hero-title">Receive MALL</div>
+            <div className="wo-hero-sub">Share your address or QR code to receive Mallcoins</div>
+          </div>
+        </div>
+        <div className="wo-card" style={{ maxWidth: 560 }}>
+          <div style={{ textAlign: 'center', padding: '32px 16px' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(34, 211, 238, 0.08)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <Wallet size={24} style={{ color: 'var(--cyan)', opacity: 0.5 }} />
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>No wallet connected</div>
+            <div style={{ fontSize: 13, color: 'var(--txt-3)' }}>Connect a wallet to see your receive address and QR code.</div>
+          </div>
         </div>
       </div>
     );
@@ -90,36 +101,96 @@ export default function WalletReceive() {
 
   return (
     <div>
-      <div className="view-head"><h1>Receive MALL</h1><span className="sub">Share your address to receive Mallcoins</span></div>
-      <div className="card" style={{ maxWidth: 560 }}>
-        <div className="sec-title"><h2>Your address</h2></div>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* ── hero ── */}
+      <div className="wo-hero">
+        <div className="wo-hero-icon" style={{ background: 'rgba(34, 211, 238, 0.1)', color: 'var(--cyan)' }}>
+          <ArrowDownLeft size={22} />
+        </div>
+        <div className="wo-hero-body">
+          <div className="wo-hero-title">Receive MALL</div>
+          <div className="wo-hero-sub">Share your address or QR code — payments arrive in real time</div>
+        </div>
+      </div>
+
+      {/* ── QR + address card ── */}
+      <div className="wo-qr-section" style={{ maxWidth: 560 }}>
+        <div className="wo-qr-frame">
           {qrDataUrl ? (
-            <img src={qrDataUrl} alt="Wallet address QR code" width={132} height={132} style={{ background: '#fff', padding: 6, borderRadius: 10, flex: 'none' }} />
+            <img src={qrDataUrl} alt="Wallet address QR code" width={160} height={160} style={{ borderRadius: 8 }} />
           ) : (
-            <div style={{ width: 132, height: 132, background: '#fff', borderRadius: 10, flex: 'none' }} />
+            <div style={{ width: 160, height: 160, background: '#fff', borderRadius: 8 }} />
           )}
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <div className="mono" style={{ fontSize: 12, wordBreak: 'break-all', color: 'var(--txt-2)' }}>{addr}</div>
-            <div className="row" style={{ marginTop: 10 }}>
-              <button className="btn btn-primary btn-sm" onClick={copy}>Copy address</button>
-              <button className="btn btn-ghost btn-sm" onClick={share}>Share</button>
+          {awaiting && !paid && (
+            <div className="wo-pulse-ring" />
+          )}
+          {paid && (
+            <div style={{
+              position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(34, 197, 94, 0.12)', borderRadius: 12, backdropFilter: 'blur(4px)',
+            }}>
+              <CheckCircle2 size={40} style={{ color: 'var(--green)' }} />
             </div>
+          )}
+        </div>
+
+        <div className="wo-address-display">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+            <QrCode size={12} style={{ color: 'var(--txt-3)' }} />
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--txt-3)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Your address</span>
           </div>
+          <div className="wo-address-text">{addr}</div>
         </div>
-        <div style={{ borderTop: '1px solid var(--line-1)', marginTop: 16, paddingTop: 14 }}>
-          {!awaiting && !paid && (
-            <button className="btn btn-block btn-ghost gold" onClick={startPoll}>🔔 Await payment — watch this address</button>
-          )}
-          {awaiting && (
-            <div style={{ textAlign: 'center', padding: 8 }}>
-              <span className="stream-pulse" style={{ display: 'inline-block', marginRight: 8 }} />
-              <span className="muted">Watching for an incoming transaction…</span>
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-primary btn-sm" onClick={copy} style={{ flex: 1, gap: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            {copied ? <CheckCircle2 size={13} /> : <Copy size={13} />}
+            {copied ? 'Copied!' : 'Copy address'}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={share} style={{ flex: 1, gap: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Share2 size={13} /> Share
+          </button>
+        </div>
+      </div>
+
+      {/* ── await payment ── */}
+      <div className="wo-card" style={{ maxWidth: 560 }}>
+        {!awaiting && !paid && (
+          <button className="btn btn-block btn-ghost" onClick={startPoll} style={{ gap: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderColor: 'rgba(34, 211, 238, 0.25)', color: 'var(--cyan)' }}>
+            <Bell size={14} /> Await payment — watch this address
+          </button>
+        )}
+
+        {awaiting && (
+          <div className="wo-status" style={{ textAlign: 'center' }}>
+            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(34, 211, 238, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Shield size={18} style={{ color: 'var(--cyan)' }} />
+              </div>
+              <div className="wo-pulse-ring" style={{ position: 'absolute' }} />
             </div>
-          )}
-          {paid && <div style={{ textAlign: 'center', color: 'var(--green-2)', fontWeight: 800 }}>✓ Payment received — balance updated</div>}
+            <div className="wo-status-title" style={{ color: 'var(--cyan)' }}>Watching for payment…</div>
+            <div className="wo-status-text">A balance increase on this address will be detected in real time</div>
+          </div>
+        )}
+
+        {paid && (
+          <div className="wo-status wo-card--success" style={{ textAlign: 'center' }}>
+            <CheckCircle2 size={32} style={{ color: 'var(--green)', marginBottom: 8 }} />
+            <div className="wo-status-title" style={{ color: 'var(--green)' }}>Payment received</div>
+            <div className="wo-status-text">Your balance has been updated</div>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setPaid(false); }} style={{ marginTop: 12 }}>
+              Await another payment
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── info ── */}
+      <div className="wo-card wo-info--tip" style={{ maxWidth: 560 }}>
+        <div style={{ fontSize: 12, color: 'var(--txt-3)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--txt-2)' }}>Address format:</strong> bech32, prefixed <code className="mono" style={{ fontSize: 11, background: 'var(--bg-3)', padding: '1px 5px', borderRadius: 4 }}>mall1</code>.
+          The QR code encodes this address directly — scan it from any Mallchain-compatible wallet to send MALL here.
         </div>
-        <div className="tiny" style={{ marginTop: 12 }}>Address format: bech32, prefixed "mall1". The QR code above encodes this address directly.</div>
       </div>
     </div>
   );

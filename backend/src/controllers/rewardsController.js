@@ -28,7 +28,7 @@ exports.info = async (req, res) => {
       } else if (address && address.startsWith('0x')) {
         // fallback: hex-encoded 20-byte address payload -> bech32 (matches
         // routes/addressMap.js's hex<->bech32 mapping convention)
-        const bech32 = require('bech32');
+        const { bech32 } = require('bech32');
         const hex = address.replace(/^0x/, '');
         const bytes = Buffer.from(hex, 'hex');
         address = bech32.encode(PREFIX, bech32.toWords(bytes));

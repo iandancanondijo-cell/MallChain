@@ -10,8 +10,8 @@ const DLQ_COLLECTION = 'convert_dead_letters'
 const worker = new Worker(
   'convert-liquidity-dlq',
   async job => {
-    const { address, mlcoins, kesValue, poolId, firstFailedAt, previousAttempts } = job.data
-    const attemptNumber = Number(previousAttempts || 0) + 1
+    const { address, mlcoins, kesValue, poolId, firstFailedAt } = job.data
+    const attemptNumber = job.attemptsMade + 1  // use BullMQ's internal counter, not stale job data
 
     let liquidityResult = null
     try {
@@ -52,6 +52,11 @@ const worker = new Worker(
   {
     connection: getRedisConnection(),
     concurrency: 2,
+    settings: {
+      lockDuration: 120000,     // 2 min — long enough for signAndBroadcast to complete
+      stalledInterval: 30000,
+      maxStalledCount: 0,       // stalled jobs fail immediately instead of re-queuing
+    },
   },
 )
 

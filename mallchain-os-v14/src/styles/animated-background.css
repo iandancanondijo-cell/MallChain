@@ -1,0 +1,156 @@
+/* ============================================================
+   Animated Background — slow-moving particles and gradients
+   ============================================================ */
+
+.animated-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--bg-0);
+}
+
+/* Gradient orbs — large, blurred color blobs that drift slowly */
+.animated-bg__orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.15;
+  mix-blend-mode: screen;
+}
+
+.animated-bg__orb--1 {
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, var(--gold) 0%, transparent 70%);
+  top: -200px;
+  left: -200px;
+  animation: orb-drift-1 80s ease-in-out infinite;
+}
+
+.animated-bg__orb--2 {
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, var(--purple) 0%, transparent 70%);
+  bottom: -150px;
+  right: -150px;
+  animation: orb-drift-2 100s ease-in-out infinite;
+}
+
+.animated-bg__orb--3 {
+  width: 450px;
+  height: 450px;
+  background: radial-gradient(circle, var(--cyan) 0%, transparent 70%);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: orb-drift-3 120s ease-in-out infinite;
+}
+
+@keyframes orb-drift-1 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  25% {
+    transform: translate(100px, 150px) scale(1.1);
+  }
+  50% {
+    transform: translate(200px, 50px) scale(0.9);
+  }
+  75% {
+    transform: translate(50px, 200px) scale(1.05);
+  }
+}
+
+@keyframes orb-drift-2 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(-150px, -100px) scale(1.15);
+  }
+  66% {
+    transform: translate(-80px, -200px) scale(0.95);
+  }
+}
+
+@keyframes orb-drift-3 {
+  0%, 100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  25% {
+    transform: translate(-30%, -70%) scale(1.1);
+  }
+  50% {
+    transform: translate(-70%, -30%) scale(0.9);
+  }
+  75% {
+    transform: translate(-40%, -60%) scale(1.05);
+  }
+}
+
+/* Particles — small floating dots */
+.animated-bg__particle {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 10px var(--gold), 0 0 20px var(--gold);
+  animation: particle-float linear infinite;
+}
+
+@keyframes particle-float {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  25% {
+    transform: translate(50px, -100px) rotate(90deg);
+  }
+  50% {
+    transform: translate(-30px, -200px) rotate(180deg);
+  }
+  75% {
+    transform: translate(80px, -150px) rotate(270deg);
+  }
+  100% {
+    transform: translate(0, 0) rotate(360deg);
+  }
+}
+
+/* Mesh gradient overlay — adds subtle texture */
+.animated-bg__mesh {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(at 20% 30%, rgba(243, 186, 47, 0.05) 0px, transparent 50%),
+    radial-gradient(at 80% 70%, rgba(167, 139, 250, 0.05) 0px, transparent 50%),
+    radial-gradient(at 50% 50%, rgba(34, 211, 238, 0.03) 0px, transparent 50%);
+  animation: mesh-shift 60s ease-in-out infinite;
+}
+
+@keyframes mesh-shift {
+  0%, 100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+/* Ensure content sits above the background */
+.app-shell {
+  position: relative;
+  z-index: 1;
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  .animated-bg__orb,
+  .animated-bg__particle,
+  .animated-bg__mesh {
+    animation: none;
+  }
+}

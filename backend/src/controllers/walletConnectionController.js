@@ -1,6 +1,6 @@
 const axios = require('axios');
 const bip39 = require('bip39');
-const bech32 = require('bech32');
+const { bech32 } = require('bech32');
 const { DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
 
 const CHAIN_REST = (process.env.CHAIN_REST_URL || process.env.VITE_CHAIN_REST || 'http://localhost:1317').replace(/\/$/, '');

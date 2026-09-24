@@ -263,9 +263,56 @@ async function getLatest() {
   };
 }
 
+/**
+ * Fetch the most recent `limit` blocks by walking backward from the latest height.
+ * Returns an array of BlockData-shaped objects (same shape as getLatest).
+ */
+async function getRecentBlocks(limit = 20) {
+  limit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
+
+  // 1. Get latest height
+  const statusRes = await axios.get(`${RPC}/status`, { timeout: 8000 });
+  const latestHeight = Number(statusRes.data?.result?.sync_info?.latest_block_height || 0);
+  if (!latestHeight) throw new Error('unable to determine latest block height');
+
+  // 2. Build array of heights to fetch (latest → latest - limit + 1)
+  const heights = [];
+  for (let i = 0; i < limit; i++) {
+    const h = latestHeight - i;
+    if (h <= 0) break;
+    heights.push(h);
+  }
+
+  // 3. Fetch blocks in parallel (bounded concurrency)
+  const results = await Promise.allSettled(
+    heights.map(h => fetchBlockFromRest(String(h)).catch(() => fetchBlockFromRpc(String(h))))
+  );
+
+  // 4. Collect successful results in order
+  const blocks = [];
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value) {
+      const b = r.value;
+      blocks.push({
+        height: b.height,
+        hash: b.hash || '',
+        time: b.blockTime?.iso || '',
+        timestamp: b.blockTime?.unix || 0,
+        numTxs: b.txCount || 0,
+        proposer: b.proposer || '',
+        gasUsed: 0,
+        gasWanted: 0,
+      });
+    }
+  }
+
+  return blocks;
+}
+
 module.exports = {
   getBlock,
   getTransaction,
   getLatest,
+  getRecentBlocks,
   formatTimes,
 };

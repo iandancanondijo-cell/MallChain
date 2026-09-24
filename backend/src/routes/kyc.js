@@ -47,4 +47,12 @@ router.post('/aml/check', auth, kycCtrl.runAMLCheck);
 // Get KYC status (requires authentication)
 router.get('/status', auth, kycCtrl.getKYCStatus);
 
+// Draft endpoints — let a mid-flow user save progress and resume later.
+// PATCH saves partial data, GET retrieves it, DELETE clears it (called
+// after successful submit so a completed user doesn't see a stale resume
+// prompt on next login).
+router.patch('/draft', auth, limiters.strict, kycCtrl.saveDraft);
+router.get('/draft', auth, kycCtrl.getDraft);
+router.delete('/draft', auth, kycCtrl.clearDraft);
+
 module.exports = router;

@@ -36,7 +36,11 @@ export const kycApi = {
     try {
       const res = await fetch(`${base}/api/kyc/status`, { credentials: 'include' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) return { ok: false, error: data.error || `Failed to load KYC status (${res.status})` };
+      if (!res.ok) {
+        const rawError = data?.error;
+        const errorMessage = typeof rawError === 'string' ? rawError : rawError?.message || `Failed to load KYC status (${res.status})`;
+        return { ok: false, error: errorMessage };
+      }
       return { ok: true, data };
     } catch (e) {
       return { ok: false, error: (e as Error).message || 'Failed to load KYC status' };
@@ -58,7 +62,9 @@ export const kycApi = {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        return { ok: false, error: data.error || `Upload failed (${res.status})` };
+        const rawError = data?.error;
+        const errorMessage = typeof rawError === 'string' ? rawError : rawError?.message || `Upload failed (${res.status})`;
+        return { ok: false, error: errorMessage };
       }
       return { ok: true, data };
     } catch (e) {
@@ -74,7 +80,10 @@ export const kycApi = {
       const res = await fetch(`${base}/api/kyc/document/${kycId}${qs}`, { credentials: 'include' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        return { ok: false, error: data.error || `Failed to load document (${res.status})` };
+        // Backend returns AppError as {error: {code, message, statusCode, ...}} or flat {error: "message"}
+        const rawError = data?.error;
+        const errorMessage = typeof rawError === 'string' ? rawError : rawError?.message || `Failed to load document (${res.status})`;
+        return { ok: false, error: errorMessage };
       }
       const blob = await res.blob();
       return { ok: true, data: URL.createObjectURL(blob) };

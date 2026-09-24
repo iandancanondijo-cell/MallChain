@@ -2,6 +2,8 @@ const axios = require('axios')
 const Transaction = require('../models/transaction')
 const logger = require('../utils/logger')
 const { createBlockchainBackoff } = require('../utils/circuitBreaker')
+const { notify, notifyUser } = require('./notify')
+const User = require('../models/user')
 
 const CHAIN_REST = process.env.CHAIN_REST_URL || process.env.CHAIN_REST || 'http://localhost:1317'
 const BASE_POLL_INTERVAL_MS = Number(process.env.BLOCKCHAIN_LISTENER_INTERVAL_MS || 3000)
@@ -60,6 +62,34 @@ async function reconcilePendingTransactions() {
           status: tx.status,
           blockHeight: tx.blockHeight,
         })
+
+        // Send notification when transaction is confirmed or failed
+        if (tx.userId && (tx.status === 'confirmed' || tx.status === 'failed')) {
+          const title = tx.status === 'confirmed'
+            ? 'Transaction Confirmed'
+            : 'Transaction Failed'
+          const body = tx.status === 'confirmed'
+            ? `Your transaction of ${tx.amount || ''} ${tx.denom || 'MLCNS'} has been confirmed on-chain.`
+            : `Your transaction failed: ${tx.error || 'Unknown error'}`
+
+          // In-app notification
+          await notify(tx.userId, { kind: 'transaction', title, body })
+
+          // Multi-channel notification (email, SMS, WhatsApp) based on user preferences
+          try {
+            const user = await User.findById(tx.userId).lean()
+            if (user) {
+              await notifyUser(user, {
+                kind: 'transaction',
+                title,
+                body,
+                category: 'transactions',
+              })
+            }
+          } catch (notifyErr) {
+            logger.warn('blockchainListener', 'Failed to send transaction notification', notifyErr, { txHash: tx.txHash, userId: tx.userId })
+          }
+        }
 
         if (global.io) {
           global.io.emit('tx:update', {

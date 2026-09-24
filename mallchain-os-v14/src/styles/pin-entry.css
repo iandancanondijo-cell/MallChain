@@ -37,13 +37,13 @@
   align-items: center;
   gap: 0.75rem;
   padding: 2rem 1rem;
-  background: linear-gradient(135deg, #0d111b 0%, #1a1f2e 100%);
-  border: 2px solid #f3ba2f33;
+  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  border: 2px solid rgba(var(--section-accent-rgb),0.2);
   border-radius: 12px;
   font-size: 2.5rem;
   letter-spacing: 0.5rem;
   font-weight: 600;
-  color: #f3ba2f;
+  color: var(--gold);
   cursor: pointer;
   transition: all 0.3s;
   min-height: 100px;
@@ -53,12 +53,12 @@
 }
 
 .pin-display:hover {
-  border-color: #f3ba2f;
+  border-color: var(--gold);
   box-shadow: 0 0 20px rgba(243, 186, 47, 0.2);
 }
 
 .pin-display:focus-within {
-  border-color: #ffcc66;
+  border-color: var(--gold-2);
   box-shadow: 0 0 20px rgba(243, 186, 47, 0.3);
 }
 
@@ -66,23 +66,23 @@
 .attempt-counter {
   text-align: center;
   font-size: 0.9rem;
-  color: #b0b0b0;
+  color: var(--txt-2);
   padding: 0.5rem;
 }
 
 .attempt-counter.warning {
-  color: #ff6b6b;
-  background-color: #3a1a1a22;
-  border: 1px solid #ff6b6b33;
+  color: var(--red-2);
+  background-color: rgba(var(--red),0.13);
+  border: 1px solid rgba(var(--red-2),0.2);
   border-radius: 6px;
   padding: 0.75rem;
   font-weight: 500;
 }
 
 .pin-locked-message {
-  background-color: #3a1a1a;
-  border: 1px solid #ff6b6b;
-  color: #ff6b6b;
+  background-color: rgba(var(--red),0.12);
+  border: 1px solid var(--red-2);
+  color: var(--red-2);
   padding: 1rem;
   border-radius: 6px;
   text-align: center;
@@ -92,7 +92,7 @@
 .pin-status {
   text-align: center;
   font-size: 0.85rem;
-  color: #666;
+  color: var(--txt-3);
 }
 
 /* PIN Numpad */
@@ -107,18 +107,18 @@
   grid-template-columns: repeat(3, 1fr);
   gap: 0.75rem;
   padding: 1rem;
-  background: linear-gradient(135deg, #0d111b 0%, #1a1f2e 100%);
-  border: 1px solid #f3ba2f33;
+  background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  border: 1px solid rgba(var(--section-accent-rgb),0.2);
   border-radius: 12px;
 }
 
 .numpad-btn {
   aspect-ratio: 1;
   padding: 0;
-  background-color: #1a1f2e;
-  border: 1px solid #f3ba2f;
+  background-color: var(--bg-2);
+  border: 1px solid var(--gold);
   border-radius: 8px;
-  color: #e0e0e0;
+  color: var(--txt-1);
   font-size: 1.5rem;
   font-weight: 600;
   cursor: pointer;
@@ -130,8 +130,8 @@
 }
 
 .numpad-btn:hover:not(:disabled) {
-  background-color: #252d3d;
-  border-color: #ffcc66;
+  background-color: var(--bg-3);
+  border-color: var(--gold-2);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(243, 186, 47, 0.3);
 }
@@ -144,7 +144,7 @@
 .numpad-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-  border-color: #555;
+  border-color: var(--txt-3);
 }
 
 .numpad-digit {
@@ -158,14 +158,14 @@
 .numpad-backspace {
   grid-column: 2 / 4;
   font-size: 1.2rem;
-  background-color: #2a1f1a;
-  border-color: #ff6b6b;
-  color: #ff6b6b;
+  background-color: var(--bg-2);
+  border-color: var(--red-2);
+  color: var(--red-2);
 }
 
 .numpad-backspace:hover:not(:disabled) {
-  background-color: #3a2f2a;
-  border-color: #ffaa66;
+  background-color: var(--bg-2);
+  border-color: var(--gold-2);
   box-shadow: 0 4px 12px rgba(255, 107, 107, 0.2);
 }
 
@@ -173,8 +173,8 @@
 .numpad-confirm {
   width: 100%;
   padding: 0.75rem;
-  background: linear-gradient(135deg, #f3ba2f 0%, #ffcc66 100%);
-  color: #050810;
+  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-2) 100%);
+  color: var(--bg-0);
   border: none;
   border-radius: 8px;
   font-size: 1rem;
@@ -225,7 +225,7 @@
 .pin-display:focus,
 .numpad-btn:focus,
 .numpad-confirm:focus {
-  outline: 2px solid #f3ba2f;
+  outline: 2px solid var(--gold);
   outline-offset: 2px;
 }
 
@@ -246,7 +246,7 @@
   .numpad-btn {
     background-color: #fff;
     border-color: #ccc;
-    color: #333;
+    color: var(--line-1);
   }
 
   .numpad-btn:hover:not(:disabled) {

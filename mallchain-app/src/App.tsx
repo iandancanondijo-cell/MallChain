@@ -17,13 +17,7 @@ import { UnlockModal } from './components/UnlockModal';
 import { DappApprovalModal } from './components/DappApprovalModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { TvRemoteGuide } from './components/TvRemoteGuide';
-import { TvKioskCompanionModal } from './components/TvKioskCompanionModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
-
-// Hooks
-import { useDeviceDetect } from './hooks/useDeviceDetect';
-import { useTvRemoteNavigation } from './hooks/useTvRemoteNavigation';
 
 // Pages
 import { DashboardPage } from './pages/DashboardPage';
@@ -34,9 +28,7 @@ import { ExplorerPage } from './pages/ExplorerPage';
 import { ValidatorsPage } from './pages/ValidatorsPage';
 import { ContractsPage } from './pages/ContractsPage';
 import { DappPortalPage } from './pages/DappPortalPage';
-import { TestRunnerPage } from './pages/TestRunnerPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { DeviceCompatibilityPage } from './pages/DeviceCompatibilityPage';
 
 // Task 2: MallchainDashboard (New Dark Glassmorphism Dashboard)
 import { MallchainDashboard } from './layouts/MallchainDashboard';
@@ -62,8 +54,6 @@ import {
   ExternalLink,
   Menu,
   X,
-  CheckCircle2,
-  Tv,
 } from 'lucide-react';
 
 export default function App() {
@@ -73,22 +63,6 @@ export default function App() {
   
   // Feature Flag: Toggle between old and new dashboard (Task 2)
   const [useMallchainDashboard] = useState(true);
-  
-  // Cross-Device & Smart TV Detection
-  const device = useDeviceDetect();
-  const [tvKioskOpen, setTvKioskOpen] = useState(false);
-
-  // TV Remote & Spatial D-Pad Navigation Listener
-  useTvRemoteNavigation({
-    enabled: true,
-    onBack: () => {
-      if (tvKioskOpen) {
-        setTvKioskOpen(false);
-      } else if (activeTab !== 'dashboard') {
-        setActiveTab('dashboard');
-      }
-    },
-  });
 
   // Modals
   const [walletModalOpen, setWalletModalOpen] = useState(false);
@@ -142,8 +116,6 @@ export default function App() {
     { id: 'validators', label: 'Validators & Staking', icon: ShieldCheck },
     { id: 'contracts', label: 'Smart Contracts', icon: FileCode2 },
     { id: 'dapp', label: 'dApp Portal', icon: Globe },
-    { id: 'tests', label: 'Verification (11 Tests)', icon: CheckCircle2 },
-    { id: 'devices', label: 'Devices & TV', icon: Tv },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
@@ -292,17 +264,6 @@ export default function App() {
             {/* Install PWA Button */}
             <PWAInstallButton variant="header" />
 
-            {/* TV Kiosk & 10-Foot UI Launcher Button */}
-            <button
-              id="btn-header-tv-mode"
-              onClick={() => setTvKioskOpen(true)}
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-700/70 bg-slate-900/80 hover:bg-slate-800 text-slate-300 text-xs transition-colors cursor-pointer"
-              title="Launch Smart TV Display & Retail Kiosk"
-            >
-              <Tv className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="hidden xl:inline">TV Mode</span>
-            </button>
-
             {/* Mobile menu toggle */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -371,7 +332,7 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 pt-6 pb-24 lg:pb-8">
         {/* Task 2: MallchainDashboard (New Dark Glassmorphism Dashboard) */}
         {useMallchainDashboard ? (
-          <MallchainDashboard />
+          <MallchainDashboard onOpenCreateWallet={() => setWalletModalOpen(true)} />
         ) : (
           /* Legacy Dashboard */
           <>
@@ -428,16 +389,6 @@ export default function App() {
               <DappPortalPage />
             )}
 
-            {activeTab === 'tests' && (
-              <TestRunnerPage />
-            )}
-
-            {activeTab === 'devices' && (
-              <DeviceCompatibilityPage
-                onOpenTvKiosk={() => setTvKioskOpen(true)}
-              />
-            )}
-
             {activeTab === 'settings' && (
               <SettingsPage
                 wallet={wallet}
@@ -486,21 +437,6 @@ export default function App() {
       />
 
       <DappApprovalModal />
-
-      {/* Smart TV Kiosk & Companion Modal */}
-      <TvKioskCompanionModal
-        isOpen={tvKioskOpen}
-        onClose={() => setTvKioskOpen(false)}
-        wallet={wallet}
-      />
-
-      {/* Smart TV Remote D-Pad Guide HUD */}
-      <TvRemoteGuide
-        isTV={device.isTV}
-        tvMode={device.tvMode}
-        onToggleTvMode={device.toggleTvMode}
-        onOpenKiosk={() => setTvKioskOpen(true)}
-      />
 
       {/* Offline Status Alert */}
       <OfflineIndicator />

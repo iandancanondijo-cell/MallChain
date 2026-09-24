@@ -4,7 +4,7 @@ const axios = require('axios');
 // parse (same issue documented in other test files this session). A
 // SHA-256 truncation doesn't need a Cosmos-specific library.
 const crypto = require('crypto');
-const bech32 = require('bech32');
+const { bech32 } = require('bech32');
 const { config } = require('../config');
 
 const CHAIN_REST = config.chain.rest.replace(/\/$/, '');

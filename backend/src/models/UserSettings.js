@@ -40,7 +40,32 @@ const UserSettingsSchema = new Schema({
       security: { type: Boolean, default: false },
       badgeAlerts: { type: Boolean, default: true },
     },
+    whatsapp: {
+      transactions: { type: Boolean, default: false },
+      campaigns: { type: Boolean, default: false },
+      governance: { type: Boolean, default: false },
+      marketing: { type: Boolean, default: false },
+      security: { type: Boolean, default: false },
+      badgeAlerts: { type: Boolean, default: true },
+    },
     frequency: { type: String, default: 'realtime' },
+  },
+
+  // Contact information for notification delivery
+  contactInfo: {
+    // Phone number for SMS/WhatsApp (E.164 format: +1234567890)
+    phoneNumber: { type: String, default: null },
+    phoneVerified: { type: Boolean, default: false },
+    phoneVerifiedAt: { type: Date },
+    // WhatsApp-specific opt-in (separate from phone verification)
+    whatsappOptIn: { type: Boolean, default: false },
+    whatsappOptInAt: { type: Date },
+    // Email verification status (email itself is on User model)
+    emailVerified: { type: Boolean, default: false },
+    emailVerifiedAt: { type: Date },
+    // Temporary OTP for phone verification — cleared after use or expiry.
+    pendingPhoneOtp: { type: String, select: false },
+    pendingPhoneOtpExpiry: { type: Date, select: false },
   },
 
   security: {

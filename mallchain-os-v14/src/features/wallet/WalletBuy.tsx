@@ -1,11 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
+import { CreditCard, Phone, Coins, CheckCircle2, Loader2, Smartphone, AlertTriangle, Lock, ArrowRight, Banknote } from 'lucide-react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { buyApi, type BuyConfig, type BuyQuote } from '../../services/buyApi';
 
 type Step = 'form' | 'awaiting_payment' | 'crediting' | 'done';
 
-const FALLBACK_KES_PER_MLCNS = 0.62; // used only until /api/buy/config's live rate loads
+const FALLBACK_KES_PER_MLCNS = 0.62;
+
+const STEP_META: { label: string; icon: typeof CreditCard }[] = [
+  { label: 'Details', icon: CreditCard },
+  { label: 'Pay', icon: Smartphone },
+  { label: 'Credit', icon: Loader2 },
+  { label: 'Done', icon: CheckCircle2 },
+];
+
+const STEP_INDEX: Record<Step, number> = { form: 0, awaiting_payment: 1, crediting: 2, done: 3 };
 
 /** Buy Mallcoin with real money via M-Pesa STK push (real API: reserve -> STK -> poll -> on-chain credit). */
 export default function WalletBuy() {
@@ -98,9 +108,6 @@ export default function WalletBuy() {
     setQuote(reserveRes.data.quote);
 
     if (!config?.configured.stkPush) {
-      // No live Safaricom credentials in this environment — the quote is
-      // reserved, but the STK push (and therefore payment confirmation)
-      // can't actually happen. Surface that clearly instead of hanging.
       toast('Quote reserved, but M-Pesa STK push is not configured in this environment.', false);
       setBusy(false);
       return;
@@ -121,7 +128,6 @@ export default function WalletBuy() {
     pollStatus(
       mpesaRes.data.paymentId,
       async () => {
-        // Payment confirmed by Safaricom's callback — trigger the on-chain credit.
         if (pollRef.current) clearInterval(pollRef.current);
         setStep('crediting');
         const creditRes = await buyApi.credit({ quoteId });
@@ -153,10 +159,22 @@ export default function WalletBuy() {
   if (!address) {
     return (
       <div>
-        <div className="view-head"><h1>Buy Mallcoin</h1></div>
-        <div className="card">
-          <div className="empty" style={{ color: 'var(--txt-3)', padding: 24, textAlign: 'center' }}>
-            Connect a wallet to buy Mallcoin.
+        <div className="wo-hero">
+          <div className="wo-hero-icon" style={{ background: 'rgba(243, 186, 47, 0.1)', color: 'var(--gold)' }}>
+            <CreditCard size={22} />
+          </div>
+          <div className="wo-hero-body">
+            <div className="wo-hero-title">Buy Mallcoin</div>
+            <div className="wo-hero-sub">Pay with M-Pesa — Mallcoin credited on-chain</div>
+          </div>
+        </div>
+        <div className="wo-card" style={{ maxWidth: 520 }}>
+          <div style={{ textAlign: 'center', padding: '32px 16px' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(243, 186, 47, 0.08)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <Coins size={24} style={{ color: 'var(--gold)', opacity: 0.5 }} />
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>No wallet connected</div>
+            <div style={{ fontSize: 13, color: 'var(--txt-3)' }}>Connect a wallet to buy Mallcoin with M-Pesa.</div>
           </div>
         </div>
       </div>
@@ -166,15 +184,23 @@ export default function WalletBuy() {
   if (directBuyLocked) {
     return (
       <div>
-        <div className="view-head"><h1>Buy Mallcoin</h1></div>
-        <div className="card" style={{ maxWidth: 480 }}>
-          <div style={{ textAlign: 'center', padding: 24 }}>
-            <div style={{ fontSize: 40 }}>🔒</div>
-            <h2 style={{ margin: '8px 0' }}>Direct purchases are closed</h2>
-            <div className="muted">
-              The MLCN/KES liquidity pool has reached its threshold, so buying MLCNS directly
-              with fiat is no longer available. You can still get MLCNS by converting your
-              Mallpoints or receiving a transfer from another wallet.
+        <div className="wo-hero">
+          <div className="wo-hero-icon" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--red)' }}>
+            <Lock size={22} />
+          </div>
+          <div className="wo-hero-body">
+            <div className="wo-hero-title">Buy Mallcoin</div>
+            <div className="wo-hero-sub">Direct purchases are currently closed</div>
+          </div>
+        </div>
+        <div className="wo-card wo-card--warning" style={{ maxWidth: 520 }}>
+          <div style={{ textAlign: 'center', padding: '24px 16px' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(239, 68, 68, 0.08)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <Lock size={24} style={{ color: 'var(--red)' }} />
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Direct purchases are closed</div>
+            <div style={{ fontSize: 13, color: 'var(--txt-3)', lineHeight: 1.6, maxWidth: 360, margin: '0 auto' }}>
+              The MLCN/KES liquidity pool has reached its threshold. You can still get MLCNS by converting your Mallpoints or receiving a transfer from another wallet.
             </div>
           </div>
         </div>
@@ -184,34 +210,69 @@ export default function WalletBuy() {
 
   return (
     <div>
-      <div className="view-head">
-        <h1>Buy Mallcoin</h1>
-        <span className="sub">Pay with M-Pesa · Mallcoin is credited to your wallet on-chain</span>
+      {/* ── hero ── */}
+      <div className="wo-hero">
+        <div className="wo-hero-icon" style={{ background: 'rgba(243, 186, 47, 0.1)', color: 'var(--gold)' }}>
+          <CreditCard size={22} />
+        </div>
+        <div className="wo-hero-body">
+          <div className="wo-hero-title">Buy Mallcoin</div>
+          <div className="wo-hero-sub">Pay with M-Pesa — Mallcoin credited to your wallet on-chain</div>
+        </div>
       </div>
 
+      {/* ── step indicator ── */}
+      <div className="wo-steps">
+        {STEP_META.map((s, i) => {
+          const cur = STEP_INDEX[step];
+          const cls = i < cur ? 'done' : i === cur ? 'active' : '';
+          return (
+            <div key={s.label} className={`wo-step ${cls}`}>
+              <div className="wo-step-dot"><s.icon size={12} /></div>
+              <span>{s.label}</span>
+              {i < STEP_META.length - 1 && <div className={`wo-step-line ${i < cur ? 'done' : ''}`} />}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── STK warning ── */}
       {config && !config.configured.stkPush && (
-        <div className="card" style={{ backgroundColor: 'var(--bg-2)', borderLeft: '4px solid var(--gold)', padding: 16, marginBottom: 16 }}>
-          <div style={{ fontSize: 13 }}>
-            ⚠ M-Pesa STK push isn't configured in this environment (missing Safaricom credentials).
-            You can still reserve a quote, but payment can't be completed here.
+        <div className="wo-card wo-info--warning" style={{ maxWidth: 520, marginBottom: 12 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+            <AlertTriangle size={16} style={{ color: 'var(--gold)', flexShrink: 0, marginTop: 1 }} />
+            <div style={{ fontSize: 12.5, color: 'var(--txt-2)', lineHeight: 1.5 }}>
+              M-Pesa STK push isn't configured in this environment (missing Safaricom credentials). You can reserve a quote, but payment can't be completed here.
+            </div>
           </div>
         </div>
       )}
 
-      <div className="card" style={{ maxWidth: 480 }}>
+      {/* ── main card ── */}
+      <div className="wo-card" style={{ maxWidth: 520 }}>
         {step === 'form' && (
           <>
-            <div className="field">
-              <label>Amount (MLCNS)</label>
+            <div className="field mb">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Coins size={13} style={{ color: 'var(--gold)' }} /> Amount (MLCNS)
+              </label>
               <input className="input" type="number" min="1" value={amount} onChange={(e) => onAmountChange(e.target.value)} disabled={busy} />
             </div>
-            <div className="field">
-              <label>You pay (KES)</label>
+
+            <div className="field mb">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Banknote size={13} style={{ color: 'var(--green-2)' }} /> You pay (KES)
+              </label>
               <input className="input" type="number" min="1" value={fiat} onChange={(e) => setFiat(e.target.value)} disabled={busy} />
-              <div className="hint">Rate ≈ {buyRateKes.toFixed(2)} KES / MLCNS — adjust if needed.</div>
+              <div className="hint" style={{ fontSize: 11.5, color: 'var(--txt-3)', marginTop: 4 }}>
+                Rate ≈ {buyRateKes.toFixed(2)} KES / MLCNS
+              </div>
             </div>
-            <div className="field">
-              <label>M-Pesa phone number</label>
+
+            <div className="field mb">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Phone size={13} style={{ color: 'var(--cyan)' }} /> M-Pesa phone number
+              </label>
               <input
                 className="input"
                 type="tel"
@@ -221,52 +282,86 @@ export default function WalletBuy() {
                 disabled={busy}
               />
             </div>
-            <button className="btn btn-primary btn-block" onClick={submit} disabled={busy}>
-              {busy && <span className="spin" />} Buy Mallcoin
+
+            {/* ── preview ── */}
+            <div className="wo-summary" style={{ marginBottom: 16 }}>
+              <div className="wo-summary-row">
+                <span className="wo-summary-label">You receive</span>
+                <span className="wo-summary-value" style={{ color: 'var(--gold)' }}>{amount || '0'} MLCNS</span>
+              </div>
+              <div className="wo-summary-row">
+                <span className="wo-summary-label">You pay</span>
+                <span className="wo-summary-value">{fiat || '0'} KES</span>
+              </div>
+              <div className="wo-summary-row">
+                <span className="wo-summary-label">Phone</span>
+                <span className="wo-summary-value mono">{phone || '—'}</span>
+              </div>
+              <div className="wo-summary-row total">
+                <span className="wo-summary-label">Rate</span>
+                <span className="wo-summary-value">{buyRateKes.toFixed(2)} KES / MLCNS</span>
+              </div>
+            </div>
+
+            <button className="btn btn-primary btn-block" onClick={submit} disabled={busy} style={{ gap: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              {busy ? <><span className="wo-spinner" /> Processing…</> : <><CreditCard size={14} /> Buy Mallcoin <ArrowRight size={14} /></>}
             </button>
           </>
         )}
 
         {step === 'awaiting_payment' && (
-          <div style={{ textAlign: 'center', padding: 20 }}>
-            <div style={{ fontSize: 40 }}>📲</div>
-            <h2 style={{ margin: '8px 0' }}>Check your phone</h2>
-            <div className="muted">
-              Complete the M-Pesa prompt sent to <b>{phone}</b> for {fiat} KES.
+          <div className="wo-status" style={{ textAlign: 'center', padding: '24px 16px' }}>
+            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(34, 211, 238, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Smartphone size={24} style={{ color: 'var(--cyan)' }} />
+              </div>
+              <div className="wo-pulse-ring" />
             </div>
-            {quote && <div className="mono" style={{ fontSize: 11, marginTop: 12, opacity: 0.6 }}>Quote {quote.quoteId}</div>}
+            <div className="wo-status-title">Check your phone</div>
+            <div className="wo-status-text">
+              Complete the M-Pesa prompt sent to <b className="mono">{phone}</b> for <b>{fiat} KES</b>.
+            </div>
+            {quote && (
+              <div className="wo-hash" style={{ marginTop: 12 }}>Quote {quote.quoteId}</div>
+            )}
           </div>
         )}
 
         {step === 'crediting' && (
-          <div style={{ textAlign: 'center', padding: 20 }}>
-            <div className="spin" style={{ margin: '0 auto 12px' }} />
-            <h2 style={{ margin: '8px 0' }}>Payment confirmed</h2>
-            <div className="muted">Crediting Mallcoin to your wallet on-chain…</div>
+          <div className="wo-status" style={{ textAlign: 'center', padding: '24px 16px' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(34, 197, 94, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Loader2 size={24} className="wo-spinner" style={{ color: 'var(--green)' }} />
+              </div>
+            </div>
+            <div className="wo-status-title" style={{ color: 'var(--green)' }}>Payment confirmed</div>
+            <div className="wo-status-text">Crediting Mallcoin to your wallet on-chain…</div>
           </div>
         )}
 
         {step === 'done' && quote && (
-          <div style={{ textAlign: 'center', padding: 20 }}>
-            <div style={{ fontSize: 40 }}>✓</div>
-            <h2 style={{ margin: '8px 0' }}>
-              {quote.status === 'credited' ? 'Mallcoin credited' : `Status: ${quote.status}`}
-            </h2>
-            {quote.txHash && <div className="mono" style={{ fontSize: 11, opacity: 0.6 }}>{quote.txHash}</div>}
-            {quote.reason && quote.status !== 'credited' && (
-              <div className="muted" style={{ marginTop: 8 }}>{quote.reason}</div>
-            )}
-            <div className="modal-actions" style={{ justifyContent: 'center' }}>
-              <button
-                className="btn btn-primary"
-                onClick={() => {
-                  setStep('form');
-                  setQuote(null);
-                }}
-              >
-                New purchase
-              </button>
+          <div style={{ textAlign: 'center', padding: '24px 16px' }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: '50%',
+              background: quote.status === 'credited' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(243, 186, 47, 0.1)',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16,
+            }}>
+              <CheckCircle2 size={24} style={{ color: quote.status === 'credited' ? 'var(--green)' : 'var(--gold)' }} />
             </div>
+            <div className="wo-status-title" style={{ color: quote.status === 'credited' ? 'var(--green)' : undefined }}>
+              {quote.status === 'credited' ? 'Mallcoin credited' : `Status: ${quote.status}`}
+            </div>
+            {quote.txHash && <div className="wo-hash" style={{ marginTop: 8 }}>{quote.txHash}</div>}
+            {quote.reason && quote.status !== 'credited' && (
+              <div className="wo-status-text" style={{ marginTop: 8 }}>{quote.reason}</div>
+            )}
+            <button
+              className="btn btn-primary"
+              onClick={() => { setStep('form'); setQuote(null); }}
+              style={{ marginTop: 20 }}
+            >
+              New purchase
+            </button>
           </div>
         )}
       </div>

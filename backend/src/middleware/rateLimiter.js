@@ -1,4 +1,5 @@
 const rateLimit = require('express-rate-limit')
+const { ipKeyGenerator } = require('express-rate-limit')
 
 /**
  * Create a generic rate limiter
@@ -75,7 +76,7 @@ function accountKeyGenerator(req) {
     body.buyerAddress ||
     body.buyer ||
     body.address ||
-    req.ip ||
+    ipKeyGenerator(req) ||
     req.headers['x-forwarded-for']?.split(',')[0]
   )
 }

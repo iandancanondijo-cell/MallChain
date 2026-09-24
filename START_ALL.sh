@@ -160,7 +160,7 @@ echo "Starting blockchain (RPC :26657, REST :1317)..."
 BLOCKCHAIN_PID=$!
 
 BLOCKCHAIN_READY=0
-for i in {1..30}; do
+for i in {1..60}; do
     if curl -sf http://localhost:26657/status > /dev/null 2>&1; then
         BLOCKCHAIN_READY=1
         break
@@ -194,11 +194,16 @@ for i in {1..15}; do
 done
 
 # ──────────────────────────────────────────────────────────────────────────────
-# STEP 5: Start backend
+# STEP 5: Install workspace dependencies and start backend
+# npm workspaces share the root node_modules directory, so installing from each
+# workspace separately can remove binaries required by another workspace.
 # ──────────────────────────────────────────────────────────────────────────────
+echo "Installing workspace dependencies..."
+cd "$REPO_DIR"
+npm ci --prefer-offline > /tmp/workspace-install.log 2>&1
+
 echo "Starting backend (:4000)..."
 cd "${REPO_DIR}/backend"
-npm ci --prefer-offline > /tmp/backend-install.log 2>&1 || true
 node src/index.js > /tmp/backend.log 2>&1 &
 BACKEND_PID=$!
 
@@ -223,7 +228,6 @@ echo "✅ Backend running (PID: $BACKEND_PID)"
 # ──────────────────────────────────────────────────────────────────────────────
 echo "Starting frontend (:5173)..."
 cd "${REPO_DIR}/mallchain-os-v14"
-npm ci --prefer-offline > /tmp/frontend-install.log 2>&1 || true
 npm run dev -- --host 127.0.0.1 --port 5173 > /tmp/frontend.log 2>&1 &
 FRONTEND_PID=$!
 

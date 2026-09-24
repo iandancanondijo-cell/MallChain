@@ -18,6 +18,8 @@ import { socketManager } from '../services/socket';
 import { t } from '../services/i18n';
 import { useMaintenanceStatus } from '../services/maintenanceApi';
 import { openCommandPalette } from './CommandPalette';
+import NotificationSetupWizard from './NotificationSetupWizard';
+import { settingsApi, type ContactInfo } from '../services/settingsApi';
 const LANGS = ['EN', 'FR', 'ES', 'SW'];
 const ACCENTS = ['gold', 'cyan', 'purple', 'emerald'];
 
@@ -26,6 +28,8 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
   const [open, setOpen] = useState<'notif' | 'prefs' | null>(null);
   const [nf, setNf] = useState<'all' | 'unread'>('all');
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [contact, setContact] = useState<ContactInfo | null>(null);
+  const [showWizard, setShowWizard] = useState(false);
   useStoreVersion();
   const st = store.state;
   const allCurrencies = useSupportedCurrencies();
@@ -47,6 +51,14 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
     });
     return unsubscribe;
   }, [loadNotifications]);
+
+  // Load contact info so we know whether to show the setup wizard.
+  useEffect(() => {
+    if (!st.user.authed) return;
+    settingsApi.getContact().then((r) => {
+      if (r.ok && r.data) setContact(r.data);
+    });
+  }, [st.user.authed]);
 
   const unread = notifications.filter((n) => !n.read).length;
   const notifs = notifications.filter((n) => (nf === 'all' ? true : !n.read));
@@ -201,11 +213,45 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
       )}
       {open === 'notif' && (
         <div className="panel" role="dialog" aria-label={t('Notifications')}>
+          {/* Notification setup wizard — shown when no channel is verified yet */}
+          {showWizard && st.user.authed && (
+            <NotificationSetupWizard
+              contact={contact}
+              userEmail={st.user.email}
+              onComplete={() => {
+                setShowWizard(false);
+                // Refresh contact info so the panel reflects the new state.
+                settingsApi.getContact().then((r) => { if (r.ok && r.data) setContact(r.data); });
+              }}
+              onDismiss={() => setShowWizard(false)}
+            />
+          )}
           <div className="panel-head">
             <span className="grow">{t('Notifications')}</span>
             <button type="button" className="chip" onClick={() => setNf(nf === 'all' ? 'unread' : 'all')}>{nf === 'all' ? t('All') : t('Unread')}</button>
             <button type="button" className="chip gold" onClick={markAllRead}>{t('Mark all read')}</button>
           </div>
+          {/* Setup prompt banner — shown when channels aren't configured and wizard isn't open */}
+          {!showWizard && st.user.authed && contact && !contact.phoneVerified && !contact.emailVerified && (
+            <div style={{
+              padding: '10px 14px', borderBottom: '1px solid var(--line-1)',
+              background: 'linear-gradient(135deg, rgba(243,186,47,0.06), rgba(243,186,47,0.02))',
+              display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              <Bell size={15} style={{ color: 'var(--accent, #f3ba2f)', flex: 'none' }} />
+              <div style={{ flex: 1, fontSize: 11.5, color: 'var(--txt-2)', lineHeight: 1.4 }}>
+                Receive real-time notifications and messages directly
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ fontSize: 11, flex: 'none' }}
+                onClick={() => setShowWizard(true)}
+              >
+                Set up
+              </button>
+            </div>
+          )}
           <div style={{ maxHeight: 320, overflowY: 'auto' }}>
             {notifs.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--txt-3)', fontSize: 12.5 }}>{t('No notifications yet')}</div>}
             {notifs.map((n) => (

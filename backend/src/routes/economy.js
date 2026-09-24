@@ -7,12 +7,19 @@ const { getMarketPrice } = require('../services/mallcoinService')
 const CHAIN_REST = process.env.CHAIN_REST || 'http://localhost:1317'
 const TOTAL_SUPPLY = 670000000
 
-// Correct wallet addresses from wallet_data/new_wallets.json (mall prefix)
+// Actual treasury wallet addresses (bech32 mall1 format) + locked status
 const WALLET_ADDRESSES = {
   founder: 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg',
   afa: 'mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6',
   orthopharm: 'mall1nma8m9jl3e5mscr0rrn93hq43thw7ve6xfee4f',
   team: 'mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5'
+}
+
+const WALLET_STATUS = {
+  founder: 'locked',
+  afa: 'unlocked',
+  orthopharm: 'unlocked',
+  team: 'unlocked'
 }
 
 const PHASE_MONTHS = 36
@@ -44,25 +51,36 @@ function getCurrentMonthNumber() {
 }
 
 async function fetchWalletBalances() {
-  const balances = {}
+  const wallets = {}
   try {
     const url = `${CHAIN_REST.replace(/\/$/, '')}/tmp/marketplace/mlcoin/v1/wallet_balance`
     const response = await axios.get(url, { timeout: 2000 })
     const walletList = response.data?.wallet_balance || []
+    logger.info('economy', `Fetched ${walletList.length} wallets from chain`)
     for (const wb of walletList) {
       const address = wb.address || wb.index
-      const key = Object.entries(WALLET_ADDRESSES).find(([, addr]) => addr === address)?.[0]
-      if (key) {
+      const entry = Object.entries(WALLET_ADDRESSES).find(([, addr]) => addr === address)
+      if (entry) {
+        const [key, addr] = entry
         const rawBalance = typeof wb.balance === 'string' ? Number(wb.balance) : wb.balance
-        balances[key] = rawBalance / 1000000
+        wallets[key] = {
+          address: addr,
+          balance: rawBalance / 1000000,
+          locked: WALLET_STATUS[key] || 'unlocked'
+        }
+        logger.info('economy', `Matched ${key}: ${addr} = ${wallets[key].balance} MLCNS (${wallets[key].locked})`)
       }
     }
+    if (Object.keys(wallets).length === 0) {
+      logger.warn('economy', 'No wallets matched! Chain addresses:', walletList.map(w => w.address || w.index))
+    }
   } catch (e) {
+    logger.error('economy', 'fetchWalletBalances error:', e.message)
     for (const key of Object.keys(WALLET_ADDRESSES)) {
-      balances[key] = null
+      wallets[key] = { address: WALLET_ADDRESSES[key], balance: null, locked: WALLET_STATUS[key] || 'unlocked' }
     }
   }
-  return balances
+  return wallets
 }
 
 router.get('/wallets', async (req, res) => {
@@ -226,6 +244,114 @@ router.get('/user/:address', async (req, res) => {
     })
   } catch (e) {
     logger.error('economy', 'user error', e)
+    return res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+// ── Track Economics ──────────────────────────────────────────────────────────
+// Aggregates on-chain supply breakdown, wallet count, and liquidity pool value
+// for the "Track Economics" panel on the Economy page.
+router.get('/track', async (req, res) => {
+  try {
+    const base = CHAIN_REST.replace(/\/$/, '')
+
+    // 1. Fetch ALL wallet balances from chain (paginated) to compute held supply + wallet count
+    let allWallets = []
+    let paginationNext = ''
+    let page = 1
+    const maxPages = 50 // safety cap
+    try {
+      while (page <= maxPages) {
+        const url = `${base}/tmp/marketplace/mlcoin/v1/wallet_balance`
+        const params = { 'pagination.limit': 100 }
+        if (paginationNext) params['pagination.key'] = paginationNext
+        const resp = await axios.get(url, { params, timeout: 5000 })
+        const list = resp.data?.wallet_balance || []
+        allWallets = allWallets.concat(list)
+        const nextKey = resp.data?.pagination?.next_key
+        if (!nextKey || list.length === 0) break
+        paginationNext = nextKey
+        page++
+      }
+      logger.info('economy', `track: fetched ${allWallets.length} wallets across ${page} page(s)`)
+    } catch (e) {
+      logger.warn('economy', `track: wallet pagination error: ${e.message}`)
+    }
+
+    const totalWallets = allWallets.length
+    const heldByWallets = allWallets.reduce((sum, w) => {
+      const raw = typeof w.balance === 'string' ? Number(w.balance) : (w.balance || 0)
+      return sum + raw
+    }, 0) / 1000000 // convert from micro to display units
+
+    // 2. Emission state for burned total
+    let emittedTotal = 0
+    let burnedTotal = 0
+    try {
+      const resp = await axios.get(`${base}/tmp/marketplace/mlcoin/v1/emission_state`, { timeout: 3000 })
+      const es = resp.data?.emission_state || resp.data || {}
+      emittedTotal = Number(es.emitted_total ?? es.emittedTotal ?? 0)
+      burnedTotal = Number(es.burned_total ?? es.burnedTotal ?? 0)
+    } catch (e) { /* fallback to zeros */ }
+
+    // 3. Market price for liquidity valuation
+    const marketPrice = await getMarketPrice()
+    const mlcnsPriceKes = Number(marketPrice?.midPriceKes || 0.62)
+
+    // 4. Liquidity pool fiat (KES) — try internal /api/liquidity/pools first, then chain directly
+    let liquidityPoolKes = 0
+    let liquidityPool = null
+    try {
+      // Try the backend's own liquidity endpoint (it caches pool data)
+      const liqResp = await axios.get(`http://localhost:${process.env.PORT || 4000}/api/liquidity/pools`, { timeout: 3000 })
+      const poolList = liqResp.data?.pools || []
+      if (poolList.length > 0) {
+        const pool = poolList[0]
+        liquidityPoolKes = Number(pool.tvlKes || pool.tvl || 0)
+        liquidityPool = {
+          tvlKes: liquidityPoolKes,
+          reserve0: pool.reserve0,
+          reserve1: pool.reserve1,
+          name: pool.name || 'MLCNS/KES'
+        }
+      }
+    } catch (e) {
+      // Fallback: estimate from pool account balances on chain
+      try {
+        const poolAddr = process.env.POOL_ACCOUNT_ADDRESS
+        if (poolAddr) {
+          const bankResp = await axios.get(`${base}/cosmos/bank/v1beta1/balances/${poolAddr}`, { timeout: 3000 })
+          const balances = bankResp.data?.balances || []
+          const umlcn = Number(balances.find(b => b.denom === 'umlcn')?.amount || 0) / 1e6
+          const umal = Number(balances.find(b => b.denom === 'umal')?.amount || 0) / 1e6
+          liquidityPoolKes = umlcn * mlcnsPriceKes + umal
+          liquidityPool = { reserve0: umlcn, reserve1: umal, tvlKes: liquidityPoolKes, name: 'MLCNS/KES' }
+        }
+      } catch (e2) { /* no pool data available */ }
+    }
+
+    // 5. Compute supply breakdown
+    const unclaimedOnChain = Math.max(0, TOTAL_SUPPLY - heldByWallets)
+    const heldPercent = TOTAL_SUPPLY > 0 ? (heldByWallets / TOTAL_SUPPLY) * 100 : 0
+    const unclaimedPercent = TOTAL_SUPPLY > 0 ? (unclaimedOnChain / TOTAL_SUPPLY) * 100 : 0
+
+    return res.json({
+      success: true,
+      totalSupply: TOTAL_SUPPLY,
+      heldByWallets,
+      unclaimedOnChain,
+      burnedTotal,
+      emittedTotal,
+      totalWallets,
+      heldPercent: heldPercent.toFixed(2),
+      unclaimedPercent: unclaimedPercent.toFixed(2),
+      liquidityPool,
+      liquidityPoolKes,
+      mlcnsPriceKes,
+      timestamp: new Date().toISOString()
+    })
+  } catch (e) {
+    logger.error('economy', 'track error', e)
     return res.status(500).json({ success: false, error: e.message })
   }
 })

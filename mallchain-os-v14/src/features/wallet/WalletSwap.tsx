@@ -6,6 +6,7 @@
  * actually wire it up end to end for the first time.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { Repeat, ArrowDownUp, AlertTriangle, CheckCircle2, Loader2, Droplets, Zap, Info, TrendingDown } from 'lucide-react';
 import { store, type Balance } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { requestMnemonic } from '../../services/mnemonicAccess';
@@ -19,15 +20,10 @@ const SLIPPAGE_PRESETS_BPS = [10, 50, 100]; // 0.1% / 0.5% / 1%
 const DEFAULT_SLIPPAGE_BPS = 100;
 
 const DENOM_TO_STORE: Record<string, keyof Balance | undefined> = {
-  umall: 'MALL',
-  umallcoin: 'MALL',
-  umallpoints: 'MLPTS',
-  umallpoint: 'MLPTS',
-  uusd_m: 'USD_M',
-  uusdm: 'USD_M',
-  ukes: 'KES',
-  ueur: 'EUR',
-  ugbp: 'GBP',
+  umall: 'MALL', umallcoin: 'MALL',
+  umallpoints: 'MLPTS', umallpoint: 'MLPTS',
+  uusd_m: 'USD_M', uusdm: 'USD_M',
+  ukes: 'KES', ueur: 'EUR', ugbp: 'GBP',
 };
 
 function toBaseUnits(amount: string): string {
@@ -86,8 +82,7 @@ export default function WalletSwap() {
   const balanceIn = assetIn ? st.balances[assetIn] : null;
   const amtInNum = parseFloat(amountIn);
   const feeNum = estimate ? Number(fromBaseUnits(estimate.fee)) : 0;
-  const balanceInsufficient =
-    balanceIn !== null && Number.isFinite(amtInNum) && amtInNum + feeNum > balanceIn;
+  const balanceInsufficient = balanceIn !== null && Number.isFinite(amtInNum) && amtInNum + feeNum > balanceIn;
 
   const priceImpactPct = (() => {
     if (!estimate || reserveIn <= 0 || reserveOut <= 0) return null;
@@ -121,9 +116,7 @@ export default function WalletSwap() {
         .catch((e) => {
           if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to estimate swap');
         })
-        .finally(() => {
-          if (!cancelled) setEstimating(false);
-        });
+        .finally(() => { if (!cancelled) setEstimating(false); });
     }, 400);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -158,27 +151,15 @@ export default function WalletSwap() {
 
       if (assetIn && amountDisplay > 0) {
         store.applyTx({
-          type: 'swap',
-          amount: amountDisplay + feeNum,
-          asset: assetIn,
-          kind: 'debit',
-          fee: feeNum,
+          type: 'swap', amount: amountDisplay + feeNum, asset: assetIn, kind: 'debit', fee: feeNum,
           note: `Swapped ${amountDisplay} ${assetIn} for ${amountOutDisplay.toFixed(6)} ${assetOut || denomOut} on pool #${pool.id}`,
-          notifTitle: `Swapped ${amountDisplay} ${assetIn || denomIn}`,
-          notifKind: 'tx',
+          notifTitle: `Swapped ${amountDisplay} ${assetIn || denomIn}`, notifKind: 'tx',
           activityText: `Swapped ${amountDisplay} ${assetIn || denomIn} → ${amountOutDisplay.toFixed(6)} ${assetOut || denomOut}`,
           status: 'pending',
         });
       }
       if (assetOut && amountOutDisplay > 0) {
-        store.applyTx({
-          type: 'swap',
-          amount: amountOutDisplay,
-          asset: assetOut,
-          kind: 'credit',
-          note: `Received from swap on pool #${pool.id}`,
-          status: 'pending',
-        });
+        store.applyTx({ type: 'swap', amount: amountOutDisplay, asset: assetOut, kind: 'credit', note: `Received from swap on pool #${pool.id}`, status: 'pending' });
       }
 
       setTxHash(result.txHash);
@@ -195,12 +176,20 @@ export default function WalletSwap() {
   if (loadError) {
     return (
       <div>
-        <div className="view-head"><h1>Swap</h1></div>
-        <div className="card" style={{ maxWidth: 520 }}>
-          <div style={{ textAlign: 'center', padding: 32 }}>
-            <div style={{ fontSize: 40 }}>⚠️</div>
-            <h2 style={{ margin: '8px 0' }}>Couldn't load pools</h2>
-            <p className="muted">{loadError}</p>
+        <div className="wo-hero">
+          <div className="wo-hero-icon" style={{ background: 'rgba(52, 211, 153, 0.1)', color: 'var(--emerald)' }}>
+            <Repeat size={22} />
+          </div>
+          <div className="wo-hero-body">
+            <div className="wo-hero-title">Swap</div>
+            <div className="wo-hero-sub">Trade tokens on Mallchain DEX pools</div>
+          </div>
+        </div>
+        <div className="wo-card wo-card--error" style={{ maxWidth: 520 }}>
+          <div style={{ textAlign: 'center', padding: 24 }}>
+            <AlertTriangle size={32} style={{ color: 'var(--red)', marginBottom: 8 }} />
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Couldn't load pools</div>
+            <div style={{ fontSize: 13, color: 'var(--txt-3)' }}>{loadError}</div>
           </div>
         </div>
       </div>
@@ -210,12 +199,22 @@ export default function WalletSwap() {
   if (pools && pools.length === 0) {
     return (
       <div>
-        <div className="view-head"><h1>Swap</h1><span className="sub">no pools yet</span></div>
-        <div className="card" style={{ maxWidth: 520 }}>
+        <div className="wo-hero">
+          <div className="wo-hero-icon" style={{ background: 'rgba(52, 211, 153, 0.1)', color: 'var(--emerald)' }}>
+            <Repeat size={22} />
+          </div>
+          <div className="wo-hero-body">
+            <div className="wo-hero-title">Swap</div>
+            <div className="wo-hero-sub">No liquidity pools yet</div>
+          </div>
+        </div>
+        <div className="wo-card" style={{ maxWidth: 520 }}>
           <div style={{ textAlign: 'center', padding: 32 }}>
-            <div style={{ fontSize: 40 }}>🔄</div>
-            <h2 style={{ margin: '8px 0' }}>No liquidity pools exist yet</h2>
-            <p className="muted">Once a pool is created on-chain, it'll show up here to swap against.</p>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(52, 211, 153, 0.08)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <Droplets size={24} style={{ color: 'var(--emerald)', opacity: 0.5 }} />
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>No liquidity pools exist yet</div>
+            <div style={{ fontSize: 13, color: 'var(--txt-3)' }}>Once a pool is created on-chain, it'll show up here to swap against.</div>
           </div>
         </div>
       </div>
@@ -224,14 +223,27 @@ export default function WalletSwap() {
 
   return (
     <div>
-      <div className="view-head"><h1>Swap</h1></div>
-      <div className="card" style={{ maxWidth: 520 }}>
-        {!pools && <div className="tiny" style={{ padding: 20 }}>Loading pools…</div>}
+      {/* ── hero ── */}
+      <div className="wo-hero">
+        <div className="wo-hero-icon" style={{ background: 'rgba(52, 211, 153, 0.1)', color: 'var(--emerald)' }}>
+          <Repeat size={22} />
+        </div>
+        <div className="wo-hero-body">
+          <div className="wo-hero-title">Swap</div>
+          <div className="wo-hero-sub">Trade tokens on Mallchain DEX pools</div>
+        </div>
+      </div>
+
+      <div className="wo-card" style={{ maxWidth: 520 }}>
+        {!pools && <div style={{ textAlign: 'center', padding: 20, color: 'var(--txt-3)', fontSize: 13 }}>Loading pools…</div>}
 
         {pools && pool && (
           <>
+            {/* ── Pool selector ── */}
             <div className="field mb">
-              <label>Pool</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Droplets size={13} style={{ color: 'var(--emerald)' }} /> Pool
+              </label>
               <select className="input" value={pool.id} onChange={(e) => { setPoolId(Number(e.target.value)); setAmountIn(''); setEstimate(null); }}>
                 {pools.map((p) => (
                   <option key={p.id} value={p.id}>#{p.id} · {p.tokenADenom} / {p.tokenBDenom} · {(Number(p.fee) * 100).toFixed(2)}% fee</option>
@@ -239,8 +251,11 @@ export default function WalletSwap() {
               </select>
             </div>
 
+            {/* ── Direction toggle ── */}
             <div className="field mb">
-              <label>Direction</label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <ArrowDownUp size={13} style={{ color: 'var(--cyan)' }} /> Direction
+              </label>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className={`btn btn-sm ${direction === 'AtoB' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setDirection('AtoB'); setAmountIn(''); setEstimate(null); }}>
                   {pool.tokenADenom} → {pool.tokenBDenom}
@@ -251,11 +266,12 @@ export default function WalletSwap() {
               </div>
             </div>
 
+            {/* ── Amount in ── */}
             <div className="field mb">
-              <label>
-                Amount ({denomIn})
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Zap size={13} style={{ color: 'var(--gold)' }} /> Amount ({denomIn})
                 {balanceIn !== null && (
-                  <span className="tiny muted" style={{ float: 'right', fontWeight: 400 }}>
+                  <span className="tiny muted" style={{ marginLeft: 'auto', fontWeight: 400 }}>
                     Available: {balanceIn.toFixed(2)} {assetIn || denomIn}
                   </span>
                 )}
@@ -270,15 +286,16 @@ export default function WalletSwap() {
                 style={balanceInsufficient ? { borderColor: 'var(--red)' } : undefined}
               />
               {balanceInsufficient && (
-                <div className="tiny" style={{ color: 'var(--red)', marginTop: 4 }}>
-                  Insufficient balance — required {(amtInNum + feeNum).toFixed(2)}, you have {balanceIn?.toFixed(2) ?? '—'}
+                <div style={{ fontSize: 11.5, color: 'var(--red)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <AlertTriangle size={11} /> Insufficient — required {(amtInNum + feeNum).toFixed(2)}, you have {balanceIn?.toFixed(2) ?? '—'}
                 </div>
               )}
             </div>
 
+            {/* ── Slippage ── */}
             <div className="field mb">
-              <label>
-                Slippage tolerance
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Info size={13} style={{ color: 'var(--txt-3)' }} /> Slippage tolerance
                 <Tooltip text="The most the price can move against you between quote and execution before the swap is cancelled. A higher tolerance is less likely to fail but may fill at a worse rate." />
               </label>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -304,39 +321,44 @@ export default function WalletSwap() {
               </div>
             </div>
 
-            <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-              <div className="tiny">You receive (est.)</div>
-              <div style={{ fontSize: 20, fontWeight: 600 }}>
+            {/* ── Estimate card ── */}
+            <div className="wo-estimate" style={{ marginBottom: 14 }}>
+              <div className="wo-estimate-label">You receive (est.)</div>
+              <div className="wo-estimate-value" style={{ color: 'var(--emerald)' }}>
                 {estimating ? '…' : estimate ? `${fromBaseUnits(estimate.tokenOut)} ${denomOut}` : '—'}
               </div>
               {estimate && (
-                <div className="tiny muted">
+                <div className="wo-estimate-detail">
                   Fee: {fromBaseUnits(estimate.fee)} {denomIn} · min received ({(effectiveSlippageBps / 100).toFixed(2)}% slippage): {fromBaseUnits(Math.floor(Number(estimate.tokenOut) * (10000 - effectiveSlippageBps) / 10000).toString())} {denomOut}
                 </div>
               )}
               {priceImpactPct !== null && (
                 <div
-                  className="tiny"
                   style={{
-                    marginTop: 6,
-                    color: priceImpactPct >= 10 ? 'var(--red)' : priceImpactPct >= 3 ? 'var(--gold-2)' : undefined,
+                    fontSize: 11.5, marginTop: 8, display: 'flex', alignItems: 'center', gap: 4,
+                    color: priceImpactPct >= 10 ? 'var(--red)' : priceImpactPct >= 3 ? 'var(--gold-2)' : 'var(--txt-3)',
                     fontWeight: priceImpactPct >= 3 ? 600 : undefined,
                   }}
                 >
-                  Price impact
+                  <TrendingDown size={12} /> Price impact
                   <Tooltip text="How much this swap's size moves the pool's price away from the current spot rate. Larger trades relative to pool depth cause bigger impact." />
                   : {priceImpactPct.toFixed(2)}%
-                  {priceImpactPct >= 10 && ' — very high impact, you may receive significantly less than expected'}
-                  {priceImpactPct >= 3 && priceImpactPct < 10 && ' — high impact for this pool'}
+                  {priceImpactPct >= 10 && ' — very high impact'}
+                  {priceImpactPct >= 3 && priceImpactPct < 10 && ' — high for this pool'}
                 </div>
               )}
             </div>
 
-            {err && <div className="error-message mb">{err}</div>}
-            {txHash && <div className="tiny mb">✓ Broadcast — tx <span className="mono">{txHash}</span></div>}
+            {err && <div className="wo-card wo-card--error" style={{ padding: 12, marginBottom: 12 }}>{err}</div>}
+            {txHash && (
+              <div className="wo-card wo-card--success" style={{ padding: 12, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <CheckCircle2 size={14} style={{ color: 'var(--green)', flexShrink: 0 }} />
+                <span style={{ fontSize: 12 }}>Broadcast — tx <span className="mono">{txHash}</span></span>
+              </div>
+            )}
 
-            <button className="btn btn-primary btn-block" onClick={doSwap} disabled={swapping || !estimate || !amountIn || balanceInsufficient}>
-              {swapping ? 'Swapping…' : balanceInsufficient ? 'Insufficient balance' : 'Swap'}
+            <button className="btn btn-primary btn-block" onClick={doSwap} disabled={swapping || !estimate || !amountIn || balanceInsufficient} style={{ gap: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              {swapping ? <><span className="wo-spinner" /> Swapping…</> : balanceInsufficient ? 'Insufficient balance' : <><Repeat size={14} /> Swap</>}
             </button>
           </>
         )}

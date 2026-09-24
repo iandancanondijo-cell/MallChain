@@ -304,7 +304,7 @@ export function isValidMallAddress(address: string): boolean {
   }
 
   try {
-    const { prefix } = fromBech32(address);
+    const { prefix } = fromBech32(address, 1000); // Pass explicit limit to avoid Infinity bug
     return prefix === ADDRESS_PREFIX;
   } catch {
     return false;

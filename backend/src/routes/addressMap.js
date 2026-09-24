@@ -5,7 +5,7 @@ const AddressMap = require('../models/AddressMap')
 
 // Get mapping by hex address
 // Auto-generate bech32 for any hex address if mapping does not exist
-const bech32 = require('bech32')
+const { bech32 } = require('bech32')
 router.get('/map/:hex', async (req, res) => {
   try {
     const hex = (req.params.hex || '').toLowerCase()

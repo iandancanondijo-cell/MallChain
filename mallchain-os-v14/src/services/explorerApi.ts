@@ -125,6 +125,15 @@ export async function getTransaction(hash: string): Promise<TransactionData> {
 }
 
 /**
+ * Get recent blocks list
+ */
+export async function getRecentBlocks(limit = 20): Promise<BlockData[]> {
+  const res = await api.get<{ blocks: BlockData[] }>('/api/explorer/blocks', { limit });
+  if (!res.ok || !res.data) throw new Error(res.error || 'Failed to fetch recent blocks');
+  return res.data.blocks || [];
+}
+
+/**
  * Get blockchain stats
  */
 export async function getBlockchainStats(): Promise<BlockStats> {

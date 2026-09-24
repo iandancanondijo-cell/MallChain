@@ -32,3 +32,9 @@ variable "eks_max_nodes" {
   type    = number
   default = 6
 }
+
+variable "eks_endpoint_allowed_cidrs" {
+  type        = list(string)
+  description = "CIDRs allowed to reach the EKS API server endpoint. Lock to office/VPN ranges in production."
+  default     = ["0.0.0.0/0"]
+}

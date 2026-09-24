@@ -6,7 +6,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { toast } from '../components/ui';
-import { getLatestBlock, getBlockchainStats, getRecentTransactions, getBlock, getTransaction } from '../services/explorerApi';
+import { getLatestBlock, getBlockchainStats, getRecentTransactions, getRecentBlocks, getBlock, getTransaction } from '../services/explorerApi';
 import type { BlockData, BlockStats, TransactionData } from '../services/explorerApi';
 import { socketManager, type BlockData as SocketBlockData } from '../services/socket';
 
@@ -27,6 +27,7 @@ export default function BlockchainExplorer() {
   const [latestBlock, setLatestBlock] = useState<BlockData | null>(null);
   const [stats, setStats] = useState<BlockStats | null>(null);
   const [recentTxs, setRecentTxs] = useState<TransactionData[]>([]);
+  const [recentBlocks, setRecentBlocks] = useState<BlockData[]>([]);
   const [selectedBlock, setSelectedBlock] = useState<BlockData | null>(null);
   const [selectedTx, setSelectedTx] = useState<TransactionData | null>(null);
   const [blockSearch, setBlockSearch] = useState('');
@@ -40,14 +41,16 @@ export default function BlockchainExplorer() {
   const loadData = useCallback(async () => {
     try {
       setError('');
-      const [block, blockStats, txs] = await Promise.all([
+      const [block, blockStats, txs, blocks] = await Promise.all([
         getLatestBlock(),
         getBlockchainStats(),
         getRecentTransactions(20),
+        getRecentBlocks(20),
       ]);
       setLatestBlock(block);
       setStats(blockStats);
       setRecentTxs(txs);
+      setRecentBlocks(blocks);
       setLoading(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load blockchain data';
@@ -322,6 +325,49 @@ export default function BlockchainExplorer() {
               </div>
             </div>
           )}
+
+          <div className="card">
+            <div className="card-title">Recent Blocks</div>
+            <div className="tx-list">
+              {recentBlocks.length === 0 ? (
+                <div style={{ padding: '16px', textAlign: 'center', color: 'var(--txt-3)' }}>
+                  No blocks available
+                </div>
+              ) : (
+                recentBlocks.map((block) => (
+                  <div
+                    key={block.height}
+                    className="tx-item"
+                    onClick={() => {
+                      setSelectedBlock(block);
+                      setBlockSearch(String(block.height));
+                    }}
+                    style={{ cursor: 'pointer', padding: '12px', borderBottom: '1px solid var(--bg-2)' }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                          Block #{block.height.toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--txt-3)' }}>
+                          {block.timestamp ? new Date(block.timestamp * 1000).toLocaleString() : '—'}
+                        </div>
+                        <div className="mono" style={{ fontSize: '11px', color: 'var(--txt-3)' }}>
+                          {fmtHash(block.hash)}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '12px' }}>{block.numTxs} tx{block.numTxs !== 1 ? 's' : ''}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--txt-3)' }} title={block.proposer}>
+                          Proposer: {fmtHash(block.proposer)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       )}
 

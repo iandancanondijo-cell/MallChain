@@ -10,7 +10,7 @@ function getConvertLiquidityQueue() {
       connection,
       defaultJobOptions: {
         removeOnComplete: true,
-        removeOnFail: false,
+        removeOnFail: true,   // was false — failed jobs accumulated in Redis and re-cycled on stall
         attempts: 3,
         backoff: {
           type: 'exponential',

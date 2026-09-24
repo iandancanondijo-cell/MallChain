@@ -12,7 +12,7 @@ Checks performed (and auto-fixed if needed):
   2. staking module has the validator bonded with correct delegation
   3. bonded_tokens_pool module account exists in auth
   4. bonded_tokens_pool has the correct stake balance in bank
-  5. bank supply matches the sum of all bank balances
+  5. bank supply is left empty for the SDK to derive from balances
   6. slashing module has signing_info for the validator
   7. genutil gen_txs is empty (broken gentx removed)
   8. initial_height is 1 (integer)
@@ -25,7 +25,6 @@ import os
 import subprocess
 import sys
 import hashlib
-from collections import defaultdict
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -302,20 +301,14 @@ def main(chain_home: str):
         })
         modified = True
 
-    # ── Check 9: bank supply = sum of all balances ──────────────────────────
-    totals = defaultdict(int)
-    for b in genesis["app_state"]["bank"]["balances"]:
-        for c in b["coins"]:
-            totals[c["denom"]] += int(c["amount"])
-
-    current_supply = {s["denom"]: s["amount"] for s in genesis["app_state"]["bank"]["supply"]}
-    expected_supply = {d: str(a) for d, a in sorted(totals.items())}
-
-    if current_supply != expected_supply:
-        print(f"  Fixing: bank supply ({current_supply} → {expected_supply})")
-        genesis["app_state"]["bank"]["supply"] = [
-            {"denom": d, "amount": a} for d, a in sorted(totals.items())
-        ]
+    # ── Check 9: let the SDK derive bank supply from balances ───────────────
+    # CometBFT normalizes quoted integer strings in this legacy field into JSON
+    # numbers before InitGenesis. Cosmos SDK v0.53 rejects those numbers, while
+    # an empty supply is supported and is calculated from balances.
+    current_supply = genesis["app_state"]["bank"].get("supply", [])
+    if current_supply:
+        print("  Fixing: clearing explicit bank supply (derived from balances)")
+        genesis["app_state"]["bank"]["supply"] = []
         modified = True
 
     # ── Check 10: slashing signing_infos ───────────────────────────────────

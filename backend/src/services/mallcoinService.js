@@ -1,5 +1,5 @@
 const axios = require('axios');
-const bech32 = require('bech32');
+const { bech32 } = require('bech32');
 const { config } = require('../config');
 const { createBlockchainBreaker } = require('../utils/circuitBreaker');
 const { getCacheService, CacheService } = require('./cacheService');

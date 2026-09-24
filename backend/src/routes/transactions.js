@@ -2,7 +2,7 @@ const router = require('express').Router()
 const Transaction = require('../models/transaction')
 const { getTransactionQueue } = require('../queue/transactionQueue')
 const crypto = require('crypto')
-const bech32 = require('bech32')
+const { bech32 } = require('bech32')
 const { asyncHandler } = require('../utils/errorHandler')
 
 function pubkeyToAddress(pubkeyBase64, prefix = process.env.CHAIN_PREFIX || process.env.COSMOS_PREFIX || 'mall') {

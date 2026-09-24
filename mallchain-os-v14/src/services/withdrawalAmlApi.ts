@@ -46,7 +46,11 @@ export const withdrawalAmlApi = {
     try {
       const res = await fetch(`${base}/api/withdrawals/aml/status`, { credentials: 'include' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) return { ok: false, error: data.error?.message || data.error || `Failed to load status (${res.status})` };
+      if (!res.ok) {
+        const rawError = data?.error;
+        const errorMessage = typeof rawError === 'string' ? rawError : rawError?.message || `Failed to load status (${res.status})`;
+        return { ok: false, error: errorMessage };
+      }
       return { ok: true, data };
     } catch (e) {
       return { ok: false, error: (e as Error).message || 'Failed to load verification status' };
@@ -66,7 +70,11 @@ export const withdrawalAmlApi = {
         body: form,
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) return { ok: false, error: data.error?.message || data.error || `Upload failed (${res.status})` };
+      if (!res.ok) {
+        const rawError = data?.error;
+        const errorMessage = typeof rawError === 'string' ? rawError : rawError?.message || `Upload failed (${res.status})`;
+        return { ok: false, error: errorMessage };
+      }
       return { ok: true, data };
     } catch (e) {
       return { ok: false, error: (e as Error).message || 'Upload failed' };
@@ -111,7 +119,9 @@ export const withdrawalAmlApi = {
       const res = await fetch(`${base}/api/withdrawals/aml/${reviewId}/document${qs}`, { credentials: 'include' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        return { ok: false, error: data.error?.message || data.error || `Failed to load document (${res.status})` };
+        const rawError = data?.error;
+        const errorMessage = typeof rawError === 'string' ? rawError : rawError?.message || `Failed to load document (${res.status})`;
+        return { ok: false, error: errorMessage };
       }
       const blob = await res.blob();
       return { ok: true, data: URL.createObjectURL(blob) };

@@ -67,9 +67,17 @@ const KYCSchema = new Schema({
   // (Article 17(3)(b)). The exact retention period is a legal/compliance
   // policy decision, not one this code makes — see docs/compliance/gdpr.md.
   erasedAt: { type: Date },
+
+  // Draft progress — stores partial KYC data so users can resume after
+  // closing the browser. Only populated while the user is mid-flow; cleared
+  // on successful submit. Uses the same encryption as the main fields.
+  draft: {
+    step: { type: String, enum: ['personal', 'address', 'identity', 'financial', 'review'] },
+    data: { type: Schema.Types.Mixed, default: null },
+    updatedAt: { type: Date },
+  },
 });
 
-KYCSchema.index({ userId: 1 });
 KYCSchema.index({ status: 1 });
 KYCSchema.index({ riskLevel: 1 });
 KYCSchema.index({ submittedAt: -1 });

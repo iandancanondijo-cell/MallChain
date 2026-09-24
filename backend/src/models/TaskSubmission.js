@@ -40,7 +40,6 @@ const TaskSubmissionSchema = new Schema({
   completed_at: { type: Date },
   rejection_note: { type: String },
 }, {
-  strict: false, // Allow additional dynamic fields
   timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
 });
 

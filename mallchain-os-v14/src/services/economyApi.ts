@@ -49,6 +49,12 @@ export interface EconomyUser {
   valueRatio: string;
 }
 
+export interface EconomyWallet {
+  address: string;
+  balance: number | null;
+  locked: 'locked' | 'unlocked';
+}
+
 export interface EconomyState {
   mlcnsPriceKes: number;
   market: EconomyMarket;
@@ -56,7 +62,7 @@ export interface EconomyState {
   emission: EconomyEmission;
   schedule: { phaseMonths: number; phases: EconomyPhase[] };
   conversion: EconomyConversion;
-  wallets: Record<string, number | null> | null;
+  wallets: Record<string, EconomyWallet> | null;
   user: EconomyUser | null;
   timestamp: string;
 }
@@ -68,6 +74,28 @@ export interface EconomyUserHoldings {
   mlcnsPriceKes: number;
   estimatedKesValue: number;
   valueRatio: string;
+}
+
+export interface TrackLiquidityPool {
+  tvlKes: number;
+  reserve0?: number;
+  reserve1?: number;
+  name: string;
+}
+
+export interface TrackEconomics {
+  totalSupply: number;
+  heldByWallets: number;
+  unclaimedOnChain: number;
+  burnedTotal: number;
+  emittedTotal: number;
+  totalWallets: number;
+  heldPercent: string;
+  unclaimedPercent: string;
+  liquidityPool: TrackLiquidityPool | null;
+  liquidityPoolKes: number;
+  mlcnsPriceKes: number;
+  timestamp: string;
 }
 
 export const economyApi = {
@@ -83,5 +111,12 @@ export const economyApi = {
    */
   async getUserHoldings(address: string) {
     return api.get<EconomyUserHoldings>(`/api/economy/user/${address}`);
+  },
+  /**
+   * GET /api/economy/track — supply breakdown, wallet count, and liquidity
+   * pool value for the "Track Economics" panel.
+   */
+  async getTrackEconomics() {
+    return api.get<TrackEconomics>('/api/economy/track');
   },
 };
