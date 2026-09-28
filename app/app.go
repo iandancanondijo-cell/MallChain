@@ -11,7 +11,7 @@ import (
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
-	circuitante "cosmossdk.io/x/circuit/ante"
+	"cosmossdk.io/x/circuit/ante"
 	circuitkeeper "cosmossdk.io/x/circuit/keeper"
 	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
 
@@ -73,6 +73,7 @@ import (
 	badgemod "marketplace/x/badge/module"
 	crosschainmod "marketplace/x/crosschain/module"
 	dexmod "marketplace/x/dex"
+	edumod "marketplace/x/edu/module"
 	govmod "marketplace/x/governance"
 	mallcoinmod "marketplace/x/mallcoin/module"
 	mallpointsmod "marketplace/x/mallpoints/module"
@@ -196,6 +197,7 @@ func AppConfig() depinject.Config {
 				// RegisterGRPCGatewayRoutes only reads from <pkg>/types (no
 				// receiver fields touched).
 				"badge":      badgemod.AppModule{},
+				"edu":        edumod.AppModule{},
 				"mallcoin":   mallcoinmod.AppModule{},
 				"mallpoints": mallpointsmod.AppModule{},
 				"mlcoin":     mlcoinmod.AppModule{},
@@ -203,6 +205,42 @@ func AppConfig() depinject.Config {
 			},
 		),
 	)
+}
+
+// NewClientContext creates a client.Context with codec, interface registry, and
+// TxConfig initialized via depinject. This is required before the gRPC server
+// starts, as it needs TxConfig.SignModeHandler() during initialization.
+func NewClientContext() (client.Context, error) {
+	var (
+		appCodec          codec.Codec
+		interfaceRegistry codectypes.InterfaceRegistry
+		txConfig          client.TxConfig
+		legacyAmino       *codec.LegacyAmino
+	)
+
+	// Supply a no-op logger for depinject resolution. The actual app logger
+	// is supplied later in New() for the full app initialization.
+	clientConfig := depinject.Configs(
+		AppConfig(),
+		depinject.Supply(
+			log.NewNopLogger(),
+		),
+	)
+
+	if err := depinject.Inject(clientConfig,
+		&appCodec,
+		&interfaceRegistry,
+		&txConfig,
+		&legacyAmino,
+	); err != nil {
+		return client.Context{}, err
+	}
+
+	return client.Context{}.
+		WithCodec(appCodec).
+		WithInterfaceRegistry(interfaceRegistry).
+		WithTxConfig(txConfig).
+		WithLegacyAmino(legacyAmino), nil
 }
 
 // New returns a reference to an initialized App.
@@ -251,9 +289,6 @@ func New(
 			// read the depinject documentation and depinject module wiring for more information
 			// on available options and how to use them.
 		),
-		// Provide custom signers via a provider function so depinject calls it
-		// at the right time before ProvideInterfaceRegistry
-		depinject.Provide(ProvideCustomGetSignersForRuntime),
 	)
 
 	// NOTE: ante store key is only usable after app/baseapp store is initialized.
@@ -465,7 +500,7 @@ func New(
 	// paused via x/circuit (governance/authority-gated) is rejected before
 	// any rate-limit/replay bookkeeping or signature verification happens.
 	// CircuitBreakerKeeper.IsAllowed has a pointer receiver, hence &app.CircuitBreakerKeeper.
-	circuitBreaker := circuitante.NewCircuitBreakerDecorator(&app.CircuitBreakerKeeper)
+	circuitBreaker := ante.NewCircuitBreakerDecorator(&app.CircuitBreakerKeeper)
 	wrappedAnte := func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
 		return circuitBreaker.AnteHandle(ctx, tx, simulate, innerAnte)
 	}

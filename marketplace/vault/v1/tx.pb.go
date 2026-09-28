@@ -450,40 +450,7 @@ func (*MsgDisableVaultResponse) Descriptor() ([]byte, []int) {
 
 var File_marketplace_vault_v1_tx_proto protoreflect.FileDescriptor
 
-const file_marketplace_vault_v1_tx_proto_rawDesc = "" +
-	"\n" +
-	"\x1dmarketplace/vault/v1/tx.proto\x12\x14marketplace.vault.v1\x1a\x14gogoproto/gogo.proto\x1a\x17cosmos/msg/v1/msg.proto\x1a\x19cosmos_proto/cosmos.proto\"\x9b\x01\n" +
-	"\rMsgSetupVault\x12<\n" +
-	"\tauthority\x18\x01 \x01(\tB\x1e\xf2\xde\x1f\x10yaml:\"authority\"\xfa\xde\x1f\x06stringR\tauthority\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x18\n" +
-	"\aaccount\x18\x03 \x01(\tR\aaccount\x12\x16\n" +
-	"\x06issuer\x18\x04 \x01(\tR\x06issuer\"B\n" +
-	"\x15MsgSetupVaultResponse\x12)\n" +
-	"\x10provisioning_uri\x18\x01 \x01(\tR\x0fprovisioningUri\"\x83\x01\n" +
-	"\x0fMsgConfirmVault\x12\x1c\n" +
-	"\tauthority\x18\x01 \x01(\tR\tauthority\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x1b\n" +
-	"\ttotp_code\x18\x03 \x01(\tR\btotpCode\x12\x19\n" +
-	"\bpriv_key\x18\x04 \x01(\fR\aprivKey\"\x19\n" +
-	"\x17MsgConfirmVaultResponse\"\x83\x01\n" +
-	"\x10MsgUnlockAndSign\x12\x1c\n" +
-	"\tauthority\x18\x01 \x01(\tR\tauthority\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x1b\n" +
-	"\ttotp_code\x18\x03 \x01(\tR\btotpCode\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\fR\amessage\"8\n" +
-	"\x18MsgUnlockAndSignResponse\x12\x1c\n" +
-	"\tsignature\x18\x01 \x01(\fR\tsignature\"h\n" +
-	"\x0fMsgDisableVault\x12\x1c\n" +
-	"\tauthority\x18\x01 \x01(\tR\tauthority\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x1b\n" +
-	"\ttotp_code\x18\x03 \x01(\tR\btotpCode\"\x19\n" +
-	"\x17MsgDisableVaultResponse2\xa9\x03\n" +
-	"\x03Msg\x12`\n" +
-	"\n" +
-	"SetupVault\x12#.marketplace.vault.v1.MsgSetupVault\x1a+.marketplace.vault.v1.MsgSetupVaultResponse\"\x00\x12f\n" +
-	"\fConfirmVault\x12%.marketplace.vault.v1.MsgConfirmVault\x1a-.marketplace.vault.v1.MsgConfirmVaultResponse\"\x00\x12i\n" +
-	"\rUnlockAndSign\x12&.marketplace.vault.v1.MsgUnlockAndSign\x1a..marketplace.vault.v1.MsgUnlockAndSignResponse\"\x00\x12f\n" +
-	"\fDisableVault\x12%.marketplace.vault.v1.MsgDisableVault\x1a-.marketplace.vault.v1.MsgDisableVaultResponse\"\x00\x1a\x05\x80\xe7\xb0*\x01B*Z(github.com/tmp/marketplace/x/vault/typesb\x06proto3"
+const file_marketplace_vault_v1_tx_proto_rawDesc = "\x0a\x1dmarketplace/vault/v1/tx.proto\x12\x14marketplace.vault.v1\x1a\x14gogoproto/gogo.proto\x1a\x17cosmos/msg/v1/msg.proto\x1a\x19cosmos_proto/cosmos.proto\x22\xab\x01\x0a\x0dMsgSetupVault\x12<\x0a\x09authority\x18\x01 \x01(\x09B\x1e\xf2\xde\x1f\x10yaml:\x22authority\x22\xfa\xde\x1f\x06stringR\x09authority\x12\x1a\x0a\x08password\x18\x02 \x01(\x09R\x08password\x12\x18\x0a\x07account\x18\x03 \x01(\x09R\x07account\x12\x16\x0a\x06issuer\x18\x04 \x01(\x09R\x06issuer:\x0e\x82\xe7\xb0*\x09authority\x22B\x0a\x15MsgSetupVaultResponse\x12)\x0a\x10provisioning_uri\x18\x01 \x01(\x09R\x0fprovisioningUri\x22\x93\x01\x0a\x0fMsgConfirmVault\x12\x1c\x0a\x09authority\x18\x01 \x01(\x09R\x09authority\x12\x1a\x0a\x08password\x18\x02 \x01(\x09R\x08password\x12\x1b\x0a\x09totp_code\x18\x03 \x01(\x09R\x08totpCode\x12\x19\x0a\x08priv_key\x18\x04 \x01(\x0cR\x07privKey:\x0e\x82\xe7\xb0*\x09authority\x22\x19\x0a\x17MsgConfirmVaultResponse\x22\x93\x01\x0a\x10MsgUnlockAndSign\x12\x1c\x0a\x09authority\x18\x01 \x01(\x09R\x09authority\x12\x1a\x0a\x08password\x18\x02 \x01(\x09R\x08password\x12\x1b\x0a\x09totp_code\x18\x03 \x01(\x09R\x08totpCode\x12\x18\x0a\x07message\x18\x04 \x01(\x0cR\x07message:\x0e\x82\xe7\xb0*\x09authority\x228\x0a\x18MsgUnlockAndSignResponse\x12\x1c\x0a\x09signature\x18\x01 \x01(\x0cR\x09signature\x22x\x0a\x0fMsgDisableVault\x12\x1c\x0a\x09authority\x18\x01 \x01(\x09R\x09authority\x12\x1a\x0a\x08password\x18\x02 \x01(\x09R\x08password\x12\x1b\x0a\x09totp_code\x18\x03 \x01(\x09R\x08totpCode:\x0e\x82\xe7\xb0*\x09authority\x22\x19\x0a\x17MsgDisableVaultResponse2\xa9\x03\x0a\x03Msg\x12`\x0a\x0aSetupVault\x12#.marketplace.vault.v1.MsgSetupVault\x1a+.marketplace.vault.v1.MsgSetupVaultResponse\x22\x00\x12f\x0a\x0cConfirmVault\x12%.marketplace.vault.v1.MsgConfirmVault\x1a-.marketplace.vault.v1.MsgConfirmVaultResponse\x22\x00\x12i\x0a\x0dUnlockAndSign\x12&.marketplace.vault.v1.MsgUnlockAndSign\x1a..marketplace.vault.v1.MsgUnlockAndSignResponse\x22\x00\x12f\x0a\x0cDisableVault\x12%.marketplace.vault.v1.MsgDisableVault\x1a-.marketplace.vault.v1.MsgDisableVaultResponse\x22\x00\x1a\x05\x80\xe7\xb0*\x01B*Z(github.com/tmp/marketplace/x/vault/typesb\x06proto3"
 
 var (
 	file_marketplace_vault_v1_tx_proto_rawDescOnce sync.Once

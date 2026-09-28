@@ -31,6 +31,7 @@ service Msg {
 // in-browser, encrypts the secret with it, and submits only the resulting
 // ciphertext here.
 message MsgSetupVault {
+  option (cosmos.msg.v1.signer) = "authority";
   string authority = 1 [(gogoproto.moretags) = "yaml:\"authority\"", (gogoproto.casttype) = "string"];
   string salt = 2;                  // base64, client-generated
   uint32 kdf_time = 3;
@@ -48,6 +49,7 @@ message MsgSetupVaultResponse {}
 // just-submitted TOTP secret and checking a live code) that the user saved
 // their authenticator entry correctly.
 message MsgConfirmVault {
+  option (cosmos.msg.v1.signer) = "authority";
   string authority = 1;
   string nonce_priv = 2;   // base64
   string ciphertext = 3;   // base64 — encrypted ed25519 private key
@@ -61,6 +63,7 @@ message MsgConfirmVaultResponse {}
 // no separate password/TOTP factor is meaningful here since, as above, the
 // chain can't verify either without seeing them in the clear.
 message MsgDisableVault {
+  option (cosmos.msg.v1.signer) = "authority";
   string authority = 1;
 }
 

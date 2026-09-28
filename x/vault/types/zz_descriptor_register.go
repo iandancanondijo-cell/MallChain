@@ -14,6 +14,12 @@ import (
 	msg "cosmossdk.io/api/cosmos/msg/v1"
 )
 
+func init() {
+	if err := RegisterDescriptor(); err != nil {
+		panic(fmt.Sprintf("failed to register vault descriptor with signer options: %v", err))
+	}
+}
+
 // RegisterDescriptor registers the gzipped FileDescriptorProto in this package
 // into the global protoregistry and sets the cosmos.msg.v1.service extension
 // on the Msg service. Returns an error if registration fails.

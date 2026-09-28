@@ -7,6 +7,7 @@ import (
 	"marketplace/app"
 
 	dbm "github.com/cosmos/cosmos-db"
+	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/server"
 	svrcmd "github.com/cosmos/cosmos-sdk/server/cmd"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
@@ -21,10 +22,18 @@ import (
 func main() {
 	sdk.SetAddrCacheEnabled(false)
 
+	clientCtx, err := app.NewClientContext()
+	if err != nil {
+		panic(err)
+	}
+
 	rootCmd := &cobra.Command{
 		Use:   app.Name,
 		Short: app.Name + " application node",
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if err := client.SetCmdClientContextHandler(clientCtx, cmd); err != nil {
+				return err
+			}
 			return server.InterceptConfigsPreRunHandler(cmd, "", nil, cmtcfg.DefaultConfig())
 		},
 	}
