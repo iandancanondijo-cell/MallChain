@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger')
 const axios = require('axios');
+const requireAuth = require('../middleware/requireAuth');
 
 const CHAIN_RPC = process.env.CHAIN_RPC || 'http://localhost:26657';
 const CHAIN_REST = process.env.CHAIN_REST || 'http://localhost:1317';
@@ -99,7 +100,7 @@ router.get('/wallet/:address/balance', async (req, res) => {
 
     let mlcBalance = 0;
     const balances = data.balances || [];
-    const mlcBalObj = balances.find(b => b.denom === 'mlc');
+    const mlcBalObj = balances.find(b => b.denom === 'mlcoin');
     if (mlcBalObj) {
       mlcBalance = Number(mlcBalObj.amount);
     }
@@ -108,7 +109,7 @@ router.get('/wallet/:address/balance', async (req, res) => {
       success: true,
       address,
       balance: mlcBalance,
-      denom: 'mlc',
+      denom: 'mlcoin',
       source: 'blockchain'
     });
   } catch (e) {
@@ -117,7 +118,7 @@ router.get('/wallet/:address/balance', async (req, res) => {
       success: true,
       address: req.params.address,
       balance: 0,
-      denom: 'mlc',
+      denom: 'mlcoin',
       source: 'fallback',
       error: e.message
     });
@@ -129,7 +130,7 @@ router.get('/wallet/:address/balance', async (req, res) => {
  * Broadcast a signed transaction to the chain
  * Body: { tx: base64_encoded_signed_transaction }
  */
-router.post('/broadcast', async (req, res) => {
+router.post('/broadcast', requireAuth(), async (req, res) => {
   try {
     const { tx } = req.body;
     if (!tx) {

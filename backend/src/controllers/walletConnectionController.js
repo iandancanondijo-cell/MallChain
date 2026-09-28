@@ -122,7 +122,7 @@ async function connectWallet(req, res) {
       let umal = 0; // microMAL
 
       balances.forEach(bal => {
-        if (bal.denom === 'umlcn' || bal.denom === 'mlcn') {
+        if (bal.denom === 'mlcoin') {
           mallcoins = parseInt(bal.amount) / 1000000; // Convert from microunits
         }
         if (bal.denom === 'umal' || bal.denom === 'mal') {
@@ -241,7 +241,7 @@ async function getWalletBalance(req, res) {
     let umal = 0;
 
     balances.forEach(bal => {
-      if (bal.denom === 'umlcn' || bal.denom === 'mlcn') {
+      if (bal.denom === 'mlcoin') {
         mallcoins = parseInt(bal.amount) / 1000000;
       }
       if (bal.denom === 'umal' || bal.denom === 'mal') {

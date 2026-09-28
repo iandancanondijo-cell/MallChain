@@ -1,10 +1,11 @@
 /**
  * Base MLPTS reward rates for verified social-campaign activities.
  *
- * Economic baseline: 1 MLPTS = KSh 2.00, 1 MLCNS ~= KSh 0.60-0.62, so
- * 1 MLCNS ~= 0.30-0.31 MLPTS. These are intentionally tiny fractions of an
- * MLPTS for high-frequency actions (view/like/etc) so the emission rate
- * stays sane — see DAILY_CAP_MLPTS below.
+ * Economic baseline: 1 MLPTS = KSh 2.00 (configured via MALLPOINT_PRICE_KES).
+ * The MLPTS→MLCNS conversion rate is dynamic (fiat-pegged oracle — see
+ * services/conversionRateOracle.js), so the MLCNS KES value fluctuates with
+ * the market. Rates below are denominated in MLPTS and represent the base
+ * reward before campaign multiplier and reviewer verification.
  *
  * Each activity's `rate` (or `min`/`max` for ranged activities like "complete
  * campaign") is a *base* reward. The actual per-campaign payout is
@@ -16,7 +17,7 @@
  * Tiers (for reference/UI grouping only, not used in the payout formula):
  *  A = micro actions (view/impression/like/save)      ~0.05-1 MLPTS
  *  B = engagement (comment/share/repost/bookmark)      ~0.5-3 MLPTS
- *  C = acquisition (follow/subscribe/join)             ~1-17 MLPTS
+ *  C = acquisition (follow/subscribe/join)             ~1-8 MLPTS
  *  D = high-value campaign actions (complete/mission)  2-25+ MLPTS
  *  E = Mallchain-native activities (mining, governance, validator,
  *      dev contributions, bug bounty, marketplace, referrals) — these are
@@ -30,13 +31,13 @@ const PLATFORMS = {
     icon: 'tiktok',
     dailyCapMlpts: 15,
     activities: {
-      view: { rate: 0.08, tier: 'A' },
-      like: { rate: 0.10, tier: 'A' },
-      comment: { rate: 0.23, tier: 'B' },
-      follow: { rate: 0.35, tier: 'C' },
-      share: { rate: 0.30, tier: 'B' },
-      save: { rate: 0.18, tier: 'A' },
-      profile_visit: { rate: 0.05, tier: 'A' },
+      view: { rate: 0.28, tier: 'A' },
+      like: { rate: 0.391, tier: 'A' },
+      comment: { rate: 0.51, tier: 'B' },
+      follow: { rate: 3, tier: 'C' },
+      share: { rate: 0.90, tier: 'B' },
+      save: { rate: 0.75, tier: 'A' },
+      profile_visit: { rate: 0.12, tier: 'A' },
       complete_campaign: { min: 1, max: 5, tier: 'D' },
     },
   },
@@ -119,17 +120,18 @@ const PLATFORMS = {
   x: {
     label: 'X',
     icon: 'x',
-    // 9 MLPTS/impression is only for specifically sponsored/qualified
-    // impressions (verified via the campaign vote flow), never ordinary
-    // scrolling impressions — enforced by requiring campaign_id + reviewer
-    // approval for every rewarded action, same as every other platform here.
+    // All actions require campaign_id + reviewer approval (same as every
+    // other platform) — no action is rewarded for ordinary scrolling.
+    // Rates calibrated to sit between Instagram and YouTube/LinkedIn,
+    // reflecting X's engagement depth without the emission imbalance
+    // that previously made a single follow worth 30 KES.
     activities: {
-      impression: { rate: 9, tier: 'B', note: 'campaign-qualified impressions only' },
-      like: { rate: 11, tier: 'B' },
-      comment: { rate: 13, tier: 'B' },
-      repost: { rate: 17, tier: 'B' },
-      follow: { rate: 15, tier: 'C' },
-      bookmark: { rate: 8, tier: 'B' },
+      impression: { rate: 0.50, tier: 'A', note: 'campaign-qualified impressions only' },
+      like: { rate: 1, tier: 'B' },
+      comment: { rate: 2, tier: 'B' },
+      repost: { rate: 3, tier: 'B' },
+      follow: { rate: 3, tier: 'C' },
+      bookmark: { rate: 1.50, tier: 'B' },
     },
   },
   snapchat: {
@@ -231,8 +233,8 @@ const PLATFORMS = {
 // Fallback daily MLPTS-earning cap (per user, across all campaign activity
 // on a platform) for any platform without an explicit cap set above. Keeps
 // emission bounded even for platforms where a per-platform cap wasn't
-// specified — see the X-impression math in the module docstring above for
-// why unrestricted high-frequency rewards are dangerous at this scale.
+// specified — without this, a user could chain high-value actions on a
+// single platform and accumulate outsized rewards in a short window.
 const DEFAULT_DAILY_CAP_MLPTS = 20;
 
 // Campaign creators can scale a platform/activity's base rate by this much

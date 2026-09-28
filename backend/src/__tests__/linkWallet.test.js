@@ -19,6 +19,26 @@ jest.mock('../services/badgeService', () => ({
 jest.mock('../middleware/tokenDenylist', () => ({
   isRevoked: jest.fn().mockResolvedValue(false),
 }));
+jest.mock('../middleware/authCache', () => ({
+  getCachedUser: jest.fn().mockResolvedValue(null),
+  setCachedUser: jest.fn().mockResolvedValue(undefined),
+}));
+jest.mock('../utils/activityTracker', () => ({
+  markActiveToday: jest.fn(),
+}));
+jest.mock('../config', () => ({
+  config: {
+    chain: {
+      prefix: 'mall',
+    },
+  },
+}));
+jest.mock('../mallwallet/queue/redis', () => {
+  const mockRedis = {
+    set: jest.fn().mockResolvedValue('OK'),
+  };
+  return jest.fn(() => mockRedis);
+});
 // verifyAdr036.js pulls in @cosmjs/amino -> @cosmjs/crypto, whose argon2
 // support is an ESM-only transitive dependency Jest's default CJS
 // resolution can't parse (same reason mallpointsConvert.test.js mocks it).

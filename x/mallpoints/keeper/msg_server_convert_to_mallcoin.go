@@ -33,21 +33,38 @@ func (k msgServer) ConvertToMallcoin(ctx context.Context, msg *types.MsgConvertT
 		return nil, errorsmod.Wrap(err, "invalid creator address")
 	}
 
-	// C4: resolve the governance-authoritative conversion ratio from the
-	// x/mlcoin keeper *before* doing any balance mutations so the ratio is
-	// snapshotted at the top of the Msg and can't change mid-execution.
-	// Same exact value is used on the backend (via /mlcoin/v1/params) so
-	// client preview == on-chain settlement.
-	ratioFixed, scale := k.mlcoinKeeper.GetConversionRatio(ctx)
-	mintedAmount, err := safeMulDiv(msg.Amount, ratioFixed, scale)
+	// Dynamic conversion rate validation: backend submits a proposed_rate which
+	// must fall within the on-chain [min_conversion_rate, max_conversion_rate] bounds.
+	// This prevents extreme rates while allowing fiat-pegged dynamic pricing.
+	minRate, maxRate := k.mlcoinKeeper.GetConversionRateBounds(ctx)
+
+	if msg.ProposedRate < minRate {
+		return nil, errorsmod.Wrapf(
+			types.ErrInvalidRequest,
+			"proposed_rate %d below minimum bound %d; backend oracle rate too low",
+			msg.ProposedRate, minRate,
+		)
+	}
+	if msg.ProposedRate > maxRate {
+		return nil, errorsmod.Wrapf(
+			types.ErrInvalidRequest,
+			"proposed_rate %d above maximum bound %d; backend oracle rate too high",
+			msg.ProposedRate, maxRate,
+		)
+	}
+
+	// Use the backend-proposed rate for conversion calculation.
+	// Scale is always 1_000_000 (6 decimal fixed-point).
+	scale := uint64(1_000_000)
+	mintedAmount, err := safeMulDiv(msg.Amount, msg.ProposedRate, scale)
 	if err != nil {
-		return nil, errorsmod.Wrap(err, "conversion ratio math")
+		return nil, errorsmod.Wrap(err, "conversion rate math")
 	}
 	if mintedAmount == 0 && msg.Amount > 0 {
 		return nil, errorsmod.Wrapf(
 			types.ErrInvalidRequest,
-			"convert amount %d points rounds down to zero coins at ratio %d/%d; increase amount",
-			msg.Amount, ratioFixed, scale,
+			"convert amount %d points rounds down to zero coins at rate %d/%d; increase amount",
+			msg.Amount, msg.ProposedRate, scale,
 		)
 	}
 
@@ -108,12 +125,11 @@ func (k msgServer) ConvertToMallcoin(ctx context.Context, msg *types.MsgConvertT
 		sdk.NewAttribute(sdk.AttributeKeyModule, types.ModuleName),
 		sdk.NewAttribute(types.AttributeKeyUser, msg.Creator),
 		sdk.NewAttribute(types.AttributeKeyPoints, strconv.FormatUint(msg.Amount, 10)),
-		// C4 fix: AttributeKeyAmount now holds the actual minted MLCNS,
-		// not the input points count. Callers that need both amounts can
-		// read the separate attributes.
 		sdk.NewAttribute(types.AttributeKeyAmount, strconv.FormatUint(mintedAmount, 10)),
-		sdk.NewAttribute("ratio_fixed", strconv.FormatUint(ratioFixed, 10)),
-		sdk.NewAttribute("ratio_scale", strconv.FormatUint(scale, 10)),
+		sdk.NewAttribute("proposed_rate", strconv.FormatUint(msg.ProposedRate, 10)),
+		sdk.NewAttribute("rate_scale", strconv.FormatUint(scale, 10)),
+		sdk.NewAttribute("min_rate", strconv.FormatUint(minRate, 10)),
+		sdk.NewAttribute("max_rate", strconv.FormatUint(maxRate, 10)),
 	))
 
 	return &types.MsgConvertToMallcoinResponse{}, nil

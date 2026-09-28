@@ -6,10 +6,9 @@ const { getChainUserPoints, getConversionWindow, mergePoints, buildConversionSta
 const { getUserBadgeInfo } = require('../services/badgeService')
 const { creditMlcns } = require('../services/faucetService')
 const {
-  getChainParams,
   getMlptsPerMlcnsScale,
-  mlptsPerMlcnsToNumber,
 } = require('../services/mallcoinService')
+const { getDynamicConversionRate } = require('../services/conversionRateOracle')
 const { addLiquidityToPool } = require('../controllers/liquidityController')
 const { recordLiquidityActivity } = require('../services/liquidityActivityService')
 const { verifyConvertSignature } = require('../mallwallet/security/verifyAdr036')
@@ -211,31 +210,25 @@ router.post('/convert', async (req, res) => {
       })
     }
 
-    // C4 / single source of truth for the Mallpoints → Mallcoin conversion
-    // ratio. This used to fetch the live MLCNS/KES mid-price and then
-    // silently ignore it (hardcoded 1:1 conversion), which made the
-    // settle amount drift by 15-40% away from governance intent. The
-    // value now comes from the on-chain x/mlcoin Params.MlptsPerMlcns
-    // governance param (6-decimal fixed-point), same source used on
-    // the MsgConvertToMallcoin keeper side so client preview == on-chain
-    // settlement. KES-value is also still preserved for liquidity pool
-    // accounting (addLiquidityToPool needs a fiat side).
-    const chainParams = await getChainParams()
-    const mlptsPerMlcnsFloat = mlptsPerMlcnsToNumber(chainParams.mlpts_per_mlcns)
+    // Dynamic fiat-pegged conversion rate via the backend oracle.
+    // The oracle fetches the live MLCNS/KES market price from the chain and
+    // combines it with the configured MLPTS/KES price to compute:
+    //   proposed_rate = (mlptsPriceKes / mlcnsMidPriceKes) * 1_000_000
+    // This rate is clamped to the on-chain [min_conversion_rate, max_conversion_rate]
+    // bounds so the Msg always passes on-chain validation. The same formula
+    // is used on-chain (safeMulDiv in msg_server_convert_to_mallcoin.go) so
+    // backend preview == on-chain settlement.
+    const oracle = await getDynamicConversionRate()
     const ratioScale = getMlptsPerMlcnsScale()
 
-    const pointsToConvert = Math.floor(acc.balance) // integer points; if decimals were used, floor to integer
+    const pointsToConvert = Math.floor(acc.balance)
     if (pointsToConvert <= 0) return res.status(400).json({ error: 'insufficient points' })
 
-    // C4 CHAIN-AUTHORITATIVE math, matching the Go keeper formula exactly:
-    //   mlcnsAmount = (pointsAmount * ratioFixed) / scale
-    // This is the same safeMulDiv formula run by
-    // x/mallpoints/keeper/msg_server_convert_to_mallcoin.go so the REST
-    // preview and the on-chain Msg result converge for the same input.
-    const mlcoinsRaw = (pointsToConvert * Number(chainParams.mlpts_per_mlcns || 0)) / ratioScale
-    const mlcoins6 = Math.round(mlcoinsRaw * ratioScale) / ratioScale  // 6-decimal precision
+    // Dynamic rate math: mlcnsAmount = (pointsAmount * proposedRate) / RATE_SCALE
+    const mlcoinsRaw = (pointsToConvert * oracle.proposedRate) / ratioScale
+    const mlcoins6 = Math.round(mlcoinsRaw * ratioScale) / ratioScale
     const mlcoins = mlcoins6
-    const kesValue = pointsToConvert * pointPrice()
+    const kesValue = pointsToConvert * oracle.mlptsPriceKes
 
     const previousLastConversionAt = acc.lastConversionAt
 
@@ -329,14 +322,15 @@ router.post('/convert', async (req, res) => {
         ok: true,
         convertedPoints: pointsToConvert,
         mallcoins: mlcoins,
-        // C4 metadata: include the authoritative ratio so callers can audit
-        // exactly which governance value was used for this conversion.
         ratio: {
-          source: chainParams.source,
-          mlpts_per_mlcns_fixed: chainParams.mlpts_per_mlcns,
-          mlpts_per_mlcns: mlptsPerMlcnsFloat,
-          scale: ratioScale,
-          point_price_kes: pointPrice(),
+          source: oracle.source,
+          proposed_rate: oracle.proposedRate,
+          min_rate: oracle.minRate,
+          max_rate: oracle.maxRate,
+          rate_scale: oracle.rateScale,
+          clamped: oracle.clamped,
+          mlpts_price_kes: oracle.mlptsPriceKes,
+          mlcns_mid_price_kes: oracle.mlcnsMidPriceKes,
           kes_value_of_points: kesValue,
         },
         liquidity: liquidityResult,

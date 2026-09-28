@@ -140,7 +140,7 @@ router.get('/state', async (req, res) => {
             mallpoints: mallpoints,
             mlcnsPriceKes,
             totalKesValue: mlcnsBalance * mlcnsPriceKes + mallpoints * 2,
-            valueRatio: (2 / mlcnsPriceKes).toFixed(2)
+            valueRatio: 3.2
           }
         }
       } catch (e) { /* chain query unavailable — fallback used */ }
@@ -179,8 +179,8 @@ router.get('/state', async (req, res) => {
       conversion: {
         badgeHolders: '15th of each month',
         nonBadge: 'December 27th only',
-        rate: '1 MP = 1 MLCNS',
-        valueRatio: (2 / mlcnsPriceKes).toFixed(2)
+        rate: '1 MP = 3.2 MLCNS',
+        valueRatio: 3.2
       },
       wallets: walletBalances,
       user: userBalances,
@@ -240,7 +240,7 @@ router.get('/user/:address', async (req, res) => {
       market: marketPrice,
       monthlyEmissionCap: monthlyEmission,
       estimatedKesValue: mlcnsBalance * mlcnsPriceKes + mallpoints * 2,
-      valueRatio: (2 / mlcnsPriceKes).toFixed(2)
+      valueRatio: 3.2
     })
   } catch (e) {
     logger.error('economy', 'user error', e)
@@ -322,10 +322,10 @@ router.get('/track', async (req, res) => {
         if (poolAddr) {
           const bankResp = await axios.get(`${base}/cosmos/bank/v1beta1/balances/${poolAddr}`, { timeout: 3000 })
           const balances = bankResp.data?.balances || []
-          const umlcn = Number(balances.find(b => b.denom === 'umlcn')?.amount || 0) / 1e6
+          const mlcoin = Number(balances.find(b => b.denom === 'mlcoin')?.amount || 0) / 1e6
           const umal = Number(balances.find(b => b.denom === 'umal')?.amount || 0) / 1e6
-          liquidityPoolKes = umlcn * mlcnsPriceKes + umal
-          liquidityPool = { reserve0: umlcn, reserve1: umal, tvlKes: liquidityPoolKes, name: 'MLCNS/KES' }
+          liquidityPoolKes = mlcoin * mlcnsPriceKes + umal
+          liquidityPool = { reserve0: mlcoin, reserve1: umal, tvlKes: liquidityPoolKes, name: 'MLCNS/KES' }
         }
       } catch (e2) { /* no pool data available */ }
     }

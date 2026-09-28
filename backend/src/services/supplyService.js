@@ -6,7 +6,7 @@ const { stdout, stderr } = require('process');
 const console = new Console(stdout, stderr);
 
 const CHAIN_REST = process.env.CHAIN_REST_URL || process.env.VITE_CHAIN_REST || 'http://localhost:1317';
-const DENOM = process.env.DENOM || 'umlcn';
+const DENOM = process.env.DENOM || 'mlcoin';
 const MLCNS_DECIMALS = Number(process.env.MLCNS_DECIMALS || 6);
 
 // Fetch current circulating supply from chain

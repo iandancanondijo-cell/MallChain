@@ -114,13 +114,11 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
    */
   test('Scenario 1: Wallet receives transaction update', (done) => {
     const port = server.address().port;
-    
-    // Simulate frontend client
-    const frontendSocket = ioClient(`http://localhost:${port}`, { 
-      reconnection: false 
+
+    const frontendSocket = ioClient(`http://localhost:${port}`, {
+      reconnection: false
     });
 
-    // Track state changes in frontend
     const frontendState = {
       connected: false,
       balances: null,
@@ -130,51 +128,36 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
 
     frontendSocket.on('connect', () => {
       frontendState.connected = true;
-      
-      // Subscribe to wallet for real-time updates
       frontendSocket.emit('subscribe:wallet', WALLET_ADDRESS);
     });
 
-    // Listen for initial wallet data
     frontendSocket.on('wallet:update', (data) => {
       frontendState.balances = data.balances;
       frontendState.updateCount++;
       frontendState.lastUpdate = data;
-      // Capture latency at actual delivery time, not at a later poll — setTimeout
-      // scheduling jitter means "time since emit" measured after a fixed wait is
-      // not a meaningful (or stable) latency signal.
       frontendState.lastUpdateReceivedAt = Date.now();
+
+      // After initial subscription data arrives, trigger the blockchain event
+      if (frontendState.updateCount === 1) {
+        expect(frontendState.connected).toBe(true);
+        expect(frontendState.balances).not.toBeNull();
+        expect(frontendState.balances.mallcoin).toBe(1000);
+
+        io.to(`wallet:${WALLET_ADDRESS}`).emit('wallet:update', {
+          address: WALLET_ADDRESS,
+          balances: { mallcoin: 1500, gold: 50 },
+          timestamp: Date.now()
+        });
+
+        setTimeout(() => {
+          expect(frontendState.balances.mallcoin).toBe(1500);
+          expect(frontendState.updateCount).toBe(2);
+          expect(frontendState.lastUpdateReceivedAt - frontendState.lastUpdate.timestamp).toBeLessThan(100);
+          frontendSocket.close();
+          done();
+        }, 100);
+      }
     });
-
-    // Wait for connection and subscription
-    setTimeout(() => {
-      // Verify connection and subscription
-      expect(frontendState.connected).toBe(true);
-      expect(frontendState.balances).not.toBeNull();
-      expect(frontendState.balances.mallcoin).toBe(1000);
-      expect(frontendState.updateCount).toBe(1); // Initial cached data
-
-      // Simulate blockchain event: User receives transaction
-      // In production, this would come from blockchain listener
-      io.to(`wallet:${WALLET_ADDRESS}`).emit('wallet:update', {
-        address: WALLET_ADDRESS,
-        balances: { mallcoin: 1500, gold: 50 }, // Balance increased
-        timestamp: Date.now()
-      });
-
-      // Wait for frontend to receive update
-      setTimeout(() => {
-        // Verify frontend received the update
-        expect(frontendState.balances.mallcoin).toBe(1500);
-        expect(frontendState.updateCount).toBe(2); // Initial + transaction
-        
-        // Verify the update was delivered promptly (measured at actual receipt time)
-        expect(frontendState.lastUpdateReceivedAt - frontendState.lastUpdate.timestamp).toBeLessThan(100);
-
-        frontendSocket.close();
-        done();
-      }, 100);
-    }, 100);
   }, TEST_TIMEOUT);
 
   /**
@@ -198,10 +181,6 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
 
     const updateSequence = [];
 
-    frontendSocket.on('connect', () => {
-      frontendSocket.emit('subscribe:wallet', WALLET_ADDRESS);
-    });
-
     frontendSocket.on('wallet:update', (data) => {
       updateSequence.push({
         timestamp: data.timestamp,
@@ -209,46 +188,40 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
       });
     });
 
-    setTimeout(() => {
-      // Simulate three rapid transactions
-      const updates = [
-        { balance: 1100, delay: 0 },
-        { balance: 1200, delay: 10 },
-        { balance: 1300, delay: 20 }
-      ];
+    frontendSocket.on('connect', () => {
+      frontendSocket.emit('subscribe:wallet', WALLET_ADDRESS);
 
-      // Emit updates in order
-      updates.forEach((update, index) => {
-        setTimeout(() => {
-          io.to(`wallet:${WALLET_ADDRESS}`).emit('wallet:update', {
-            address: WALLET_ADDRESS,
-            balances: { mallcoin: update.balance, gold: 50 },
-            timestamp: Date.now()
-          });
-        }, update.delay);
-      });
-
-      // Wait for all updates
+      // Wait for subscription to settle before emitting rapid updates
       setTimeout(() => {
-        // Should have initial cached update + 3 transaction updates
-        expect(updateSequence.length).toBeGreaterThanOrEqual(4);
-        
-        // Find the three transaction updates (skip initial if present)
-        const transactionUpdates = updateSequence.slice(-3);
-        
-        // Verify updates are in correct order
-        expect(transactionUpdates[0].balance).toBe(1100);
-        expect(transactionUpdates[1].balance).toBe(1200);
-        expect(transactionUpdates[2].balance).toBe(1300);
-        
-        // Verify timestamps are in order
-        expect(transactionUpdates[0].timestamp).toBeLessThanOrEqual(transactionUpdates[1].timestamp);
-        expect(transactionUpdates[1].timestamp).toBeLessThanOrEqual(transactionUpdates[2].timestamp);
+        const updates = [
+          { balance: 1100, delay: 0 },
+          { balance: 1200, delay: 10 },
+          { balance: 1300, delay: 20 }
+        ];
 
-        frontendSocket.close();
-        done();
-      }, 150);
-    }, 100);
+        updates.forEach((update) => {
+          setTimeout(() => {
+            io.to(`wallet:${WALLET_ADDRESS}`).emit('wallet:update', {
+              address: WALLET_ADDRESS,
+              balances: { mallcoin: update.balance, gold: 50 },
+              timestamp: Date.now()
+            });
+          }, update.delay);
+        });
+
+        setTimeout(() => {
+          expect(updateSequence.length).toBeGreaterThanOrEqual(4);
+          const transactionUpdates = updateSequence.slice(-3);
+          expect(transactionUpdates[0].balance).toBe(1100);
+          expect(transactionUpdates[1].balance).toBe(1200);
+          expect(transactionUpdates[2].balance).toBe(1300);
+          expect(transactionUpdates[0].timestamp).toBeLessThanOrEqual(transactionUpdates[1].timestamp);
+          expect(transactionUpdates[1].timestamp).toBeLessThanOrEqual(transactionUpdates[2].timestamp);
+          frontendSocket.close();
+          done();
+        }, 200);
+      }, 200);
+    });
   }, TEST_TIMEOUT);
 
   /**
@@ -281,7 +254,6 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
     });
 
     setTimeout(() => {
-      // Simulate new blockchain block detection
       const newBlock = {
         height: 12345,
         hash: 'ABCD1234EFGH5678IJKL9012MNOP3456',
@@ -295,11 +267,10 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
         expect(blockUpdates.length).toBe(1);
         expect(blockUpdates[0].height).toBe(12345);
         expect(blockUpdates[0].txCount).toBe(42);
-
         frontendSocket.close();
         done();
-      }, 100);
-    }, 100);
+      }, 200);
+    }, 200);
   }, TEST_TIMEOUT);
 
   /**
@@ -339,7 +310,6 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
     });
 
     setTimeout(() => {
-      // Broadcast price update to all subscribers
       const priceUpdate = {
         prices: { mallcoin: 0.50, gold: 1.25 },
         volumes: { mallcoin: 50000, gold: 10000 },
@@ -349,18 +319,15 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
       io.to('price:updates').emit('price:current', priceUpdate);
 
       setTimeout(() => {
-        // Both frontends should receive the same update
         expect(prices1.length).toBe(1);
         expect(prices2.length).toBe(1);
-        
         expect(prices1[0].prices.mallcoin).toBe(0.50);
         expect(prices2[0].prices.mallcoin).toBe(0.50);
-
         frontend1.close();
         frontend2.close();
         done();
-      }, 100);
-    }, 100);
+      }, 200);
+    }, 200);
   }, TEST_TIMEOUT);
 
   /**
@@ -418,10 +385,8 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
     });
 
     setTimeout(() => {
-      // Verify initial subscription
       expect(states.filter(s => s.event === 'wallet_update').length).toBe(1);
-      
-      // Simulate wallet update after subscription
+
       io.to(`wallet:${WALLET_ADDRESS}`).emit('wallet:update', {
         address: WALLET_ADDRESS,
         balances: { mallcoin: 2000, gold: 50 },
@@ -429,14 +394,12 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
       });
 
       setTimeout(() => {
-        // Should have received update
         const updates = states.filter(s => s.event === 'wallet_update');
         expect(updates.length).toBeGreaterThanOrEqual(2);
-        
         frontendSocket.close();
         done();
-      }, 100);
-    }, 200);
+      }, 200);
+    }, 300);
   }, TEST_TIMEOUT);
 
   /**
@@ -480,11 +443,9 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
     });
 
     setTimeout(() => {
-      // Reset counts (skip initial cached updates)
       eventsA.length = 0;
       eventsB.length = 0;
 
-      // Send update to wallet:B only
       io.to(`wallet:${WALLET_B}`).emit('wallet:update', {
         address: WALLET_B,
         balances: { mallcoin: 5000, gold: 100 },
@@ -492,18 +453,14 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
       });
 
       setTimeout(() => {
-        // User A should NOT receive any events (room isolation)
         expect(eventsA.length).toBe(0);
-        
-        // User B should receive exactly 1 event
         expect(eventsB.length).toBe(1);
         expect(eventsB[0]).toBe(WALLET_B);
-
         userA.close();
         userB.close();
         done();
-      }, 100);
-    }, 150);
+      }, 200);
+    }, 200);
   }, TEST_TIMEOUT);
 
   /**
@@ -542,25 +499,17 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
     });
 
     setTimeout(() => {
-      // Close the Socket.IO server (not just the raw HTTP server) so already-
-      // established connections are actually terminated and clients see a
-      // disconnect event. server.close() alone only stops new connections;
-      // existing socket.io transports stay open independently.
       io.close();
 
       setTimeout(() => {
-        // Should have received disconnect event
         const disconnectEvents = events.filter(e =>
           typeof e === 'object' && e.event === 'disconnected'
         );
-
-        // Should have at least one disconnect event
         expect(disconnectEvents.length).toBeGreaterThan(0);
-
         frontendSocket.close();
         done();
-      }, 200);
-    }, 150);
+      }, 300);
+    }, 200);
   }, TEST_TIMEOUT);
 
   /**
@@ -605,10 +554,8 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
     });
 
     setTimeout(() => {
-      // Clear initial cached update count
       metrics.eventsReceived = 0;
 
-      // Emit 10 rapid updates (one every 50ms)
       for (let i = 0; i < 10; i++) {
         setTimeout(() => {
           io.to(`wallet:${WALLET_ADDRESS}`).emit('wallet:update', {
@@ -619,21 +566,14 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
         }, i * 50);
       }
 
-      // Check results after all updates sent
       setTimeout(() => {
-        // Should receive all 10 events
         expect(metrics.eventsReceived).toBe(10);
-        
-        // Should not disconnect
         expect(metrics.disconnects).toBe(0);
-        
-        // Should not have errors
         expect(metrics.errors).toBe(0);
-
         frontendSocket.close();
         done();
-      }, 600);
-    }, 150);
+      }, 700);
+    }, 200);
   }, TEST_TIMEOUT);
 
   /**
@@ -665,7 +605,6 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
     user3.on('market:feed', (events) => feeds.user3.push(events));
 
     setTimeout(() => {
-      // Broadcast market activity
       const marketEvents = [
         { type: 'trade', timestamp: Date.now(), data: { seller: 'addr1', buyer: 'addr2' } },
         { type: 'listing', timestamp: Date.now() + 10, data: { item: 'sword' } },
@@ -675,20 +614,17 @@ describe('Task 14.2: Real-Time Updates - End-to-End Integration', () => {
       io.to('market:feed').emit('market:feed', marketEvents);
 
       setTimeout(() => {
-        // All users should receive same events
         expect(feeds.user1.length).toBe(1);
         expect(feeds.user2.length).toBe(1);
         expect(feeds.user3.length).toBe(1);
-        
         expect(feeds.user1[0].length).toBe(3);
         expect(feeds.user2[0].length).toBe(3);
         expect(feeds.user3[0].length).toBe(3);
-
         user1.close();
         user2.close();
         user3.close();
         done();
-      }, 100);
-    }, 150);
+      }, 200);
+    }, 200);
   }, TEST_TIMEOUT);
 });

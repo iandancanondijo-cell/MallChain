@@ -106,7 +106,7 @@ describe('walletConnectionController', () => {
       axios.get.mockImplementation((url) => {
         if (url.includes('/bank/v1beta1/balances/')) {
           return Promise.resolve({
-            data: { balances: [{ denom: 'umlcn', amount: '5000000' }, { denom: 'umal', amount: '250000' }] },
+            data: { balances: [{ denom: 'mlcoin', amount: '5000000' }, { denom: 'umal', amount: '250000' }] },
           });
         }
         if (url.includes('/auth/v1beta1/accounts/')) {
@@ -191,7 +191,7 @@ describe('walletConnectionController', () => {
 
     test('returns parsed balances for a valid address', async () => {
       axios.get.mockResolvedValue({
-        data: { balances: [{ denom: 'mlcn', amount: '9000000' }] },
+        data: { balances: [{ denom: 'mlcoin', amount: '9000000' }] },
       });
 
       const app = buildApp();

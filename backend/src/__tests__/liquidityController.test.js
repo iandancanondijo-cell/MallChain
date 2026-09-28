@@ -34,7 +34,7 @@ function mockChainResponses(axios, { buyPrice = 120, sellPrice = 100, reserve0Ra
     }
     if (url.includes('/cosmos/bank/v1beta1/balances/mall1pool')) {
       return Promise.resolve({
-        data: { balances: [{ denom: 'umlcn', amount: reserve0Raw }, { denom: 'umal', amount: reserve1Raw }] },
+        data: { balances: [{ denom: 'mlcoin', amount: reserve0Raw }, { denom: 'umal', amount: reserve1Raw }] },
       });
     }
     if (url.includes('/tmp/marketplace/mlcoin/v1/market/trades')) {

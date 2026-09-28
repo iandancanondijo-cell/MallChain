@@ -35,16 +35,28 @@ const DefaultMlptsPerMlcns uint64 = 3_200_000
 // Params.MlptsPerMlcns.
 const MLPTSPerMlcnsScale uint64 = 1_000_000
 
+// DefaultMinConversionRate is the minimum allowed conversion rate (fixed-point, 6 decimals).
+// Represents 0.1 MLCNS per MLPTS as the floor bound for dynamic rate validation.
+const DefaultMinConversionRate uint64 = 1_000
+
+// DefaultMaxConversionRate is the maximum allowed conversion rate (fixed-point, 6 decimals).
+// Represents 10.0 MLCNS per MLPTS as the ceiling bound for dynamic rate validation.
+const DefaultMaxConversionRate uint64 = 100_000_000
+
 // NewParams creates a new Params instance.
 func NewParams(
 	burnWallet string,
 	minStakeAmount uint64,
 	mlptsPerMlcns uint64,
+	minConversionRate uint64,
+	maxConversionRate uint64,
 ) Params {
 	return Params{
-		BurnWallet:     burnWallet,
-		MinStakeAmount: minStakeAmount,
-		MlptsPerMlcns:  mlptsPerMlcns,
+		BurnWallet:        burnWallet,
+		MinStakeAmount:    minStakeAmount,
+		MlptsPerMlcns:     mlptsPerMlcns,
+		MinConversionRate: minConversionRate,
+		MaxConversionRate: maxConversionRate,
 	}
 }
 
@@ -54,6 +66,8 @@ func DefaultParams() Params {
 		DefaultBurnWallet,
 		DefaultMinStakeAmount,
 		DefaultMlptsPerMlcns,
+		DefaultMinConversionRate,
+		DefaultMaxConversionRate,
 	)
 }
 
@@ -66,6 +80,15 @@ func (p Params) Validate() error {
 		return err
 	}
 	if err := validateMlptsPerMlcns(p.MlptsPerMlcns); err != nil {
+		return err
+	}
+	if err := validateMinConversionRate(p.MinConversionRate); err != nil {
+		return err
+	}
+	if err := validateMaxConversionRate(p.MaxConversionRate); err != nil {
+		return err
+	}
+	if err := validateConversionRateBounds(p.MinConversionRate, p.MaxConversionRate); err != nil {
 		return err
 	}
 
@@ -101,6 +124,39 @@ func validateMinStakeAmount(v uint64) error {
 func validateMlptsPerMlcns(v uint64) error {
 	if v > 1_000_000_000_000 {
 		return fmt.Errorf("mlpts_per_mlcns > 1_000_000_000_000; unexpected hyperinflationary ratio")
+	}
+	return nil
+}
+
+// validateMinConversionRate ensures the minimum conversion rate bound is safe.
+// Allows 0 to keep zero-valued genesis Params valid; the keeper layer applies
+// DefaultMinConversionRate on a nil/0 read.
+func validateMinConversionRate(v uint64) error {
+	if v > 1_000_000_000_000 {
+		return fmt.Errorf("min_conversion_rate > 1_000_000_000_000; unexpected hyperinflationary bound")
+	}
+	return nil
+}
+
+// validateMaxConversionRate ensures the maximum conversion rate bound is safe.
+// Allows 0 to keep zero-valued genesis Params valid; the keeper layer applies
+// DefaultMaxConversionRate on a nil/0 read.
+func validateMaxConversionRate(v uint64) error {
+	if v > 1_000_000_000_000 {
+		return fmt.Errorf("max_conversion_rate > 1_000_000_000_000; unexpected hyperinflationary bound")
+	}
+	return nil
+}
+
+// validateConversionRateBounds ensures min <= max to prevent invalid bounds.
+// Both values of 0 are allowed (genesis default tolerance); the check only
+// fires when both are non-zero.
+func validateConversionRateBounds(min, max uint64) error {
+	if min == 0 || max == 0 {
+		return nil
+	}
+	if min > max {
+		return fmt.Errorf("min_conversion_rate (%d) > max_conversion_rate (%d); invalid bounds", min, max)
 	}
 	return nil
 }

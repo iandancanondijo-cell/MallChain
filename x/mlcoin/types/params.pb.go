@@ -27,9 +27,11 @@ const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 
 // Params defines the parameters for the module.
 type Params struct {
-	BurnWallet     string `protobuf:"bytes,1,opt,name=burn_wallet,json=burnWallet,proto3" json:"burn_wallet,omitempty"`
-	MinStakeAmount uint64 `protobuf:"varint,2,opt,name=min_stake_amount,json=minStakeAmount,proto3" json:"min_stake_amount,omitempty"`
-	MlptsPerMlcns  uint64 `protobuf:"varint,3,opt,name=mlpts_per_mlcns,json=mlptsPerMlcns,proto3" json:"mlpts_per_mlcns,omitempty"`
+	BurnWallet       string `protobuf:"bytes,1,opt,name=burn_wallet,json=burnWallet,proto3" json:"burn_wallet,omitempty"`
+	MinStakeAmount   uint64 `protobuf:"varint,2,opt,name=min_stake_amount,json=minStakeAmount,proto3" json:"min_stake_amount,omitempty"`
+	MlptsPerMlcns    uint64 `protobuf:"varint,3,opt,name=mlpts_per_mlcns,json=mlptsPerMlcns,proto3" json:"mlpts_per_mlcns,omitempty"`
+	MinConversionRate uint64 `protobuf:"varint,4,opt,name=min_conversion_rate,json=minConversionRate,proto3" json:"min_conversion_rate,omitempty"`
+	MaxConversionRate uint64 `protobuf:"varint,5,opt,name=max_conversion_rate,json=maxConversionRate,proto3" json:"max_conversion_rate,omitempty"`
 }
 
 func (m *Params) Reset()         { *m = Params{} }
@@ -82,6 +84,20 @@ func (m *Params) GetMinStakeAmount() uint64 {
 func (m *Params) GetMlptsPerMlcns() uint64 {
 	if m != nil {
 		return m.MlptsPerMlcns
+	}
+	return 0
+}
+
+func (m *Params) GetMinConversionRate() uint64 {
+	if m != nil {
+		return m.MinConversionRate
+	}
+	return 0
+}
+
+func (m *Params) GetMaxConversionRate() uint64 {
+	if m != nil {
+		return m.MaxConversionRate
 	}
 	return 0
 }
@@ -139,6 +155,12 @@ func (this *Params) Equal(that interface{}) bool {
 	if this.MlptsPerMlcns != that1.MlptsPerMlcns {
 		return false
 	}
+	if this.MinConversionRate != that1.MinConversionRate {
+		return false
+	}
+	if this.MaxConversionRate != that1.MaxConversionRate {
+		return false
+	}
 	return true
 }
 func (m *Params) Marshal() (dAtA []byte, err error) {
@@ -161,6 +183,16 @@ func (m *Params) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.MaxConversionRate != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxConversionRate))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.MinConversionRate != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MinConversionRate))
+		i--
+		dAtA[i] = 0x20
+	}
 	if m.MlptsPerMlcns != 0 {
 		i = encodeVarintParams(dAtA, i, uint64(m.MlptsPerMlcns))
 		i--
@@ -207,6 +239,12 @@ func (m *Params) Size() (n int) {
 	}
 	if m.MlptsPerMlcns != 0 {
 		n += 1 + sovParams(uint64(m.MlptsPerMlcns))
+	}
+	if m.MinConversionRate != 0 {
+		n += 1 + sovParams(uint64(m.MinConversionRate))
+	}
+	if m.MaxConversionRate != 0 {
+		n += 1 + sovParams(uint64(m.MaxConversionRate))
 	}
 	return n
 }
@@ -312,6 +350,44 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.MlptsPerMlcns |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MinConversionRate", wireType)
+			}
+			m.MinConversionRate = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MinConversionRate |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxConversionRate", wireType)
+			}
+			m.MaxConversionRate = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxConversionRate |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}

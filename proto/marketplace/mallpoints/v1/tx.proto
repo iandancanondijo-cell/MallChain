@@ -67,6 +67,9 @@ message MsgConvertToMallcoin {
   option (cosmos.msg.v1.signer) = "creator";
   string creator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
   uint64 amount = 2;
+  // proposed_rate is the backend-calculated MLCNS-per-MLPTS conversion rate (fixed-point, 6 decimals).
+  // The chain validates this rate against min_conversion_rate and max_conversion_rate bounds.
+  uint64 proposed_rate = 3;
 }
 
 // MsgConvertToMallcoinResponse defines the MsgConvertToMallcoinResponse message.

@@ -4,6 +4,7 @@ const { getTransactionQueue } = require('../queue/transactionQueue')
 const crypto = require('crypto')
 const { bech32 } = require('bech32')
 const { asyncHandler } = require('../utils/errorHandler')
+const requireAuth = require('../middleware/requireAuth')
 
 function pubkeyToAddress(pubkeyBase64, prefix = process.env.CHAIN_PREFIX || process.env.COSMOS_PREFIX || 'mall') {
   // pubkeyBase64 expected to be base64-encoded raw secp256k1 compressed pubkey (33 bytes)
@@ -15,13 +16,29 @@ function pubkeyToAddress(pubkeyBase64, prefix = process.env.CHAIN_PREFIX || proc
 }
 
 
-router.post('/send', asyncHandler(async (req, res) => {
+router.post('/send', requireAuth(), asyncHandler(async (req, res) => {
     const {
       from,
       to,
       amount,
       denom
     } = req.body
+
+    // Validate required fields
+    if (!from || !to || !amount || !denom) {
+      return res.status(400).json({ error: 'Missing required fields: from, to, amount, denom' })
+    }
+
+    // Validate amount is positive
+    if (Number(amount) <= 0) {
+      return res.status(400).json({ error: 'Amount must be positive' })
+    }
+
+    // Validate denom
+    const validDenoms = ['mlcoin', 'umal']
+    if (!validDenoms.includes(denom)) {
+      return res.status(400).json({ error: `Invalid denom. Must be one of: ${validDenoms.join(', ')}` })
+    }
 
     // If frontend provided a signed tx, do basic signature verification: require signerPubKey or signerAddress
     if (req.body.signedTx) {

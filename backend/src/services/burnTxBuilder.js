@@ -8,7 +8,7 @@ const console = new Console(stdout, stderr);
 
 const CHAIN_RPC = process.env.CHAIN_RPC_URL || process.env.VITE_CHAIN_RPC || 'http://localhost:26657';
 const GAS_PRICE = process.env.GAS_PRICE || '0.025';
-const DENOM = process.env.DENOM || 'umlcn';
+const DENOM = process.env.DENOM || 'mlcoin';
 
 async function getAddressFromMnemonic(mnemonic) {
   try {

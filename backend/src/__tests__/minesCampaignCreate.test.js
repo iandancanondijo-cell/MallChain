@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 
 jest.mock('../models/user', () => ({
   find: jest.fn(),
+  findById: jest.fn(),
   findOneAndUpdate: jest.fn(),
 }));
 jest.mock('../models/TaskSubmission', () => ({
@@ -22,6 +23,19 @@ jest.mock('../models/Campaign', () => ({
 }));
 jest.mock('../models/WalletTransaction', () => ({ find: jest.fn(), create: jest.fn() }));
 jest.mock('../services/minesReviewService', () => ({ autoAssignReviewers: jest.fn() }));
+
+jest.mock('../middleware/authCache', () => ({
+  getCachedUser: jest.fn().mockResolvedValue(null),
+  setCachedUser: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('../middleware/tokenDenylist', () => ({
+  isRevoked: jest.fn().mockResolvedValue(false),
+}));
+
+jest.mock('../utils/activityTracker', () => ({
+  markActiveToday: jest.fn(),
+}));
 
 // mongoose.startSession()/withTransaction is real transaction machinery that
 // needs a live replica set — stub it to just run the callback directly, same
@@ -73,6 +87,9 @@ describe('POST /api/mines/campaigns/create', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    User.findById.mockReturnValue({
+      select: jest.fn().mockResolvedValue({ _id: 'user-1', email: 'test@example.com', role: 'user' }),
+    });
   });
 
   test('rejects an unknown platform', async () => {
@@ -152,6 +169,9 @@ describe('POST /api/mines/submissions — campaign anti-abuse limits', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    User.findById.mockReturnValue({
+      select: jest.fn().mockResolvedValue({ _id: 'user-1', email: 'test@example.com', role: 'user' }),
+    });
   });
 
   test('rejects once the user hits max_completions_per_user for the campaign', async () => {

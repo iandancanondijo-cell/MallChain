@@ -13,5 +13,13 @@ message Params {
 
   string burn_wallet = 1;
   uint64 min_stake_amount = 2;
+  // mlpts_per_mlcns is the legacy fixed conversion ratio (fixed-point, 6 decimals).
+  // Retained for backward compatibility but superseded by dynamic rate bounds.
   uint64 mlpts_per_mlcns = 3;
+  // min_conversion_rate is the minimum allowed MLCNS-per-MLPTS rate (fixed-point, 6 decimals).
+  // Backend-submitted conversion rates below this floor are rejected on-chain.
+  uint64 min_conversion_rate = 4;
+  // max_conversion_rate is the maximum allowed MLCNS-per-MLPTS rate (fixed-point, 6 decimals).
+  // Backend-submitted conversion rates above this ceiling are rejected on-chain.
+  uint64 max_conversion_rate = 5;
 }

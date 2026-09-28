@@ -113,7 +113,7 @@ const gasPriceSchema = Joi.number()
 const sendSchema = Joi.object({
   toAddress: addressSchema,
   amount: amountSchema,
-  denom: Joi.string().default('umlcn'),
+  denom: Joi.string().default('mlcoin'),
   memo: memoSchema,
   walletAddress: addressSchema,
   // For client-signed transactions
@@ -160,7 +160,7 @@ const stakingActionSchema = Joi.object({
   delegatorAddress: addressSchema,
   validatorAddress: addressSchema.optional(), // Required for delegate, undelegate, redelegate
   amount: amountSchema.optional(), // Required for delegate, undelegate, redelegate
-  denom: Joi.string().default('umlcn'),
+  denom: Joi.string().default('mlcoin'),
   memo: memoSchema,
   gasPrice: gasPriceSchema,
 }).required()

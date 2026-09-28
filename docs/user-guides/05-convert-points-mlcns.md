@@ -1,6 +1,6 @@
 # How to Convert MallPoints to MLCN Tokens
 
-Earn 1 MallPoint per 10 KES spent in Marketplace. Conversion rate: 100 MallPoints = 1 MLCN.
+Earn 1 MallPoint per 10 KES spent in Marketplace. Conversion rate: 1 MallPoint = 3.2 MLCNS.
 
 ## Prerequisites
 

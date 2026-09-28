@@ -7,7 +7,7 @@ const { stdout, stderr } = require('process')
 const console = new Console(stdout, stderr)
 
 const CHAIN_REST = process.env.CHAIN_REST_URL || process.env.VITE_CHAIN_REST || 'http://localhost:1317'
-const POOL_TOKEN0_DENOM = process.env.POOL_TOKEN0_DENOM || 'umlcn'
+const POOL_TOKEN0_DENOM = process.env.POOL_TOKEN0_DENOM || 'mlcoin'
 const POOL_TOKEN1_DENOM = process.env.POOL_TOKEN1_DENOM || 'umal'
 const POOL_TOKEN0_DECIMALS = Number(process.env.POOL_TOKEN0_DECIMALS || 6)
 const POOL_TOKEN1_DECIMALS = Number(process.env.POOL_TOKEN1_DECIMALS || 6)

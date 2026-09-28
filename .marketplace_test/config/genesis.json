@@ -304,7 +304,11 @@
     },
     "mlcoin": {
       "params": {
-        "burn_wallet": ""
+        "burn_wallet": "",
+        "mlpts_per_mlcns": "3200000",
+        "min_stake_amount": "18250",
+        "min_conversion_rate": "1000",
+        "max_conversion_rate": "100000000"
       },
       "wallet_balance_map": [
         {

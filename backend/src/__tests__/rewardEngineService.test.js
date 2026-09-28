@@ -8,8 +8,8 @@ const {
 
 describe('rewardEngineService', () => {
   test('resolveBaseRate reads a flat-rate activity', () => {
-    expect(resolveBaseRate('tiktok', 'like')).toBe(0.10);
-    expect(resolveBaseRate('x', 'repost')).toBe(17);
+    expect(resolveBaseRate('tiktok', 'like')).toBe(0.391);
+    expect(resolveBaseRate('x', 'repost')).toBe(3);
   });
 
   test('resolveBaseRate returns the midpoint for a ranged activity', () => {
@@ -36,7 +36,7 @@ describe('rewardEngineService', () => {
   test('computeCampaignRate clamps an out-of-range multiplier before applying it', () => {
     // Multiplier 100 clamps to 5x, not 100x — an unrestricted multiplier
     // would be exactly the emission-explosion risk called out for X impressions.
-    expect(computeCampaignRate({ platform: 'x', activity: 'impression', multiplier: 100 })).toBe(45); // 9 * 5
+    expect(computeCampaignRate({ platform: 'x', activity: 'impression', multiplier: 100 })).toBe(2.5); // 0.50 * 5
   });
 
   test('computeCampaignRate returns null for an unknown platform/activity pair', () => {

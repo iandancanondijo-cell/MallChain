@@ -147,6 +147,33 @@ func (k *Keeper) GetConversionRatio(ctx context.Context) (mlptsPerMlcns uint64, 
 	return p.MlptsPerMlcns, types.MLPTSPerMlcnsScale
 }
 
+// GetParams returns the module parameters.
+func (k *Keeper) GetParams(ctx context.Context) types.Params {
+	p, err := k.Params.Get(ctx)
+	if err != nil {
+		return types.DefaultParams()
+	}
+	return p
+}
+
+// GetConversionRateBounds returns the min and max allowed conversion rates
+// (fixed-point, 6 decimals) for dynamic rate validation.
+func (k *Keeper) GetConversionRateBounds(ctx context.Context) (minRate uint64, maxRate uint64) {
+	p, err := k.Params.Get(ctx)
+	if err != nil {
+		return types.DefaultMinConversionRate, types.DefaultMaxConversionRate
+	}
+	minRate = p.MinConversionRate
+	maxRate = p.MaxConversionRate
+	if minRate == 0 {
+		minRate = types.DefaultMinConversionRate
+	}
+	if maxRate == 0 {
+		maxRate = types.DefaultMaxConversionRate
+	}
+	return minRate, maxRate
+}
+
 // GetAuthority returns the module's authority.
 func (k Keeper) GetAuthority() []byte {
 	return k.authority

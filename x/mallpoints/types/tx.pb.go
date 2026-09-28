@@ -250,8 +250,9 @@ var xxx_messageInfo_MsgAwardPointsResponse proto.InternalMessageInfo
 
 // MsgConvertToMallcoin defines the MsgConvertToMallcoin message.
 type MsgConvertToMallcoin struct {
-	Creator string `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`
-	Amount  uint64 `protobuf:"varint,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	Creator      string `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`
+	Amount       uint64 `protobuf:"varint,2,opt,name=amount,proto3" json:"amount,omitempty"`
+	ProposedRate uint64 `protobuf:"varint,3,opt,name=proposed_rate,json=proposedRate,proto3" json:"proposed_rate,omitempty"`
 }
 
 func (m *MsgConvertToMallcoin) Reset()         { *m = MsgConvertToMallcoin{} }
@@ -297,6 +298,13 @@ func (m *MsgConvertToMallcoin) GetCreator() string {
 func (m *MsgConvertToMallcoin) GetAmount() uint64 {
 	if m != nil {
 		return m.Amount
+	}
+	return 0
+}
+
+func (m *MsgConvertToMallcoin) GetProposedRate() uint64 {
+	if m != nil {
+		return m.ProposedRate
 	}
 	return 0
 }
@@ -718,6 +726,11 @@ func (m *MsgConvertToMallcoin) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.ProposedRate != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.ProposedRate))
+		i--
+		dAtA[i] = 0x18
+	}
 	if m.Amount != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.Amount))
 		i--
@@ -843,6 +856,9 @@ func (m *MsgConvertToMallcoin) Size() (n int) {
 	}
 	if m.Amount != 0 {
 		n += 1 + sovTx(uint64(m.Amount))
+	}
+	if m.ProposedRate != 0 {
+		n += 1 + sovTx(uint64(m.ProposedRate))
 	}
 	return n
 }
@@ -1371,6 +1387,25 @@ func (m *MsgConvertToMallcoin) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.Amount |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ProposedRate", wireType)
+			}
+			m.ProposedRate = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.ProposedRate |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}

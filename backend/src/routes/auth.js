@@ -41,6 +41,29 @@ router.post('/register',
 );
 
 /**
+ * GET /api/auth/email-exists?email=user@example.com
+ * Checks if an email is already registered. Returns { exists: true/false }.
+ * Used by frontend registration form to show real-time validation.
+ */
+router.get('/email-exists',
+  limiters.auth,
+  preventNoSQLInjection,
+  sanitizeInputs,
+  async (req, res) => {
+    try {
+      const { email } = req.query;
+      if (!email) return res.status(400).json({ error: 'email required' });
+      const User = require('../models/user');
+      const normalizedEmail = email.toLowerCase().trim();
+      const existing = await User.findOne({ email: normalizedEmail });
+      res.json({ exists: !!existing });
+    } catch (e) {
+      res.status(500).json({ error: 'check failed' });
+    }
+  }
+);
+
+/**
  * Task 4.1: POST /api/auth/login
  * Authenticates user with email and password
  * Returns JWT token if credentials valid

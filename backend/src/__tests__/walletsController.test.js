@@ -35,13 +35,13 @@ describe('GET /api/wallets/wallets', () => {
         });
       }
       if (url.includes('/cosmos/bank/v1beta1/balances/mall1rich')) {
-        return Promise.resolve({ data: { balances: [{ denom: 'mlcns', amount: '5000000' }] } });
+        return Promise.resolve({ data: { balances: [{ denom: 'mlcoin', amount: '5000000' }] } });
       }
       if (url.includes('/cosmos/bank/v1beta1/balances/mall1poor')) {
         return Promise.resolve({ data: { balances: [{ denom: 'umlcn', amount: '100' }] } });
       }
       if (url.includes('/cosmos/bank/v1beta1/balances/mall1zero')) {
-        return Promise.resolve({ data: { balances: [{ denom: 'mlcns', amount: '0' }] } });
+        return Promise.resolve({ data: { balances: [{ denom: 'mlcoin', amount: '0' }] } });
       }
       return Promise.reject(new Error(`unexpected url ${url}`));
     });
@@ -66,10 +66,10 @@ describe('GET /api/wallets/wallets', () => {
         });
       }
       if (url.includes('/cosmos/bank/v1beta1/balances/mall1a')) {
-        return Promise.resolve({ data: { balances: [{ denom: 'mlcns', amount: '1000000' }] } });
+        return Promise.resolve({ data: { balances: [{ denom: 'mlcoin', amount: '1000000' }] } });
       }
       if (url.includes('/cosmos/bank/v1beta1/balances/mall1b')) {
-        return Promise.resolve({ data: { balances: [{ denom: 'mlcns', amount: '2000000' }] } });
+        return Promise.resolve({ data: { balances: [{ denom: 'mlcoin', amount: '2000000' }] } });
       }
       return Promise.reject(new Error(`unexpected url ${url}`));
     });

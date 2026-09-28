@@ -27,7 +27,7 @@ func (k msgServer) MintMallcoin(ctx context.Context, msg *types.MsgMintMallcoin)
 
 	// Mint tokens into the mint module account, then transfer to recipient
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	coins := sdk.NewCoins(sdk.NewInt64Coin("mlc", int64(msg.Amount)))
+	coins := sdk.NewCoins(sdk.NewInt64Coin("mlcoin", int64(msg.Amount)))
 	if err := k.Keeper.bankKeeper.MintCoins(sdkCtx, minttypes.ModuleName, coins); err != nil {
 		return nil, err
 	}

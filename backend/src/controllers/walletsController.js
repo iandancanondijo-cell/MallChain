@@ -26,7 +26,7 @@ async function getAllWalletsWithMallcoins(req, res) {
       const url = `${CHAIN_REST.replace(/\/$/, '')}/cosmos/bank/v1beta1/balances/${address}`
       const resp = await axios.get(url)
       const coins = resp.data.balances || []
-      const mlc = coins.find(c => c.denom === 'mlcns')
+      const mlc = coins.find(c => c.denom === 'mlcoin')
       if (mlc && Number(mlc.amount) > 0) {
         balances.push({ address, amount: Number(mlc.amount) / 1_000_000 })
       }

@@ -95,7 +95,7 @@ exports.getPoolLiquidity = asyncHandler(async (req, res) => {
   }
 });
 
-// GET /api/dex/pools/:poolId/estimate?denom=umlcn&amount=1000000&tokenOutDenom=umal
+// GET /api/dex/pools/:poolId/estimate?denom=mlcoin&amount=1000000&tokenOutDenom=umal
 exports.estimateSwap = asyncHandler(async (req, res) => {
   const { poolId } = req.params;
   const { denom, amount, tokenOutDenom } = req.query;

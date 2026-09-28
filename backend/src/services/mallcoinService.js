@@ -68,11 +68,15 @@ async function getChainParams() {
     const p = data.params || data.Params || {};
     const minStake = Number(p.min_stake_amount ?? p.minStakeAmount ?? 0);
     const mlptsFixed = Number(p.mlpts_per_mlcns ?? p.mlptsPerMlcns ?? 0);
+    const minConvRate = Number(p.min_conversion_rate ?? p.minConversionRate ?? 0);
+    const maxConvRate = Number(p.max_conversion_rate ?? p.maxConversionRate ?? 0);
     const result = {
       source: 'chain',
       burn_wallet: p.burn_wallet || p.burnWallet || '',
       min_stake_amount: minStake > 0 ? minStake : DEFAULT_MIN_STAKE_AMOUNT,
       mlpts_per_mlcns: mlptsFixed > 0 ? mlptsFixed : DEFAULT_MLPTS_PER_MLCNS_FIXED,
+      min_conversion_rate: minConvRate,
+      max_conversion_rate: maxConvRate,
     };
     if (cache) {
       await cache.set(cacheKey, result, CacheService.TTL.MEDIUM);
@@ -84,6 +88,8 @@ async function getChainParams() {
       burn_wallet: '',
       min_stake_amount: DEFAULT_MIN_STAKE_AMOUNT,
       mlpts_per_mlcns: DEFAULT_MLPTS_PER_MLCNS_FIXED,
+      min_conversion_rate: 1_000,
+      max_conversion_rate: 100_000_000,
     };
     if (cache) {
       await cache.set(cacheKey, fallback, CacheService.TTL.SHORT);

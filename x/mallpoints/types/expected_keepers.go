@@ -38,4 +38,7 @@ type MlcoinKeeper interface {
 	//   mlcnsAmount = (pointsAmount * mlptsPerMlcnsFixedPoint) / scale
 	// Defaults are (3_200_000, 1_000_000) = 3.2 MLCNS per 1 MLPTS.
 	GetConversionRatio(ctx context.Context) (mlptsPerMlcns uint64, scale uint64)
+	// GetConversionRateBounds returns the min and max allowed conversion rates
+	// (fixed-point, 6 decimals) for dynamic rate validation.
+	GetConversionRateBounds(ctx context.Context) (minRate uint64, maxRate uint64)
 }
