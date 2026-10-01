@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
-import { eduApi, type EduResource, type EduCategory, type EduVerifyResponse } from '../../services/eduApi';
+import { eduApi, type EduResource, type EduCategory, type EduVerifyResponse, type RewardRates } from '../../services/eduApi';
 
 const CHAIN_LABEL: Record<EduResource['chain']['status'], string> = {
   registered: '⛓ Anchored on-chain',
@@ -53,6 +53,9 @@ export default function Edu() {
   const [historyOpen, setHistoryOpen] = useState<Record<string, boolean>>({});
   const [historyData, setHistoryData] = useState<Record<string, EduResource[]>>({});
 
+  const [rewardRates, setRewardRates] = useState<RewardRates | null>(null);
+  const trackedViews = useRef(new Set<string>());
+
   const load = () => {
     setLoading(true);
     setError(null);
@@ -67,6 +70,18 @@ export default function Edu() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryFilter]);
+
+  useEffect(() => {
+    eduApi.getRewardRates().then((res) => {
+      if (res.ok && res.data) setRewardRates(res.data.rates);
+    });
+  }, []);
+
+  const trackView = (resourceId: string) => {
+    if (!st.user.authed || trackedViews.current.has(resourceId)) return;
+    trackedViews.current.add(resourceId);
+    eduApi.trackView(resourceId).catch(() => {});
+  };
 
   const resetUploadForm = () => {
     setShowUpload(false);
@@ -160,17 +175,29 @@ export default function Edu() {
         </select>
 
         {st.user.authed ? (
-          <button
-            className="btn btn-primary"
-            style={{ marginLeft: 'auto' }}
-            onClick={() => (showUpload ? resetUploadForm() : setShowUpload(true))}
-          >
-            {showUpload ? 'Cancel' : '+ Post a resource'}
-          </button>
+          st.wallet.address ? (
+            <button
+              className="btn btn-primary"
+              style={{ marginLeft: 'auto' }}
+              onClick={() => (showUpload ? resetUploadForm() : setShowUpload(true))}
+            >
+              {showUpload ? 'Cancel' : '+ Post a resource'}
+            </button>
+          ) : (
+            <span className="tiny muted" style={{ marginLeft: 'auto', alignSelf: 'center' }}>Connect a wallet to post resources</span>
+          )
         ) : (
           <span className="tiny muted" style={{ marginLeft: 'auto', alignSelf: 'center' }}>Sign in to post a resource</span>
         )}
       </div>
+
+      {rewardRates && (
+        <div className="card mb" style={{ padding: '10px 16px', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="tiny" style={{ color: 'var(--cyan)' }}>Earn rewards for sharing knowledge:</span>
+          <span className="tiny muted">{rewardRates.viewRewardKes} KES ({rewardRates.viewRewardMlpts} MLPTS) per view</span>
+          <span className="tiny muted">{rewardRates.downloadRewardKes} KES ({rewardRates.downloadRewardMlpts} MLPTS) per download</span>
+        </div>
+      )}
 
       {showUpload && (
         <div className="card mb">
@@ -244,6 +271,9 @@ export default function Edu() {
           {resources.map((r) => {
             const isAuthor = st.user.authed && r.authorId === st.user.id;
             const vr = verifyResults[r.id];
+
+            if (st.user.authed && !isAuthor) trackView(r.id);
+
             return (
               <div key={r.id} className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
@@ -257,7 +287,7 @@ export default function Edu() {
                     </div>
                     {r.description && <div className="tiny muted" style={{ marginBottom: 6 }}>{r.description}</div>}
                     <div className="tiny muted">
-                      by {r.authorName} · {fmtBytes(r.fileSizeBytes)} · {r.downloadCount} download{r.downloadCount === 1 ? '' : 's'} · {new Date(r.createdAt).toLocaleDateString()}
+                      by {r.authorName} · {fmtBytes(r.fileSizeBytes)} · {r.viewCount} view{r.viewCount === 1 ? '' : 's'} · {r.downloadCount} download{r.downloadCount === 1 ? '' : 's'} · {new Date(r.createdAt).toLocaleDateString()}
                       {r.chain.version > 1 && ` · v${r.chain.version}`}
                     </div>
 
@@ -309,13 +339,16 @@ export default function Edu() {
                     )}
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                    <a
+                    <button
                       className="btn btn-ghost"
-                      href={eduApi.downloadUrl(r.id)}
-                      download={r.fileName}
+                      onClick={async () => {
+                        if (!st.user.authed) { toast('Sign in to download', false); return; }
+                        try { await eduApi.download(r.id, r.fileName); }
+                        catch { toast('Download failed', false); }
+                      }}
                     >
                       ⬇ Download
-                    </a>
+                    </button>
                     {isAuthor && (
                       <button className="btn btn-ghost" onClick={() => startNewVersion(r)}>New version</button>
                     )}

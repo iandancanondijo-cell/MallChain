@@ -13,6 +13,7 @@ const User = require('../models/user');
 const { AppError, ErrorCodes, asyncHandler } = require('../utils/errorHandler');
 const logger = require('../utils/logger');
 const { registerDocumentFromMnemonic, getVersionHistory } = require('../services/eduTxBuilder');
+const { rewardForInteraction, getRewardRates } = require('../services/eduRewardService');
 
 const CATEGORIES = ['blockchain-basics', 'tokenomics', 'security', 'governance', 'validators', 'general'];
 
@@ -94,6 +95,7 @@ function toPublicResource(doc) {
     fileSizeBytes: doc.fileSizeBytes,
     mimeType: doc.mimeType,
     downloadCount: doc.downloadCount,
+    viewCount: doc.viewCount,
     docId: doc.docId,
     previousResourceId: doc.previousResourceId ? String(doc.previousResourceId) : null,
     chain: {
@@ -122,6 +124,13 @@ router.post('/', auth, limiters.standard, uploadEduResource.single('file'), asyn
     throw new AppError(ErrorCodes.MISSING_REQUIRED_FIELD, 'No file uploaded', 400);
   }
 
+  const userId = req.user?.id || req.user?._id;
+  const uploadingUser = await User.findById(userId);
+  if (!uploadingUser?.walletAddress) {
+    fs.unlink(req.file.path, () => {});
+    throw new AppError(ErrorCodes.INSUFFICIENT_PERMISSIONS, 'You must connect a wallet before uploading educational content', 403);
+  }
+
   const { error, value } = postResourceSchema.validate(req.body || {});
   if (error) {
     // The file was already written to disk by multer before validation ran
@@ -131,7 +140,6 @@ router.post('/', auth, limiters.standard, uploadEduResource.single('file'), asyn
     throw new AppError(ErrorCodes.INVALID_REQUEST_FORMAT, error.details[0].message, 400);
   }
 
-  const userId = req.user?.id || req.user?._id;
   const authorName = req.user?.name || req.user?.email?.split('@')[0] || req.user?.username || 'Anonymous';
 
   let previousResource = null;
@@ -204,6 +212,12 @@ router.get('/', limiters.lenient, asyncHandler(async (req, res) => {
   });
 }));
 
+// GET /api/edu/rewards/rates — public, returns the MLPTS/KES reward rates so
+// the frontend can display "earn 3.5 MLPTS per view" etc. without hardcoding.
+router.get('/rewards/rates', limiters.lenient, asyncHandler(async (_req, res) => {
+  res.json({ ok: true, rates: getRewardRates() });
+}));
+
 // GET /api/edu/:id — one resource's metadata.
 router.get('/:id', limiters.lenient, asyncHandler(async (req, res) => {
   const resource = await EduResource.findOne({ _id: req.params.id, status: 'published' });
@@ -211,10 +225,23 @@ router.get('/:id', limiters.lenient, asyncHandler(async (req, res) => {
   res.json({ ok: true, resource: toPublicResource(resource) });
 }));
 
-// GET /api/edu/:id/download — stream the real file back, counted.
-router.get('/:id/download', limiters.lenient, asyncHandler(async (req, res) => {
+// GET /api/edu/:id/download — stream the real file back, counted. Auth
+// required so the author can be rewarded (13 KES per unique downloader). If
+// the reward fails (author has no wallet, self-download, already rewarded
+// this user) the file is still served — the download itself is never blocked
+// by a reward failure.
+router.get('/:id/download', auth, limiters.lenient, asyncHandler(async (req, res) => {
   const resource = await EduResource.findOne({ _id: req.params.id, status: 'published' });
   if (!resource) throw new AppError(ErrorCodes.NOT_FOUND, 'Resource not found', 404);
+
+  const viewerId = req.user?.id || req.user?._id;
+
+  // Best-effort reward: fire-and-forget so a slow or failing reward tx never
+  // blocks the actual file download. Errors are logged by the service.
+  if (viewerId) {
+    rewardForInteraction({ resourceId: String(resource._id), viewerId: String(viewerId), type: 'download' })
+      .catch((err) => logger.warn('edu', 'download reward failed', { resourceId: String(resource._id), viewerId, error: err.message }));
+  }
 
   // path.basename strips any directory component — storedFilename is
   // generated server-side (see middleware/upload.js) so this isn't
@@ -223,13 +250,34 @@ router.get('/:id/download', limiters.lenient, asyncHandler(async (req, res) => {
   // and keeps this route safe if that ever changes.
   const filePath = path.join(EDU_UPLOAD_DIR, path.basename(resource.storedFilename));
 
-  EduResource.updateOne({ _id: resource._id }, { $inc: { downloadCount: 1 } }).catch((err) =>
-    logger.warn('edu', 'failed to increment downloadCount', { resourceId: String(resource._id), error: err.message })
-  );
-
   res.download(filePath, resource.fileName, (err) => {
     if (err && !res.headersSent) res.status(404).json({ ok: false, error: 'File not found' });
   });
+}));
+
+// POST /api/edu/:id/view — record that the authenticated user viewed this
+// resource and reward the author (7 KES per unique viewer). Returns whether
+// a reward was actually granted (no reward for self-views, duplicate views,
+// or authors without a connected wallet).
+router.post('/:id/view', auth, limiters.lenient, asyncHandler(async (req, res) => {
+  const resourceId = req.params.id;
+  const viewerId = String(req.user?.id || req.user?._id);
+
+  try {
+    const result = await rewardForInteraction({ resourceId, viewerId, type: 'view' });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    if (err.code === 'RESOURCE_NOT_FOUND') {
+      throw new AppError(ErrorCodes.NOT_FOUND, 'Resource not found', 404);
+    }
+    if (err.code === 'SELF_REWARD_BLOCKED') {
+      return res.json({ ok: true, rewarded: false, reason: 'self_reward_blocked' });
+    }
+    if (err.code === 'WALLET_REQUIRED') {
+      return res.json({ ok: true, rewarded: false, reason: 'author_wallet_required' });
+    }
+    throw err;
+  }
 }));
 
 // GET /api/edu/:id/verify — recompute the file's CURRENT hash and compare

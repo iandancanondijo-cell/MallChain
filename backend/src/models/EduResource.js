@@ -25,6 +25,7 @@ const EduResourceSchema = new mongoose.Schema({
   fileSizeBytes: { type: Number, default: 0 },
   mimeType: { type: String, default: '' },
   downloadCount: { type: Number, default: 0 },
+  viewCount: { type: Number, default: 0 },
   // Soft-delete: keeps downloadCount/audit history rather than losing it,
   // and lets an author's or admin's removal be undone if it was a mistake.
   status: { type: String, enum: ['published', 'removed'], default: 'published', index: true },

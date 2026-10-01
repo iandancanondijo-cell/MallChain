@@ -35,6 +35,7 @@ export interface EduResource {
   fileSizeBytes: number;
   mimeType: string;
   downloadCount: number;
+  viewCount: number;
   docId: string;
   previousResourceId: string | null;
   chain: EduChainInfo;
@@ -55,6 +56,21 @@ export interface EduVerifyResponse {
   currentHash: string;
   uploadedHash: string;
   chain: { status: EduChainInfo['status']; recordId?: string; version?: number; onChainHash?: string; error?: string };
+}
+
+export interface RewardRates {
+  viewRewardKes: number;
+  viewRewardMlpts: number;
+  downloadRewardKes: number;
+  downloadRewardMlpts: number;
+  mallpointPriceKes: number;
+}
+
+export interface ViewTrackResponse {
+  rewarded: boolean;
+  reason?: string;
+  rewardMlpts?: number;
+  rewardKes?: number;
 }
 
 function apiBase(): string {
@@ -120,5 +136,30 @@ export const eduApi = {
   /** Direct download URL — no auth needed, safe to navigate to or set as an <a href>. */
   downloadUrl(id: string): string {
     return `${apiBase()}/api/edu/${id}/download`;
+  },
+
+  /** Authenticated download — fetches the file as a blob and triggers a browser download. */
+  async download(id: string, fileName: string): Promise<void> {
+    const res = await fetch(`${apiBase()}/api/edu/${id}/download`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Download failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  /** Record a view on a resource and reward the author (7 KES / 3.5 MLPTS). */
+  async trackView(id: string): Promise<ApiResult<ViewTrackResponse>> {
+    return api.post<ViewTrackResponse>(`/api/edu/${id}/view`, {});
+  },
+
+  /** Fetch the current reward rates for display. */
+  async getRewardRates(): Promise<ApiResult<{ rates: RewardRates }>> {
+    return api.get<{ rates: RewardRates }>('/api/edu/rewards/rates');
   },
 };
