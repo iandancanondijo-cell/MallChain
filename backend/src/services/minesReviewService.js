@@ -4,6 +4,7 @@ const User = require('../models/user');
 const WalletTransaction = require('../models/WalletTransaction');
 const Campaign = require('../models/Campaign');
 const { notify } = require('./notify');
+const { syncMallPointAccount, requireWalletAddress } = require('./mallpointsService');
 
 /**
  * Mines "Proof Reviewer" content-review game: random 6-reviewer assignment,
@@ -147,7 +148,17 @@ async function settle(task, { approved, reason }) {
           ],
           { session }
         );
-        await User.findByIdAndUpdate(task.miner_id, { $inc: { mlpts_balance: finalReward } }).session(session);
+        // GATE 61: Atomic balance credit + MallPointAccount sync
+        const miner = await User.findById(task.miner_id).session(session);
+        if (miner) {
+          // GATE 61.1: Wallet-first enforcement — reject reward if no wallet linked
+          requireWalletAddress(miner, { userId: task.miner_id, flow: 'mines_reviewer_miner_reward' });
+          await User.findByIdAndUpdate(task.miner_id, { $inc: { mlpts_balance: finalReward } }).session(session);
+          await syncMallPointAccount(miner.walletAddress, finalReward, session, {
+            userId: task.miner_id,
+            flow: 'mines_reviewer_miner_reward',
+          });
+        }
       }
 
       if (task.campaign_id && approved) {
@@ -195,7 +206,15 @@ async function settle(task, { approved, reason }) {
             { session, new: true }
           );
           if (reviewer) {
+            // GATE 61: Atomic balance credit + MallPointAccount sync for reviewer
+            const reviewerUser = await User.findById(reviewerId).session(session);
+            // GATE 61.1: Wallet-first enforcement — reject reward if no wallet linked
+            requireWalletAddress(reviewerUser, { userId: reviewerId, flow: 'mines_reviewer_vote_reward' });
             await User.findByIdAndUpdate(reviewerId, { $inc: { mlpts_balance: VOTE_REWARD } }).session(session);
+            await syncMallPointAccount(reviewerUser?.walletAddress, VOTE_REWARD, session, {
+              userId: reviewerId,
+              flow: 'mines_reviewer_vote_reward',
+            });
             pendingNotifications.push({
               userId: reviewerId,
               kind: 'mines',

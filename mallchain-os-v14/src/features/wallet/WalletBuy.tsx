@@ -30,7 +30,7 @@ export default function WalletBuy() {
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<Step>('form');
   const [quote, setQuote] = useState<BuyQuote | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval>>();
+  const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const buyRateKes = config?.rates?.buyPriceKes || FALLBACK_KES_PER_MLCNS;
   const directBuyLocked = config?.directBuy?.locked ?? false;

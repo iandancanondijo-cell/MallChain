@@ -58,6 +58,27 @@
           "pub_key": null,
           "account_number": "5",
           "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall198h9saq46c4243r0zg88ma62a55xvsttnf7z3y",
+          "pub_key": null,
+          "account_number": "6",
+          "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall1ezs4gg35npymrcsje96tm8ctqsjzrca9ap0hfc",
+          "pub_key": null,
+          "account_number": "7",
+          "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "mall17q95wy3grw0uajhsq62gdrwycurktz4gg36ldc",
+          "pub_key": null,
+          "account_number": "8",
+          "sequence": "0"
         }
       ]
     },
@@ -98,6 +119,33 @@
             {
               "denom": "stake",
               "amount": "2000000000"
+            }
+          ]
+        },
+        {
+          "address": "mall198h9saq46c4243r0zg88ma62a55xvsttnf7z3y",
+          "coins": [
+            {
+              "denom": "stake",
+              "amount": "1000000000"
+            }
+          ]
+        },
+        {
+          "address": "mall1ezs4gg35npymrcsje96tm8ctqsjzrca9ap0hfc",
+          "coins": [
+            {
+              "denom": "stake",
+              "amount": "100000000"
+            }
+          ]
+        },
+        {
+          "address": "mall17q95wy3grw0uajhsq62gdrwycurktz4gg36ldc",
+          "coins": [
+            {
+              "denom": "stake",
+              "amount": "500000000"
             }
           ]
         }
@@ -323,8 +371,8 @@
         "burn_wallet": "",
         "mlpts_per_mlcns": "3200000",
         "min_stake_amount": "18250",
-        "min_conversion_rate": "1000",
-        "max_conversion_rate": "100000000"
+        "min_conversion_rate": 1000,
+        "max_conversion_rate": 100000000
       },
       "wallet_balance_map": [
         {
@@ -356,6 +404,27 @@
           "address": "mall1msa4wcpvw20x4x60faywnfqws0v95plq6nsyp0",
           "balance": "100000000000",
           "locked": "0"
+        },
+        {
+          "index": "mall198h9saq46c4243r0zg88ma62a55xvsttnf7z3y",
+          "address": "mall198h9saq46c4243r0zg88ma62a55xvsttnf7z3y",
+          "balance": "10000000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "mall1ezs4gg35npymrcsje96tm8ctqsjzrca9ap0hfc",
+          "address": "mall1ezs4gg35npymrcsje96tm8ctqsjzrca9ap0hfc",
+          "balance": "10000000000",
+          "locked": "0",
+          "unlock_time": "0"
+        },
+        {
+          "index": "mall17q95wy3grw0uajhsq62gdrwycurktz4gg36ldc",
+          "address": "mall17q95wy3grw0uajhsq62gdrwycurktz4gg36ldc",
+          "balance": "50000000000",
+          "locked": "0",
+          "unlock_time": "0"
         }
       ],
       "emission_state": {

@@ -49,7 +49,7 @@ export function useWalletData(address: string | null | undefined) {
   const [state, setState] = useState<UseWalletDataState>(DEFAULT_STATE);
   const retryCountRef = useRef(0);
   const maxRetriesRef = useRef(3);
-  const retryTimeoutRef = useRef<NodeJS.Timeout>();
+  const retryTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
   // Guards against out-of-order responses: a retry-delayed fetch, a manual
   // retry, and an address-change refetch can all be in flight at once, and
   // an older one resolving last would otherwise overwrite a newer balance

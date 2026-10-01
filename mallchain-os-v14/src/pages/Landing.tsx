@@ -534,6 +534,7 @@ export default function Landing({ navigate }: LandingProps) {
       <footer className="landing-footer">
         <div className="footer-top">
           <div className="footer-brand">
+            <img className="footer-emblem" src="/mallchain.svg" alt="Mallchain emblem" width={112} height={112} loading="lazy" />
             <div className="nav-logo">
               <span className="nav-logo-mark"><img src="/favicon.svg" alt="" width={32} height={32} /></span>
               <span className="nav-logo-text">Mallchain</span>

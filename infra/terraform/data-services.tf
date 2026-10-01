@@ -118,15 +118,13 @@ module "nginx_ingress" {
   vpc_id              = module.vpc.vpc_id
   public_subnet_ids   = module.vpc.public_subnets
   private_subnet_ids  = module.vpc.private_subnets
-  domain_name         = "${var.environment == "production" ? "" : "${var.environment}."}mallchain.io"
+  domain_name         = "${var.environment == "production" ? "" : "${var.environment}."}mallchain.network"
   subject_alternative_names = [
-    "${var.environment == "production" ? "www" : "www.${var.environment}"}.mallchain.io",
-    "${var.environment == "production" ? "api" : "api.${var.environment}"}.mallchain.io",
-    "${var.environment == "production" ? "sentry" : "sentry.${var.environment}"}.mallchain.io",
+    "${var.environment == "production" ? "www" : "www.${var.environment}"}.mallchain.network",
+    "${var.environment == "production" ? "api" : "api.${var.environment}"}.mallchain.network",
   ]
   backend_target_port  = 8080
   frontend_target_port = 3000
-  sentry_target_port   = 9000
   rate_limit_per_ip    = 2000
   rate_limit_window_minutes = 5
   http_5xx_alarm_threshold_pct = 5

@@ -35,6 +35,12 @@ service Msg {
 
   // Unstake claims a completed stake (principal + rewards) back to the caller's wallet.
   rpc Unstake(MsgUnstake) returns (MsgUnstakeResponse);
+
+  // Approve grants spender permission to transfer up to amount from owner's balance (MGP-20).
+  rpc Approve(MsgApprove) returns (MsgApproveResponse);
+
+  // TransferFrom moves amount from owner to recipient using spender's allowance (MGP-20).
+  rpc TransferFrom(MsgTransferFrom) returns (MsgTransferFromResponse);
 }
 
 // Admin: set currency rate (rate is scaled by 100, e.g., 13745 = 137.45 KES)
@@ -145,4 +151,29 @@ message MsgUnstake {
 
 message MsgUnstakeResponse {
   uint64 rewards_earned = 1;
+}
+
+// MsgApprove grants spender permission to transfer up to amount from owner's
+// balance. Implements the MGP-20 approve pattern (ERC-20 equivalent).
+message MsgApprove {
+  option (cosmos.msg.v1.signer) = "owner";
+  string owner = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string spender = 2 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  uint64 amount = 3;
+}
+
+message MsgApproveResponse {}
+
+// MsgTransferFrom moves amount from owner to recipient using spender's
+// pre-approved allowance. Implements the MGP-20 transferFrom pattern.
+message MsgTransferFrom {
+  option (cosmos.msg.v1.signer) = "spender";
+  string spender = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string owner = 2 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string recipient = 3 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  uint64 amount = 4;
+}
+
+message MsgTransferFromResponse {
+  string tx_id = 1;
 }

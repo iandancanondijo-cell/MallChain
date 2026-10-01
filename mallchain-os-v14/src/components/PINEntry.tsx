@@ -39,7 +39,7 @@ export function PINEntry({
   autoTimeoutMs = 30000,
 }: PINEntryProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const timeoutRef = useRef<NodeJS.Timeout>();
+  const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   // Task 10.4: Timeout auto-clear (30 sec default)
   useEffect(() => {

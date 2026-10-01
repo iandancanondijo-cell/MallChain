@@ -1,5 +1,18 @@
 const axios = require('axios');
 const { config } = require('../config');
+const logger = require('../utils/logger');
+
+// GATE 61: Lazy-require MallPointAccount to avoid circular dependency at
+// module load time. The model is registered by the time any route calls
+// syncMallPointAccount(), but may not be registered when this file is first
+// required during startup.
+let _MallPointAccount = null;
+function getMallPointAccount() {
+  if (!_MallPointAccount) {
+    _MallPointAccount = require('../models/MallPointAccount');
+  }
+  return _MallPointAccount;
+}
 
 const CHAIN_REST = config.chain.rest.replace(/\/$/, '');
 
@@ -120,9 +133,73 @@ function buildConversionStatus({ hasBadge, lastConversionAt, now = new Date(), a
   };
 }
 
+/**
+ * GATE 61: Synchronize a MLPTS balance change to MallPointAccount so the
+ * conversion path can see it. Call this within the same MongoDB session
+ * transaction that mutates User.mlpts_balance.
+ *
+ * @param {string|null} walletAddress - The user's linked on-chain address
+ * @param {number} amount - Positive for credit, negative for debit
+ * @param {import('mongoose').ClientSession} session - Active MongoDB session
+ * @param {object} [opts] - Optional context for logging
+ * @param {string} [opts.userId] - User ID for log context
+ * @param {string} [opts.flow] - Flow name for log context (e.g. 'mining_reward')
+ * @returns {Promise<boolean>} true if synced, false if skipped (no walletAddress)
+ */
+async function syncMallPointAccount(walletAddress, amount, session, opts = {}) {
+  if (!walletAddress) {
+    logger.warn('gate61-sync', 'user has no walletAddress; MallPointAccount not synchronized', {
+      userId: opts.userId || null,
+      flow: opts.flow || null,
+      amount,
+      note: 'User must link wallet for conversion to work',
+    });
+    return false;
+  }
+
+  if (!Number.isFinite(amount) || amount === 0) {
+    return true; // nothing to sync
+  }
+
+  const MallPointAccount = getMallPointAccount();
+  await MallPointAccount.findOneAndUpdate(
+    { address: walletAddress },
+    { $inc: { balance: amount } },
+    { upsert: true, session, new: true }
+  );
+
+  logger.info('gate61-sync', 'MallPointAccount synchronized', {
+    userId: opts.userId || null,
+    flow: opts.flow || null,
+    address: walletAddress,
+    amount,
+  });
+
+  return true;
+}
+
+/**
+ * GATE 61.1: Enforce wallet-first business rule — throws if the user has no
+ * linked walletAddress. Must be called BEFORE any MLPTS credit within the
+ * same transaction, so a walletless user can never receive MLPTS that would
+ * diverge from MallPointAccount.
+ */
+function requireWalletAddress(user, context = {}) {
+  if (!user || !user.walletAddress) {
+    const err = new Error('wallet required: user must link a Mallchain wallet before earning MLPTS');
+    err.code = 'WALLET_REQUIRED';
+    err.userId = context.userId || user?._id || null;
+    err.flow = context.flow || null;
+    throw err;
+  }
+  return user.walletAddress;
+}
+
 module.exports = {
   getChainUserPoints,
   getConversionWindow,
   mergePoints,
   buildConversionStatus,
+  syncMallPointAccount,
+  requireWalletAddress,
 };

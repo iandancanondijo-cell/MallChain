@@ -56,7 +56,8 @@ func TestApproveAndTransferFrom(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(500), allowance)
 
-	require.NoError(t, k.TransferFrom(ctx, owner, spender, recipient, 200))
+	_, err = k.TransferFrom(ctx, owner, spender, recipient, 200)
+	require.NoError(t, err)
 
 	ownerWallet, err := k.WalletBalance.Get(ctx, owner)
 	require.NoError(t, err)
@@ -97,7 +98,7 @@ func TestTransferFromFailsWhenAllowanceTooLow(t *testing.T) {
 	require.NoError(t, k.WalletBalance.Set(ctx, owner, types.WalletBalance{Address: owner, Balance: 1_000}))
 	require.NoError(t, k.Approve(ctx, owner, spender, 100))
 
-	err = k.TransferFrom(ctx, owner, spender, recipient, 200)
+	_, err = k.TransferFrom(ctx, owner, spender, recipient, 200)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, types.ErrInsufficientAllowance))
 }

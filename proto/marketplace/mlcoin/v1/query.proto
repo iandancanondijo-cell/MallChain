@@ -71,6 +71,11 @@ service Query {
   rpc GetStakingRecords(QueryGetStakingRecordsRequest) returns (QueryGetStakingRecordsResponse) {
     option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/staking/{address}";
   }
+
+  // Queries the MGP-20 allowance granted by owner to spender.
+  rpc GetAllowance(QueryGetAllowanceRequest) returns (QueryGetAllowanceResponse) {
+    option (google.api.http).get = "/tmp/marketplace/mlcoin/v1/mgp20/allowance/{owner}/{spender}";
+  }
 }
 
 // QueryGetCurrencyRatesRequest returns all currency rates
@@ -199,4 +204,15 @@ message StakingRecordEntry {
 // QueryGetStakingRecordsResponse defines the response with an address's staking records.
 message QueryGetStakingRecordsResponse {
   repeated StakingRecordEntry staking_records = 1 [(gogoproto.nullable) = false];
+}
+
+// QueryGetAllowanceRequest defines the request to get an MGP-20 allowance.
+message QueryGetAllowanceRequest {
+  string owner = 1;
+  string spender = 2;
+}
+
+// QueryGetAllowanceResponse defines the response with the current allowance.
+message QueryGetAllowanceResponse {
+  uint64 allowance = 1;
 }

@@ -94,6 +94,9 @@ marketplaced
 # Backup files
 backup-handwritten/
 
+# Local backups — PII (user data dumps) + admin credentials, NEVER commit
+backups/
+
 # Documentation
 *.md
 !README.md

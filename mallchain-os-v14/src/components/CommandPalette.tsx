@@ -77,8 +77,7 @@ export default function CommandPalette({ navigate, isAdminRoute }: { navigate: (
       ...(store.state.user.role === 'admin' || store.state.user.role === 'superadmin'
         ? [{ label: 'Admin', icon: '🛠', run: go('/admin') }]
         : []),
-      { label: 'Settings', icon: '⚙', run: go('/settings') },
-      { label: 'Profile', icon: '👤', run: go('/profile') },
+      { label: 'Profile & Settings', icon: '⚙', run: go('/settings') },
       { label: 'New transaction', icon: '💸', run: go('/wallet/send') },
       { label: 'Create campaign', icon: '➕', run: go('/mines/my-campaigns') },
       { label: 'Deploy contract', icon: '🚀', run: go('/contracts') },

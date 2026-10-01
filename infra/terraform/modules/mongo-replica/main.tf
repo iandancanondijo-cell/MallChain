@@ -49,12 +49,11 @@ resource "aws_docdb_cluster_parameter_group" "mongo" {
 }
 
 resource "random_password" "docdb_master" {
-  length  = 32
-  special = true
-  upper   = true
-  lower   = true
-  number  = true
-
+  length       = 32
+  special      = true
+  upper        = true
+  lower        = true
+  numeric      = true
   override_special = "_-@%+^#~"
 
   keepers = {
@@ -64,23 +63,21 @@ resource "random_password" "docdb_master" {
 }
 
 resource "aws_docdb_cluster" "mongo" {
-  cluster_identifier                   = "${var.cluster_name}-${var.environment}-docdb"
-  engine                               = "docdb"
-  engine_version                       = var.engine_version
-  master_username                      = var.master_username
-  master_password                      = random_password.docdb_master.result
-  backup_retention_period              = var.backup_retention_period_days
-  preferred_backup_window              = var.preferred_backup_window
-  preferred_maintenance_window         = var.preferred_maintenance_window
-  db_subnet_group_name                 = aws_docdb_subnet_group.mongo.name
-  vpc_security_group_ids               = [aws_security_group.mongo.id]
-  db_cluster_parameter_group_name      = aws_docdb_cluster_parameter_group.mongo.name
-  storage_encrypted                    = true
-  kms_key_id                           = var.kms_key_arn
-  deletion_protection                  = var.deletion_protection
-  skip_final_snapshot                  = var.skip_final_snapshot
-  final_snapshot_identifier_prefix     = var.environment == "production" ? "${var.cluster_name}-${var.environment}-docdb-final" : null
-  apply_immediately                    = false
+  cluster_identifier              = "${var.cluster_name}-${var.environment}-docdb"
+  engine                          = "docdb"
+  engine_version                  = var.engine_version
+  master_username                 = var.master_username
+  master_password                 = random_password.docdb_master.result
+  backup_retention_period         = var.backup_retention_period_days
+  db_subnet_group_name            = aws_docdb_subnet_group.mongo.name
+  vpc_security_group_ids          = [aws_security_group.mongo.id]
+  db_cluster_parameter_group_name = aws_docdb_cluster_parameter_group.mongo.name
+  storage_encrypted               = true
+  kms_key_id                      = var.kms_key_arn
+  deletion_protection             = var.deletion_protection
+  skip_final_snapshot             = var.skip_final_snapshot
+  final_snapshot_identifier       = var.environment == "production" ? "${var.cluster_name}-${var.environment}-docdb-final-snapshot" : null
+  apply_immediately               = false
 
   tags = {
     Name = "${var.cluster_name}-${var.environment}-docdb"
@@ -88,14 +85,12 @@ resource "aws_docdb_cluster" "mongo" {
 }
 
 resource "aws_docdb_cluster_instance" "mongo" {
-  count                       = var.num_instances
-  identifier                  = "${var.cluster_name}-${var.environment}-docdb-${count.index}"
-  cluster_identifier          = aws_docdb_cluster.mongo.id
-  instance_class              = var.instance_class
-  engine                      = "docdb"
-  db_parameter_group_name     = aws_docdb_cluster_parameter_group.mongo.name
-  apply_immediately           = false
-  auto_minor_version_upgrade  = true
+  count              = var.num_instances
+  identifier         = "${var.cluster_name}-${var.environment}-docdb-${count.index}"
+  cluster_identifier = aws_docdb_cluster.mongo.id
+  instance_class     = var.instance_class
+  engine             = "docdb"
+  apply_immediately  = false
 
   tags = {
     Name = "${var.cluster_name}-${var.environment}-docdb-${count.index}"

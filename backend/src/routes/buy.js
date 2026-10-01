@@ -36,6 +36,7 @@ const {
   recordBuyLiquidityActivity,
   recordWithdrawLiquidityActivity,
 } = require('../services/liquidityActivityService');
+const { isPoolCapReached, getPoolCapStatus } = require('../services/liquidityPoolCapService');
 
 const {
   apiBaseUrl: SAFARICOM_API,
@@ -300,7 +301,11 @@ async function saleSummary(sale) {
 
 router.get('/config', async (_req, res) => {
   const keys = config.payment.envPlacement || [];
-  const [gate, price] = await Promise.all([getBuyGateStatus(), getMarketPrice()]);
+  const [gate, price, capStatus] = await Promise.all([
+    getBuyGateStatus(),
+    getMarketPrice(),
+    getPoolCapStatus(),
+  ]);
   return res.json({
     ok: true,
     provider: 'safaricom_mpesa',
@@ -328,6 +333,13 @@ router.get('/config', async (_req, res) => {
       locked: gate.locked,
       thresholdKes: gate.thresholdKes,
       reserveKes: gate.reserveKes,
+    },
+    liquidityPool: {
+      capReached: capStatus.reached,
+      currentKes: capStatus.currentKes,
+      capKes: capStatus.capKes,
+      remainingKes: capStatus.remainingKes,
+      utilizationPercent: capStatus.utilizationPercent,
     },
   });
 });
@@ -452,6 +464,22 @@ async function handleReservedCredit({ quoteId, walletAddress, creditMlcns }) {
 // mode withdraw.js's /mpesa already guards against with an Idempotency-Key.
 router.post('/reserve', limiters.financial, idempotency({ required: true }), requireDirectBuyUnlocked(), validate(schemas.buyReserve), async (req, res) => {
   try {
+    // Check if liquidity pool cap has been reached
+    const capReached = await isPoolCapReached();
+    if (capReached) {
+      const capStatus = await getPoolCapStatus();
+      return res.status(403).json({
+        error: 'Direct Mallcoin purchases are temporarily unavailable. The liquidity pool has reached its capacity limit. You can still acquire Mallcoins by converting from Mallpoints.',
+        code: 'liquidity_pool_cap_reached',
+        details: {
+          currentKes: capStatus.currentKes,
+          capKes: capStatus.capKes,
+          utilizationPercent: capStatus.utilizationPercent,
+          message: 'Pool is at capacity. Please convert Mallpoints to Mallcoins instead.',
+        },
+      });
+    }
+
     const { amount, fiat, currency, walletAddress, phone } = req.validatedBody;
 
     const quoteId = crypto.randomBytes(12).toString('hex');

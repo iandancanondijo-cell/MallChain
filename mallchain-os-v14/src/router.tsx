@@ -18,6 +18,7 @@ const AddressBook = lazy(() => import('./pages/AddressBook'));
 const SecuritySettings = lazy(() => import('./pages/SecuritySettings'));
 const TransactionHistory = lazy(() => import('./pages/TransactionHistory'));
 const BlockchainExplorer = lazy(() => import('./pages/BlockchainExplorer'));
+const MallpointsPurchase = lazy(() => import('./pages/MallpointsPurchase'));
 
 /* feature modules — each maps to a v14 view */
 import Dashboard from './features/dashboard/Dashboard';
@@ -52,7 +53,6 @@ const Messaging = lazy(() => import('./features/messaging/Messaging'));
 const Referrals = lazy(() => import('./features/referrals/Referrals'));
 const Admin = lazy(() => import('./features/admin/Admin'));
 const Settings = lazy(() => import('./features/settings/Settings'));
-const Profile = lazy(() => import('./features/profile/Profile'));
 const Contracts = lazy(() => import('./features/contracts/Contracts'));
 const DevHub = lazy(() => import('./features/devhub/DevHub'));
 const Economy = lazy(() => import('./features/economy/Economy'));
@@ -111,6 +111,8 @@ export const ROUTES: RouteDef[] = [
   { path: '/mines/validator-queue', title: 'Proof Reviewer Queue', render: () => <MinesValidatorQueue /> },
   { path: '/mines/reviewer/stake', title: 'Reviewer Stake', render: () => <MinesReviewerStake /> },
   { path: '/mines', title: 'Mines', render: (n) => <MinesHome navigate={n} /> },
+  /* creator space (spend MLPTS) — campaigns are managed on the Mines My Campaigns page (/mines/my-campaigns); purchase is the only dedicated route */
+  { path: '/mallpoints-purchase', title: 'Purchase Mallpoints', render: () => <MallpointsPurchase /> },
   /* validators — real Cosmos x/staking validators (see /mines/validator-queue for Proof Reviewers) */
   { path: '/validators/leaderboard', title: 'Validators Leaderboard', render: () => <ValidatorsLeaderboard /> },
   { path: '/validators/apply', title: 'Become a Validator', render: (n) => <ValidatorsApply navigate={n} /> },
@@ -123,8 +125,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/messaging', title: 'Messaging', render: () => <Messaging /> },
   { path: '/referrals', title: 'Referrals', render: () => <Referrals /> },
   { path: '/admin', title: 'Admin', render: () => <Admin /> },
-  { path: '/settings', title: 'Settings', render: () => <Settings /> },
-  { path: '/profile', title: 'Profile', render: () => <Profile /> },
+  { path: '/settings', title: 'Profile & Settings', render: () => <Settings /> },
   { path: '/contracts', title: 'Smart Contracts', render: () => <Contracts /> },
   { path: '/devhub', title: 'Developer Hub', render: () => <DevHub /> },
   { path: '/careers', title: 'Careers', render: () => <Careers /> },

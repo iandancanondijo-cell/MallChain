@@ -9,6 +9,7 @@ const mongoose = require('mongoose');
 const auth = require('../middleware/auth');
 const User = require('../models/user');
 const WalletTransaction = require('../models/WalletTransaction');
+const { syncMallPointAccount, requireWalletAddress } = require('../services/mallpointsService');
 
 /**
  * GET /api/referrals - Get user's referral stats
@@ -72,9 +73,12 @@ router.post('/claim', auth, async (req, res) => {
       return res.status(400).json({ error: 'No unclaimed rewards' });
     }
 
-    // Atomically mark claimed AND credit the spendable balance — this used
-    // to only bump referralClaimed, so "claiming" reported success without
-    // ever crediting a spendable MLPTS balance.
+    // GATE 61.1: Wallet-first enforcement — reject referral reward if no wallet linked
+    if (!user.walletAddress) {
+      return res.status(403).json({ error: 'Link a Mallchain wallet before claiming referral rewards' });
+    }
+
+    // Atomically mark claimed AND credit the spendable balance
     const session = await mongoose.startSession();
     try {
       await session.withTransaction(async () => {
@@ -87,6 +91,11 @@ router.post('/claim', auth, async (req, res) => {
           [{ user_id: user._id, type: 'credit', amount: unclaimed, currency: 'MLPTS', description: 'Referral commission claimed' }],
           { session }
         );
+        // GATE 61: Synchronize referral reward to MallPointAccount for conversion
+        await syncMallPointAccount(user.walletAddress, unclaimed, session, {
+          userId: user._id,
+          flow: 'referral_claim',
+        });
       });
     } finally {
       session.endSession();

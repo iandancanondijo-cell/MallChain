@@ -48,18 +48,19 @@ resource "aws_iam_role" "rds_enhanced_monitoring" {
       }
     ]
   })
+}
 
-  managed_policy_arns = [
-    "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole",
-  ]
+resource "aws_iam_role_policy_attachment" "rds_enhanced_monitoring" {
+  role       = aws_iam_role.rds_enhanced_monitoring.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }
 
 resource "random_password" "postgres_master" {
-  length  = 32
-  special = true
-  upper   = true
-  lower   = true
-  number  = true
+  length   = 32
+  special  = true
+  upper    = true
+  lower    = true
+  numeric  = true
 
   keepers = {
     cluster_name = var.cluster_name
@@ -87,24 +88,22 @@ resource "aws_db_instance" "postgres" {
 
   snapshot_identifier = var.snapshot_identifier != "" ? var.snapshot_identifier : null
 
-  backup_retention_period = var.backup_retention_period_days
-  preferred_backup_window = var.preferred_backup_window
-  preferred_maintenance_window = var.preferred_maintenance_window
-  skip_final_snapshot      = var.environment != "production"
-  final_snapshot_identifier_prefix = var.environment == "production" ? "${var.cluster_name}-${var.environment}-postgres-final" : null
+  backup_retention_period    = var.backup_retention_period_days
+  skip_final_snapshot        = var.environment != "production"
+  final_snapshot_identifier  = var.environment == "production" ? "${var.cluster_name}-${var.environment}-postgres-final-snapshot" : null
 
-  performance_insights_enabled    = var.performance_insights_enabled
+  performance_insights_enabled          = var.performance_insights_enabled
   performance_insights_retention_period = 93
-  performance_insights_kms_key_id = var.kms_key_arn
+  performance_insights_kms_key_id       = var.kms_key_arn
 
-  monitoring_interval           = var.monitoring_interval_seconds
-  monitoring_role_arn           = aws_iam_role.rds_enhanced_monitoring.arn
+  monitoring_interval = var.monitoring_interval_seconds
+  monitoring_role_arn = aws_iam_role.rds_enhanced_monitoring.arn
 
   enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
 
-  auto_minor_version_upgrade = true
+  auto_minor_version_upgrade  = true
   allow_major_version_upgrade = false
-  deletion_protection        = var.environment == "production"
+  deletion_protection         = var.environment == "production"
 
   tags = {
     Name = "${var.cluster_name}-${var.environment}-postgres"

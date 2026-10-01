@@ -9,6 +9,7 @@ const { requireAdmin } = require('../middleware/adminAuth');
 const jwt = require('jsonwebtoken');
 const minesReviewService = require('../services/minesReviewService');
 const { notify } = require('../services/notify');
+const { syncMallPointAccount } = require('../services/mallpointsService');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -428,6 +429,12 @@ router.post('/reviewer/stake', verifyToken, async (req, res) => {
         );
         reviewer.stakeStatus = reviewer.stakedAmount >= reviewer.minRequiredStake ? 'active' : 'unstaked';
         await reviewer.save({ session });
+
+        // GATE 61: Synchronize stake debit to MallPointAccount
+        await syncMallPointAccount(user.walletAddress, -amount, session, {
+          userId: req.userId,
+          flow: 'reviewer_stake',
+        });
       });
     } finally {
       session.endSession();
@@ -466,7 +473,14 @@ router.post('/reviewer/unstake', verifyToken, async (req, res) => {
         reviewer.stakedAmount -= amount;
         reviewer.stakeStatus = reviewer.stakedAmount >= reviewer.minRequiredStake ? 'active' : 'unstaked';
         await reviewer.save({ session });
+        const user = await User.findById(req.userId).session(session);
         await User.findByIdAndUpdate(req.userId, { $inc: { mlpts_balance: amount } }).session(session);
+
+        // GATE 61: Synchronize unstake return credit to MallPointAccount
+        await syncMallPointAccount(user?.walletAddress, amount, session, {
+          userId: req.userId,
+          flow: 'reviewer_unstake',
+        });
       });
     } finally {
       session.endSession();

@@ -10,10 +10,12 @@ const User = require('../models/user');
 const TaskSubmission = require('../models/TaskSubmission');
 const Campaign = require('../models/Campaign');
 const WalletTransaction = require('../models/WalletTransaction');
+const MallPointAccount = require('../models/MallPointAccount');
 const { autoAssignReviewers } = require('../services/minesReviewService');
 const { PLATFORMS, DEFAULT_DAILY_CAP_MLPTS, getDailyCapMlpts } = require('../config/socialRewardRates');
 const { computeCampaignRate, clampMultiplier, MIN_CAMPAIGN_MULTIPLIER, MAX_CAMPAIGN_MULTIPLIER } = require('../services/rewardEngineService');
 const { markActiveToday } = require('../utils/activityTracker');
+const { syncMallPointAccount, requireWalletAddress } = require('../services/mallpointsService');
 
 const SUBMISSION_CREATE_FIELDS = ['campaign_id', 'title', 'task_type', 'description', 'proof_url'];
 const SUBMISSION_UPDATE_FIELDS = ['title', 'task_type', 'description', 'proof_url'];
@@ -177,6 +179,12 @@ router.post('/campaigns/create', minesAuth, async (req, res) => {
           currency: 'MLPTS',
           description: `Campaign funding — ${platformDef.label} ${activity_type}`,
         }], { session });
+
+        // GATE 61: Synchronize campaign debit to MallPointAccount for conversion consistency
+        await syncMallPointAccount(user.walletAddress, -budget, session, {
+          userId: req.userId,
+          flow: 'mines_campaign_create',
+        });
       });
     } finally {
       session.endSession();
@@ -408,6 +416,15 @@ router.post('/submissions/:id/approve', requireAdmin, async (req, res) => {
     const session = await mongoose.startSession();
     try {
       await session.withTransaction(async () => {
+        // Fetch full user document (need walletAddress for MallPointAccount sync)
+        const user = await User.findById(sub.miner_id).session(session);
+        if (!user) {
+          throw new Error('miner user not found during transaction');
+        }
+
+        // GATE 61.1: Wallet-first enforcement — reject reward if no wallet linked
+        requireWalletAddress(user, { userId: sub.miner_id, flow: 'mining_approval' });
+
         // Create wallet transaction record
         await WalletTransaction.create([{
           user_id: sub.miner_id,
@@ -419,6 +436,12 @@ router.post('/submissions/:id/approve', requireAdmin, async (req, res) => {
 
         // Update user's mlpts_balance atomically
         await User.findByIdAndUpdate(sub.miner_id, { $inc: { mlpts_balance: finalReward } }).session(session);
+
+        // GATE 61: Synchronize mining reward to MallPointAccount (conversion-eligible ledger)
+        await syncMallPointAccount(user.walletAddress, finalReward, session, {
+          userId: sub.miner_id,
+          flow: 'mining_approval',
+        });
       });
     } finally {
       session.endSession();
@@ -458,7 +481,10 @@ router.post('/balance/credit', idempotency({ required: true }), requireAdmin, as
       
       const user = await User.findById(userId).session(session);
       if (!user) throw new Error('user not found');
-      
+
+      // GATE 61.1: Wallet-first enforcement — reject credit if no wallet linked
+      requireWalletAddress(user, { userId, flow: 'admin_balance_credit' });
+
       await User.findByIdAndUpdate(userId, { $inc: { mlpts_balance: amount } }).session(session);
       await WalletTransaction.create([{
         user_id: userId,
@@ -467,6 +493,11 @@ router.post('/balance/credit', idempotency({ required: true }), requireAdmin, as
         currency: 'MLPTS',
         description: 'Balance credit by admin',
       }], { session });
+      // GATE 61: Synchronize admin credit to MallPointAccount for conversion
+      await syncMallPointAccount(user.walletAddress, amount, session, {
+        userId,
+        flow: 'admin_balance_credit',
+      });
     });
     res.json(ok({ success: true }));
   } catch (e) { res.status(500).json(fail(e, { operation: 'balance_credit' })); }
@@ -498,6 +529,11 @@ router.post('/balance/deduct', idempotency({ required: true }), requireAdmin, as
         currency: 'MLPTS',
         description: 'Balance deduction by admin',
       }], { session });
+      // GATE 61: Synchronize admin deduct to MallPointAccount for conversion consistency
+      await syncMallPointAccount(result.walletAddress, -amount, session, {
+        userId,
+        flow: 'admin_balance_deduct',
+      });
     });
     res.json(ok({ success: true }));
   } catch (e) { res.status(500).json(fail(e, { operation: 'balance_deduct' })); }

@@ -267,8 +267,8 @@ resource "aws_wafv2_web_acl" "ingress" {
 
     statement {
       rate_based_statement {
-        limit              = var.rate_limit_per_ip
-        aggregate_key_type = "IP"
+        limit                 = var.rate_limit_per_ip
+        aggregate_key_type    = "IP"
         evaluation_window_sec = var.rate_limit_window_minutes * 60
       }
     }

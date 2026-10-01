@@ -112,7 +112,7 @@ data "template_cloudinit_config" "vault_userdata" {
 
   part {
     content_type = "text/cloud-config"
-    content = <<-EOT
+    content      = <<-EOT
       #cloud-config
       package_update: true
       package_upgrade: true

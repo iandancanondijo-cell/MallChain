@@ -111,7 +111,8 @@ func (k Keeper) HandleTransferFrom(ctx context.Context, msg types.MGP20TransferF
 		return errorsmod.Wrap(mlcointypes.ErrInvalidRequest, "transfer amount must be greater than zero")
 	}
 
-	return k.mlcoinKeeper.TransferFrom(ctx, msg.Owner, msg.Spender, msg.Recipient, msg.Amount)
+	_, err := k.mlcoinKeeper.TransferFrom(ctx, msg.Owner, msg.Spender, msg.Recipient, msg.Amount)
+	return err
 }
 
 func (k Keeper) QueryBalance(ctx context.Context, address string) (uint64, error) {

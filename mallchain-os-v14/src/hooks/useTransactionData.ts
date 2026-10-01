@@ -73,7 +73,7 @@ export function useTransactionData(options: UseTransactionDataOptions) {
 
   const retryCountRef = useRef(0);
   const maxRetriesRef = useRef(3);
-  const retryTimeoutRef = useRef<NodeJS.Timeout>();
+  const retryTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   /**
    * Calculate exponential backoff delay

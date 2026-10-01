@@ -49,7 +49,7 @@ export default function WalletWithdraw() {
   const [status, setStatus] = useState<SellStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const pollRef = useRef<ReturnType<typeof setInterval>>();
+  const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const [amlReviewStatus, setAmlReviewStatus] = useState<'none' | 'pending' | 'approved' | 'rejected'>('none');
   const [fundsSource, setFundsSource] = useState<FundsSource>('mining_staking_rewards');

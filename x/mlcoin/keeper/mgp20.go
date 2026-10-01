@@ -50,35 +50,35 @@ func (k Keeper) Approve(ctx context.Context, owner, spender string, amount uint6
 }
 
 // TransferFrom moves amount from owner to recipient using spender's allowance.
-func (k Keeper) TransferFrom(ctx context.Context, owner, spender, recipient string, amount uint64) error {
+func (k Keeper) TransferFrom(ctx context.Context, owner, spender, recipient string, amount uint64) (string, error) {
 	if amount == 0 {
-		return errorsmod.Wrap(types.ErrInvalidRequest, "transfer amount must be greater than zero")
+		return "", errorsmod.Wrap(types.ErrInvalidRequest, "transfer amount must be greater than zero")
 	}
 
 	if _, err := k.addressCodec.StringToBytes(owner); err != nil {
-		return errorsmod.Wrap(err, "invalid owner address")
+		return "", errorsmod.Wrap(err, "invalid owner address")
 	}
 	if _, err := k.addressCodec.StringToBytes(spender); err != nil {
-		return errorsmod.Wrap(err, "invalid spender address")
+		return "", errorsmod.Wrap(err, "invalid spender address")
 	}
 	if _, err := k.addressCodec.StringToBytes(recipient); err != nil {
-		return errorsmod.Wrap(err, "invalid recipient address")
+		return "", errorsmod.Wrap(err, "invalid recipient address")
 	}
 
 	allowance, err := k.GetAllowance(ctx, owner, spender)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if allowance < amount {
-		return errorsmod.Wrap(types.ErrInsufficientAllowance, "allowance too low")
+		return "", errorsmod.Wrap(types.ErrInsufficientAllowance, "allowance too low")
 	}
 
 	ownerWallet, err := k.WalletBalance.Get(ctx, owner)
 	if err != nil {
-		return errorsmod.Wrap(types.ErrWalletNotFound, "owner wallet not found")
+		return "", errorsmod.Wrap(types.ErrWalletNotFound, "owner wallet not found")
 	}
 	if ownerWallet.Balance < amount {
-		return errorsmod.Wrap(types.ErrInsufficientBalance, "owner has insufficient balance")
+		return "", errorsmod.Wrap(types.ErrInsufficientBalance, "owner has insufficient balance")
 	}
 
 	recipientWallet, err := k.WalletBalance.Get(ctx, recipient)
@@ -89,23 +89,24 @@ func (k Keeper) TransferFrom(ctx context.Context, owner, spender, recipient stri
 	// Update allowance BEFORE updating balances to prevent reentrancy attacks
 	// This follows the checks-effects-interactions pattern
 	if err := k.SetAllowance(ctx, owner, spender, allowance-amount); err != nil {
-		return errorsmod.Wrap(err, "failed to update allowance")
+		return "", errorsmod.Wrap(err, "failed to update allowance")
 	}
 
 	ownerWallet.Balance -= amount
 	recipientWallet.Balance += amount
 
 	if err := k.WalletBalance.Set(ctx, owner, ownerWallet); err != nil {
-		return errorsmod.Wrap(err, "failed to update owner balance")
+		return "", errorsmod.Wrap(err, "failed to update owner balance")
 	}
 	if err := k.WalletBalance.Set(ctx, recipient, recipientWallet); err != nil {
-		return errorsmod.Wrap(err, "failed to update recipient balance")
+		return "", errorsmod.Wrap(err, "failed to update recipient balance")
 	}
 
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	if _, err := k.RecordTransaction(ctx, owner, recipient, amount, "transfer_from", "Allowed transfer"); err != nil {
+	txID, err := k.RecordTransaction(ctx, owner, recipient, amount, "transfer_from", "Allowed transfer")
+	if err != nil {
 		sdkCtx.Logger().Error("Failed to record transfer_from transaction", "error", err)
 	}
 
-	return nil
+	return txID, nil
 }

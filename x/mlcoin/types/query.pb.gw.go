@@ -483,6 +483,82 @@ func local_request_Query_GetStakingRecords_0(ctx context.Context, marshaler runt
 
 }
 
+func request_Query_GetAllowance_0(ctx context.Context, marshaler runtime.Marshaler, client QueryClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var protoReq QueryGetAllowanceRequest
+	var metadata runtime.ServerMetadata
+
+	var (
+		val string
+		ok  bool
+		err error
+		_   = err
+	)
+
+	val, ok = pathParams["owner"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "owner")
+	}
+
+	protoReq.Owner, err = runtime.String(val)
+
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "owner", err)
+	}
+
+	val, ok = pathParams["spender"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "spender")
+	}
+
+	protoReq.Spender, err = runtime.String(val)
+
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "spender", err)
+	}
+
+	msg, err := client.GetAllowance(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	return msg, metadata, err
+
+}
+
+func local_request_Query_GetAllowance_0(ctx context.Context, marshaler runtime.Marshaler, server QueryServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+	var protoReq QueryGetAllowanceRequest
+	var metadata runtime.ServerMetadata
+
+	var (
+		val string
+		ok  bool
+		err error
+		_   = err
+	)
+
+	val, ok = pathParams["owner"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "owner")
+	}
+
+	protoReq.Owner, err = runtime.String(val)
+
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "owner", err)
+	}
+
+	val, ok = pathParams["spender"]
+	if !ok {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "missing parameter %s", "spender")
+	}
+
+	protoReq.Spender, err = runtime.String(val)
+
+	if err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "type mismatch, parameter: %s, error: %v", "spender", err)
+	}
+
+	msg, err := server.GetAllowance(ctx, &protoReq)
+	return msg, metadata, err
+
+}
+
 // RegisterQueryHandlerServer registers the http handlers for service Query to "mux".
 // UnaryRPC     :call QueryServer directly.
 // StreamingRPC :currently unsupported pending https://github.com/grpc/grpc-go/issues/906.
@@ -739,6 +815,29 @@ func RegisterQueryHandlerServer(ctx context.Context, mux *runtime.ServeMux, serv
 		}
 
 		forward_Query_GetStakingRecords_0(ctx, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+
+	})
+
+	mux.Handle("GET", pattern_Query_GetAllowance_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		var stream runtime.ServerTransportStream
+		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		rctx, err := runtime.AnnotateIncomingContext(ctx, mux, req)
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := local_request_Query_GetAllowance_0(rctx, inboundMarshaler, server, req, pathParams)
+		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
+		ctx = runtime.NewServerMetadataContext(ctx, md)
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+
+		forward_Query_GetAllowance_0(ctx, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 
 	})
 
@@ -1003,31 +1102,53 @@ func RegisterQueryHandlerClient(ctx context.Context, mux *runtime.ServeMux, clie
 
 	})
 
+	mux.Handle("GET", pattern_Query_GetAllowance_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+		ctx, cancel := context.WithCancel(req.Context())
+		defer cancel()
+		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
+		rctx, err := runtime.AnnotateContext(ctx, mux, req)
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+		resp, md, err := request_Query_GetAllowance_0(rctx, inboundMarshaler, client, req, pathParams)
+		ctx = runtime.NewServerMetadataContext(ctx, md)
+		if err != nil {
+			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
+			return
+		}
+
+		forward_Query_GetAllowance_0(ctx, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+
+	})
+
 	return nil
 }
 
 var (
-	pattern_Query_Params_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"tmp", "marketplace", "mlcoin", "v1", "params"}, "", runtime.AssumeColonVerbOpt(false)))
+	pattern_Query_Params_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"tmp", "marketplace", "mlcoin", "v1", "params"}, "", runtime.AssumeColonVerbOpt(true)))
 
-	pattern_Query_GetWalletBalance_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 1, 0, 4, 1, 5, 5}, []string{"tmp", "marketplace", "mlcoin", "v1", "wallet_balance", "index"}, "", runtime.AssumeColonVerbOpt(false)))
+	pattern_Query_GetWalletBalance_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 1, 0, 4, 1, 5, 5}, []string{"tmp", "marketplace", "mlcoin", "v1", "wallet_balance", "index"}, "", runtime.AssumeColonVerbOpt(true)))
 
-	pattern_Query_ListWalletBalance_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"tmp", "marketplace", "mlcoin", "v1", "wallet_balance"}, "", runtime.AssumeColonVerbOpt(false)))
+	pattern_Query_ListWalletBalance_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"tmp", "marketplace", "mlcoin", "v1", "wallet_balance"}, "", runtime.AssumeColonVerbOpt(true)))
 
-	pattern_Query_GetEmissionState_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"tmp", "marketplace", "mlcoin", "v1", "emission_state"}, "", runtime.AssumeColonVerbOpt(false)))
+	pattern_Query_GetEmissionState_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"tmp", "marketplace", "mlcoin", "v1", "emission_state"}, "", runtime.AssumeColonVerbOpt(true)))
 
-	pattern_Query_GetTransaction_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 1, 0, 4, 1, 5, 5}, []string{"tmp", "marketplace", "mlcoin", "v1", "transaction", "tx_id"}, "", runtime.AssumeColonVerbOpt(false)))
+	pattern_Query_GetTransaction_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 1, 0, 4, 1, 5, 5}, []string{"tmp", "marketplace", "mlcoin", "v1", "transaction", "tx_id"}, "", runtime.AssumeColonVerbOpt(true)))
 
-	pattern_Query_ListTransactions_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"tmp", "marketplace", "mlcoin", "v1", "transactions"}, "", runtime.AssumeColonVerbOpt(false)))
+	pattern_Query_ListTransactions_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4}, []string{"tmp", "marketplace", "mlcoin", "v1", "transactions"}, "", runtime.AssumeColonVerbOpt(true)))
 
-	pattern_Query_GetTransactionsByAddress_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 2, 5, 1, 0, 4, 1, 5, 5}, []string{"tmp", "marketplace", "mlcoin", "v1", "transactions", "address"}, "", runtime.AssumeColonVerbOpt(false)))
+	pattern_Query_GetTransactionsByAddress_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 2, 5, 1, 0, 4, 1, 5, 5}, []string{"tmp", "marketplace", "mlcoin", "v1", "transactions", "address"}, "", runtime.AssumeColonVerbOpt(true)))
 
-	pattern_Query_GetMarketPrice_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 2, 5}, []string{"tmp", "marketplace", "mlcoin", "v1", "market", "price"}, "", runtime.AssumeColonVerbOpt(false)))
+	pattern_Query_GetMarketPrice_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 2, 5}, []string{"tmp", "marketplace", "mlcoin", "v1", "market", "price"}, "", runtime.AssumeColonVerbOpt(true)))
 
-	pattern_Query_GetKesBalance_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 2, 5, 1, 0, 4, 1, 5, 6}, []string{"tmp", "marketplace", "mlcoin", "v1", "market", "kes-balance", "address"}, "", runtime.AssumeColonVerbOpt(false)))
+	pattern_Query_GetKesBalance_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 2, 5, 1, 0, 4, 1, 5, 6}, []string{"tmp", "marketplace", "mlcoin", "v1", "market", "kes-balance", "address"}, "", runtime.AssumeColonVerbOpt(true)))
 
-	pattern_Query_GetTradeHistory_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 2, 5}, []string{"tmp", "marketplace", "mlcoin", "v1", "market", "trades"}, "", runtime.AssumeColonVerbOpt(false)))
+	pattern_Query_GetTradeHistory_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 2, 5}, []string{"tmp", "marketplace", "mlcoin", "v1", "market", "trades"}, "", runtime.AssumeColonVerbOpt(true)))
 
-	pattern_Query_GetStakingRecords_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 1, 0, 4, 1, 5, 5}, []string{"tmp", "marketplace", "mlcoin", "v1", "staking", "address"}, "", runtime.AssumeColonVerbOpt(false)))
+	pattern_Query_GetStakingRecords_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 1, 0, 4, 1, 5, 5}, []string{"tmp", "marketplace", "mlcoin", "v1", "staking", "address"}, "", runtime.AssumeColonVerbOpt(true)))
+
+	pattern_Query_GetAllowance_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 2, 3, 2, 4, 2, 5, 1, 0, 4, 1, 5, 6, 1, 0, 4, 1, 5, 7}, []string{"tmp", "marketplace", "mlcoin", "v1", "mgp20", "allowance", "owner", "spender"}, "", runtime.AssumeColonVerbOpt(true)))
 )
 
 var (
@@ -1052,4 +1173,6 @@ var (
 	forward_Query_GetTradeHistory_0 = runtime.ForwardResponseMessage
 
 	forward_Query_GetStakingRecords_0 = runtime.ForwardResponseMessage
+
+	forward_Query_GetAllowance_0 = runtime.ForwardResponseMessage
 )

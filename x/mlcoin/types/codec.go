@@ -9,6 +9,8 @@ import (
 func RegisterInterfaces(registrar codectypes.InterfaceRegistry) {
 	registrar.RegisterImplementations((*sdk.Msg)(nil),
 		&MsgTransferMallcoin{},
+		&MsgApprove{},
+		&MsgTransferFrom{},
 	)
 
 	registrar.RegisterImplementations((*sdk.Msg)(nil),

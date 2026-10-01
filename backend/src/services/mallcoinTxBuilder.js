@@ -468,6 +468,7 @@ module.exports = {
   MSG_TRANSFER_MALLCOIN,
   signAndBroadcastTransfer,
   buildUnsignedTransferBase64,
+  broadcastSignedTx,
   transferFromMnemonic,
   transferFromPrivateKey,
   fundStakeFromMnemonic,

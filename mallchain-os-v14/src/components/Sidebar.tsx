@@ -79,7 +79,6 @@ const GROUPS: NavGroup[] = [
     items: [
       { label: 'Command Center', path: '/mines', icon: SlidersHorizontal },
       { label: 'Discover', path: '/mines/discover', icon: Compass },
-      { label: 'My Campaigns', path: '/mines/my-campaigns', icon: Megaphone, badge: (s) => s.mines.participations.filter((p) => p.status === 'inprogress').length },
       { label: 'Participation', path: '/mines/participation', icon: CheckCircle },
       { label: 'Earnings', path: '/mines/earnings', icon: DollarSign },
       { label: 'Leaderboard', path: '/mines/leaderboard', icon: Trophy },
@@ -87,6 +86,14 @@ const GROUPS: NavGroup[] = [
       { label: 'History', path: '/mines/history', icon: History },
       { label: 'Proof Reviewer Queue', path: '/mines/validator-queue', icon: ShieldCheck },
       { label: 'Stake to Review', path: '/mines/reviewer/stake', icon: Lock },
+    ],
+  },
+  {
+    title: 'Creator Space',
+    items: [
+      /* campaigns are managed on the Mines My Campaigns page (2-step wizard + escrowed budgets) — sole sidebar entry lives here in Creator Space */
+      { label: 'My Campaigns', path: '/mines/my-campaigns', icon: Megaphone },
+      { label: 'Purchase Mallpoints', path: '/mallpoints-purchase', icon: DollarSign },
     ],
   },
   {
@@ -114,8 +121,7 @@ const GROUPS: NavGroup[] = [
       { label: 'Smart Contracts', path: '/contracts', icon: FileCode },
       { label: 'Developer Hub', path: '/devhub', icon: Code },
       { label: 'Careers', path: '/careers', icon: Briefcase },
-      { label: 'Settings', path: '/settings', icon: SettingsIcon },
-      { label: 'Profile', path: '/profile', icon: User },
+      { label: 'Profile & Settings', path: '/settings', icon: SettingsIcon },
     ],
   },
 ];

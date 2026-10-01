@@ -225,10 +225,14 @@ export default function TransactionHistory() {
 
   /**
    * Task 14.5: Get block explorer URL
+   * NOTE: Block explorer not yet deployed in production. Link disabled.
+   * Re-enable once explorer.mallchain.network is deployed.
    */
   const getBlockExplorerUrl = (txHash: string | undefined) => {
     if (!txHash) return null;
-    return `https://explorer.mallchain.io/tx/${txHash}`;
+    // TODO: Update once production explorer domain is deployed
+    // return `https://explorer.mallchain.network/tx/${txHash}`;
+    return null;
   };
 
   /**

@@ -276,7 +276,7 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
           </div>
         </div>
       ) : (
-        <a className="tb-user" href="#/profile">
+        <a className="tb-user" href="#/settings">
           <div className="avatar" aria-hidden="true">{st.user.avatarInitial || 'C'}</div>
           <div style={{ lineHeight: 1.2 }}>
             <div style={{ fontSize: 12.5, fontWeight: 800 }}>{st.user.name || st.user.email?.split('@')[0] || t('Guest')}{st.user.hasBadge && <BadgeCheckmark />}</div>

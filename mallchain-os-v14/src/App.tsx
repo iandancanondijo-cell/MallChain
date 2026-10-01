@@ -36,12 +36,12 @@ function getSectionId(path: string): string {
   if (p.startsWith('/staking')) return 'staking';
   if (p.startsWith('/governance')) return 'governance';
   if (p.startsWith('/mines')) return 'mines';
+  if (p === '/mallpoints-purchase') return 'creator-space';
   if (p.startsWith('/validators')) return 'validators';
   if (p.startsWith('/explorer')) return 'explorer';
   if (p.startsWith('/economy')) return 'economy';
   if (p.startsWith('/messaging')) return 'messaging';
   if (p.startsWith('/settings')) return 'settings';
-  if (p.startsWith('/profile')) return 'profile';
   if (p.startsWith('/referrals')) return 'referrals';
   if (p.startsWith('/admin')) return 'admin';
   if (p.startsWith('/help') || p.startsWith('/edu')) return 'help';

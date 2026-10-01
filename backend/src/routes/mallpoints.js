@@ -106,40 +106,13 @@ router.post('/sync', async (req, res) => {
   }
 })
 
-// POST /api/mallpoints/award - award initial mallpoints when wallet is created
-// Awards points equivalent to a fiat target (default 34.99 KES) using a configurable
-// point price (default 2 KES per Mallpoint). You can override with env vars:
-// MALLPOINT_AWARD_FIAT and MALLPOINT_PRICE_KES
-//
-// The award amount is always server-computed from these env vars — it is NOT
-// taken from the request body. Accepting a caller-supplied `amount` here let
-// anyone mint themselves arbitrary Mallpoints for free (no payment check),
-// which then convert 1:1 into real minted Mallcoin once a conversion window
-// is open. This is a one-time signup bonus, not a purchase; buying Mallpoints
-// with real money must go through a payment-confirmed flow instead.
-router.post('/award', createLimiter({ windowMs: 60*1000, max: 20 }), async (req, res) => {
-  try {
-    const { address } = req.body || {}
-    if (!address) return res.status(400).json({ error: 'missing address' })
-
-    const existing = await MallPointAccount.findOne({ address })
-    if (existing) return res.json({ ok: true, message: 'already awarded', balance: existing.balance })
-
-    // Determine fiat target and point price
-    const targetFiat = (typeof process.env.MALLPOINT_AWARD_FIAT !== 'undefined' && !isNaN(Number(process.env.MALLPOINT_AWARD_FIAT))) ? Number(process.env.MALLPOINT_AWARD_FIAT) : 34.99
-    const pointPrice = (typeof process.env.MALLPOINT_PRICE_KES !== 'undefined' && !isNaN(Number(process.env.MALLPOINT_PRICE_KES))) ? Number(process.env.MALLPOINT_PRICE_KES) : 2
-
-    const awardPoints = targetFiat / (pointPrice || 1)
-
-    // Normalize to sensible precision (6 decimals) and store
-    const award = Math.round(awardPoints * 1_000_000) / 1_000_000
-
-    const acc = await MallPointAccount.create({ address, balance: award })
-    return res.json({ ok: true, awardedPoints: award, awardedFiat: (award * pointPrice), pointPrice, balance: acc.balance })
-  } catch (e) {
-    logger.error('mallpoints', 'mallpoints award error', e)
-    res.status(500).json({ error: String(e) })
-  }
+// POST /api/mallpoints/award - DISABLED
+// Mallpoints must now be purchased via M-Pesa. See /api/mallpoints/purchase
+router.post('/award', (req, res) => {
+  return res.status(410).json({
+    error: 'Mallpoints award endpoint has been disabled. Mallpoints must be purchased via M-Pesa.',
+    purchaseEndpoint: '/api/mallpoints/purchase'
+  })
 })
 
 // POST /api/mallpoints/convert - convert mallpoints to mallcoins using the same

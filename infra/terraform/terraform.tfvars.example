@@ -1,0 +1,19 @@
+# Mallchain Production Terraform Variables
+# Copy this file to terraform.tfvars and fill in real values
+# NEVER commit terraform.tfvars to version control
+
+# Redis AUTH token - generate with: openssl rand -base64 48 | tr -d '/+=' | head -c 64
+redis_auth_token = "REPLACE_ME_WITH_A_SECURE_RANDOM_STRING"
+
+# AWS configuration
+aws_region  = "eu-west-1"
+environment = "production"
+cluster_name = "mallchain"
+
+# EKS node configuration
+eks_min_nodes = 2
+eks_max_nodes = 6
+eks_node_instance_types = ["t3.large"]
+
+# Security - lock EKS API access to office/VPN CIDRs in production
+# eks_endpoint_allowed_cidrs = ["203.0.113.0/24"]  # Replace with real CIDR

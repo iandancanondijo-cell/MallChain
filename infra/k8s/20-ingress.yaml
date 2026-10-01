@@ -18,17 +18,24 @@ metadata:
     nginx.ingress.kubernetes.io/limit-rps: '50'
 spec:
   tls:
-    - hosts: ['app.example.com', 'api.example.com'] # replace with real domains
+    - hosts: ['mallchain.network', 'www.mallchain.network', 'api.mallchain.network']
       secretName: mallchain-tls
   rules:
-    - host: app.example.com
+    - host: mallchain.network
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service: { name: frontend, port: { number: 8080 } }
-    - host: api.example.com
+    - host: www.mallchain.network
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: frontend, port: { number: 8080 } }
+    - host: api.mallchain.network
       http:
         paths:
           - path: /

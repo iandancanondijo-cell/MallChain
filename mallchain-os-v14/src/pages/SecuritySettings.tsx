@@ -397,10 +397,10 @@ export function SecuritySettings() {
           <div className="setting-item">
             <div className="setting-info">
               <h3>Manage 2FA</h3>
-              <p>Two-factor authentication is managed from your Profile page.</p>
+              <p>Two-factor authentication is managed from your Profile &amp; Settings page.</p>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={() => { window.location.hash = '#/profile'; }}>
-              Go to Profile
+            <button className="btn btn-secondary btn-sm" onClick={() => { window.location.hash = '#/settings'; }}>
+              Go to Profile & Settings
             </button>
           </div>
         </div>
