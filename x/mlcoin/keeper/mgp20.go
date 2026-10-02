@@ -15,6 +15,18 @@ func allowanceKey(owner, spender string) string {
 	return owner + "|" + spender
 }
 
+// GetBalance returns the wallet balance for address, or 0 if no wallet exists.
+func (k Keeper) GetBalance(ctx context.Context, address string) (uint64, error) {
+	wallet, err := k.WalletBalance.Get(ctx, address)
+	if err != nil {
+		if errors.Is(err, collections.ErrNotFound) {
+			return 0, nil
+		}
+		return 0, errorsmod.Wrap(err, "failed to read wallet balance")
+	}
+	return wallet.Balance, nil
+}
+
 // GetAllowance returns the current approved allowance from owner to spender.
 func (k Keeper) GetAllowance(ctx context.Context, owner, spender string) (uint64, error) {
 	allowance, err := k.Allowances.Get(ctx, allowanceKey(owner, spender))

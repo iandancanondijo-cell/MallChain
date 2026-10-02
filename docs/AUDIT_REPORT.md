@@ -230,7 +230,11 @@ No genesis import/export, no gRPC services registered.
 
 ### 27. DEX: No pool pausing/emergency shutdown
 
+**RESOLVED** — `PausePool`/`UnpausePool` governance messages added; all swap/liquidity operations check pool status; paused pools reject transactions.
+
 ### 28. Crosschain: Should integrate with actual IBC
+
+**RESOLVED** — Full `porttypes.IBCModule` implementation in `x/crosschain/ibc/module.go` with `OnRecvPacket`, `OnAcknowledgementPacket`, `OnTimeoutPacket`, and all channel lifecycle handlers. `x/crosschain/keeper/ibc.go` implements ICS-20 transfer construction, ICS-23/24 proof verification, ack/timeout refund handling, and bridge memo tracking.
 
 ### 29. Missing unit tests for critical paths
 
@@ -240,11 +244,15 @@ No genesis import/export, no gRPC services registered.
 
 ### 32. mlcoin: Dynamic pricing has no bounds/circuit breaker
 
+**RESOLVED** — 10% max change per update enforced in `updateDynamicPricing`; price floor of 1 prevents zero/negative rates; circuit breaker trips if rate deviates >50% from previous.
+
 ### 33. mallpoints: Conversion rate is hardcoded 1:1
 
 ### 34. Proto files should have `cosmos.msg.v1.signer` annotations
 
 ### 35. Simulation framework is stubbed out
+
+**RESOLVED** — Real simulation operations implemented for DEX (`SimulateMsgSwap`), governance (`SimulateMsgVote`), mlcoin (`SimulateMsgStake`), badge (`SimulateMsgIssueBadge`), and mallpoints (`SimulateMsgAwardPoints`, `SimulateMsgConvertToMallcoin`). All wired into respective module `WeightedOperations`.
 
 ---
 
@@ -252,7 +260,7 @@ No genesis import/export, no gRPC services registered.
 
 | Module | Status | Critical Issues | Key Enhancement |
 |--------|--------|----------------|-----------------|
-| **crosschain** | ⛔ Broken | No escrow, no auth, no proof | Integrate real IBC |
+| **crosschain** | ✅ IBC integrated | Full ICS-20/23/24 integration | Production IBC testing |
 | **dex** | ⚠️ Fragile | Float64 math, overflow risk | Integer-only AMM |
 | **governance** | ⚠️ Fragile | No deposit transfer, no execution | Execute passed proposals |
 | **mallcoin** | ✅ Basic | — | More tests |

@@ -247,19 +247,25 @@ export default function App() {
       <AnimatedBackground />
       <div className={'app-shell' + (isAdminRoute ? ' app-shell--admin' : '')}>
         <a href="#main-content" className="skip-link">Skip to main content</a>
-      {!hiddenNav && (isAdminRoute
-        ? <AdminSidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} activeTab={adminTab} onTabChange={setAdminTab} />
-        : <Sidebar path={path} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />)}
+      {!hiddenNav && (
+        <ErrorBoundary resetKey={path}>
+          {isAdminRoute
+            ? <AdminSidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} activeTab={adminTab} onTabChange={setAdminTab} />
+            : <Sidebar path={path} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />}
+        </ErrorBoundary>
+      )}
       {!hiddenNav && mobileNavOpen && (
         <div className="sidebar-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />
       )}
       <main className="main" id="main-content" data-section={getSectionId(path)} style={hiddenNav ? { marginLeft: 0 } : undefined}>
         {!hiddenNav && (
-          <TopBar
-            navigate={navigate}
-            isAdminRoute={isAdminRoute}
-            onToggleMobileNav={() => setMobileNavOpen((o) => !o)}
+          <ErrorBoundary resetKey={path}>
+            <TopBar
+              navigate={navigate}
+              isAdminRoute={isAdminRoute}
+              onToggleMobileNav={() => setMobileNavOpen((o) => !o)}
           />
+          </ErrorBoundary>
         )}
 
         {/* global banners (admin-driven) */}

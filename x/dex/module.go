@@ -3,6 +3,7 @@ package dex
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 
 	"cosmossdk.io/core/appmodule"
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
@@ -14,9 +15,11 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
+	"github.com/cosmos/cosmos-sdk/x/simulation"
 
 	"marketplace/x/dex/client/cli"
 	"marketplace/x/dex/keeper"
+	dexsimulation "marketplace/x/dex/simulation"
 	"marketplace/x/dex/types"
 )
 
@@ -142,8 +145,22 @@ func (am AppModule) RegisterStoreDecoder(sdr simtypes.StoreDecoderRegistry) {
 
 // WeightedOperations returns the all the dex module operations with their respective weights.
 func (am AppModule) WeightedOperations(simState module.SimulationState) []simtypes.WeightedOperation {
-	return []simtypes.WeightedOperation{
-		// simulation.OpWeightSubmitProposal(am.keeper),
-		// simulation.OpWeightVote(am.keeper),
-	}
+	operations := make([]simtypes.WeightedOperation, 0)
+	const (
+		opWeightMsgSwap          = "op_weight_msg_swap"
+		defaultWeightMsgSwap int = 100
+	)
+
+	var weightMsgSwap int
+	simState.AppParams.GetOrGenerate(opWeightMsgSwap, &weightMsgSwap, nil,
+		func(_ *rand.Rand) {
+			weightMsgSwap = defaultWeightMsgSwap
+		},
+	)
+	operations = append(operations, simulation.NewWeightedOperation(
+		weightMsgSwap,
+		dexsimulation.SimulateMsgSwap(am.keeper, simState.TxConfig),
+	))
+
+	return operations
 }

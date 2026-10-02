@@ -188,20 +188,49 @@ func (k Keeper) updateDynamicPricing(ctx context.Context) error {
 		market = types.MarketPrice{BuyPrice: 62, SellPrice: 58}
 	}
 
-	// Adjust prices based on activity multiplier
+	// Circuit breaker: cap price change at 10% of current price per update
+	// to prevent extreme swings from runaway feedback loops.
+	maxChangePerUpdate := func(price uint64) uint64 {
+		change := price / 10 // 10%
+		if change == 0 {
+			return 1 // minimum 1 unit change to avoid stalling
+		}
+		return change
+	}
+
+	// Adjust prices based on activity multiplier with circuit breaker
 	if metrics.PriceImpactMultiplier > 0 {
 		// Increase prices on high activity
 		adjustment := uint64(metrics.PriceImpactMultiplier)
+		maxBuyChange := maxChangePerUpdate(market.BuyPrice)
+		maxSellChange := maxChangePerUpdate(market.SellPrice)
+		if adjustment > maxBuyChange {
+			adjustment = maxBuyChange
+			sdkCtx.Logger().Warn("dynamic pricing circuit breaker triggered (buy price cap)",
+				"requested", metrics.PriceImpactMultiplier, "capped", adjustment)
+		}
 		market.BuyPrice += adjustment
-		market.SellPrice += adjustment
+		market.SellPrice += min(adjustment, maxSellChange)
 	} else if metrics.PriceImpactMultiplier < 0 {
 		// Decrease prices on low activity
 		adjustment := uint64(-metrics.PriceImpactMultiplier)
-		if market.BuyPrice > adjustment {
-			market.BuyPrice -= adjustment
+		maxBuyChange := maxChangePerUpdate(market.BuyPrice)
+		maxSellChange := maxChangePerUpdate(market.SellPrice)
+		if adjustment > maxBuyChange {
+			adjustment = maxBuyChange
+			sdkCtx.Logger().Warn("dynamic pricing circuit breaker triggered (buy price floor cap)",
+				"requested", -metrics.PriceImpactMultiplier, "capped", adjustment)
 		}
-		if market.SellPrice > adjustment {
-			market.SellPrice -= adjustment
+		// Price floor: prevent prices from going to zero
+		if market.BuyPrice > adjustment && market.BuyPrice-adjustment >= 1 {
+			market.BuyPrice -= adjustment
+		} else {
+			market.BuyPrice = 1 // minimum price floor
+		}
+		if market.SellPrice > adjustment && market.SellPrice-adjustment >= 1 {
+			market.SellPrice -= min(adjustment, maxSellChange)
+		} else {
+			market.SellPrice = 1 // minimum price floor
 		}
 	}
 

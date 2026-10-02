@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -15,6 +16,12 @@ type ContractHostEnvironment struct {
 	ContractAddr string
 	Sender       string
 	Keeper       *Keeper
+	// ReadOnly, when true, causes all state-mutating host functions
+	// (db_write, transfer) to return an error instead of writing. This is
+	// set for query executions so a malicious or buggy contract can't
+	// mutate chain state through a code path that is supposed to be
+	// read-only.
+	ReadOnly bool
 }
 
 // GetSender returns the transaction sender
@@ -32,13 +39,21 @@ func (h *ContractHostEnvironment) StorageGet(key string) ([]byte, error) {
 	return h.Keeper.GetContractState(h.Ctx, h.ContractAddr, key)
 }
 
-// StorageSet writes to contract state
+// StorageSet writes to contract state. Returns an error if the host
+// environment is in read-only mode (query execution).
 func (h *ContractHostEnvironment) StorageSet(key string, value []byte) error {
+	if h.ReadOnly {
+		return fmt.Errorf("db_write forbidden: query execution is read-only")
+	}
 	return h.Keeper.SetContractState(h.Ctx, h.ContractAddr, key, value)
 }
 
-// Mgp20Transfer transfers tokens on behalf of contract
+// Mgp20Transfer transfers tokens on behalf of contract. Returns an error
+// if the host environment is in read-only mode (query execution).
 func (h *ContractHostEnvironment) Mgp20Transfer(to string, amount uint64) error {
+	if h.ReadOnly {
+		return fmt.Errorf("transfer forbidden: query execution is read-only")
+	}
 	transferMsg := wasmbridgetypes.MGP20TransferMsg{
 		From:   h.ContractAddr,
 		To:     to,
@@ -74,13 +89,17 @@ func DefaultHostABI() *HostABI {
 	}
 }
 
-// NewHostEnvironment creates a contract host environment for WASM execution
-func NewHostEnvironment(ctx context.Context, contractAddr, sender string, keeper *Keeper) *ContractHostEnvironment {
+// NewHostEnvironment creates a contract host environment for WASM
+// execution. If readOnly is true, state-mutating host functions (db_write,
+// transfer) will return errors instead of writing — used for query
+// execution to enforce read-only semantics at the host boundary.
+func NewHostEnvironment(ctx context.Context, contractAddr, sender string, keeper *Keeper, readOnly bool) *ContractHostEnvironment {
 	return &ContractHostEnvironment{
 		Ctx:          ctx,
 		ContractAddr: contractAddr,
 		Sender:       sender,
 		Keeper:       keeper,
+		ReadOnly:     readOnly,
 	}
 }
 

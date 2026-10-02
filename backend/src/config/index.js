@@ -390,17 +390,21 @@ function validateRuntimeSecrets() {
 }
 
 function getAllowedOrigins() {
-  const origins = [
+  const baseOrigins = [
     config.frontendUrl,
     ...config.corsOrigins,
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
   ].filter(Boolean);
+
+  // In production, never allow localhost origins — they should only be
+  // available during local development.
+  if (!config.isProduction) {
+    baseOrigins.push('http://localhost:5173', 'http://127.0.0.1:5173');
+  }
 
   if (!config.isProduction) {
     return (origin, callback) => {
       if (!origin) return callback(null, true);
-      if (origins.includes(origin)) return callback(null, true);
+      if (baseOrigins.includes(origin)) return callback(null, true);
       if (/^http:\/\/(localhost|127\.0\.0\.1):\d+$/i.test(origin)) {
         return callback(null, true);
       }
@@ -410,7 +414,7 @@ function getAllowedOrigins() {
 
   return (origin, callback) => {
     if (!origin) return callback(null, true);
-    if (origins.includes(origin)) return callback(null, true);
+    if (baseOrigins.includes(origin)) return callback(null, true);
     return callback(new Error('Not allowed by CORS'));
   };
 }

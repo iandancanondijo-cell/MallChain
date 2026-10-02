@@ -8,8 +8,9 @@ import (
 type MlcoinKeeper interface {
 	Transfer(ctx context.Context, from, to string, amount uint64) error
 	Approve(ctx context.Context, owner, spender string, amount uint64) error
-	TransferFrom(ctx context.Context, owner, spender, recipient string, amount uint64) error
+	TransferFrom(ctx context.Context, owner, spender, recipient string, amount uint64) (string, error)
 	GetAllowance(ctx context.Context, owner, spender string) (uint64, error)
+	GetBalance(ctx context.Context, address string) (uint64, error)
 }
 
 // WalletBalanceAccessor defines the subset of wallet balance operations needed by wasmbridge.

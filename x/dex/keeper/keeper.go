@@ -11,18 +11,24 @@ import (
 	"cosmossdk.io/math"
 	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"google.golang.org/protobuf/proto"
 
 	"marketplace/x/dex/types"
 )
 
+// poolCodec uses deterministic protobuf binary encoding for consensus-critical
+// on-chain storage (Encode/Decode), with JSON reserved for CLI/REST display
+// (EncodeJSON/DecodeJSON). The previous implementation used encoding/json for
+// both, which is non-deterministic across Go versions for map fields and could
+// cause consensus splits.
 type poolCodec struct{}
 
 func (poolCodec) Encode(value *types.Pool) ([]byte, error) {
-	return json.Marshal(value)
+	return proto.MarshalOptions{Deterministic: true}.Marshal(value)
 }
 func (poolCodec) Decode(b []byte) (*types.Pool, error) {
 	v := &types.Pool{}
-	err := json.Unmarshal(b, v)
+	err := proto.Unmarshal(b, v)
 	return v, err
 }
 func (poolCodec) EncodeJSON(value *types.Pool) ([]byte, error) {
@@ -44,11 +50,11 @@ func (poolCodec) ValueType() string {
 type paramsCodec struct{}
 
 func (paramsCodec) Encode(value *types.Params) ([]byte, error) {
-	return json.Marshal(value)
+	return proto.MarshalOptions{Deterministic: true}.Marshal(value)
 }
 func (paramsCodec) Decode(b []byte) (*types.Params, error) {
 	v := &types.Params{}
-	err := json.Unmarshal(b, v)
+	err := proto.Unmarshal(b, v)
 	return v, err
 }
 func (paramsCodec) EncodeJSON(value *types.Params) ([]byte, error) {
@@ -158,6 +164,10 @@ func (k Keeper) CreatePool(ctx context.Context, creator sdk.AccAddress, tokenA, 
 		return 0, err
 	}
 
+	if params.Paused {
+		return 0, fmt.Errorf("DEX is currently paused")
+	}
+
 	if fee == "" {
 		fee = params.DefaultFee
 	}
@@ -230,6 +240,14 @@ func (k Keeper) validateFee(fee string, params *types.Params) error {
 
 func (k Keeper) AddLiquidity(ctx context.Context, provider sdk.AccAddress, poolId uint64, tokenAAmount, tokenBAmount sdk.Coin) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	params, err := k.GetParams(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get DEX parameters: %w", err)
+	}
+	if params.Paused {
+		return fmt.Errorf("DEX is currently paused")
+	}
 
 	pool, err := k.pools.Get(ctx, poolId)
 	if err != nil {
@@ -365,6 +383,10 @@ func (k Keeper) Swap(ctx context.Context, sender sdk.AccAddress, poolId uint64, 
 	params, err := k.GetParams(ctx)
 	if err != nil {
 		return sdk.Coin{}, fmt.Errorf("failed to get DEX parameters: %w", err)
+	}
+
+	if params.Paused {
+		return sdk.Coin{}, fmt.Errorf("DEX is currently paused")
 	}
 
 	var tokenOut sdk.Coin

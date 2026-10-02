@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { store } from '../../store/store';
-import { useStoreVersion, fmtNum, toast } from '../../components/ui';
+import { useStoreSlice } from '../../store/hooks';
+import { fmtNum, toast } from '../../components/ui';
 import { stakingApi, type StakingSummary } from '../../services/stakingApi';
 import { stakeMlcns, unstake, StakingTxError } from '../../services/stakingTx';
 import { requestMnemonic } from '../../services/mnemonicAccess';
@@ -8,9 +9,9 @@ import { Lock, Unlock, TrendingUp, Coins, History, Zap, AlertTriangle } from 'lu
 
 /** Staking — DeFi-style glassmorphism layout with real MsgStake/MsgUnstake. */
 export default function Staking() {
-  useStoreVersion();
-  const st = store.state;
-  const address = st.wallet.address;
+  const address = useStoreSlice(s => s.wallet.address);
+  const pinEncryptedMnemonic = useStoreSlice(s => s.wallet.pinEncryptedMnemonic);
+  const mallBalance = useStoreSlice(s => s.balances.MALL);
 
   const [summary, setSummary] = useState<StakingSummary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -33,8 +34,8 @@ export default function Staking() {
 
   const delegate = async () => {
     const a = parseFloat(amt);
-    if (!a || a <= 0 || a > st.balances.MALL) return toast('Invalid amount or insufficient balance', false);
-    if (!st.wallet.pinEncryptedMnemonic || !address) return toast('Wallet not connected', false);
+    if (!a || a <= 0 || a > mallBalance) return toast('Invalid amount or insufficient balance', false);
+    if (!pinEncryptedMnemonic || !address) return toast('Wallet not connected', false);
     const mnemonic = await requestMnemonic();
     if (!mnemonic) return;
     setBusy(true);
@@ -49,7 +50,7 @@ export default function Staking() {
   };
 
   const doUnstake = async (stakeId: string) => {
-    if (!st.wallet.pinEncryptedMnemonic || !address) return toast('Wallet not connected', false);
+    if (!pinEncryptedMnemonic || !address) return toast('Wallet not connected', false);
     const mnemonic = await requestMnemonic();
     if (!mnemonic) return;
     setUnstakingId(stakeId);
@@ -158,11 +159,11 @@ export default function Staking() {
           <div className="field">
             <label>
               Amount (MLCNS)
-              <span className="tiny muted" style={{ float: 'right', fontWeight: 400 }}>Balance: {fmtNum(st.balances.MALL)}</span>
+              <span className="tiny muted" style={{ float: 'right', fontWeight: 400 }}>Balance: {fmtNum(mallBalance)}</span>
             </label>
             <div className="row">
               <input className="input" type="number" placeholder="0.00" value={amt} onChange={(e) => setAmt(e.target.value)} style={{ flex: 1 }} />
-              <button className="btn btn-ghost btn-sm" onClick={() => setAmt(String(st.balances.MALL))}>Max</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setAmt(String(mallBalance))}>Max</button>
             </div>
           </div>
           <button className="btn btn-primary btn-block" onClick={delegate} disabled={busy || !!error}>

@@ -1,6 +1,8 @@
 const express = require('express')
 const router = express.Router()
+const mongoose = require('mongoose')
 const MallPointAccount = require('../models/MallPointAccount')
+const User = require('../models/user')
 const { createLimiter } = require('../middleware/rateLimiter')
 const { getChainUserPoints, getConversionWindow, mergePoints, buildConversionStatus } = require('../services/mallpointsService')
 const { getUserBadgeInfo } = require('../services/badgeService')
@@ -9,6 +11,7 @@ const {
   getMlptsPerMlcnsScale,
 } = require('../services/mallcoinService')
 const { getDynamicConversionRate } = require('../services/conversionRateOracle')
+const { blindIndex } = require('../utils/fieldEncryption')
 const { addLiquidityToPool } = require('../controllers/liquidityController')
 const { recordLiquidityActivity } = require('../services/liquidityActivityService')
 const { verifyConvertSignature } = require('../mallwallet/security/verifyAdr036')
@@ -63,8 +66,8 @@ router.get('/:address', async (req, res) => {
       convertiblePoints: Math.floor(acc?.balance || 0),
     })
   } catch (e) {
-    logger.error('mallpoints', 'mallpoints get error', e)
-    res.status(500).json({ error: String(e) })
+    logger.error('mallpoints', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' })
   }
 })
 
@@ -101,8 +104,8 @@ router.post('/sync', async (req, res) => {
       convertiblePoints: Math.floor(dbBalance || 0),
     })
   } catch (e) {
-    logger.error('mallpoints', 'mallpoints sync error', e)
-    res.status(500).json({ error: String(e) })
+    logger.error('mallpoints', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' })
   }
 })
 
@@ -205,9 +208,41 @@ router.post('/convert', async (req, res) => {
 
     const previousLastConversionAt = acc.lastConversionAt
 
-    acc.balance = acc.balance - pointsToConvert
-    acc.lastConversionAt = new Date()
-    await acc.save()
+    // Atomic debit from both MallPointAccount (canonical on-chain balance)
+    // and User.mlpts_balance (used by mines/creatorSpace/referrals).
+    // Both updates must succeed atomically to prevent balance divergence.
+    const session = await mongoose.startSession()
+    let updated
+    try {
+      await session.withTransaction(async () => {
+        // Debit MallPointAccount
+        updated = await MallPointAccount.findOneAndUpdate(
+          { address, balance: { $gte: pointsToConvert } },
+          { $inc: { balance: -pointsToConvert }, $set: { lastConversionAt: new Date() } },
+          { new: true, session }
+        )
+        if (!updated) {
+          throw new Error('insufficient balance (concurrent conversion?)')
+        }
+
+        // Debit User.mlpts_balance
+        const user = await User.findOne({ walletAddress_blind: blindIndex(address) }).session(session)
+        if (user) {
+          await User.updateOne(
+            { _id: user._id, mlpts_balance: { $gte: pointsToConvert } },
+            { $inc: { mlpts_balance: -pointsToConvert } },
+            { session }
+          )
+        }
+      })
+    } catch (txErr) {
+      await session.endSession()
+      if (txErr.message.includes('insufficient balance')) {
+        return res.status(400).json({ error: 'insufficient balance (concurrent conversion?)' })
+      }
+      throw txErr
+    }
+    await session.endSession()
 
     try {
       const credit = await creditMlcns(address, mlcoins)
@@ -310,9 +345,12 @@ router.post('/convert', async (req, res) => {
         credit,
       })
     } catch (creditErr) {
-      acc.balance = acc.balance + pointsToConvert
-      acc.lastConversionAt = previousLastConversionAt
-      await acc.save()
+      // Atomic rollback — restore the debited points. Uses $inc to avoid
+      // racing with any other concurrent operation on this account.
+      await MallPointAccount.findOneAndUpdate(
+        { address },
+        { $inc: { balance: pointsToConvert }, $set: { lastConversionAt: previousLastConversionAt } }
+      )
       logger.warn('mallpoints', 'MLCNS credit failed; points restored', { error: creditErr.message })
       return res.status(502).json({
         error: 'Points conversion credited on ledger failed',
@@ -321,8 +359,8 @@ router.post('/convert', async (req, res) => {
     }
 
   } catch (e) {
-    logger.error('mallpoints', 'mallpoints convert error', e)
-    res.status(500).json({ error: String(e) })
+    logger.error('mallpoints', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' })
   }
 })
 

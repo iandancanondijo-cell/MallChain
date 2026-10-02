@@ -12,6 +12,7 @@ import { config } from '../services/config';
 import { detectDefaultCurrency } from '../services/locale';
 
 export const OS_KEY = 'mallchain_os_v1_v14';
+const WALLET_SECRETS_KEY = 'mallchain_wallet_secrets_v1';
 
 /* ---------------- types ---------------- */
 
@@ -180,7 +181,7 @@ export interface AppState {
   };
   contracts: Array<{ id: string; name: string; addr: string; type: string; txs: number }>;
   devhub: {
-    keys: Array<{ id: string; name: string; key: string; used: number; created: string }>;
+    keys: Array<{ id: string; name: string; used: number; created: string }>;
   };
   careers: {
     list: Array<{ title: string; dept: string; loc: string; applied: boolean }>;
@@ -369,18 +370,43 @@ class Store {
   }
 
   private load(): AppState {
+    let parsed: AppState | null = null;
     try {
       const raw = localStorage.getItem(OS_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as AppState;
-        if (parsed && parsed.version === 14) {
-          return this.merge(parsed);
+        const p = JSON.parse(raw) as AppState;
+        if (p && p.version === 14) {
+          parsed = p;
         }
       }
     } catch {
       /* corrupted store — start fresh */
     }
-    const fresh = emptyState();
+    const base = parsed ? this.merge(parsed) : emptyState();
+
+    // F1: The PIN-encrypted mnemonic ciphertext lives in sessionStorage
+    // (cleared when the tab/browser closes) rather than localStorage
+    // (persistent). This limits the XSS exposure window: an attacker who
+    // steals the ciphertext from sessionStorage can only brute-force the
+    // PIN while the tab is still open. On load, we overlay the session
+    // secret onto the localStorage-backed state. If sessionStorage has no
+    // secret yet but localStorage does (migration from older versions),
+    // we promote it to sessionStorage and strip it from localStorage.
+    try {
+      const sessionRaw = sessionStorage.getItem(WALLET_SECRETS_KEY);
+      if (sessionRaw) {
+        const secrets = JSON.parse(sessionRaw) as { pinEncryptedMnemonic?: string; pinHash?: string };
+        if (secrets.pinEncryptedMnemonic) base.wallet.pinEncryptedMnemonic = secrets.pinEncryptedMnemonic;
+        if (secrets.pinHash) base.wallet.pinHash = secrets.pinHash;
+      } else if (parsed?.wallet?.pinEncryptedMnemonic) {
+        this.writeWalletSecrets(parsed.wallet.pinEncryptedMnemonic, parsed.wallet.pinHash);
+        base.wallet.pinEncryptedMnemonic = parsed.wallet.pinEncryptedMnemonic;
+        base.wallet.pinHash = parsed.wallet.pinHash;
+        this.persistMainStore(parsed);
+      }
+    } catch {
+      /* sessionStorage unavailable — fall back to localStorage copy already in base */
+    }
 
     // Task 4.8: Sync auth state with the session marker on initial load.
     // The JWT itself lives in an httpOnly cookie this code can't read — this
@@ -396,13 +422,14 @@ class Store {
     try {
       const raw = localStorage.getItem('session');
       const authedUntil = raw ? (JSON.parse(raw) as { authedUntil?: number }).authedUntil : undefined;
-      fresh.user.authed = typeof authedUntil === 'number' && authedUntil > Math.floor(Date.now() / 1000);
+      base.user.authed = typeof authedUntil === 'number' && authedUntil > Math.floor(Date.now() / 1000);
     } catch {
-      fresh.user.authed = false;
+      base.user.authed = false;
     }
 
-    this.persist();
-    return fresh;
+    this.persistMainStore(base);
+    this.writeWalletSecrets(base.wallet.pinEncryptedMnemonic, base.wallet.pinHash);
+    return base;
   }
 
   private merge(saved: AppState): AppState {
@@ -432,8 +459,34 @@ class Store {
   }
 
   persist() {
+    this.persistMainStore(this.state);
+    this.writeWalletSecrets(this.state.wallet.pinEncryptedMnemonic, this.state.wallet.pinHash);
+  }
+
+  private writeWalletSecrets(pinEncryptedMnemonic: string, pinHash: string) {
     try {
-      localStorage.setItem(OS_KEY, JSON.stringify(this.state));
+      sessionStorage.setItem(
+        WALLET_SECRETS_KEY,
+        JSON.stringify({ pinEncryptedMnemonic: pinEncryptedMnemonic || '', pinHash: pinHash || '' })
+      );
+    } catch {
+      /* sessionStorage unavailable */
+    }
+  }
+
+  private persistMainStore(state: AppState) {
+    try {
+      const toPersist = { ...state };
+      if (toPersist.wallet) {
+        const { mnemonic: _m, pinEncryptedMnemonic: _pe, pinHash: _ph, ...safeWallet } = toPersist.wallet as typeof toPersist.wallet & { mnemonic?: string; pinEncryptedMnemonic?: string; pinHash?: string };
+        toPersist.wallet = { ...safeWallet, mnemonic: '', pinEncryptedMnemonic: '', pinHash: '' } as typeof toPersist.wallet;
+      }
+      if (toPersist.devhub?.keys) {
+        toPersist.devhub = {
+          keys: toPersist.devhub.keys.map(({ id, name, used, created }) => ({ id, name, used, created })),
+        };
+      }
+      localStorage.setItem(OS_KEY, JSON.stringify(toPersist));
     } catch {
       /* storage full/unavailable */
     }
@@ -539,9 +592,17 @@ class Store {
    * Apply a full snapshot already persisted by another tab (via a `storage` event).
    * Unlike every other mutation path this does NOT re-persist — the snapshot is
    * already on disk — it only merges into memory and notifies subscribers.
+   * Wallet secrets (pinEncryptedMnemonic, pinHash) are preserved from the current
+   * tab's sessionStorage — they're not in the localStorage snapshot.
    */
   applyExternalState(newState: AppState) {
+    const savedSecrets = {
+      pinEncryptedMnemonic: this.state.wallet.pinEncryptedMnemonic,
+      pinHash: this.state.wallet.pinHash,
+    };
     this.state = this.merge(newState);
+    this.state.wallet.pinEncryptedMnemonic = savedSecrets.pinEncryptedMnemonic;
+    this.state.wallet.pinHash = savedSecrets.pinHash;
     this.listeners.forEach((fn) => {
       try {
         fn();
@@ -553,6 +614,7 @@ class Store {
 
   reset() {
     localStorage.removeItem(OS_KEY);
+    sessionStorage.removeItem(WALLET_SECRETS_KEY);
     this.state = emptyState();
     this.commit();
   }

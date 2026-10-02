@@ -23,6 +23,7 @@ const { enqueueFailedCallback } = require('../mallwallet/queue/paymentCallbackQu
 const { getBuyGateStatus, requireDirectBuyUnlocked } = require('../services/buyGateService');
 const { checkSellLiquidity } = require('../services/sellGateService');
 const User = require('../models/user');
+const { blindIndex } = require('../utils/fieldEncryption');
 const WithdrawalAmlReview = require('../models/WithdrawalAmlReview');
 const { checkMinimumWithdrawal } = require('../services/withdrawalMinimumService');
 const { checkWeeklyWithdrawalLimit, WEEKLY_WITHDRAWAL_LIMIT } = require('../services/withdrawalRateLimitService');
@@ -520,8 +521,8 @@ router.post('/reserve', limiters.financial, idempotency({ required: true }), req
       quote: paymentSummary(purchase),
     });
   } catch (e) {
-    logger.error('buy', 'buy reserve error', e);
-    res.status(500).json({ error: e.message });
+    logger.error('buy', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -546,8 +547,8 @@ router.post('/mpesa', limiters.financial, idempotency({ required: true }), requi
       currency: purchase.currency,
     });
   } catch (e) {
-    logger.error('buy', 'M-Pesa initiate error', e);
-    res.status(500).json({ error: e.message });
+    logger.error('buy', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -568,8 +569,8 @@ router.get('/status/:paymentId', async (req, res) => {
     if (!purchase) return res.json({ status: 'unknown', providerMode: getProviderMode() });
     return res.json(paymentSummary(purchase));
   } catch (e) {
-    logger.error('buy', 'status check error', e);
-    res.json({ status: 'error', reason: e.message, providerMode: getProviderMode() });
+    logger.error('buy', { route: req.originalUrl, error: e.message || String(e) });
+    res.json({ status: 'error', reason: 'internal error', providerMode: getProviderMode() });
   }
 });
 
@@ -608,9 +609,9 @@ router.post('/credit', limiters.financial, validate(schemas.buyCredit), async (r
     const response = await handleReservedCredit({ quoteId, walletAddress, creditMlcns });
     return res.json(response);
   } catch (e) {
-    logger.error('buy', 'credit error', e);
+    logger.error('buy', { route: req.originalUrl, error: e.message || String(e) });
     const status = e.status || 500;
-    res.status(status).json({ error: e.message });
+    res.status(status).json({ error: status === 400 ? 'invalid request' : 'internal error' });
   }
 });
 
@@ -659,7 +660,7 @@ router.get('/sell/preview', async (req, res) => {
     const amlCheck = sellerAddress
       ? await requireApprovedAmlReview(sellerAddress, estimatedKes)
       : { ok: true, required: false, thresholdKes: AML_WITHDRAWAL_THRESHOLD_KES, reviewId: null, reviewStatus: 'none' };
-    const walletLinked = sellerAddress ? Boolean(await User.findOne({ walletAddress: sellerAddress }).select('_id').lean()) : false;
+    const walletLinked = sellerAddress ? Boolean(await User.findOne({ walletAddress_blind: blindIndex(sellerAddress) }).select('_id').lean()) : false;
     const liquidityCheck = await checkSellLiquidity(estimatedKes);
 
     const burnPercentage = 30; // default applied burn rate — see burnCalculator.js, actual split confirmed at settlement time
@@ -697,8 +698,8 @@ router.get('/sell/preview', async (req, res) => {
       liquidityError: liquidityCheck.ok ? null : liquidityCheck.error,
     });
   } catch (e) {
-    logger.error('buy', 'sell preview error', e);
-    return res.status(500).json({ error: e.message || 'preview failed' });
+    logger.error('buy', { route: req.originalUrl, error: e.message || String(e) });
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -815,8 +816,8 @@ router.post('/sell', limiters.financial, validate(schemas.sell), async (req, res
     });
     return res.status(result.status).json(result.body);
   } catch (e) {
-    logger.error('buy', 'sell error', e);
-    return res.status(500).json({ error: e.message });
+    logger.error('buy', { route: req.originalUrl, error: e.message || String(e) });
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -858,8 +859,8 @@ router.post('/sell/:saleId/resign', limiters.financial, async (req, res) => {
 
     return res.json({ ok: true, saleId: sale.saleId, withdrawalId: withdrawal.withdrawalId, status: withdrawal.status });
   } catch (e) {
-    logger.error('buy', 'sell resign error', e);
-    return res.status(500).json({ error: e.message || 'resign failed' });
+    logger.error('buy', { route: req.originalUrl, error: e.message || String(e) });
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -876,8 +877,8 @@ router.get('/sell/status/:saleId', async (req, res) => {
     }
     return res.json(await saleSummary(sale));
   } catch (e) {
-    logger.error('buy', 'sell status error', e);
-    return res.status(500).json({ error: e.message || 'cash-out status failed' });
+    logger.error('buy', { route: req.originalUrl, error: e.message || String(e) });
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 

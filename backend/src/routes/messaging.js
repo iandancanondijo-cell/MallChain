@@ -9,6 +9,7 @@ const auth = require('../middleware/auth');
 const User = require('../models/user');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
+const { blindIndex, decryptField } = require('../utils/fieldEncryption');
 
 async function requireParticipant(req, res, next) {
   try {
@@ -47,9 +48,11 @@ router.get('/conversations', auth, async (req, res) => {
           senderId: { $ne: req.user._id },
           readBy: { $ne: req.user._id },
         });
+        // email is encrypted at rest — decrypt for display name fallback
+        const decryptedEmail = other?.email ? decryptField(other.email) : other?.email;
         return {
           id: c._id,
-          name: other?.username || other?.email || 'Unknown',
+          name: other?.username || decryptedEmail || 'Unknown',
           unread,
           lastMessage: lastMessage ? { text: lastMessage.text, ts: lastMessage.createdAt, mine: String(lastMessage.senderId) === String(req.user._id) } : null,
         };
@@ -133,7 +136,8 @@ router.post('/conversations', auth, async (req, res) => {
       return res.status(400).json({ error: 'recipientEmail required' });
     }
 
-    const recipient = await User.findOne({ email: recipientEmail });
+    const normalizedEmail = recipientEmail.toLowerCase().trim();
+    const recipient = await User.findOne({ email_blind: blindIndex(normalizedEmail) });
     if (!recipient) {
       return res.status(404).json({ error: 'No user found with that email' });
     }
@@ -148,7 +152,9 @@ router.post('/conversations', auth, async (req, res) => {
       conversation = await Conversation.create({ participants: [req.user._id, recipient._id] });
     }
 
-    res.json({ success: true, conversation: { id: conversation._id, name: recipient.username || recipient.email, unread: 0 } });
+    // email is encrypted at rest — decrypt for display name fallback
+    const decryptedEmail = recipient.email ? decryptField(recipient.email) : recipient.email;
+    res.json({ success: true, conversation: { id: conversation._id, name: recipient.username || decryptedEmail, unread: 0 } });
   } catch (error) {
     logger.error('messaging', 'error creating conversation', error);
     res.status(500).json({ error: 'Failed to create conversation' });

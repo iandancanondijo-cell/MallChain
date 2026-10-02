@@ -19,6 +19,7 @@ const LiquidityPoolActivity = require('../models/LiquidityPoolActivity');
 const LiquidityReconciliation = require('../models/LiquidityReconciliation');
 const AuditLog = require('../models/AuditLog');
 const logger = require('../utils/logger');
+const { blindIndex, decryptField } = require('../utils/fieldEncryption');
 
 const REDACTED = '[erased]';
 
@@ -39,13 +40,18 @@ const REDACTED = '[erased]';
  */
 async function gatherUserData(user) {
   const userId = user._id;
-  const walletAddress = user.walletAddress;
-  const phone = user.phone;
+  // walletAddress and phone are encrypted at rest — decrypt to plaintext
+  // before using them for cross-model queries (computing blindIndex on
+  // ciphertext would produce a hash that matches nothing).
+  const walletAddress = user.walletAddress ? decryptField(user.walletAddress) : null;
+  const phone = user.phone ? decryptField(user.phone) : null;
+  // Phone is now encrypted at rest — query by blind index instead
+  const phoneBlind = phone ? blindIndex(phone) : null;
 
-  const walletOrPhone = (walletField, phoneField) => {
+  const walletOrPhone = (walletField, phoneBlindField) => {
     const or = [];
     if (walletAddress) or.push({ [walletField]: walletAddress });
-    if (phone && phoneField) or.push({ [phoneField]: phone });
+    if (phoneBlind && phoneBlindField) or.push({ [phoneBlindField]: phoneBlind });
     return or.length ? { $or: or } : null;
   };
 
@@ -76,12 +82,12 @@ async function gatherUserData(user) {
   ]);
 
   const financial = {};
-  const bpQuery = walletOrPhone('walletAddress', 'phone');
-  const mpQuery = walletOrPhone('walletAddress', 'phone');
-  const msQuery = walletOrPhone('sellerAddress', 'phone');
-  const wrQuery = walletOrPhone('walletAddress', 'phone');
+  const bpQuery = walletOrPhone('walletAddress', 'phone_blind');
+  const mpQuery = walletOrPhone('walletAddress', 'phone_blind');
+  const msQuery = walletOrPhone('sellerAddress', 'phone_blind');
+  const wrQuery = walletOrPhone('walletAddress', 'phone_blind');
   const b2cQuery = walletOrPhone('sellerAddress', 'sellerPhone');
-  const lpaQuery = walletOrPhone('walletAddress', 'phone');
+  const lpaQuery = walletOrPhone('walletAddress', 'phone_blind');
   const lrQuery = walletAddress ? { walletAddress } : null;
 
   const [
@@ -148,8 +154,10 @@ async function exportUserData(user) {
  */
 async function eraseUserData(user) {
   const userId = user._id;
-  const walletAddress = user.walletAddress;
-  const phone = user.phone;
+  // walletAddress and phone are encrypted at rest — decrypt to plaintext
+  // before using them for cross-model queries in the erasure flow.
+  const walletAddress = user.walletAddress ? decryptField(user.walletAddress) : null;
+  const phone = user.phone ? decryptField(user.phone) : null;
   const erasedAt = new Date();
 
   await Promise.all([
@@ -182,23 +190,26 @@ async function eraseUserData(user) {
 
   await Message.updateMany({ senderId: userId }, { $set: { text: '[message deleted by user]' } });
 
-  const phoneOrWalletFilter = (walletField, phoneField) => {
+  // Phone is now encrypted at rest — query by blind index instead
+  const phoneBlind = phone ? blindIndex(phone) : null;
+
+  const phoneOrWalletFilter = (walletField, phoneBlindField) => {
     const or = [];
     if (walletAddress) or.push({ [walletField]: walletAddress });
-    if (phone && phoneField) or.push({ [phoneField]: phone });
+    if (phoneBlind && phoneBlindField) or.push({ [phoneBlindField]: phoneBlind });
     return or.length ? { $or: or } : null;
   };
 
   const redactPhoneOps = [];
-  // Same field names (walletAddress + phone) across all four of these schemas.
-  const walletAddressPhoneFilter = phoneOrWalletFilter('walletAddress', 'phone');
+  // Same field names (walletAddress + phone_blind) across all four of these schemas.
+  const walletAddressPhoneFilter = phoneOrWalletFilter('walletAddress', 'phone_blind');
   if (walletAddressPhoneFilter) {
     redactPhoneOps.push(BadgePurchase.updateMany(walletAddressPhoneFilter, { $set: { phone: REDACTED } }));
     redactPhoneOps.push(MallcoinPurchase.updateMany(walletAddressPhoneFilter, { $set: { phone: REDACTED } }));
     redactPhoneOps.push(WithdrawalRequest.updateMany(walletAddressPhoneFilter, { $set: { phone: REDACTED } }));
     redactPhoneOps.push(LiquidityPoolActivity.updateMany(walletAddressPhoneFilter, { $set: { phone: REDACTED } }));
   }
-  const sellerAddressPhoneFilter = phoneOrWalletFilter('sellerAddress', 'phone');
+  const sellerAddressPhoneFilter = phoneOrWalletFilter('sellerAddress', 'phone_blind');
   if (sellerAddressPhoneFilter) {
     redactPhoneOps.push(MallcoinSale.updateMany(sellerAddressPhoneFilter, { $set: { phone: REDACTED } }));
   }

@@ -13,6 +13,9 @@ import { TxRaw } from 'cosmjs-types/cosmos/tx/v1beta1/tx';
 import { SignMode } from 'cosmjs-types/cosmos/tx/signing/v1beta1/signing';
 import { api } from './api';
 import { chain } from './config';
+import { estimateGas } from './gasEstimation';
+import { broadcastWithRetry } from './broadcastWithRetry';
+import { waitForConfirmation } from './txConfirmation';
 import {
   createVaultRegistry,
   MSG_SETUP_VAULT,
@@ -23,7 +26,7 @@ import {
   type MsgDisableVaultValue,
 } from './vaultProto';
 
-const DEFAULT_GAS_LIMIT = 200000;
+const PLACEHOLDER_GAS_LIMIT = 0;
 
 export class VaultTxError extends Error {}
 
@@ -52,7 +55,29 @@ async function signAndBroadcast(opts: { mnemonic: string; fromAddress: string; t
   });
 
   const pubkey = encodePubkey({ type: 'tendermint/PubKeySecp256k1', value: toBase64(account.pubkey) });
-  const fee = calculateFee(DEFAULT_GAS_LIMIT, GasPrice.fromString(chain.gasPrice));
+
+  // Build unsigned tx with placeholder fee for simulation
+  const placeholderFee = calculateFee(PLACEHOLDER_GAS_LIMIT, GasPrice.fromString(chain.gasPrice));
+  const placeholderAuthInfoBytes = makeAuthInfoBytes(
+    [{ pubkey, sequence: BigInt(sequence) }],
+    placeholderFee.amount,
+    Number(placeholderFee.gas),
+    undefined,
+    undefined,
+    SignMode.SIGN_MODE_DIRECT
+  );
+
+  const placeholderTxRaw = TxRaw.encode({
+    bodyBytes,
+    authInfoBytes: placeholderAuthInfoBytes,
+    signatures: [new Uint8Array()],
+  }).finish();
+
+  // Estimate gas via backend simulation
+  const gasLimit = await estimateGas(toBase64(placeholderTxRaw));
+
+  // Rebuild with estimated gas
+  const fee = calculateFee(gasLimit, GasPrice.fromString(chain.gasPrice));
   const authInfoBytes = makeAuthInfoBytes(
     [{ pubkey, sequence: BigInt(sequence) }],
     fee.amount,
@@ -71,13 +96,14 @@ async function signAndBroadcast(opts: { mnemonic: string; fromAddress: string; t
     signatures: [fromBase64(signature.signature)],
   }).finish();
 
-  const res = await api.post<{ success: boolean; txHash: string; error?: string }>('/api/key-vault/broadcast', {
-    txBytes: toBase64(txRawBytes),
-  });
-  if (!res.ok || !res.data?.txHash) {
-    throw new VaultTxError(res.error || res.data?.error || 'Transaction failed during broadcast');
+  let data;
+  try {
+    data = await broadcastWithRetry('/api/key-vault/broadcast', { txBytes: toBase64(txRawBytes) });
+  } catch (err) {
+    throw new VaultTxError(err instanceof Error ? err.message : 'Transaction failed during broadcast');
   }
-  return { txHash: res.data.txHash };
+  await waitForConfirmation(data.txHash);
+  return { txHash: data.txHash };
 }
 
 export async function setupVault(opts: { mnemonic: string; fromAddress: string } & Omit<MsgSetupVaultValue, 'authority'>): Promise<{ txHash: string }> {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 
 	"cosmossdk.io/core/appmodule"
 	"github.com/cosmos/cosmos-sdk/client"
@@ -11,11 +12,14 @@ import (
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	simtypes "github.com/cosmos/cosmos-sdk/types/simulation"
+	"github.com/cosmos/cosmos-sdk/x/simulation"
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/spf13/cobra"
 
 	"marketplace/x/governance/client/cli"
 	"marketplace/x/governance/keeper"
+	govsimulation "marketplace/x/governance/simulation"
 	"marketplace/x/governance/types"
 )
 
@@ -125,4 +129,35 @@ func (am AppModule) ExportGenesis(ctx sdk.Context, cdc codec.JSONCodec) json.Raw
 // EndBlock executes all ABCI EndBlock logic respective to the governance module.
 func (am AppModule) EndBlock(ctx context.Context) error {
 	return am.keeper.EndBlocker(ctx)
+}
+
+// GenerateGenesisState creates a randomized GenState of the governance module.
+func (AppModule) GenerateGenesisState(simState *module.SimulationState) {
+	govGenesis := types.DefaultGenesisState()
+	simState.GenState[types.ModuleName] = simState.Cdc.MustMarshalJSON(govGenesis)
+}
+
+// RegisterStoreDecoder registers a decoder.
+func (am AppModule) RegisterStoreDecoder(_ simtypes.StoreDecoderRegistry) {}
+
+// WeightedOperations returns the all the gov module operations with their respective weights.
+func (am AppModule) WeightedOperations(simState module.SimulationState) []simtypes.WeightedOperation {
+	operations := make([]simtypes.WeightedOperation, 0)
+	const (
+		opWeightMsgVote          = "op_weight_msg_vote"
+		defaultWeightMsgVote int = 100
+	)
+
+	var weightMsgVote int
+	simState.AppParams.GetOrGenerate(opWeightMsgVote, &weightMsgVote, nil,
+		func(_ *rand.Rand) {
+			weightMsgVote = defaultWeightMsgVote
+		},
+	)
+	operations = append(operations, simulation.NewWeightedOperation(
+		weightMsgVote,
+		govsimulation.SimulateMsgVote(am.keeper, simState.TxConfig),
+	))
+
+	return operations
 }

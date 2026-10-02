@@ -42,6 +42,34 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 		return err
 	}
 
+	// Initialize transactions from genesis
+	for _, tx := range genState.TransactionMap {
+		if err := k.Transactions.Set(ctx, tx.TxId, tx); err != nil {
+			return err
+		}
+	}
+
+	// Initialize transaction count sequence
+	if genState.TransactionCount > 0 {
+		if err := k.TransactionCount.Set(ctx, genState.TransactionCount); err != nil {
+			return err
+		}
+	}
+
+	// Initialize market price from genesis
+	if genState.MarketPrice != nil {
+		if err := k.MarketPrice.Set(ctx, *genState.MarketPrice); err != nil {
+			return err
+		}
+	}
+
+	// Initialize trade history from genesis
+	for _, trade := range genState.TradeHistory {
+		if err := k.TradeHistory.Set(ctx, trade.TxId, trade); err != nil {
+			return err
+		}
+	}
+
 	if err := k.Params.Set(ctx, genState.Params); err != nil {
 		return err
 	}
@@ -82,6 +110,44 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 		return nil, err
 	}
 	genesis.FeesAccumulated = feesAcc
+
+	// Export transactions
+	if err := k.Transactions.Walk(ctx, nil, func(_ string, val types.Transaction) (stop bool, err error) {
+		genesis.TransactionMap = append(genesis.TransactionMap, val)
+		return false, nil
+	}); err != nil {
+		return nil, err
+	}
+
+	// Export transaction count sequence (Peek returns next value without incrementing)
+	txCount, err := k.TransactionCount.Peek(ctx)
+	if err != nil && !errors.Is(err, collections.ErrNotFound) {
+		return nil, err
+	}
+	genesis.TransactionCount = txCount
+
+	// Export market price
+	marketPrice, err := k.MarketPrice.Get(ctx)
+	if err != nil && !errors.Is(err, collections.ErrNotFound) {
+		return nil, err
+	}
+	genesis.MarketPrice = &marketPrice
+
+	// Export KES balances
+	if err := k.KesBalance.Walk(ctx, nil, func(_ string, val types.KesBalance) (stop bool, err error) {
+		genesis.KesBalanceMap = append(genesis.KesBalanceMap, val)
+		return false, nil
+	}); err != nil {
+		return nil, err
+	}
+
+	// Export trade history
+	if err := k.TradeHistory.Walk(ctx, nil, func(_ string, val types.Trade) (stop bool, err error) {
+		genesis.TradeHistory = append(genesis.TradeHistory, val)
+		return false, nil
+	}); err != nil {
+		return nil, err
+	}
 
 	return genesis, nil
 }

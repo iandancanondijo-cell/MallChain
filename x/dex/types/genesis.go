@@ -22,6 +22,7 @@ func DefaultParams() Params {
 		MaxFee:             "0.01",
 		MinFee:             "0.001",
 		MaxPoolDrainPercent: 20,
+		Paused:             false,
 	}
 }
 
@@ -59,6 +60,28 @@ func (gs *GenesisState) Validate() error {
 		}
 		if !pool.TotalLiquidity.IsValid() {
 			return fmt.Errorf("invalid total liquidity")
+		}
+
+		if pool.Fee != "" && gs.Params != nil {
+			poolFee, err := parseFeeDec(fmt.Sprintf("pool %d fee", pool.Id), pool.Fee)
+			if err != nil {
+				return err
+			}
+			minFee, _ := parseFeeDec("min fee", gs.Params.MinFee)
+			maxFee, _ := parseFeeDec("max fee", gs.Params.MaxFee)
+			if poolFee.LT(minFee) || poolFee.GT(maxFee) {
+				return fmt.Errorf("pool %d fee %s is outside allowed range [%s, %s]", pool.Id, pool.Fee, gs.Params.MinFee, gs.Params.MaxFee)
+			}
+		}
+
+		aZero := pool.TokenAReserve.IsZero()
+		bZero := pool.TokenBReserve.IsZero()
+		liqZero := pool.TotalLiquidity.IsZero()
+		if liqZero && (!aZero || !bZero) {
+			return fmt.Errorf("pool %d has zero liquidity but non-zero reserves", pool.Id)
+		}
+		if !liqZero && (aZero || bZero) {
+			return fmt.Errorf("pool %d has liquidity but zero reserve on one side", pool.Id)
 		}
 	}
 

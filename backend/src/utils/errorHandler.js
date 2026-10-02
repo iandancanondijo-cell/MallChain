@@ -171,17 +171,23 @@ function errorHandler() {
     // misleading 500 the moment a route not already using AppError directly
     // hits this handler.
     if (!(err instanceof AppError)) {
-      const isProduction = process.env.NODE_ENV === 'production'
+      // [B11 remediation] Detailed error messages are gated on an explicit
+      // DEBUG_ERRORS env var, not NODE_ENV. Previously staging (NODE_ENV !==
+      // 'production') leaked stack traces and driver error messages to the
+      // internet. Now only environments that explicitly opt in via
+      // DEBUG_ERRORS=true get the detail — production AND staging stay safe
+      // by default.
+      const showDetail = process.env.DEBUG_ERRORS === 'true' || process.env.DEBUG_ERRORS === '1';
       error = new AppError(
         ErrorCodes.INTERNAL_ERROR,
         // A raw driver/library error message can contain connection
         // strings, file paths, or field values (e.g. a Mongo duplicate-key
         // error echoes the offending document). Never forward that to the
-        // client in production — the full message still reaches the log
-        // call below either way.
-        isProduction ? MessageMap[ErrorCodes.INTERNAL_ERROR] || 'Internal server error' : err.message,
+        // client unless DEBUG_ERRORS is explicitly enabled — the full
+        // message still reaches the log call below either way.
+        showDetail ? err.message : (MessageMap[ErrorCodes.INTERNAL_ERROR] || 'Internal server error'),
         err.statusCode || err.status || 500,
-        isProduction ? {} : { originalError: err.message?.substring(0, 100) }
+        showDetail ? { originalError: err.message?.substring(0, 100) } : {}
       )
     }
 

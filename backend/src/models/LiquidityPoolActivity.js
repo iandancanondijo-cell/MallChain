@@ -1,6 +1,11 @@
 /* eslint-env node */
 /* global require, module */
 const mongoose = require('mongoose');
+const { encryptField, decryptField, blindIndex } = require('../utils/fieldEncryption');
+
+// Phone numbers are PII — encrypted at rest like KYC fields. A blind index
+// supports exact-match queries (GDPR erasure looks up by phone).
+const ENCRYPTED_FIELDS = ['phone'];
 
 const LiquidityPoolActivitySchema = new mongoose.Schema(
   {
@@ -23,6 +28,7 @@ const LiquidityPoolActivitySchema = new mongoose.Schema(
     payoutRef: { type: String },
     walletAddress: { type: String },
     phone: { type: String },
+    phone_blind: { type: String },
     currency: { type: String, default: 'KES' },
     amountMlcns: { type: Number, default: 0 },
     fiatAmount: { type: Number, default: 0 },
@@ -47,7 +53,7 @@ const LiquidityPoolActivitySchema = new mongoose.Schema(
 LiquidityPoolActivitySchema.index({ flow: 1, createdAt: -1 });
 LiquidityPoolActivitySchema.index({ status: 1, createdAt: -1 });
 LiquidityPoolActivitySchema.index({ walletAddress: 1, createdAt: -1 });
-LiquidityPoolActivitySchema.index({ phone: 1, createdAt: -1 });
+LiquidityPoolActivitySchema.index({ phone_blind: 1, createdAt: -1 });
 LiquidityPoolActivitySchema.index({ quoteId: 1, createdAt: -1 });
 LiquidityPoolActivitySchema.index({ saleId: 1, createdAt: -1 });
 LiquidityPoolActivitySchema.index({ withdrawalId: 1, createdAt: -1 });
@@ -60,4 +66,29 @@ LiquidityPoolActivitySchema.index({ burnTxHash: 1 });
 LiquidityPoolActivitySchema.index({ flow: 1, status: 1 });
 LiquidityPoolActivitySchema.index({ recordedAt: -1 });
 
-module.exports = mongoose.model('LiquidityPoolActivity', LiquidityPoolActivitySchema);
+// Synchronous, zero-argument pre-hook — Mongoose 9's Kareem middleware runner
+// only recognizes this style as promise-returning-or-synchronous. Encrypts
+// phone on save and populates the blind index for exact-match queries.
+LiquidityPoolActivitySchema.pre('save', function encryptPhoneOnSave() {
+  if (this.isModified('phone') && this.phone != null) {
+    this.phone = encryptField(this.phone);
+    this.phone_blind = blindIndex(this.phone);
+  }
+});
+
+/**
+ * Decrypts phone on a plain object or hydrated document. Every route that
+ * reads this field for display must pass its result through this before
+ * sending it anywhere.
+ */
+function decryptLiquidityPoolActivityPhone(activity) {
+  if (!activity) return activity;
+  const plain = typeof activity.toObject === 'function' ? activity.toObject() : { ...activity };
+  if (plain.phone != null) plain.phone = decryptField(plain.phone);
+  return plain;
+}
+
+const LiquidityPoolActivityModel = mongoose.model('LiquidityPoolActivity', LiquidityPoolActivitySchema);
+LiquidityPoolActivityModel.decryptPhone = decryptLiquidityPoolActivityPhone;
+
+module.exports = LiquidityPoolActivityModel;

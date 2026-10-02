@@ -12,9 +12,12 @@ import { TxRaw } from 'cosmjs-types/cosmos/tx/v1beta1/tx';
 import { SignMode } from 'cosmjs-types/cosmos/tx/signing/v1beta1/signing';
 import { api } from './api';
 import { chain } from './config';
+import { estimateGas } from './gasEstimation';
+import { broadcastWithRetry } from './broadcastWithRetry';
+import { waitForConfirmation } from './txConfirmation';
 import { createDexRegistry, MSG_SWAP, type MsgSwapValue } from './dexProto';
 
-const DEFAULT_GAS_LIMIT = 250000;
+const PLACEHOLDER_GAS_LIMIT = 0;
 
 export class DexTxError extends Error {}
 
@@ -43,7 +46,29 @@ async function signAndBroadcast(opts: { mnemonic: string; fromAddress: string; t
   });
 
   const pubkey = encodePubkey({ type: 'tendermint/PubKeySecp256k1', value: toBase64(account.pubkey) });
-  const fee = calculateFee(DEFAULT_GAS_LIMIT, GasPrice.fromString(chain.gasPrice));
+
+  // Build unsigned tx with placeholder fee for simulation
+  const placeholderFee = calculateFee(PLACEHOLDER_GAS_LIMIT, GasPrice.fromString(chain.gasPrice));
+  const placeholderAuthInfoBytes = makeAuthInfoBytes(
+    [{ pubkey, sequence: BigInt(sequence) }],
+    placeholderFee.amount,
+    Number(placeholderFee.gas),
+    undefined,
+    undefined,
+    SignMode.SIGN_MODE_DIRECT
+  );
+
+  const placeholderTxRaw = TxRaw.encode({
+    bodyBytes,
+    authInfoBytes: placeholderAuthInfoBytes,
+    signatures: [new Uint8Array()],
+  }).finish();
+
+  // Estimate gas via backend simulation
+  const gasLimit = await estimateGas(toBase64(placeholderTxRaw));
+
+  // Rebuild with estimated gas
+  const fee = calculateFee(gasLimit, GasPrice.fromString(chain.gasPrice));
   const authInfoBytes = makeAuthInfoBytes(
     [{ pubkey, sequence: BigInt(sequence) }],
     fee.amount,
@@ -62,13 +87,14 @@ async function signAndBroadcast(opts: { mnemonic: string; fromAddress: string; t
     signatures: [fromBase64(signature.signature)],
   }).finish();
 
-  const res = await api.post<{ success: boolean; txHash: string; error?: string }>('/api/dex/broadcast', {
-    txBytes: toBase64(txRawBytes),
-  });
-  if (!res.ok || !res.data?.txHash) {
-    throw new DexTxError(res.error || res.data?.error || 'Swap failed during broadcast');
+  let data;
+  try {
+    data = await broadcastWithRetry('/api/dex/broadcast', { txBytes: toBase64(txRawBytes) });
+  } catch (err) {
+    throw new DexTxError(err instanceof Error ? err.message : 'Swap failed during broadcast');
   }
-  return { txHash: res.data.txHash };
+  await waitForConfirmation(data.txHash);
+  return { txHash: data.txHash };
 }
 
 /** Signs and broadcasts a real MsgSwap. `minTokenOut` is slippage protection — the chain rejects the swap if it can't deliver at least that much. */

@@ -3,9 +3,35 @@ syntax = "proto3";
 package marketplace.crosschain.v1;
 
 import "gogoproto/gogo.proto";
+import "cosmos/base/v1beta1/coin.proto";
 import "marketplace/crosschain/v1/tx.proto";
 
 option go_package = "github.com/tmp/marketplace/x/crosschain/types";
+
+// BridgeTransferEntry pairs a transfer ID with its BridgeTransfer for genesis export.
+message BridgeTransferEntry {
+  uint64 id = 1;
+  BridgeTransfer transfer = 2 [(gogoproto.nullable) = false];
+}
+
+// ChainRouteEntry maps a route key to IBC routing metadata for genesis export.
+message ChainRouteEntry {
+  string key = 1;
+  string chain_id = 2;
+  string channel_id = 3;
+  string port_id = 4;
+}
+
+// TransferMetaEntry pairs a transfer ID with its block-level metadata for genesis export.
+message TransferMetaEntry {
+  uint64 id = 1;
+  uint64 init_height = 2;
+  uint64 ibc_sequence = 3;
+  uint64 timeout_blocks = 4;
+  uint64 timeout_timestamp = 5;
+  string port_id = 6;
+  string channel_id = 7;
+}
 
 // GenesisState defines the crosschain module's genesis state.
 message GenesisState {
@@ -14,4 +40,13 @@ message GenesisState {
 
   // bridge_state defines the bridge state at genesis.
   BridgeState bridge_state = 2 [(gogoproto.nullable) = false];
+
+  // bridge_transfers holds all pending/in-flight bridge transfers.
+  repeated BridgeTransferEntry bridge_transfers = 3 [(gogoproto.nullable) = false];
+
+  // chain_routes holds all configured IBC chain routes.
+  repeated ChainRouteEntry chain_routes = 4 [(gogoproto.nullable) = false];
+
+  // transfer_meta holds block-level metadata keyed by transfer ID.
+  repeated TransferMetaEntry transfer_meta = 5 [(gogoproto.nullable) = false];
 }

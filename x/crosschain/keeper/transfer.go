@@ -46,6 +46,11 @@ func (k Keeper) InitiateBridgeTransfer(ctx sdk.Context, msg *types.MsgInitiateBr
 		bridgeState = types.BridgeState{}
 	}
 
+	// Enforce maximum pending transfers to prevent unbounded state growth.
+	if uint64(len(bridgeState.PendingTransfers)) >= types.MaxPendingTransfers {
+		return 0, fmt.Errorf("maximum pending bridge transfers reached (%d)", types.MaxPendingTransfers)
+	}
+
 	// Create new transfer
 	transferId := bridgeState.NextTransferId
 	amount := msg.Amount // Make a copy

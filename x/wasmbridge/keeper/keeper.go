@@ -2,15 +2,15 @@ package keeper
 
 import (
 	"context"
-	"errors"
+	"strconv"
 
 	"cosmossdk.io/collections"
 	"cosmossdk.io/core/address"
 	corestore "cosmossdk.io/core/store"
 	errorsmod "cosmossdk.io/errors"
 	"github.com/cosmos/cosmos-sdk/codec"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	mlcoinkeeper "marketplace/x/mlcoin/keeper"
 	mlcointypes "marketplace/x/mlcoin/types"
 	"marketplace/x/wasmbridge/types"
 )
@@ -19,7 +19,7 @@ type Keeper struct {
 	storeService corestore.KVStoreService
 	cdc          codec.Codec
 	addressCodec address.Codec
-	mlcoinKeeper *mlcoinkeeper.Keeper
+	mlcoinKeeper types.MlcoinKeeper
 
 	Schema      collections.Schema
 	BridgeState collections.Map[string, uint64]
@@ -29,7 +29,7 @@ func NewKeeper(
 	storeService corestore.KVStoreService,
 	cdc codec.Codec,
 	addressCodec address.Codec,
-	mlcoinKeeper *mlcoinkeeper.Keeper,
+	mlcoinKeeper types.MlcoinKeeper,
 ) (Keeper, error) {
 	sb := collections.NewSchemaBuilder(storeService)
 
@@ -74,7 +74,21 @@ func (k Keeper) HandleTransfer(ctx context.Context, msg types.MGP20TransferMsg) 
 		return errorsmod.Wrap(mlcointypes.ErrInvalidRequest, "transfer amount must be greater than zero")
 	}
 
-	return k.mlcoinKeeper.Transfer(ctx, msg.From, msg.To, msg.Amount)
+	if err := k.mlcoinKeeper.Transfer(ctx, msg.From, msg.To, msg.Amount); err != nil {
+		return err
+	}
+
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	sdkCtx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			types.EventTypeTransfer,
+			sdk.NewAttribute("from", msg.From),
+			sdk.NewAttribute("to", msg.To),
+			sdk.NewAttribute("amount", strconv.FormatUint(msg.Amount, 10)),
+		),
+	)
+
+	return nil
 }
 
 func (k Keeper) HandleApprove(ctx context.Context, msg types.MGP20ApproveMsg) error {
@@ -91,7 +105,21 @@ func (k Keeper) HandleApprove(ctx context.Context, msg types.MGP20ApproveMsg) er
 		return errorsmod.Wrap(mlcointypes.ErrInvalidRequest, "approve amount must be greater than zero")
 	}
 
-	return k.mlcoinKeeper.Approve(ctx, msg.Owner, msg.Spender, msg.Amount)
+	if err := k.mlcoinKeeper.Approve(ctx, msg.Owner, msg.Spender, msg.Amount); err != nil {
+		return err
+	}
+
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	sdkCtx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			types.EventTypeApprove,
+			sdk.NewAttribute("owner", msg.Owner),
+			sdk.NewAttribute("spender", msg.Spender),
+			sdk.NewAttribute("amount", strconv.FormatUint(msg.Amount, 10)),
+		),
+	)
+
+	return nil
 }
 
 func (k Keeper) HandleTransferFrom(ctx context.Context, msg types.MGP20TransferFromMsg) error {
@@ -112,7 +140,22 @@ func (k Keeper) HandleTransferFrom(ctx context.Context, msg types.MGP20TransferF
 	}
 
 	_, err := k.mlcoinKeeper.TransferFrom(ctx, msg.Owner, msg.Spender, msg.Recipient, msg.Amount)
-	return err
+	if err != nil {
+		return err
+	}
+
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	sdkCtx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			types.EventTypeTransferFrom,
+			sdk.NewAttribute("owner", msg.Owner),
+			sdk.NewAttribute("spender", msg.Spender),
+			sdk.NewAttribute("recipient", msg.Recipient),
+			sdk.NewAttribute("amount", strconv.FormatUint(msg.Amount, 10)),
+		),
+	)
+
+	return nil
 }
 
 func (k Keeper) QueryBalance(ctx context.Context, address string) (uint64, error) {
@@ -123,15 +166,7 @@ func (k Keeper) QueryBalance(ctx context.Context, address string) (uint64, error
 		return 0, err
 	}
 
-	wallet, err := k.mlcoinKeeper.WalletBalance.Get(ctx, address)
-	if err != nil {
-		if errors.Is(err, collections.ErrNotFound) {
-			return 0, nil
-		}
-		return 0, errorsmod.Wrap(err, "failed to query balance")
-	}
-
-	return wallet.Balance, nil
+	return k.mlcoinKeeper.GetBalance(ctx, address)
 }
 
 func (k Keeper) QueryAllowance(ctx context.Context, owner, spender string) (uint64, error) {

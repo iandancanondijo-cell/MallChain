@@ -1,11 +1,17 @@
 /* eslint-env node */
 /* global require, module */
 const mongoose = require('mongoose');
+const { encryptField, decryptField, blindIndex } = require('../utils/fieldEncryption');
+
+// Phone numbers are PII — encrypted at rest like KYC fields. A blind index
+// supports exact-match queries (GDPR erasure looks up by phone).
+const ENCRYPTED_FIELDS = ['phone'];
 
 const WithdrawalRequestSchema = new mongoose.Schema({
   withdrawalId: { type: String, required: true, unique: true },
   walletAddress: { type: String, required: true },
   phone: { type: String, required: true },
+  phone_blind: { type: String },
   amountMlcns: { type: Number, required: true },
   amountKes: { type: Number, required: true },
   currency: { type: String, default: 'KES' },
@@ -40,7 +46,7 @@ const WithdrawalRequestSchema = new mongoose.Schema({
 
 // Add indexes for common query patterns
 WithdrawalRequestSchema.index({ walletAddress: 1 })
-WithdrawalRequestSchema.index({ phone: 1 })
+WithdrawalRequestSchema.index({ phone_blind: 1 })
 WithdrawalRequestSchema.index({ status: 1 })
 WithdrawalRequestSchema.index({ payoutRef: 1 })
 WithdrawalRequestSchema.index({ saleId: 1 })
@@ -55,4 +61,29 @@ WithdrawalRequestSchema.index({ status: 1, queuedAt: 1 })
 // withdrawalAmlGateService.js) — both scan "this wallet's requests since N days ago".
 WithdrawalRequestSchema.index({ walletAddress: 1, createdAt: -1 })
 
-module.exports = mongoose.model('WithdrawalRequest', WithdrawalRequestSchema);
+// Synchronous, zero-argument pre-hook — Mongoose 9's Kareem middleware runner
+// only recognizes this style as promise-returning-or-synchronous. Encrypts
+// phone on save and populates the blind index for exact-match queries.
+WithdrawalRequestSchema.pre('save', function encryptPhoneOnSave() {
+  if (this.isModified('phone') && this.phone != null) {
+    this.phone = encryptField(this.phone);
+    this.phone_blind = blindIndex(this.phone);
+  }
+});
+
+/**
+ * Decrypts phone on a plain object or hydrated document. Every route that
+ * reads this field for display must pass its result through this before
+ * sending it anywhere.
+ */
+function decryptWithdrawalRequestPhone(request) {
+  if (!request) return request;
+  const plain = typeof request.toObject === 'function' ? request.toObject() : { ...request };
+  if (plain.phone != null) plain.phone = decryptField(plain.phone);
+  return plain;
+}
+
+const WithdrawalRequestModel = mongoose.model('WithdrawalRequest', WithdrawalRequestSchema);
+WithdrawalRequestModel.decryptPhone = decryptWithdrawalRequestPhone;
+
+module.exports = WithdrawalRequestModel;

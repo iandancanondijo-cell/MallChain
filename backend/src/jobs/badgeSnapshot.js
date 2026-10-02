@@ -13,6 +13,7 @@ const { getConsecutiveActiveDays } = require('../utils/activityTracker');
 const { notifyUser } = require('../services/notify');
 const { config } = require('../config');
 const logger = require('../utils/logger');
+const { decryptField } = require('../utils/fieldEncryption');
 
 /**
  * Runs the snapshot for `now` (defaults to the real current time — accepts
@@ -31,18 +32,25 @@ async function runBadgeSnapshot(now = new Date()) {
   // A single find() is fine at this app's current scale; a production
   // deployment with a large user base would want to page through this in
   // batches instead of loading every linked-wallet user at once.
-  const users = await User.find({ walletAddress: { $exists: true, $ne: null } })
+  // walletAddress is encrypted at rest — query by blind index existence and
+  // decrypt to plaintext before passing to blockchain API calls and the
+  // notification service (which needs the real email/phone).
+  const users = await User.find({ walletAddress_blind: { $exists: true, $ne: null } })
     .select('_id email phone walletAddress')
     .lean();
 
   for (const user of users) {
     stats.processed++;
     const userId = user._id.toString();
+    // Decrypt PII for this user's iteration — blockchain calls need the
+    // real wallet address, and notifyUser needs real email/phone.
+    const walletAddress = decryptField(user.walletAddress);
+    const decryptedUser = { ...user, walletAddress, email: user.email ? decryptField(user.email) : user.email, phone: user.phone ? decryptField(user.phone) : user.phone };
     try {
-      const badge = await getUserBadgeInfo(user.walletAddress);
+      const badge = await getUserBadgeInfo(walletAddress);
 
       if (badge.exists) {
-        await notifyUser(user, {
+        await notifyUser(decryptedUser, {
           kind: 'badge',
           title: 'Your Mallpoints conversion window opens tomorrow',
           body: 'Your badge is active — you can convert Mallpoints to Mallcoin on the 15th.',
@@ -56,24 +64,24 @@ async function runBadgeSnapshot(now = new Date()) {
       if (streakOk) {
         const result = await issueBadgeFromMnemonic({
           mnemonic: operatorMnemonic,
-          recipient: user.walletAddress,
+          recipient: walletAddress,
           badgeType: 'gold',
         });
         await BadgeIssuance.create({
           userId: user._id,
-          walletAddress: user.walletAddress,
+          walletAddress,
           method: 'streak',
           badgeType: 'gold',
           txHash: result.txHash,
         });
-        await notifyUser(user, {
+        await notifyUser(decryptedUser, {
           kind: 'badge',
           title: 'You earned your badge!',
           body: `You stayed active ${config.badge.streakRequiredDays} days straight — convert Mallpoints to Mallcoin tomorrow on the 15th.`,
         });
         stats.issued++;
       } else {
-        await notifyUser(user, {
+        await notifyUser(decryptedUser, {
           kind: 'badge',
           title: "You missed this month's badge window",
           body: `Stay active every day for ${config.badge.streakRequiredDays} days before the 14th to earn a badge automatically, or buy one for KSh ${config.badge.purchasePriceKes} any time.`,

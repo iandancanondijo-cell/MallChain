@@ -35,7 +35,7 @@ router.get('/market/price', async (req, res) => {
       source: 'blockchain'
     });
   } catch (e) {
-    logger.error('onchain', 'market price error', e);
+    logger.error('onchain', { route: req.originalUrl, error: e.message || String(e) });
     // Fallback prices
     return res.json({
       success: true,
@@ -47,7 +47,7 @@ router.get('/market/price', async (req, res) => {
         total_sell_volume: 0
       },
       source: 'fallback',
-      error: e.message
+      error: 'internal error'
     });
   }
 });
@@ -73,12 +73,12 @@ router.get('/trades/:address', async (req, res) => {
       address
     });
   } catch (e) {
-    logger.error('onchain', 'trade history error', e);
+    logger.error('onchain', { route: req.originalUrl, error: e.message || String(e) });
     return res.json({
       success: true,
       trades: [],
       address: req.params.address,
-      error: e.message
+      error: 'internal error'
     });
   }
 });
@@ -113,14 +113,14 @@ router.get('/wallet/:address/balance', async (req, res) => {
       source: 'blockchain'
     });
   } catch (e) {
-    logger.error('onchain', 'wallet balance error', e);
+    logger.error('onchain', { route: req.originalUrl, error: e.message || String(e) });
     return res.json({
       success: true,
       address: req.params.address,
       balance: 0,
       denom: 'mlcoin',
       source: 'fallback',
-      error: e.message
+      error: 'internal error'
     });
   }
 });
@@ -157,10 +157,10 @@ router.post('/broadcast', requireAuth(), async (req, res) => {
       rawLog: data.tx_response?.raw_log
     });
   } catch (e) {
-    logger.error('onchain', 'broadcast error', e);
+    logger.error('onchain', { route: req.originalUrl, error: e.message || String(e) });
     return res.status(400).json({
       success: false,
-      error: e.message,
+      error: 'invalid request',
       details: e.response?.data
     });
   }
@@ -188,10 +188,10 @@ router.get('/tx/:txHash', async (req, res) => {
       status: data.tx_response?.code === 0 ? 'success' : 'failed'
     });
   } catch (e) {
-    logger.error('onchain', 'tx query error', e);
+    logger.error('onchain', { route: req.originalUrl, error: e.message || String(e) });
     return res.status(400).json({
       success: false,
-      error: e.message
+      error: 'invalid request'
     });
   }
 });

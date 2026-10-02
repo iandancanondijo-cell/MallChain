@@ -10,6 +10,7 @@ const jwt = require('jsonwebtoken');
 const minesReviewService = require('../services/minesReviewService');
 const { notify } = require('../services/notify');
 const { syncMallPointAccount } = require('../services/mallpointsService');
+const logger = require('../utils/logger');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -40,7 +41,11 @@ function verifyToken(req, res, next) {
 }
 
 function ok(data) { return { ok: true, data }; }
-function fail(err) { return { ok: false, error: String(err) }; }
+function fail(err) {
+  if (typeof err === 'string') return { ok: false, error: err };
+  logger.error('taskAssignment', { error: err.message || String(err) });
+  return { ok: false, error: 'internal error' };
+}
 
 // ============ ADMIN: TASK ASSIGNMENT WINDOW ============
 

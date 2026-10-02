@@ -1,14 +1,12 @@
 import { useEffect, useState } from 'react';
-import { store } from '../../store/store';
-import { useStoreVersion, fmtNum, fmtMoney } from '../../components/ui';
+import { useStoreSlice } from '../../store/hooks';
+import { fmtNum, fmtMoney } from '../../components/ui';
 import { economyApi, type EconomyState, type EconomyUserHoldings, type TrackEconomics } from '../../services/economyApi';
 import { TrendingUp, Coins, Flame, BarChart3, AlertTriangle, Wallet, ArrowDownRight, Eye, ChevronDown, ChevronUp, Droplets, Users } from 'lucide-react';
 
 /** Economy / Tokenomics — macro-financial glassmorphism layout with real emission/supply/treasury data. */
 export default function Economy() {
-  useStoreVersion();
-  const st = store.state;
-  const walletAddress = st.wallet.address;
+  const walletAddress = useStoreSlice(s => s.wallet.address);
   const [data, setData] = useState<EconomyState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

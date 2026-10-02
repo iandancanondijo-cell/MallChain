@@ -24,8 +24,8 @@ router.get('/map/:hex', async (req, res) => {
     }
     return res.json({ ok: true, hex: m.hex, bech32: m.bech32 })
   } catch (e) {
-    logger.error('addressMap', 'address map get error', e)
-    return res.status(500).json({ ok: false, error: String(e) })
+    logger.error('addressMap', { route: req.originalUrl, error: e.message || String(e) });
+    return res.status(500).json({ ok: false, error: 'internal error' })
   }
 })
 
@@ -38,8 +38,8 @@ router.post('/map', async (req, res) => {
     const doc = await AddressMap.findOneAndUpdate({ hex: key }, { hex: key, bech32 }, { upsert: true, new: true, setDefaultsOnInsert: true })
     return res.json({ ok: true, mapping: doc })
   } catch (e) {
-    logger.error('addressMap', 'address map upsert error', e)
-    return res.status(500).json({ ok: false, error: String(e) })
+    logger.error('addressMap', { route: req.originalUrl, error: e.message || String(e) });
+    return res.status(500).json({ ok: false, error: 'internal error' })
   }
 })
 

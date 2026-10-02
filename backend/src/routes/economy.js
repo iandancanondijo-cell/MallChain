@@ -88,8 +88,8 @@ router.get('/wallets', async (req, res) => {
     const balances = await fetchWalletBalances()
     return res.json({ success: true, wallets: balances })
   } catch (e) {
-    logger.error('economy', 'wallets error', e)
-    return res.status(500).json({ success: false, error: e.message })
+    logger.error('economy', { route: req.originalUrl, error: e.message || String(e) });
+    return res.status(500).json({ success: false, error: 'internal error' })
   }
 })
 
@@ -187,8 +187,8 @@ router.get('/state', async (req, res) => {
       timestamp: now.toISOString()
     })
   } catch (e) {
-    logger.error('economy', 'state error', e)
-    return res.status(500).json({ success: false, error: e.message })
+    logger.error('economy', { route: req.originalUrl, error: e.message || String(e) });
+    return res.status(500).json({ success: false, error: 'internal error' })
   }
 })
 
@@ -243,8 +243,8 @@ router.get('/user/:address', async (req, res) => {
       valueRatio: 3.2
     })
   } catch (e) {
-    logger.error('economy', 'user error', e)
-    return res.status(500).json({ success: false, error: e.message })
+    logger.error('economy', { route: req.originalUrl, error: e.message || String(e) });
+    return res.status(500).json({ success: false, error: 'internal error' })
   }
 })
 
@@ -351,8 +351,8 @@ router.get('/track', async (req, res) => {
       timestamp: new Date().toISOString()
     })
   } catch (e) {
-    logger.error('economy', 'track error', e)
-    return res.status(500).json({ success: false, error: e.message })
+    logger.error('economy', { route: req.originalUrl, error: e.message || String(e) });
+    return res.status(500).json({ success: false, error: 'internal error' })
   }
 })
 

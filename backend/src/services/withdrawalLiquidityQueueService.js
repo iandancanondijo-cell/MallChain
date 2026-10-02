@@ -7,6 +7,7 @@ const { executeSellSettlement } = require('./sellExecutionService');
 const { recordWithdrawLiquidityActivity } = require('./liquidityActivityService');
 const { notifyUser } = require('./notify');
 const logger = require('../utils/logger');
+const { blindIndex } = require('../utils/fieldEncryption');
 
 /**
  * Notifies the withdrawer of a state change. Falls back to a direct SMS
@@ -16,7 +17,7 @@ const logger = require('../utils/logger');
  */
 async function notifyWithdrawalStateChange(withdrawal, { title, body }) {
   try {
-    const user = await User.findOne({ walletAddress: withdrawal.walletAddress });
+    const user = await User.findOne({ walletAddress_blind: blindIndex(withdrawal.walletAddress) });
     if (user) {
       await notifyUser(user, { kind: 'system', title, body, category: 'withdrawals' });
       return;

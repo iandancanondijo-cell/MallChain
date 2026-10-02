@@ -6,13 +6,16 @@ const { encryptField, decryptField } = require('../utils/fieldEncryption');
 // A held signed transaction is at least as sensitive as KYC PII — anyone who
 // obtains it can broadcast it verbatim — so it's encrypted at rest the same
 // way, not just stored as plaintext because it "looks like" opaque base64.
-const ENCRYPTED_FIELDS = ['pendingTxBytes'];
+// Phone numbers are also PII — encrypted at rest like KYC fields. A blind
+// index supports exact-match queries (GDPR erasure looks up by phone).
+const ENCRYPTED_FIELDS = ['pendingTxBytes', 'phone'];
 
 const MallcoinSaleSchema = new mongoose.Schema({
   saleId: { type: String, required: true, unique: true },
   sellerAddress: { type: String, required: true },
   amount: { type: Number, required: true }, // MLCNS sold
   phone: { type: String },
+  phone_blind: { type: String },
   status: {
     type: String,
     // queued_liquidity/resign_required: held, unbroadcast — see
@@ -38,7 +41,7 @@ const MallcoinSaleSchema = new mongoose.Schema({
 // Add indexes for common query patterns
 MallcoinSaleSchema.index({ sellerAddress: 1 })
 MallcoinSaleSchema.index({ status: 1 })
-MallcoinSaleSchema.index({ phone: 1 })
+MallcoinSaleSchema.index({ phone_blind: 1 })
 MallcoinSaleSchema.index({ txHash: 1 })
 MallcoinSaleSchema.index({ burnTxHash: 1 })
 MallcoinSaleSchema.index({ createdAt: -1 })
@@ -46,14 +49,17 @@ MallcoinSaleSchema.index({ sellerAddress: 1, status: 1 })
 MallcoinSaleSchema.index({ status: 1, createdAt: -1 })
 
 // Synchronous, zero-argument pre-hook — Mongoose 9's Kareem middleware runner
-// only recognizes this style as promise-returning-or-synchronous. A
-// `function(next)` param here throws "next is not a function" the moment a
-// real .save() runs (see the identical fix + comment in models/kyc.js).
-MallcoinSaleSchema.pre('save', function encryptPendingTxBytesOnSave() {
+// only recognizes this style as promise-returning-or-synchronous. Encrypts
+// pendingTxBytes and phone on save, and populates the blind index for phone.
+MallcoinSaleSchema.pre('save', function encryptFieldsOnSave() {
   for (const field of ENCRYPTED_FIELDS) {
     if (this.isModified(field) && this[field] != null) {
       this[field] = encryptField(this[field]);
     }
+  }
+  // Populate blind index for phone queries
+  if (this.isModified('phone') && this.phone != null) {
+    this.phone_blind = blindIndex(this.phone);
   }
 });
 
@@ -63,7 +69,20 @@ function decryptPendingTxBytes(sale) {
   return decryptField(sale.pendingTxBytes);
 }
 
+/**
+ * Decrypts phone on a plain object or hydrated document. Every route that
+ * reads this field for display must pass its result through this before
+ * sending it anywhere.
+ */
+function decryptMallcoinSalePhone(sale) {
+  if (!sale) return sale;
+  const plain = typeof sale.toObject === 'function' ? sale.toObject() : { ...sale };
+  if (plain.phone != null) plain.phone = decryptField(plain.phone);
+  return plain;
+}
+
 const MallcoinSaleModel = mongoose.model('MallcoinSale', MallcoinSaleSchema);
 MallcoinSaleModel.decryptPendingTxBytes = decryptPendingTxBytes;
+MallcoinSaleModel.decryptPhone = decryptMallcoinSalePhone;
 
 module.exports = MallcoinSaleModel;

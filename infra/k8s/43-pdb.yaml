@@ -1,0 +1,45 @@
+# PodDisruptionBudgets — prevent voluntary disruptions (node drains, rolling
+# updates) from taking down all replicas of a service at once.
+# For single-replica StatefulSets (marketplaced, redis), minAvailable: 1
+# blocks drains entirely — manual intervention required, which is the safe
+# default for stateful workloads.
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend-pdb
+  namespace: mallchain
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: backend }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: marketplaced-pdb
+  namespace: mallchain
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: marketplaced }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend-pdb
+  namespace: mallchain
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: frontend }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+  namespace: mallchain
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: redis }

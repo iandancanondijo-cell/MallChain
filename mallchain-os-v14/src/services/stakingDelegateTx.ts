@@ -12,8 +12,11 @@ import { SignMode } from 'cosmjs-types/cosmos/tx/signing/v1beta1/signing';
 import { MsgDelegate, MsgUndelegate } from 'cosmjs-types/cosmos/staking/v1beta1/tx';
 import { api } from './api';
 import { chain } from './config';
+import { estimateGas } from './gasEstimation';
+import { broadcastWithRetry } from './broadcastWithRetry';
+import { waitForConfirmation } from './txConfirmation';
 
-const DEFAULT_GAS_LIMIT = 250000;
+const PLACEHOLDER_GAS_LIMIT = 0;
 
 export class DelegateTxError extends Error {}
 
@@ -47,7 +50,29 @@ async function signAndBroadcast(opts: {
   });
 
   const pubkey = encodePubkey({ type: 'tendermint/PubKeySecp256k1', value: toBase64(account.pubkey) });
-  const fee = calculateFee(DEFAULT_GAS_LIMIT, GasPrice.fromString(chain.gasPrice));
+
+  // Build unsigned tx with placeholder fee for simulation
+  const placeholderFee = calculateFee(PLACEHOLDER_GAS_LIMIT, GasPrice.fromString(chain.gasPrice));
+  const placeholderAuthInfoBytes = makeAuthInfoBytes(
+    [{ pubkey, sequence: BigInt(sequence) }],
+    placeholderFee.amount,
+    Number(placeholderFee.gas),
+    undefined,
+    undefined,
+    SignMode.SIGN_MODE_DIRECT
+  );
+
+  const placeholderTxRaw = TxRaw.encode({
+    bodyBytes,
+    authInfoBytes: placeholderAuthInfoBytes,
+    signatures: [new Uint8Array()],
+  }).finish();
+
+  // Estimate gas via backend simulation
+  const gasLimit = await estimateGas(toBase64(placeholderTxRaw));
+
+  // Rebuild with estimated gas
+  const fee = calculateFee(gasLimit, GasPrice.fromString(chain.gasPrice));
   const authInfoBytes = makeAuthInfoBytes(
     [{ pubkey, sequence: BigInt(sequence) }],
     fee.amount,
@@ -68,11 +93,14 @@ async function signAndBroadcast(opts: {
 
   const txBytes = toBase64(txRawBytes);
 
-  const res = await api.post<{ success: boolean; txHash: string; error?: string }>('/api/staking/broadcast', { txBytes });
-  if (!res.ok || !res.data?.txHash) {
-    throw new DelegateTxError(res.error || res.data?.error || 'Transaction failed during broadcast');
+  let data;
+  try {
+    data = await broadcastWithRetry('/api/staking/broadcast', { txBytes });
+  } catch (err) {
+    throw new DelegateTxError(err instanceof Error ? err.message : 'Transaction failed during broadcast');
   }
-  return { txHash: res.data.txHash };
+  await waitForConfirmation(data.txHash);
+  return { txHash: data.txHash };
 }
 
 /** Signs and broadcasts a real MsgDelegate — bonds `amount` (base denom units) to a validator. */

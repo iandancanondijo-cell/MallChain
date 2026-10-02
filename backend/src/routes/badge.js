@@ -18,6 +18,7 @@ const axios = require('axios');
 const BadgePurchase = require('../models/BadgePurchase');
 const BadgeIssuance = require('../models/BadgeIssuance');
 const User = require('../models/user');
+const { blindIndex } = require('../utils/fieldEncryption');
 const { validate, schemas } = require('../middleware/validation');
 const verifyWebhookToken = require('../middleware/verifyWebhookToken');
 const { config } = require('../config');
@@ -177,8 +178,8 @@ router.post('/reserve', validate(schemas.badgeReserve), async (req, res) => {
       providerMode: getProviderMode(),
     });
   } catch (e) {
-    logger.error('badge', 'reserve error', e);
-    res.status(500).json({ error: e.message });
+    logger.error('badge', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -191,8 +192,8 @@ router.post('/mpesa', validate(schemas.badgeMpesaInitiate), async (req, res) => 
     const response = await initiateMpesaRequest(purchase, phone);
     return res.json({ ...response, quoteId: purchase.quoteId, amountKes: purchase.fiatAmount });
   } catch (e) {
-    logger.error('badge', 'M-Pesa initiate error', e);
-    res.status(e.status || 500).json({ error: e.message });
+    logger.error('badge', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(e.status || 500).json({ error: (e.status === 400) ? 'invalid request' : 'internal error' });
   }
 });
 
@@ -201,7 +202,7 @@ router.post('/mpesa/callback', verifyWebhookToken, validate(schemas.mpesaCallbac
     const result = await processMpesaCallback(req.body);
     return res.json(result);
   } catch (e) {
-    logger.error('badge', 'M-Pesa callback error', e);
+    logger.error('badge', { route: req.originalUrl, error: e.message || String(e) });
     res.json({ ResultCode: 1 });
   }
 });
@@ -254,7 +255,7 @@ router.post('/issue', validate(schemas.badgeIssue), async (req, res) => {
       purchase.badgeTxHash = result.txHash;
       await purchase.save();
 
-      const user = await User.findOne({ walletAddress: purchase.walletAddress }).lean();
+      const user = await User.findOne({ walletAddress_blind: blindIndex(purchase.walletAddress) }).lean();
       if (user) {
         await BadgeIssuance.create({
           userId: user._id,
@@ -285,8 +286,8 @@ router.post('/issue', validate(schemas.badgeIssue), async (req, res) => {
       throw issueErr;
     }
   } catch (e) {
-    logger.error('badge', 'issue error', e);
-    res.status(500).json({ error: e.message });
+    logger.error('badge', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -307,8 +308,8 @@ router.get('/status/:quoteId', async (req, res) => {
       reason: purchase.reason || null,
     });
   } catch (e) {
-    logger.error('badge', 'status error', e);
-    res.status(500).json({ error: e.message });
+    logger.error('badge', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' });
   }
 });
 

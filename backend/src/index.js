@@ -230,6 +230,24 @@ const minesLimiter = createLimiter({
   max: 100,
 });
 
+// [B9 remediation] Global baseline rate limiter — catches routes that don't
+// have an explicit per-route limiter (market, staking, governance, notifications,
+// etc.). Generous enough to not interfere with normal use, but caps burst abuse.
+// Applied to all /api/* before route mounting so every endpoint has a floor.
+const globalLimiter = createLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 300, // 300 requests per 15 min per IP ≈ 20/min
+  message: { error: 'rate_limit_exceeded', message: 'Too many requests. Please try again later.' },
+  keyGenerator: (req) => {
+    // Key by user id when authenticated (so a logged-in user hitting many
+    // routes still shares one budget), fall back to IP for anonymous traffic.
+    return req.user?.id || req.ip || req.headers['x-forwarded-for']?.split(',')[0];
+  },
+});
+
+// Apply global limiter to all API routes
+app.use('/api', globalLimiter);
+
 app.use((req, res, next) => {
   const start = Date.now()
   res.on('finish', () => {
@@ -343,13 +361,11 @@ async function checkChainHealth() {
   };
 }
 
-app.get('/api/health', async (req, res) => {
-  // Each dependency is checked independently — a chain outage used to throw
-  // out of checkChainHealth() before database/redis were even checked, so
-  // the response collapsed to a bare chain-only error with no db/redis
-  // fields at all. That's exactly the wrong time to lose that signal: a
-  // multi-dependency partial outage is when ops most needs to see all
-  // three statuses at once, not just whichever one happened to throw first.
+// [B10 remediation] Health check split into public (status only) and admin
+// (full detail). Previously the public endpoint exposed chain REST URL, DB
+// status, and Redis status to unauthenticated callers — useful info for
+// attackers mapping infrastructure.
+async function getDetailedHealthStatus() {
   let chainStatus;
   try {
     chainStatus = await checkChainHealth();
@@ -378,12 +394,30 @@ app.get('/api/health', async (req, res) => {
   }
 
   const overallStatus = chainStatus.status === 'ok' && dbStatus === 'ok' && redisStatus === 'ok' ? 'ok' : 'degraded';
+  return {
+    overallStatus,
+    chain: chainStatus,
+    database: { status: dbStatus },
+    redis: { status: redisStatus },
+  };
+}
+
+// Public health endpoint — returns only overall status, no infrastructure detail
+app.get('/api/health', async (req, res) => {
+  const { overallStatus } = await getDetailedHealthStatus();
+  return res.status(overallStatus === 'ok' ? 200 : 503).json({
+    status: overallStatus,
+  });
+});
+
+// Admin-only detailed health — exposes chain URL, DB, Redis status to ops
+const { requireAdmin } = require('./middleware/adminAuth');
+app.get('/api/admin/health', requireAdmin, async (req, res) => {
+  const { overallStatus, ...detail } = await getDetailedHealthStatus();
   return res.status(overallStatus === 'ok' ? 200 : 503).json({
     status: overallStatus,
     backend: 'ok',
-    chain: chainStatus,
-    database: { status: dbStatus },
-    redis: { status: redisStatus }
+    ...detail,
   });
 });
 
@@ -800,14 +834,18 @@ async function start() {
       serverSelectionTimeoutMS: Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS || 10000),
       socketTimeoutMS: Number(process.env.MONGO_SOCKET_TIMEOUT_MS || 45000),
       autoIndex: !config.isProduction,
-      retryWrites: false,
+      retryWrites: true,
       ...mongoTlsOptions,
     });
     logger.info('Mongo connected', { mongo });
     await initializeDefaultBurnPolicies();
     await initializeDefaultDynamicThresholds();
   } catch (err) {
-    logger.warn('MongoDB unavailable; starting server in degraded mode', { error: err.message || err });
+    if (config.isProduction) {
+      logger.error('MongoDB is required in production — refusing to start without it.', { error: err.message || err });
+      process.exit(1);
+    }
+    logger.warn('MongoDB unavailable; starting server in degraded mode (dev only)', { error: err.message || err });
   }
 
   // global.redisClient backs both /api/health's Redis check and the cache
@@ -871,12 +909,15 @@ async function start() {
 // - Server broadcasts wallet:update only to subscribed clients
 // - Prevents unauthorized access to other wallets' data
 const server = http.createServer(app)
-const allowedOrigins = [process.env.FRONTEND_URL, 'http://localhost:5173', 'http://127.0.0.1:5173'].filter(Boolean)
+const socketAllowedOrigins = [process.env.FRONTEND_URL].filter(Boolean)
+if (!config.isProduction) {
+  socketAllowedOrigins.push('http://localhost:5173', 'http://127.0.0.1:5173')
+}
 const io = new Server(server, {
   // CORS configuration for Socket.IO connections
   // Must match frontend origin to allow WebSocket handshake
   cors: {
-    origin: allowedOrigins.length > 0 ? allowedOrigins : ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: socketAllowedOrigins.length > 0 ? socketAllowedOrigins : ['http://localhost:5173', 'http://127.0.0.1:5173'],
     methods: ['GET', 'POST'],
     credentials: true
   },
@@ -916,7 +957,7 @@ io.use((socket, next) => {
   }
   if (token) {
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET)
+      const decoded = jwt.verify(token, JWT_SECRET)
       socket.data.userId = decoded.userId || decoded.id
     } catch (err) {
       logger.warn('Socket JWT verification failed', { socketId: socket.id, error: err.message })

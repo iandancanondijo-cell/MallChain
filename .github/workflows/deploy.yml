@@ -160,3 +160,37 @@ jobs:
           echo "== rollout status marketplaced =="
           kubectl -n "$K8S_NS" rollout status statefulset/marketplaced --timeout=10m
           echo "== rollouts complete =="
+
+      - name: Post-deploy health check
+        run: |
+          set -euo pipefail
+          API_URL="${{ vars.PUBLIC_API_URL }}"
+          if [ -z "$API_URL" ]; then
+            echo "::warning::PUBLIC_API_URL not set — skipping HTTP health check (rollout status only)."
+            exit 0
+          fi
+
+          echo "== Waiting 30s for new pods to stabilize =="
+          sleep 30
+
+          echo "== Health check: GET ${API_URL}/api/health =="
+          for i in 1 2 3 4 5; do
+            HTTP_CODE=$(curl -s -o /tmp/health-response.json -w "%{http_code}" "${API_URL}/api/health" || echo "000")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✓ Health check passed (HTTP $HTTP_CODE)"
+              cat /tmp/health-response.json
+              exit 0
+            fi
+            echo "Attempt $i/5: HTTP $HTTP_CODE — retrying in 10s..."
+            sleep 10
+          done
+
+          echo "::error::Health check failed after 5 attempts. Last HTTP code: $HTTP_CODE"
+          cat /tmp/health-response.json 2>/dev/null || true
+          echo ""
+          echo "== Pod status =="
+          kubectl -n mallchain get pods -o wide
+          echo ""
+          echo "== Recent backend logs =="
+          kubectl -n mallchain logs deployment/backend --tail=50 || true
+          exit 1

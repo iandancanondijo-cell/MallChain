@@ -51,6 +51,17 @@ message Params {
 
   // max_pool_drain_percent is the maximum percentage of a pool's reserves that can be drained in a single transaction.
   uint32 max_pool_drain_percent = 5;
+
+  // paused disables swaps, pool creation, and liquidity additions when true.
+  // Liquidity removal remains enabled so users can exit positions during emergencies.
+  bool paused = 6;
+}
+
+// PoolLiquidityEntry represents a user's liquidity position in a pool.
+message PoolLiquidityEntry {
+  uint64 pool_id = 1;
+  string address = 2 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  cosmos.base.v1beta1.Coin liquidity = 3 [(gogoproto.nullable) = false];
 }
 
 // GenesisState defines the dex module's genesis state.
@@ -63,4 +74,7 @@ message GenesisState {
 
   // next_pool_id is the next available pool ID.
   uint64 next_pool_id = 3;
+
+  // pool_liquidity defines all LP positions at genesis.
+  repeated PoolLiquidityEntry pool_liquidity = 4 [(gogoproto.nullable) = false];
 }

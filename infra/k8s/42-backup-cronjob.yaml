@@ -1,0 +1,89 @@
+# Backup CronJob — runs scripts/backup.sh daily at 02:00 UTC.
+# Backs up MongoDB (off-chain state) + chain data directory (on-chain state).
+# Requires BACKUP_OFFSITE_URI secret to be set for offsite upload (S3/GCS).
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mallchain-backup
+  namespace: mallchain
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels: { app: mallchain-backup }
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: mongo:7.0
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  echo "Starting backup at $(date -u)"
+
+                  BACKUP_ROOT="/backups"
+                  TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+                  DEST="${BACKUP_ROOT}/${TIMESTAMP}"
+                  mkdir -p "${DEST}"
+
+                  # MongoDB dump
+                  echo "Dumping MongoDB..."
+                  mongodump --uri="${MONGO_URI}" --out="${DEST}/mongo"
+
+                  # Chain data (if accessible via shared volume)
+                  if [ -d "/chain-data/data" ]; then
+                    echo "Copying chain data..."
+                    cp -r "/chain-data/data" "${DEST}/chain"
+                  fi
+
+                  # Create tarball
+                  echo "Creating archive..."
+                  tar -czf "${DEST}.tar.gz" -C "${BACKUP_ROOT}" "${TIMESTAMP}"
+                  rm -rf "${DEST}"
+
+                  # Offsite upload if configured
+                  if [ -n "${BACKUP_OFFSITE_URI:-}" ]; then
+                    echo "Uploading to ${BACKUP_OFFSITE_URI}..."
+                    case "${BACKUP_OFFSITE_URI}" in
+                      s3://*)
+                        aws s3 cp "${DEST}.tar.gz" "${BACKUP_OFFSITE_URI}/${TIMESTAMP}.tar.gz"
+                        ;;
+                      gs://*)
+                        gsutil cp "${DEST}.tar.gz" "${BACKUP_OFFSITE_URI}/${TIMESTAMP}.tar.gz"
+                        ;;
+                    esac
+                  fi
+
+                  echo "Backup complete: ${DEST}.tar.gz"
+              env:
+                - name: MONGO_URI
+                  valueFrom:
+                    secretKeyRef:
+                      name: mallchain-backend-secrets
+                      key: MONGO_URI
+                - name: BACKUP_OFFSITE_URI
+                  valueFrom:
+                    secretKeyRef:
+                      name: mallchain-backend-secrets
+                      key: BACKUP_OFFSITE_URI
+                      optional: true
+              resources:
+                requests: { cpu: 100m, memory: 256Mi }
+                limits: { cpu: 500m, memory: 1Gi }
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backups
+          volumes:
+            - name: backup-storage
+              emptyDir:
+                sizeLimit: 10Gi

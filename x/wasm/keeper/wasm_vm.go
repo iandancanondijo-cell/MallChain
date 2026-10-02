@@ -196,6 +196,8 @@ func (vm *WasmVM) validateWasmCode(wasmBytes []byte) error {
 // module bound to (contractAddr, sender), instantiate the guest with real
 // per-call gas metering wired in, write msg into the guest's memory, invoke
 // entrypoint, and read back its real return value.
+// If readOnly is true, the host environment rejects state-mutating operations
+// (db_write, transfer) — used by QueryWASM to enforce read-only semantics.
 func (vm *WasmVM) call(
 	ctx context.Context,
 	wasmBytes []byte,
@@ -203,6 +205,7 @@ func (vm *WasmVM) call(
 	msg []byte,
 	contractAddr, sender string,
 	gasLimit, baseCost, entrypointCost uint64,
+	readOnly bool,
 ) ([]byte, uint64, error) {
 	if err := vm.validateWasmCode(wasmBytes); err != nil {
 		return nil, 0, err
@@ -236,7 +239,7 @@ func (vm *WasmVM) call(
 	}
 	defer compiled.Close(execCtx)
 
-	env := NewHostEnvironment(ctx, contractAddr, sender, vm.keeper)
+	env := NewHostEnvironment(ctx, contractAddr, sender, vm.keeper, readOnly)
 	hostMod, err := env.buildHostModule(execCtx, vm.Runtime)
 	if err != nil {
 		return nil, meter.used, fmt.Errorf("failed to build host module: %w", err)
@@ -293,21 +296,21 @@ func (vm *WasmVM) call(
 
 // InitializeWASM calls the contract's _instantiate entry point.
 func (vm *WasmVM) InitializeWASM(ctx context.Context, wasmBytes, initMsg []byte, contractAddr, sender string, gasLimit, instantiateCost uint64) ([]byte, uint64, error) {
-	return vm.call(ctx, wasmBytes, "_instantiate", initMsg, contractAddr, sender, gasLimit, instantiateCost, 0)
+	return vm.call(ctx, wasmBytes, "_instantiate", initMsg, contractAddr, sender, gasLimit, instantiateCost, 0, false)
 }
 
 // ExecuteWASM calls the contract's _execute entry point.
 func (vm *WasmVM) ExecuteWASM(ctx context.Context, wasmBytes, msg []byte, contractAddr, sender string, gasLimit, baseCost, exportCost uint64) ([]byte, uint64, error) {
-	return vm.call(ctx, wasmBytes, "_execute", msg, contractAddr, sender, gasLimit, baseCost, exportCost)
+	return vm.call(ctx, wasmBytes, "_execute", msg, contractAddr, sender, gasLimit, baseCost, exportCost, false)
 }
 
-// QueryWASM calls the contract's _query entry point. Read-only by
-// convention (the contract's own db_write host import still works if
-// called, since a query message can't be distinguished from an execute one
-// at the ABI level — the msg_server layer is what actually prevents queries
-// from being routed anywhere state-changing).
+// QueryWASM calls the contract's _query entry point. The host environment
+// is created in read-only mode: db_write and transfer host functions will
+// return errors instead of mutating state, enforcing read-only semantics
+// at the host boundary even though the WASM ABI itself cannot distinguish
+// a query call from an execute call.
 func (vm *WasmVM) QueryWASM(ctx context.Context, wasmBytes, query []byte, contractAddr, sender string, gasLimit, queryCost uint64) ([]byte, uint64, error) {
-	return vm.call(ctx, wasmBytes, "_query", query, contractAddr, sender, gasLimit, queryCost, 0)
+	return vm.call(ctx, wasmBytes, "_query", query, contractAddr, sender, gasLimit, queryCost, 0, true)
 }
 
 // ValidateAndCompile validates WASM before execution

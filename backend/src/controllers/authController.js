@@ -5,8 +5,9 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const totp = require('../utils/totp');
 const { config } = require('../config');
-const { revokeToken, revokeAllUserTokens } = require('../middleware/tokenDenylist');
+const { revokeToken, revokeAllUserTokens, isRevoked } = require('../middleware/tokenDenylist');
 const getRedis = require('../mallwallet/queue/redis');
+const { blindIndex, decryptField } = require('../utils/fieldEncryption');
 
 const LINK_WALLET_SIGNATURE_MAX_AGE_MS = 10 * 60 * 1000;
 const ADR036_CONSUMED_TTL_SECONDS = 60 * 60;
@@ -14,8 +15,10 @@ const ADR036_CONSUMED_TTL_SECONDS = 60 * 60;
 // Account lockout after repeated failed logins. limiters.auth (rateLimiter.js)
 // already throttles by IP, which an attacker defeats by rotating IPs; this
 // is keyed by the account identifier itself so it can't be sidestepped that
-// way. Backed by Redis (best-effort — if Redis is unreachable we fail open
-// and allow the attempt rather than locking everyone out on an infra blip).
+// way. Backed by Redis. [B8 remediation] Fail CLOSED on Redis errors — if
+// we can't verify lockout status, deny the login rather than bypassing the
+// lockout check. An infra blip briefly blocking logins is far preferable to
+// an attacker getting unlimited guesses during a Redis outage.
 const FAILED_LOGIN_LIMIT = 10;
 const FAILED_LOGIN_WINDOW_SECONDS = 15 * 60;
 
@@ -28,8 +31,11 @@ async function checkAccountLock(identifier) {
       const ttl = await redis.ttl(key);
       return { locked: true, retryAfterSeconds: ttl > 0 ? ttl : FAILED_LOGIN_WINDOW_SECONDS };
     }
-  } catch (_) {
-    /* Redis unavailable — fail open. */
+  } catch (err) {
+    // Redis unavailable — fail CLOSED. Log the error for ops visibility.
+    const logger = require('../utils/logger');
+    logger.error('authController', `Lockout check failed (failing closed for ${identifier}): ${err.message || err}`);
+    return { locked: true, retryAfterSeconds: FAILED_LOGIN_WINDOW_SECONDS, reason: 'lockout_check_unavailable' };
   }
   return { locked: false };
 }
@@ -139,14 +145,20 @@ function clearAuthCookie(res) {
 }
 
 function toPublicUser(user) {
+  // Decrypt PII fields before exposing them. After B3, email/phone/
+  // walletAddress are AES-256-GCM encrypted at rest — the raw document
+  // fields hold ciphertext, not the values the frontend expects.
+  const email = user.email ? decryptField(user.email) : null;
+  const phone = user.phone ? decryptField(user.phone) : null;
+  const walletAddress = user.walletAddress ? decryptField(user.walletAddress) : null;
   return {
     _id: user._id,
     id: user._id,
-    email: user.email,
+    email,
     name: user.name || null,
     username: user.username || null,
-    phone: user.phone || null,
-    walletAddress: user.walletAddress || null,
+    phone,
+    walletAddress,
     role: user.role || 'user',
     creator_level: String(user.creator_level ?? 0),
     mlpts_balance: Number(user.mlpts_balance || 0),
@@ -216,7 +228,7 @@ exports.register = async (req, res) => {
   const { password, referralCode } = req.body;
   const email = normalizeEmail(req.body.email);
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
-  const existing = await User.findOne({ email });
+  const existing = await User.findOne({ email_blind: blindIndex(email) });
   if (existing) return res.status(400).json({ error: 'email exists' });
   const hash = await bcrypt.hash(password, 10);
 
@@ -238,7 +250,7 @@ exports.login = async (req, res) => {
     return res.status(423).json({ error: 'account temporarily locked after repeated failed logins', retryAfterSeconds: lock.retryAfterSeconds });
   }
 
-  const u = await User.findOne({ email });
+  const u = await User.findOne({ email_blind: blindIndex(email) });
   if (!u) { await recordFailedLogin(email); return res.status(400).json({ error: 'invalid credentials' }); }
   if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
   const ok = await bcrypt.compare(password, u.password);
@@ -271,7 +283,7 @@ exports.registerUsername = async (req, res) => {
   if (existingUsername) return res.status(400).json({ error: 'username exists' });
 
   const syntheticEmail = makeSyntheticEmail(username);
-  const existingEmail = await User.findOne({ email: syntheticEmail });
+  const existingEmail = await User.findOne({ email_blind: blindIndex(syntheticEmail) });
   if (existingEmail) return res.status(400).json({ error: 'username exists' });
 
   const hash = await bcrypt.hash(password, 10);
@@ -325,15 +337,21 @@ exports.me = async (req, res) => {
   if (!token) return res.status(401).json({ error: 'missing token' })
   try {
     const decoded = jwt.verify(token, getJwtSecret())
+    // Check the token denylist — without this, logout and "sign out everywhere"
+    // only clear the cookie, while the JWT itself stays valid until expiry.
+    if (await isRevoked(decoded)) return res.status(401).json({ error: 'token revoked' })
     // Task 4.1: Handle both old (id) and new (userId) token formats for compatibility
     const userId = decoded.userId || decoded.id;
     const user = await User.findById(userId).select('-password')
     if (!user) return res.status(401).json({ error: 'user not found' })
 
     const publicUser = toPublicUser(user);
-    if (user.walletAddress) {
+    // walletAddress is encrypted at rest — decrypt before the badge check
+    // (getUserBadgeInfo queries the chain with the plaintext address).
+    const plainWallet = user.walletAddress ? decryptField(user.walletAddress) : null;
+    if (plainWallet) {
       const { getUserBadgeInfo } = require('../services/badgeService');
-      const badge = await getUserBadgeInfo(user.walletAddress).catch(() => ({ exists: false }));
+      const badge = await getUserBadgeInfo(plainWallet).catch(() => ({ exists: false }));
       publicUser.hasBadge = Boolean(badge.exists);
     } else {
       publicUser.hasBadge = false;
@@ -421,10 +439,14 @@ exports.linkWallet = async (req, res) => {
     return res.status(401).json({ error: 'invalid signature — unable to verify you control this wallet' });
   }
 
-  const user = await User.findByIdAndUpdate(userId, { walletAddress: address }, { new: true }).select('-password');
+  // find→set→save (not findByIdAndUpdate) so the pre-save hook fires —
+  // it computes walletAddress_blind and encrypts the address at rest.
+  const user = await User.findById(userId).select('-password');
   if (!user) return res.status(401).json({ error: 'user not found' });
+  user.walletAddress = address;
+  await user.save();
 
-  return res.json({ ok: true, walletAddress: user.walletAddress });
+  return res.json({ ok: true, walletAddress: address });
 };
 
 exports.googleCallback = async (req, res) => {

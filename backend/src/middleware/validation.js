@@ -85,7 +85,6 @@ const mlcnsTransferSchema = Joi.object({
   to: addressSchema,
   amountMlcns: amountSchema,
   txBytes: Joi.string().optional(),
-  privateKey: Joi.string().optional(),
   memo: Joi.string().max(256).optional(),
 });
 

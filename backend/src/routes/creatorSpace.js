@@ -104,11 +104,11 @@ router.post('/campaigns/create', creatorAuth, async (req, res) => {
       })
     })
   } catch (e) {
-    logger.error('creator-space', 'campaign creation error', e)
+    logger.error('creatorSpace', { route: req.originalUrl, error: e.message || String(e) });
     if (e.message === 'insufficient Mallpoints balance') {
-      return res.status(400).json({ error: e.message })
+      return res.status(400).json({ error: 'invalid request' })
     }
-    res.status(500).json({ error: String(e) })
+    res.status(500).json({ error: 'internal error' })
   } finally {
     await session.endSession()
   }
@@ -123,8 +123,8 @@ router.get('/campaigns', creatorAuth, async (req, res) => {
 
     return res.json({ ok: true, campaigns })
   } catch (e) {
-    logger.error('creator-space', 'get campaigns error', e)
-    res.status(500).json({ error: String(e) })
+    logger.error('creatorSpace', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' })
   }
 })
 
@@ -142,8 +142,8 @@ router.get('/balance', creatorAuth, async (req, res) => {
       walletAddress: user.walletAddress,
     })
   } catch (e) {
-    logger.error('creator-space', 'balance error', e)
-    res.status(500).json({ error: String(e) })
+    logger.error('creatorSpace', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' })
   }
 })
 

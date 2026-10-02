@@ -19,6 +19,9 @@ import { TxRaw } from 'cosmjs-types/cosmos/tx/v1beta1/tx';
 import { SignMode } from 'cosmjs-types/cosmos/tx/signing/v1beta1/signing';
 import { api } from './api';
 import { chain } from './config';
+import { estimateGas } from './gasEstimation';
+import { broadcastWithRetry } from './broadcastWithRetry';
+import { waitForConfirmation } from './txConfirmation';
 import {
   MSG_CREATE_ESCROW,
   MSG_RELEASE_FUNDS,
@@ -29,7 +32,7 @@ import {
   type MsgOpenDisputeValue,
 } from './marketplaceProto';
 
-const DEFAULT_GAS_LIMIT = 250000;
+const PLACEHOLDER_GAS_LIMIT = 0;
 
 export class MarketplaceTxError extends Error {
   code?: string;
@@ -81,7 +84,29 @@ async function signAndBroadcast(opts: {
   });
 
   const pubkey = encodePubkey({ type: 'tendermint/PubKeySecp256k1', value: toBase64(account.pubkey) });
-  const fee = calculateFee(DEFAULT_GAS_LIMIT, GasPrice.fromString(chain.gasPrice));
+
+  // Build unsigned tx with placeholder fee for simulation
+  const placeholderFee = calculateFee(PLACEHOLDER_GAS_LIMIT, GasPrice.fromString(chain.gasPrice));
+  const placeholderAuthInfoBytes = makeAuthInfoBytes(
+    [{ pubkey, sequence: BigInt(sequence) }],
+    placeholderFee.amount,
+    Number(placeholderFee.gas),
+    undefined,
+    undefined,
+    SignMode.SIGN_MODE_DIRECT
+  );
+
+  const placeholderTxRaw = TxRaw.encode({
+    bodyBytes,
+    authInfoBytes: placeholderAuthInfoBytes,
+    signatures: [new Uint8Array()],
+  }).finish();
+
+  // Estimate gas via backend simulation
+  const gasLimit = await estimateGas(toBase64(placeholderTxRaw));
+
+  // Rebuild with estimated gas
+  const fee = calculateFee(gasLimit, GasPrice.fromString(chain.gasPrice));
   const authInfoBytes = makeAuthInfoBytes(
     [{ pubkey, sequence: BigInt(sequence) }],
     fee.amount,
@@ -102,13 +127,12 @@ async function signAndBroadcast(opts: {
 
   const txBytes = toBase64(txRawBytes);
 
-  const res = await api.post<{ success: boolean; txHash: string; error?: string }>('/api/marketplace/escrow/broadcast', {
-    txBytes,
-  });
-  if (!res.ok || !res.data?.txHash) {
-    throw new MarketplaceTxError(res.data?.error || res.error || 'Escrow transaction failed during broadcast');
+  try {
+    const data = await broadcastWithRetry('/api/marketplace/escrow/broadcast', { txBytes });
+    return data.txHash;
+  } catch (err) {
+    throw new MarketplaceTxError(err instanceof Error ? err.message : 'Escrow transaction failed during broadcast');
   }
-  return res.data.txHash;
 }
 
 function decodeEventAttr(value: string): string {
@@ -124,30 +148,6 @@ function decodeEventAttr(value: string): string {
   } catch {
     return value;
   }
-}
-
-/** Polls GET /api/send/status/:txHash until the tx is included, then returns its events. */
-async function waitForTxEvents(txHash: string, attempts = 8, delayMs = 1500): Promise<Array<{ type: string; attributes: Array<{ key: string; value: string }> }>> {
-  for (let i = 0; i < attempts; i++) {
-    const res = await api.get<{
-      success: boolean;
-      status: string;
-      code?: number;
-      events?: Array<{ type: string; attributes: Array<{ key: string; value: string }> }>;
-    }>(`/api/send/status/${txHash}`);
-
-    if (res.ok && res.data?.status === 'confirmed') {
-      if (res.data.code && res.data.code !== 0) {
-        throw new MarketplaceTxError('Escrow transaction failed on-chain');
-      }
-      return res.data.events || [];
-    }
-    if (res.ok && res.data?.status === 'failed') {
-      throw new MarketplaceTxError('Escrow transaction failed on-chain');
-    }
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-  throw new MarketplaceTxError('Timed out waiting for escrow transaction to confirm');
 }
 
 function findEventAttr(
@@ -188,7 +188,8 @@ export async function createEscrow(opts: {
     disputeWindowSeconds: String(opts.disputeWindowSeconds),
   };
   const txHash = await signAndBroadcast({ mnemonic: opts.mnemonic, fromAddress: opts.buyer, typeUrl: MSG_CREATE_ESCROW, value });
-  const events = await waitForTxEvents(txHash);
+  const confirmation = await waitForConfirmation(txHash);
+  const events = confirmation.events || [];
   const escrowId = findEventAttr(events, 'escrow_created', 'escrow_id');
   if (!escrowId) {
     throw new MarketplaceTxError('Escrow was created but its id could not be read back from the chain.');
@@ -200,7 +201,7 @@ export async function createEscrow(opts: {
 export async function releaseFunds(opts: { mnemonic: string; buyer: string; escrowId: string }): Promise<{ txHash: string }> {
   const value: MsgReleaseFundsValue = { escrowId: opts.escrowId, releaseBy: opts.buyer };
   const txHash = await signAndBroadcast({ mnemonic: opts.mnemonic, fromAddress: opts.buyer, typeUrl: MSG_RELEASE_FUNDS, value });
-  await waitForTxEvents(txHash);
+  await waitForConfirmation(txHash);
   return { txHash };
 }
 
@@ -208,6 +209,6 @@ export async function releaseFunds(opts: { mnemonic: string; buyer: string; escr
 export async function openDispute(opts: { mnemonic: string; buyer: string; escrowId: string }): Promise<{ txHash: string }> {
   const value: MsgOpenDisputeValue = { escrowId: opts.escrowId, opener: opts.buyer };
   const txHash = await signAndBroadcast({ mnemonic: opts.mnemonic, fromAddress: opts.buyer, typeUrl: MSG_OPEN_DISPUTE, value });
-  await waitForTxEvents(txHash);
+  await waitForConfirmation(txHash);
   return { txHash };
 }

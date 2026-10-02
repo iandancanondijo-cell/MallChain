@@ -87,9 +87,14 @@ async function issueBadgeFromMnemonic({ mnemonic, recipient, badgeType = 'gold' 
   if (!mnemonic) throw new Error('Missing mnemonic for badge issuer');
   if (!recipient) throw new Error('Missing recipient address');
 
-  const wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
-    prefix: config.chain.prefix,
-  });
+  let wallet;
+  try {
+    wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
+      prefix: config.chain.prefix,
+    });
+  } finally {
+    mnemonic = null;
+  }
   const [account] = await wallet.getAccounts();
 
   const client = await connectClientWithSigner(wallet);

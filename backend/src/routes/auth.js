@@ -54,8 +54,9 @@ router.get('/email-exists',
       const { email } = req.query;
       if (!email) return res.status(400).json({ error: 'email required' });
       const User = require('../models/user');
+      const { blindIndex } = require('../utils/fieldEncryption');
       const normalizedEmail = email.toLowerCase().trim();
-      const existing = await User.findOne({ email: normalizedEmail });
+      const existing = await User.findOne({ email_blind: blindIndex(normalizedEmail) });
       res.json({ exists: !!existing });
     } catch (e) {
       res.status(500).json({ error: 'check failed' });

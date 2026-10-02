@@ -11,4 +11,5 @@ var (
 	ErrUnauthorized     = errors.Register(ModuleName, 4, "unauthorized")
 	ErrGasLimitExceeded = errors.Register(ModuleName, 5, "gas limit exceeded")
 	ErrModuleDisabled   = errors.Register(ModuleName, 6, "x/wasm is disabled")
+	ErrDuplicateCode    = errors.Register(ModuleName, 7, "duplicate wasm code")
 )

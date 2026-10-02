@@ -3,10 +3,13 @@ const Schema = mongoose.Schema;
 const { encryptField, decryptField } = require('../utils/fieldEncryption');
 
 // Fields encrypted at rest (production-readiness E1/E2) — the government ID
-// number and home-address/contact details, the most sensitive identity PII
-// this model holds. Never queried by value anywhere in the codebase (only
-// ever looked up by userId/_id), so no blind index is needed for these.
-const ENCRYPTED_FIELDS = ['idNumber', 'phoneNumber', 'address', 'city', 'postalCode'];
+// number, personal identity fields, and home-address/contact details. Never
+// queried by value anywhere in the codebase (only ever looked up by
+// userId/_id), so no blind index is needed for these.
+const ENCRYPTED_FIELDS = [
+  'idNumber', 'phoneNumber', 'address', 'city', 'postalCode',
+  'firstName', 'lastName', 'dateOfBirth', 'idDocumentUrl', 'annualIncome',
+];
 
 const KYCSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },

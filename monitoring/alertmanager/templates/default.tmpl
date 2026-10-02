@@ -1,0 +1,34 @@
+{{ define "mallchain.title" -}}
+[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .GroupLabels.alertname }}
+{{- end }}
+
+{{ define "mallchain.text" -}}
+{{ range .Alerts }}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*Alert:* {{ .Labels.alertname }}
+*Severity:* {{ .Labels.severity }}
+*Job:* {{ .Labels.job }}
+{{ if .Labels.instance }}*Instance:* {{ .Labels.instance }}{{ end }}
+*Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+*Duration:* {{ .StartsAt.Sub .StartsAt }}
+
+*Summary:* {{ .Annotations.summary }}
+*Description:* {{ .Annotations.description }}
+{{ if .Annotations.runbook }}*Runbook:* {{ .Annotations.runbook }}{{ end }}
+{{ if .Annotations.dashboard }}*Dashboard:* {{ .Annotations.dashboard }}{{ end }}
+{{ end }}
+{{- end }}
+
+{{ define "mallchain.slack.title" -}}
+{{ if eq .Status "firing" }}🔴{{ else }}✅{{ end }} {{ template "mallchain.title" . }}
+{{- end }}
+
+{{ define "mallchain.slack.fields" -}}
+{{ range .Alerts }}
+{ "type": "mrkdwn", "text": {{ printf "*Summary:* %s\n*Description:* %s\n*Instance:* %s\n*Severity:* %s" .Annotations.summary .Annotations.description .Labels.instance .Labels.severity | toJson }} }
+{{ end }}
+{{- end }}
+
+{{ define "mallchain.email.subject" -}}
+[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }} ({{ .GroupLabels.job }})
+{{- end }}

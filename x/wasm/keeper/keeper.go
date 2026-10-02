@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -24,6 +25,7 @@ type Keeper struct {
 	Schema         collections.Schema
 	ContractCode   collections.Map[uint64, []byte]
 	ContractCodeID collections.Sequence
+	CodeHash       collections.Map[string, uint64]
 	Contracts      collections.Map[string, []byte]
 	ContractSeq    collections.Sequence
 	ContractState  collections.Map[collections.Pair[string, string], []byte]
@@ -57,6 +59,7 @@ func NewKeeper(
 		cdc:              cdc,
 		ContractCode:     collections.NewMap(sb, []byte("code/"), "contractCode", collections.Uint64Key, collections.BytesValue),
 		ContractCodeID:   collections.NewSequence(sb, []byte("codeSeq/"), "contractCodeID"),
+		CodeHash:         collections.NewMap(sb, []byte("codeHash/"), "codeHash", collections.StringKey, collections.Uint64Value),
 		Contracts:        collections.NewMap(sb, []byte("contract/"), "contracts", collections.StringKey, collections.BytesValue),
 		ContractSeq:      collections.NewSequence(sb, []byte("contractSeq/"), "contractSeq"),
 		ContractState:    collections.NewMap(sb, []byte("contractState/"), "contractState", collections.PairKeyCodec(collections.StringKey, collections.StringKey), collections.BytesValue),
@@ -82,6 +85,21 @@ func (k *Keeper) getWasmVM(ctx context.Context) *WasmVM {
 }
 
 func (k Keeper) StoreCode(ctx context.Context, wasmCode []byte) (uint64, error) {
+	if len(wasmCode) == 0 {
+		return 0, types.ErrInvalidRequest.Wrap("contract code is empty")
+	}
+
+	if len(wasmCode) > MaxWasmCodeSize {
+		return 0, types.ErrInvalidRequest.Wrapf("contract code exceeds maximum size (%d > %d bytes)", len(wasmCode), MaxWasmCodeSize)
+	}
+
+	hash := sha256.Sum256(wasmCode)
+	hashKey := hex.EncodeToString(hash[:])
+
+	if existingID, err := k.CodeHash.Get(ctx, hashKey); err == nil {
+		return existingID, types.ErrDuplicateCode.Wrapf("code already stored under id %d", existingID)
+	}
+
 	codeID, err := k.ContractCodeID.Next(ctx)
 	if err != nil {
 		return 0, err
@@ -94,13 +112,14 @@ func (k Keeper) StoreCode(ctx context.Context, wasmCode []byte) (uint64, error) 
 		}
 	}
 
-	if len(wasmCode) == 0 {
-		return 0, types.ErrInvalidRequest.Wrap("contract code is empty")
-	}
-
 	if err := k.ContractCode.Set(ctx, codeID, wasmCode); err != nil {
 		return 0, err
 	}
+
+	if err := k.CodeHash.Set(ctx, hashKey, codeID); err != nil {
+		return 0, err
+	}
+
 	return codeID, nil
 }
 
@@ -277,6 +296,9 @@ func (k Keeper) ExecuteContract(ctx context.Context, sender string, contractAddr
 	if gl, ok := actionMsg["gas_limit"].(float64); ok {
 		gasLimit = uint64(gl)
 	}
+	if gasLimit > gasCfg.DefaultGasLimit {
+		gasLimit = gasCfg.DefaultGasLimit
+	}
 
 	// Store execution in contract state
 	if err := k.setExecutionResult(ctx, contractAddr, "last_action", action); err != nil {
@@ -371,8 +393,14 @@ func (k Keeper) executeWASMRaw(ctx context.Context, sdkCtx sdk.Context, contract
 }
 
 func (k Keeper) executeTransfer(ctx context.Context, sender string, actionMsg map[string]interface{}) (string, error) {
-	to, _ := actionMsg["to"].(string)
-	amountFloat, _ := actionMsg["amount"].(float64)
+	to, ok := actionMsg["to"].(string)
+	if !ok || to == "" {
+		return "", types.ErrInvalidRequest.Wrap("missing or invalid 'to' field")
+	}
+	amountFloat, ok := actionMsg["amount"].(float64)
+	if !ok || amountFloat <= 0 {
+		return "", types.ErrInvalidRequest.Wrap("missing or invalid 'amount' field")
+	}
 	amount := uint64(amountFloat)
 
 	transferMsg := wasmbridgetypes.MGP20TransferMsg{
@@ -388,8 +416,14 @@ func (k Keeper) executeTransfer(ctx context.Context, sender string, actionMsg ma
 }
 
 func (k Keeper) executeApprove(ctx context.Context, sender string, actionMsg map[string]interface{}) (string, error) {
-	spender, _ := actionMsg["spender"].(string)
-	amountFloat, _ := actionMsg["amount"].(float64)
+	spender, ok := actionMsg["spender"].(string)
+	if !ok || spender == "" {
+		return "", types.ErrInvalidRequest.Wrap("missing or invalid 'spender' field")
+	}
+	amountFloat, ok := actionMsg["amount"].(float64)
+	if !ok || amountFloat <= 0 {
+		return "", types.ErrInvalidRequest.Wrap("missing or invalid 'amount' field")
+	}
 	amount := uint64(amountFloat)
 
 	approveMsg := wasmbridgetypes.MGP20ApproveMsg{

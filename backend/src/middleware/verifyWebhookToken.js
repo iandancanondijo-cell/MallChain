@@ -8,7 +8,14 @@ const crypto = require('crypto');
 // so there's one audited implementation rather than copies that could drift.
 function verifyWebhookToken(req, res, next) {
   const secret = process.env.PAYMENT_WEBHOOK_SECRET;
-  if (!secret) return next();
+  // In production, fail closed — a missing secret means every callback is
+  // accepted without verification, which lets anyone spoof a payment.
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(500).json({ error: 'webhook verification not configured' });
+    }
+    return next();
+  }
 
   const provided = String(req.query.token || '');
   const expected = Buffer.from(secret);

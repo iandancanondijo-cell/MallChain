@@ -1,24 +1,26 @@
 /* eslint-env node */
 /* global require, module, process */
-const { SigningStargateClient } = require('@cosmjs/stargate');
+const { SigningStargateClient, GasPrice } = require('@cosmjs/stargate');
 const { DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
 const { Console } = require('console');
 const { stdout, stderr } = require('process');
 const console = new Console(stdout, stderr);
+const config = require('../config');
 
-const CHAIN_RPC = process.env.CHAIN_RPC_URL || process.env.VITE_CHAIN_RPC || 'http://localhost:26657';
-const GAS_PRICE = process.env.GAS_PRICE || '0.025';
-const DENOM = process.env.DENOM || 'mlcoin';
+const CHAIN_RPC = config.chain.rpc;
+const GAS_PRICE = config.chain.gasPrice;
+const DENOM = config.chain.denom || 'mlcoin';
+const PREFIX = config.chain.prefix || 'marketplace';
 
 async function getAddressFromMnemonic(mnemonic) {
   try {
     const wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
-      prefix: 'marketplace',
+      prefix: PREFIX,
     });
     const accounts = await wallet.getAccounts();
     return accounts[0]?.address;
   } catch (err) {
-    console.error('[BurnTx] Failed to get address from mnemonic:', err.message);
+    console.error('[BurnTx] Failed to derive address (invalid mnemonic)');
     throw err;
   }
 }
@@ -35,7 +37,7 @@ async function burnCoinsOnChain({ mnemonic, burnAmount, memo = '' }) {
 
   try {
     const wallet = await DirectSecp256k1HdWallet.fromMnemonic(mnemonic, {
-      prefix: 'marketplace',
+      prefix: PREFIX,
     });
     const accounts = await wallet.getAccounts();
     const signerAddress = accounts[0].address;
@@ -56,8 +58,14 @@ async function burnCoinsOnChain({ mnemonic, burnAmount, memo = '' }) {
 
     console.log(`[BurnTx] Burning ${burnAmount} ${DENOM} from ${signerAddress}`);
 
-    // Estimate gas
-    const gasEstimate = 100000; // conservative estimate for burn
+    // Simulate to estimate gas, then add 30% margin
+    let gasEstimate;
+    try {
+      const simulated = await client.simulate(signerAddress, [burnMsg], memo || 'mallcoin burn transaction');
+      gasEstimate = Math.ceil(simulated * 1.3);
+    } catch (_simErr) {
+      gasEstimate = 200000; // fallback if simulation fails
+    }
 
     const txResult = await client.signAndBroadcast(
       signerAddress,
@@ -83,7 +91,7 @@ async function burnCoinsOnChain({ mnemonic, burnAmount, memo = '' }) {
       gasWanted: txResult.gasWanted,
     };
   } catch (err) {
-    console.error('[BurnTx] Burn transaction failed:', err.message || err);
+    console.error('[BurnTx] Burn transaction failed:', txResult?.code != null ? `code ${txResult.code}` : 'unknown error');
     throw err;
   }
 }

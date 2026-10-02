@@ -24,6 +24,13 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 	if err := k.Params.Set(ctx, genState.Params); err != nil {
 		return err
 	}
+
+	for _, entry := range genState.MonthlyPointsIssued {
+		if err := k.MonthlyPointsIssued.Set(ctx, entry.Address, entry.Points); err != nil {
+			return err
+		}
+	}
+
 	return k.initIntervals(ctx)
 }
 
@@ -54,6 +61,16 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 		return nil, err
 	}
 	genesis.ConversionWindow = &conversionWindow
+
+	if err := k.MonthlyPointsIssued.Walk(ctx, nil, func(key string, val uint64) (stop bool, err error) {
+		genesis.MonthlyPointsIssued = append(genesis.MonthlyPointsIssued, types.MonthlyPointsIssuedEntry{
+			Address: key,
+			Points:  val,
+		})
+		return false, nil
+	}); err != nil {
+		return nil, err
+	}
 
 	return genesis, nil
 }

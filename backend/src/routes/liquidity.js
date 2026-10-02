@@ -3,6 +3,7 @@ const router = express.Router()
 const ctrl = require('../controllers/liquidityController')
 const LiquidityPoolActivity = require('../models/LiquidityPoolActivity')
 const { requireAdmin } = require('../middleware/adminAuth')
+const logger = require('../utils/logger')
 
 // GET /api/liquidity/pools
 router.get('/pools', ctrl.getAllPools)
@@ -75,7 +76,8 @@ router.get('/activity', requireAdmin, async (req, res) => {
 
     return res.json({ ok: true, items, total, page: Number(page) || 0, limit: safeLimit })
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err) })
+    logger.error('liquidity', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' })
   }
 })
 

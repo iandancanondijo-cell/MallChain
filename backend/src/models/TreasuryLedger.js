@@ -20,4 +20,10 @@ const TreasuryLedgerSchema = new mongoose.Schema({
   recordedAt: { type: Date, default: Date.now },
 });
 
+TreasuryLedgerSchema.index({ activity: 1 });
+TreasuryLedgerSchema.index({ direction: 1 });
+TreasuryLedgerSchema.index({ createdAt: -1 });
+TreasuryLedgerSchema.index({ relatedSaleId: 1 }, { sparse: true });
+TreasuryLedgerSchema.index({ relatedQuoteId: 1 }, { sparse: true });
+
 module.exports = mongoose.model('TreasuryLedger', TreasuryLedgerSchema);

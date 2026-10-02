@@ -160,7 +160,12 @@ func (k Keeper) hasQuorum(ctx context.Context, tally types.TallyResult, params t
 		return false
 	}
 	if totalBonded.IsZero() {
-		return true
+		// No bonded stake means no legitimate voting power. Returning true
+		// here would let any votes (including from zero-stake accounts that
+		// slipped past TallyVotes) trivially satisfy quorum. Require the
+		// chain to have at least some bonded stake before governance can
+		// pass proposals.
+		return false
 	}
 
 	quorumRatio := math.LegacyNewDecFromInt(totalVotes).Quo(math.LegacyNewDecFromInt(totalBonded))

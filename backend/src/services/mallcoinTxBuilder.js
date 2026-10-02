@@ -12,7 +12,11 @@ const CHAIN_RPC = config.chain.rpc.replace(/\/$/, '');
 
 async function walletFromPrivateKey(privateKeyHex, prefix) {
   const key = Uint8Array.from(Buffer.from(privateKeyHex.replace(/^0x/, ''), 'hex'));
-  return DirectSecp256k1Wallet.fromKey(key, prefix || config.chain.prefix);
+  try {
+    return await DirectSecp256k1Wallet.fromKey(key, prefix || config.chain.prefix);
+  } finally {
+    key.fill(0);
+  }
 }
 
 async function connectClientWithSigner(wallet) {

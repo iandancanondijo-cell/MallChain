@@ -91,4 +91,29 @@ export const kycApi = {
       return { ok: false, error: (e as Error).message || 'Failed to load document' };
     }
   },
+
+  async submit(data: Record<string, unknown>): Promise<ApiResult<{ ok: boolean }>> {
+    const base = config.apiBaseUrl.replace(/\/$/, '');
+    const csrfToken = await authService.getCsrfToken();
+    try {
+      const res = await fetch(`${base}/api/kyc/submit`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+        },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const rawError = result?.error;
+        const errorMessage = typeof rawError === 'string' ? rawError : rawError?.message || `Failed to submit KYC (${res.status})`;
+        return { ok: false, error: errorMessage };
+      }
+      return { ok: true, data: { ok: true } };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message || 'Failed to submit KYC' };
+    }
+  },
 };

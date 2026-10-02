@@ -19,11 +19,11 @@ router.get('/balance/:address', async (req, res) => {
     }
     return res.json({ balance: '0' })
   } catch (e) {
-    logger.error('mallwallet', 'REST balance error', e)
+    logger.error('mallwallet', { route: req.originalUrl, error: e.message || String(e) });
     try {
       res.json({ balance: '0' })
     } catch (err) {
-      res.status(500).json({ error: String(err) })
+      res.status(500).json({ error: 'internal error' })
     }
   }
 })

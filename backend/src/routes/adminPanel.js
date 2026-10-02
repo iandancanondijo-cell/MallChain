@@ -27,12 +27,32 @@ const { getUserBadgeInfo } = require('../services/badgeService');
 const { issueBadgeFromMnemonic } = require('../services/badgeTxBuilder');
 const { notifyUser } = require('../services/notify');
 const { limiters } = require('../middleware/rateLimiter');
+const { blindIndex, decryptField } = require('../utils/fieldEncryption');
 
 const MAINTENANCE_SCOPES = ['send', 'withdraw', 'buy', 'payment', 'marketplace', 'staking', 'vault', 'key-vault', 'badge', 'dex'];
 
 // ============ BOOTSTRAP: Create first admin (only works when no admins exist) ============
+// Gated behind a one-time bootstrap token (BOOTSTRAP_TOKEN env var) so that
+// after a full admin wipe, a random scanner can't claim superadmin before the
+// real operator does. In production the env var is required; in dev/test a
+// missing token is tolerated but logged as a warning. [B7 remediation]
 router.post('/bootstrap', limiters.strict, async (req, res) => {
   try {
+    const bootstrapToken = process.env.BOOTSTRAP_TOKEN;
+    const suppliedToken = req.headers['x-bootstrap-token'];
+
+    if (process.env.NODE_ENV === 'production') {
+      if (!bootstrapToken) {
+        return res.status(503).json({ ok: false, error: 'Bootstrap not configured. Set BOOTSTRAP_TOKEN env var.' });
+      }
+      if (!suppliedToken || suppliedToken !== bootstrapToken) {
+        return res.status(403).json({ ok: false, error: 'Invalid or missing bootstrap token.' });
+      }
+    } else if (bootstrapToken && suppliedToken !== bootstrapToken) {
+      // Non-production: if a token IS configured, enforce it. If not configured, allow (dev convenience).
+      return res.status(403).json({ ok: false, error: 'Invalid bootstrap token.' });
+    }
+
     const adminExists = await User.findOne({ role: { $in: ['admin', 'superadmin'] } });
     if (adminExists) {
       return res.status(403).json({ ok: false, error: 'Admin already exists. Use normal admin auth to manage users.' });
@@ -49,7 +69,7 @@ router.post('/bootstrap', limiters.strict, async (req, res) => {
     // true — a fresh deploy, or every admin having been deleted — with no
     // verification the caller controls that email. Create-only: never touch
     // an existing user document.
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email_blind: blindIndex(email.toLowerCase().trim()) });
     if (existingUser) {
       return res.status(409).json({ ok: false, error: 'An account with this email already exists. Bootstrap only creates a brand-new superadmin account.' });
     }
@@ -68,7 +88,8 @@ router.post('/bootstrap', limiters.strict, async (req, res) => {
 
     return res.json({ ok: true, user: publicUser, message: 'Superadmin created successfully' });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -94,8 +115,6 @@ router.get('/dashboard', async (req, res) => {
       activeValidators,
       pendingSubmissions,
       totalCampaigns,
-      recentUsers,
-      bannedUsers,
     ] = await Promise.all([
       User.countDocuments(),
       User.countDocuments({ role: { $in: ['admin', 'superadmin'] } }),
@@ -103,9 +122,11 @@ router.get('/dashboard', async (req, res) => {
       ValidatorApplication.countDocuments({ status: 'approved', isActiveValidator: true }),
       TaskSubmission.countDocuments({ status: 'manual_review' }),
       Campaign.countDocuments(),
-      User.find().sort({ createdAt: -1 }).limit(5).select('email role createdAt banned').lean(),
-      User.countDocuments({ banned: true }),
     ]);
+    // email is encrypted at rest — decrypt for admin display after .lean()
+    const rawRecentUsers = await User.find().sort({ createdAt: -1 }).limit(5).select('email role createdAt banned').lean();
+    const recentUsers = rawRecentUsers.map((u) => ({ ...u, email: u.email ? decryptField(u.email) : u.email }));
+    const bannedUsers = await User.countDocuments({ banned: true });
 
     const stats = {
       users: { total: totalUsers, admins: adminCount, banned: bannedUsers },
@@ -117,7 +138,8 @@ router.get('/dashboard', async (req, res) => {
     await auditLog('dashboard_view', req.user, 'Admin viewed dashboard');
     return res.json({ ok: true, stats });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -130,20 +152,29 @@ router.get('/users', async (req, res) => {
   try {
     const { page = 0, limit = 50, search, role, banned } = req.query;
     const query = {};
-    // search was interpolated straight into $regex — a crafted pattern
-    // (e.g. catastrophic-backtracking like (a+)+$) could hang the query.
-    // Escaping regex metacharacters keeps this a plain substring match.
-    if (search) query.$or = [{ email: { $regex: escapeRegex(search), $options: 'i' } }];
+    // Email is encrypted at rest — search by exact-match blind index (regex
+    // on ciphertext is meaningless). Also search username (not encrypted)
+    // with regex for substring matching, since username is the non-sensitive
+    // display name.
+    if (search) {
+      const escaped = escapeRegex(search);
+      query.$or = [
+        { email_blind: blindIndex(search.toLowerCase().trim()) },
+        { username: { $regex: escaped, $options: 'i' } },
+      ];
+    }
     if (role) query.role = role;
     if (banned !== undefined) query.banned = banned === 'true';
 
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
     const skip = Math.max(Number(page) || 0, 0) * safeLimit;
 
-    const [users, total] = await Promise.all([
+    const [rawUsers, total] = await Promise.all([
       User.find(query).select('-password').sort({ createdAt: -1 }).skip(skip).limit(safeLimit).lean(),
       User.countDocuments(query),
     ]);
+    // email is encrypted at rest — decrypt for admin display
+    const users = rawUsers.map((u) => ({ ...u, email: u.email ? decryptField(u.email) : u.email }));
 
     // Bulk PII read (email + profile fields for up to 200 users at once) —
     // an admin browsing/searching every user is exactly the kind of
@@ -152,7 +183,8 @@ router.get('/users', async (req, res) => {
     await auditLog('users_search', req.user, { search: search || null, role: role || null, resultCount: users.length });
     return res.json({ ok: true, users, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -160,10 +192,13 @@ router.get('/users/:id', async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('-password').lean();
     if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
+    // email is encrypted at rest — decrypt for the audit log and admin response
+    user.email = user.email ? decryptField(user.email) : user.email;
     await auditLog('user_view', req.user, { targetUserId: req.params.id, email: user.email });
     return res.json({ ok: true, user });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -192,7 +227,8 @@ router.put('/users/:id/role', requireSuperAdmin, limiters.strict, async (req, re
     notify(user._id, { kind: 'system', title: 'Account role updated', body: `Your account role is now ${role}` });
     return res.json({ ok: true, user });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -215,7 +251,8 @@ router.put('/users/:id/ban', limiters.strict, async (req, res) => {
     });
     return res.json({ ok: true, user });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -225,10 +262,13 @@ router.delete('/users/:id', requireSuperAdmin, limiters.strict, async (req, res)
     if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
     await invalidateCachedUser(req.params.id);
 
-    await auditLog('user_delete', req.user, { targetUserId: req.params.id, email: user.email });
+    // email is encrypted at rest — decrypt for the audit log
+    const decryptedEmail = user.email ? decryptField(user.email) : user.email;
+    await auditLog('user_delete', req.user, { targetUserId: req.params.id, email: decryptedEmail });
     return res.json({ ok: true, user });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -249,7 +289,8 @@ router.get('/validators/applications', async (req, res) => {
 
     return res.json({ ok: true, applications, total });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -277,7 +318,8 @@ router.post('/validators/applications/:id/review', limiters.strict, async (req, 
     await auditLog('validator_review', req.user, { applicationId: req.params.id, action, applicantAddress: application.applicantAddress });
     return res.json({ ok: true, application });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -311,7 +353,8 @@ router.get('/kyc/pending', async (req, res) => {
     await auditLog('kyc_pending_view', req.user, { resultCount: submissions.length });
     return res.json({ ok: true, submissions, total });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -338,7 +381,8 @@ router.post('/kyc/:id/review', limiters.strict, async (req, res) => {
     await auditLog('kyc_review', req.user, { kycId: req.params.id, action, applicantId: String(kyc.userId) });
     return res.json({ ok: true, kyc });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -368,7 +412,8 @@ router.get('/aml-reviews/pending', async (req, res) => {
     await auditLog('aml_pending_view', req.user, { resultCount: reviews.length });
     return res.json({ ok: true, reviews, total });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -391,7 +436,8 @@ router.post('/aml-reviews/:id/review', limiters.strict, async (req, res) => {
     await auditLog('aml_review', req.user, { reviewId: req.params.id, action, userId: String(review.userId) });
     return res.json({ ok: true, review: WithdrawalAmlReview.decryptAmlPii(review) });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -416,7 +462,8 @@ router.get('/structuring-flags', async (req, res) => {
 
     return res.json({ ok: true, flags, total });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -436,7 +483,8 @@ router.post('/structuring-flags/:id/acknowledge', limiters.strict, async (req, r
     await auditLog('structuring_flag_acknowledge', req.user, { flagId: req.params.id, walletAddress: flag.walletAddress });
     return res.json({ ok: true, flag });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -446,7 +494,8 @@ router.get('/treasury/policies', async (_req, res) => {
     const policies = await BurnPolicy.find({}).lean();
     return res.json({ ok: true, policies });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -464,7 +513,8 @@ router.post('/treasury/policies', limiters.strict, async (req, res) => {
     await auditLog('treasury_policy_update', req.user, { activity, burnPercentage });
     return res.json({ ok: true, policy });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -474,7 +524,8 @@ router.delete('/treasury/policies/:activity', limiters.strict, async (req, res) 
     await auditLog('treasury_policy_delete', req.user, { activity: req.params.activity });
     return res.json({ ok: true, deleted: result.deletedCount === 1 });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -483,7 +534,8 @@ router.get('/treasury/dynamic-thresholds', async (_req, res) => {
     const thresholds = await DynamicBurnThreshold.find({}).sort({ activity: 1, supplyThreshold: -1 }).lean();
     return res.json({ ok: true, thresholds });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -501,7 +553,8 @@ router.post('/treasury/dynamic-thresholds', limiters.strict, async (req, res) =>
     await auditLog('treasury_threshold_update', req.user, { activity, supplyThreshold, burnPercentage });
     return res.json({ ok: true, threshold });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -511,7 +564,8 @@ router.delete('/treasury/dynamic-thresholds/:id', limiters.strict, async (req, r
     await auditLog('treasury_threshold_delete', req.user, { id: req.params.id });
     return res.json({ ok: true, deleted: result.deletedCount === 1 });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -526,7 +580,8 @@ router.get('/treasury/ledger', async (req, res) => {
     const entries = await TreasuryLedger.find(query).sort({ createdAt: -1 }).limit(safeLimit).lean();
     return res.json({ ok: true, entries });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -538,7 +593,8 @@ router.get('/treasury/metrics', async (_req, res) => {
     ]);
     return res.json({ ok: true, totals });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ error: 'internal error' });
   }
 });
 
@@ -559,7 +615,8 @@ router.get('/mining/campaigns', async (req, res) => {
 
     return res.json({ ok: true, campaigns, total });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -576,7 +633,8 @@ router.get('/mining/submissions/pending', async (req, res) => {
 
     return res.json({ ok: true, submissions, total });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -609,7 +667,8 @@ router.post('/mining/submissions/:id/approve', limiters.strict, async (req, res)
     await auditLog('mining_submission_approve', req.user, { submissionId: req.params.id, rewardAmount });
     return res.json({ ok: true, submission: updated });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -626,18 +685,27 @@ router.post('/mining/submissions/:id/reject', limiters.strict, async (req, res) 
     await auditLog('mining_submission_reject', req.user, { submissionId: req.params.id, note });
     return res.json({ ok: true, submission: row });
   } catch (err) {
-    return res.status(400).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(400).json({ ok: false, error: 'invalid request' });
   }
 });
 
 router.put('/mining/campaigns/:id', limiters.strict, async (req, res) => {
   try {
-    const row = await Campaign.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true }).lean();
+    // Whitelist allowed fields — $set: req.body would let an attacker set
+    // any model field (budget, creatorId, status, etc.).
+    const allowed = ['title', 'description', 'platform', 'status', 'budget', 'endDate', 'rewardPerVerification'];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+    const row = await Campaign.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true }).lean();
     if (!row) return res.status(404).json({ ok: false, error: 'campaign not found' });
     await auditLog('mining_campaign_update', req.user, { campaignId: req.params.id });
     return res.json({ ok: true, campaign: row });
   } catch (err) {
-    return res.status(400).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(400).json({ ok: false, error: 'invalid request' });
   }
 });
 
@@ -661,7 +729,8 @@ router.get('/governance/stats', async (_req, res) => {
       return res.json({ ok: true, stats: { total: 0, voting: 0, passed: 0, rejected: 0 }, proposals: [], note: 'chain unavailable' });
     }
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -671,7 +740,7 @@ router.get('/audit', async (req, res) => {
     const { action, actor, page = 0, limit = 100 } = req.query;
     const query = {};
     if (action) query.action = action;
-    if (actor) query.actor = { $regex: actor, $options: 'i' };
+    if (actor) query.actor = { $regex: escapeRegex(actor), $options: 'i' };
 
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 1000);
     const skip = Math.max(Number(page) || 0, 0) * safeLimit;
@@ -681,7 +750,8 @@ router.get('/audit', async (req, res) => {
     ]);
     return res.json({ ok: true, logs, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -702,7 +772,8 @@ router.post('/reconcile', limiters.strict, async (req, res) => {
     await auditLog('system_reconcile', req.user, 'Pool reconciliation triggered');
     return res.json({ ok: true, report });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err) });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -713,7 +784,8 @@ router.post('/reconciliation/run', limiters.strict, async (req, res) => {
     await auditLog('system_reconciliation_run', req.user, 'Reconciliation job triggered');
     return res.json({ ok: true, result });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err) });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -732,7 +804,8 @@ router.get('/reconciliation/items', async (req, res) => {
 
     return res.json({ ok: true, items, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err) });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -764,7 +837,8 @@ router.post('/reconciliation/:id/resolve', limiters.strict, async (req, res) => 
     await auditLog('reconciliation_resolved', req.user, { reconciliationId: item._id.toString(), note: item.resolutionNote });
     return res.json({ ok: true, item });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err) });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -783,7 +857,8 @@ router.get('/withdrawals', async (req, res) => {
 
     return res.json({ ok: true, withdrawals, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err) });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -820,7 +895,8 @@ router.post('/withdrawals/:id/retry', limiters.strict, async (req, res) => {
     await auditLog('withdrawal_retry', req.user, { withdrawalId: withdrawal.withdrawalId, outcome: 'reinitiated', payoutRef: payoutResult.payoutRef });
     return res.json({ ok: true, withdrawal });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err) });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -851,7 +927,8 @@ router.post('/withdrawals/:id/resolve', limiters.strict, async (req, res) => {
     await auditLog('withdrawal_resolved', req.user, { withdrawalId: withdrawal.withdrawalId, outcome, note: withdrawal.notes });
     return res.json({ ok: true, withdrawal });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err) });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -872,7 +949,8 @@ router.get('/badges/purchases', async (req, res) => {
 
     return res.json({ ok: true, purchases, total });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -892,7 +970,8 @@ router.get('/badges/issuances', async (req, res) => {
 
     return res.json({ ok: true, issuances, total });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -920,7 +999,7 @@ router.post('/badges/grant', limiters.strict, async (req, res) => {
       badgeType: 'gold',
     });
 
-    const user = await User.findOne({ walletAddress }).lean();
+    const user = await User.findOne({ walletAddress_blind: blindIndex(walletAddress) }).lean();
     await BadgeIssuance.create({
       userId: user?._id,
       walletAddress,
@@ -940,7 +1019,8 @@ router.post('/badges/grant', limiters.strict, async (req, res) => {
     await auditLog('badge_admin_grant', req.user, { walletAddress, txHash: result.txHash });
     return res.json({ ok: true, txHash: result.txHash });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -963,7 +1043,8 @@ router.post('/badges/purchases/:quoteId/void', limiters.strict, async (req, res)
     await auditLog('badge_purchase_void', req.user, { quoteId: req.params.quoteId, reason });
     return res.json({ ok: true, purchase: purchase.toObject() });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -983,7 +1064,8 @@ router.get('/maintenance', async (_req, res) => {
       updatedAt: state?.updatedAt || null,
     });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err) });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 
@@ -1029,7 +1111,8 @@ router.post('/maintenance', requireSuperAdmin, limiters.strict, async (req, res)
       updatedAt: state.updatedAt || null,
     });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: String(err) });
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
   }
 });
 

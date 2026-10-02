@@ -16,10 +16,13 @@ import { TxRaw } from 'cosmjs-types/cosmos/tx/v1beta1/tx';
 import { SignMode } from 'cosmjs-types/cosmos/tx/signing/v1beta1/signing';
 import { api } from './api';
 import { chain } from './config';
+import { estimateGas } from './gasEstimation';
+import { broadcastWithRetry } from './broadcastWithRetry';
+import { waitForConfirmation } from './txConfirmation';
 import { MSG_TRANSFER_MALLCOIN, createMlcoinRegistry } from './mlcoinProto';
 
 const MLCNS_DECIMALS = 6;
-const DEFAULT_GAS_LIMIT = 250000;
+const PLACEHOLDER_GAS_LIMIT = 0;
 
 export class MallcoinTxError extends Error {
   code?: string;
@@ -79,7 +82,29 @@ export async function buildSignedTxBytes(opts: {
   });
 
   const pubkey = encodePubkey({ type: 'tendermint/PubKeySecp256k1', value: toBase64(account.pubkey) });
-  const fee = calculateFee(DEFAULT_GAS_LIMIT, GasPrice.fromString(chain.gasPrice));
+
+  // Build unsigned tx with placeholder fee for simulation
+  const placeholderFee = calculateFee(PLACEHOLDER_GAS_LIMIT, GasPrice.fromString(chain.gasPrice));
+  const placeholderAuthInfoBytes = makeAuthInfoBytes(
+    [{ pubkey, sequence: BigInt(sequence) }],
+    placeholderFee.amount,
+    Number(placeholderFee.gas),
+    undefined,
+    undefined,
+    SignMode.SIGN_MODE_DIRECT
+  );
+
+  const placeholderTxRaw = TxRaw.encode({
+    bodyBytes,
+    authInfoBytes: placeholderAuthInfoBytes,
+    signatures: [new Uint8Array()],
+  }).finish();
+
+  // Estimate gas via backend simulation
+  const gasLimit = await estimateGas(toBase64(placeholderTxRaw));
+
+  // Rebuild with estimated gas
+  const fee = calculateFee(gasLimit, GasPrice.fromString(chain.gasPrice));
   const authInfoBytes = makeAuthInfoBytes(
     [{ pubkey, sequence: BigInt(sequence) }],
     fee.amount,
@@ -118,19 +143,22 @@ export async function sendMallcoinTransfer(opts: {
 }): Promise<SendMallcoinResult> {
   const txBytes = await buildSignedTxBytes(opts);
 
-  const res = await api.post<{ success: boolean; txHash: string }>('/api/send/mallcoins', {
-    from: opts.fromAddress,
-    to: opts.toAddress,
-    amount: opts.amountMlcns,
-    txBytes,
-  });
-
-  if (!res.ok || !res.data?.txHash) {
-    throw new MallcoinTxError(res.error || 'Transaction failed during broadcast');
+  let data;
+  try {
+    data = await broadcastWithRetry('/api/send/mallcoins', {
+      from: opts.fromAddress,
+      to: opts.toAddress,
+      amount: opts.amountMlcns,
+      txBytes,
+    });
+  } catch (err) {
+    throw new MallcoinTxError(err instanceof Error ? err.message : 'Transaction failed during broadcast');
   }
 
+  await waitForConfirmation(data.txHash);
+
   return {
-    txHash: res.data.txHash,
+    txHash: data.txHash,
     from: opts.fromAddress,
     to: opts.toAddress,
     amount: opts.amountMlcns,

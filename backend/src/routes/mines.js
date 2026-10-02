@@ -201,7 +201,14 @@ router.post('/campaigns/create', minesAuth, async (req, res) => {
 
 router.put('/campaigns/:id', requireAdmin, async (req, res) => {
   try {
-    const row = await Campaign.findByIdAndUpdate(req.params.id, { $set: req.body }, { new: true }).lean();
+    // Whitelist allowed fields — $set: req.body would let an attacker set
+    // any model field (budget, creatorId, status, etc.).
+    const allowed = ['title', 'description', 'platform', 'status', 'budget', 'endDate', 'rewardPerVerification'];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+    const row = await Campaign.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true }).lean();
     if (!row) return res.status(404).json(fail('campaign not found'));
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }

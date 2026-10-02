@@ -1,11 +1,17 @@
 const express = require('express')
 const router = express.Router()
 const crypto = require('crypto')
+const mongoose = require('mongoose')
 const MallPointAccount = require('../models/MallPointAccount')
 const { createLimiter } = require('../middleware/rateLimiter')
 const logger = require('../utils/logger')
 const { addLiquidityToPool } = require('../controllers/liquidityController')
 const { invalidateCache: invalidateCapCache } = require('../services/liquidityPoolCapService')
+const requireAuth = require('../middleware/requireAuth')
+const verifyWebhookToken = require('../middleware/verifyWebhookToken')
+const { getDynamicConversionRate } = require('../services/conversionRateOracle')
+const { getMlptsPerMlcnsScale } = require('../services/mallcoinService')
+const { blindIndex } = require('../utils/fieldEncryption')
 
 // Mallpoints price in KES (default 2 KES per MLPTS)
 const MALLPOINT_PRICE_KES = Number(process.env.MALLPOINT_PRICE_KES) || 2
@@ -25,8 +31,58 @@ const BASE_URL = SAFARICOM_ENV === 'production'
   ? 'https://api.safaricom.co.ke'
   : 'https://sandbox.safaricom.co.ke'
 
-// In-memory store for pending purchases (use Redis in production)
-const pendingPurchases = new Map()
+// Redis-backed store for pending purchases (survives restarts)
+const PURCHASE_TTL_SECONDS = 10 * 60; // 10 minutes
+const PURCHASE_PREFIX = 'purchase:';
+const PAYMENT_INDEX_PREFIX = 'purchase:payment:';
+
+function getRedis() {
+  return global.redisClient;
+}
+
+async function savePurchase(purchase) {
+  const redis = getRedis();
+  if (!redis) throw new Error('Redis not available');
+  const key = PURCHASE_PREFIX + purchase.quoteId;
+  const data = { ...purchase };
+  // Flatten numeric/boolean fields to strings for Redis hash
+  for (const [k, v] of Object.entries(data)) {
+    if (v === null || v === undefined) data[k] = '';
+    else if (typeof v === 'object') data[k] = JSON.stringify(v);
+    else data[k] = String(v);
+  }
+  await redis.hmset(key, data);
+  await redis.expire(key, PURCHASE_TTL_SECONDS);
+  if (purchase.paymentId) {
+    const idxKey = PAYMENT_INDEX_PREFIX + purchase.paymentId;
+    await redis.set(idxKey, purchase.quoteId, 'EX', PURCHASE_TTL_SECONDS);
+  }
+}
+
+async function getPurchase(quoteId) {
+  const redis = getRedis();
+  if (!redis) return null;
+  const data = await redis.hgetall(PURCHASE_PREFIX + quoteId);
+  if (!data || !data.quoteId) return null;
+  // Restore types
+  const p = { ...data };
+  for (const numField of ['amountKes', 'mallpointsAmount', 'createdAt', 'confirmedAt', 'creditedAt']) {
+    if (p[numField] !== '' && p[numField] !== undefined) p[numField] = Number(p[numField]);
+  }
+  for (const boolField of ['credited', 'liquidityAdded']) {
+    if (p[boolField] === 'true') p[boolField] = true;
+    else if (p[boolField] === 'false') p[boolField] = false;
+  }
+  return p;
+}
+
+async function findPurchaseByPaymentId(paymentId) {
+  const redis = getRedis();
+  if (!redis) return null;
+  const quoteId = await redis.get(PAYMENT_INDEX_PREFIX + paymentId);
+  if (!quoteId) return null;
+  return getPurchase(quoteId);
+}
 
 // Generate OAuth token for Safaricom API
 async function getDarajaToken() {
@@ -52,17 +108,15 @@ router.post('/reserve', createLimiter({ windowMs: 60*1000, max: 20 }), async (re
     const mallpointsAmount = amount_kes / MALLPOINT_PRICE_KES
     const quoteId = crypto.randomBytes(16).toString('hex')
 
-    pendingPurchases.set(quoteId, {
+    const purchase = {
       quoteId,
       address,
       amountKes: amount_kes,
       mallpointsAmount,
       status: 'reserved',
       createdAt: Date.now(),
-    })
-
-    // Auto-expire after 10 minutes
-    setTimeout(() => pendingPurchases.delete(quoteId), 10 * 60 * 1000)
+    };
+    await savePurchase(purchase);
 
     return res.json({
       ok: true,
@@ -74,8 +128,8 @@ router.post('/reserve', createLimiter({ windowMs: 60*1000, max: 20 }), async (re
       expiresAt: Date.now() + 10 * 60 * 1000,
     })
   } catch (e) {
-    logger.error('mallpoints-purchase', 'reserve error', e)
-    res.status(500).json({ error: String(e) })
+    logger.error('mallpointsPurchase', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' })
   }
 })
 
@@ -88,7 +142,7 @@ router.post('/mpesa', createLimiter({ windowMs: 60*1000, max: 10 }), async (req,
       return res.status(400).json({ error: 'quoteId and phone are required' })
     }
 
-    const purchase = pendingPurchases.get(quoteId)
+    const purchase = await getPurchase(quoteId)
     if (!purchase) {
       return res.status(404).json({ error: 'quote not found or expired' })
     }
@@ -146,6 +200,7 @@ router.post('/mpesa', createLimiter({ windowMs: 60*1000, max: 10 }), async (req,
     purchase.paymentId = stkData.CheckoutRequestID
     purchase.phone = normalizedPhone
     purchase.merchantRequestId = stkData.MerchantRequestID
+    await savePurchase(purchase)
 
     return res.json({
       ok: true,
@@ -154,13 +209,13 @@ router.post('/mpesa', createLimiter({ windowMs: 60*1000, max: 10 }), async (req,
       raw: stkData,
     })
   } catch (e) {
-    logger.error('mallpoints-purchase', 'mpesa error', e)
-    res.status(500).json({ error: String(e) })
+    logger.error('mallpointsPurchase', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' })
   }
 })
 
 // POST /api/mallpoints/purchase/mpesa/callback - Safaricom callback
-router.post('/mpesa/callback', express.json(), async (req, res) => {
+router.post('/mpesa/callback', express.json(), verifyWebhookToken, async (req, res) => {
   try {
     const callbackData = req.body.Body?.stkCallback
     if (!callbackData) {
@@ -179,14 +234,8 @@ router.post('/mpesa/callback', express.json(), async (req, res) => {
       resultDesc,
     })
 
-    // Find the purchase by paymentId
-    let purchase = null
-    for (const p of pendingPurchases.values()) {
-      if (p.paymentId === checkoutRequestId) {
-        purchase = p
-        break
-      }
-    }
+    // Find the purchase by paymentId via Redis secondary index
+    let purchase = await findPurchaseByPaymentId(checkoutRequestId)
 
     if (!purchase) {
       logger.warn('mallpoints-purchase', 'callback for unknown purchase', { checkoutRequestId })
@@ -198,6 +247,7 @@ router.post('/mpesa/callback', express.json(), async (req, res) => {
       purchase.status = 'confirmed'
       purchase.callbackData = callbackData
       purchase.confirmedAt = Date.now()
+      await savePurchase(purchase)
 
       logger.info('mallpoints-purchase', 'payment confirmed', {
         quoteId: purchase.quoteId,
@@ -209,6 +259,7 @@ router.post('/mpesa/callback', express.json(), async (req, res) => {
       purchase.status = 'failed'
       purchase.failureReason = resultDesc
       purchase.callbackData = callbackData
+      await savePurchase(purchase)
 
       logger.warn('mallpoints-purchase', 'payment failed', {
         quoteId: purchase.quoteId,
@@ -219,13 +270,13 @@ router.post('/mpesa/callback', express.json(), async (req, res) => {
 
     return res.json({ ok: true })
   } catch (e) {
-    logger.error('mallpoints-purchase', 'callback error', e)
-    res.status(500).json({ error: String(e) })
+    logger.error('mallpointsPurchase', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' })
   }
 })
 
 // POST /api/mallpoints/purchase/credit - credit Mallpoints after payment
-router.post('/credit', async (req, res) => {
+router.post('/credit', requireAuth(), async (req, res) => {
   try {
     const { quoteId } = req.body || {}
 
@@ -233,7 +284,7 @@ router.post('/credit', async (req, res) => {
       return res.status(400).json({ error: 'quoteId is required' })
     }
 
-    const purchase = pendingPurchases.get(quoteId)
+    const purchase = await getPurchase(quoteId)
     if (!purchase) {
       return res.status(404).json({ error: 'quote not found' })
     }
@@ -249,21 +300,40 @@ router.post('/credit', async (req, res) => {
       return res.status(400).json({ error: 'already credited' })
     }
 
-    // Credit Mallpoints to the account
-    let account = await MallPointAccount.findOne({ address: purchase.address })
-    if (!account) {
-      account = await MallPointAccount.create({
-        address: purchase.address,
-        balance: 0,
+    // Credit Mallpoints to both MallPointAccount (canonical on-chain balance)
+    // and User.mlpts_balance (used by mines/creatorSpace/referrals).
+    // Both updates must succeed atomically to prevent balance divergence.
+    let account
+    const session = await mongoose.startSession()
+    try {
+      await session.withTransaction(async () => {
+        // Update MallPointAccount
+        const result = await MallPointAccount.findOneAndUpdate(
+          { address: purchase.address },
+          { $inc: { balance: purchase.mallpointsAmount } },
+          { new: true, upsert: true, setDefaultsOnInsert: true, session }
+        )
+        account = result
+
+        // Update User.mlpts_balance — find user by wallet address
+        const User = require('../models/user')
+        const user = await User.findOne({ walletAddress_blind: blindIndex(purchase.address) }).session(session)
+        if (user) {
+          await User.updateOne(
+            { _id: user._id },
+            { $inc: { mlpts_balance: purchase.mallpointsAmount } },
+            { session }
+          )
+        }
+
+        purchase.status = 'credited'
+        purchase.credited = true
+        purchase.creditedAt = Date.now()
+        await savePurchase(purchase)
       })
+    } finally {
+      await session.endSession()
     }
-
-    account.balance += purchase.mallpointsAmount
-    await account.save()
-
-    purchase.status = 'credited'
-    purchase.credited = true
-    purchase.creditedAt = Date.now()
 
     logger.info('mallpoints-purchase', 'mallpoints credited', {
       quoteId: purchase.quoteId,
@@ -278,13 +348,17 @@ router.post('/credit', async (req, res) => {
     try {
       const fiatAmount = Number(purchase.amountKes || 0)
       if (fiatAmount > 0) {
-        // Calculate equivalent MLCNS value using the current conversion rate
-        // For now, use the fiat amount as the KES side of the liquidity pair
-        // The MLCNS side will be determined by the pool's current price
+        // Calculate the MLCNS equivalent using the live oracle price so the
+        // liquidity pool receives a correct fiat/crypto pair (not amount0: 0).
+        const oracle = await getDynamicConversionRate()
+        const mlcnsAmount = oracle.mlcnsMidPriceKes > 0
+          ? fiatAmount / oracle.mlcnsMidPriceKes
+          : 0
+
         liquidityResult = await addLiquidityToPool({
           poolId: 2,
-          amount0: 0, // MLCNS amount will be calculated by the pool
-          amount1: fiatAmount, // KES amount from the purchase
+          amount0: mlcnsAmount,
+          amount1: fiatAmount,
           userAddress: purchase.address,
         })
 
@@ -327,15 +401,15 @@ router.post('/credit', async (req, res) => {
       },
     })
   } catch (e) {
-    logger.error('mallpoints-purchase', 'credit error', e)
-    res.status(500).json({ error: String(e) })
+    logger.error('mallpointsPurchase', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' })
   }
 })
 
 // GET /api/mallpoints/purchase/status/:quoteId - check purchase status
-router.get('/status/:quoteId', async (req, res) => {
+router.get('/status/:quoteId', requireAuth(), async (req, res) => {
   try {
-    const purchase = pendingPurchases.get(req.params.quoteId)
+    const purchase = await getPurchase(req.params.quoteId)
     if (!purchase) {
       return res.json({ status: 'unknown' })
     }
@@ -351,8 +425,8 @@ router.get('/status/:quoteId', async (req, res) => {
       creditedAt: purchase.creditedAt,
     })
   } catch (e) {
-    logger.error('mallpoints-purchase', 'status error', e)
-    res.status(500).json({ error: String(e) })
+    logger.error('mallpointsPurchase', { route: req.originalUrl, error: e.message || String(e) });
+    res.status(500).json({ error: 'internal error' })
   }
 })
 
