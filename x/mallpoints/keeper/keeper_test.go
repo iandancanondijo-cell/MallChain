@@ -45,6 +45,10 @@ func (m mockMlcoinKeeper) GetConversionRatio(ctx context.Context) (mlptsPerMlcns
 	return 3_200_000, 1_000_000
 }
 
+func (m mockMlcoinKeeper) GetConversionRateBounds(ctx context.Context) (minRate uint64, maxRate uint64) {
+	return 0, 0
+}
+
 func initFixture(t *testing.T) *fixture {
 	t.Helper()
 
