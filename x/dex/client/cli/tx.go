@@ -61,8 +61,8 @@ func CmdCreatePool() *cobra.Command {
 
 			msg := types.MsgCreatePool{
 				Creator: clientCtx.GetFromAddress().String(),
-				TokenA:  &tokenAAmount,
-				TokenB:  &tokenBAmount,
+				TokenA:  tokenAAmount,
+				TokenB:  tokenBAmount,
 				Fee:     fee,
 			}
 
@@ -104,8 +104,8 @@ func CmdAddLiquidity() *cobra.Command {
 			msg := types.MsgAddLiquidity{
 				Provider:     clientCtx.GetFromAddress().String(),
 				PoolId:       poolId,
-				TokenAAmount: &tokenAAmount,
-				TokenBAmount: &tokenBAmount,
+				TokenAAmount: tokenAAmount,
+				TokenBAmount: tokenBAmount,
 			}
 
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), &msg)
@@ -141,7 +141,7 @@ func CmdRemoveLiquidity() *cobra.Command {
 			msg := types.MsgRemoveLiquidity{
 				Provider:        clientCtx.GetFromAddress().String(),
 				PoolId:          poolId,
-				LiquidityTokens: &liquidityTokens,
+				LiquidityTokens: liquidityTokens,
 			}
 
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), &msg)
@@ -184,9 +184,9 @@ func CmdSwap() *cobra.Command {
 			msg := types.MsgSwap{
 				Sender:        clientCtx.GetFromAddress().String(),
 				PoolId:        poolId,
-				TokenIn:       &tokenIn,
+				TokenIn:       tokenIn,
 				TokenOutDenom: tokenOutDenom,
-				MinTokenOut:   &minTokenOut,
+				MinTokenOut:   minTokenOut,
 			}
 
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), &msg)
@@ -223,7 +223,7 @@ func CmdUpdateParams() *cobra.Command {
 
 			msg := types.MsgUpdateParams{
 				Authority: clientCtx.GetFromAddress().String(),
-				Params:    &params,
+				Params:    params,
 			}
 
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), &msg)

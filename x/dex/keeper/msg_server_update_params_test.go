@@ -24,7 +24,7 @@ func TestMsgServerUpdateParams_RejectsInvalidParams(t *testing.T) {
 
 	resp, err := srv.UpdateParams(ctx, &types.MsgUpdateParams{
 		Authority: "authority_address",
-		Params:    &badParams,
+		Params:    badParams,
 	})
 	require.Error(t, err)
 	require.Nil(t, resp)
@@ -46,7 +46,7 @@ func TestMsgServerUpdateParams_AcceptsValidParams(t *testing.T) {
 
 	resp, err := srv.UpdateParams(ctx, &types.MsgUpdateParams{
 		Authority: "authority_address",
-		Params:    &newParams,
+		Params:    newParams,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)

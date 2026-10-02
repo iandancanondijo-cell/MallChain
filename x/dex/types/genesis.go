@@ -9,8 +9,8 @@ import (
 func DefaultGenesisState() *GenesisState {
 	params := DefaultParams()
 	return &GenesisState{
-		Params:     &params,
-		Pools:      []*Pool{},
+		Params:     params,
+		Pools:      []Pool{},
 		NextPoolId: 1,
 	}
 }
@@ -30,17 +30,12 @@ func (gs *GenesisState) Validate() error {
 	if gs == nil {
 		return nil
 	}
-	if gs.Params != nil {
-		if err := gs.Params.Validate(); err != nil {
-			return err
-		}
+	if err := gs.Params.Validate(); err != nil {
+		return err
 	}
 
 	poolIds := make(map[uint64]bool)
 	for _, pool := range gs.Pools {
-		if pool == nil {
-			continue
-		}
 		if poolIds[pool.Id] {
 			return fmt.Errorf("duplicate pool id %d", pool.Id)
 		}
@@ -62,7 +57,7 @@ func (gs *GenesisState) Validate() error {
 			return fmt.Errorf("invalid total liquidity")
 		}
 
-		if pool.Fee != "" && gs.Params != nil {
+		if pool.Fee != "" {
 			poolFee, err := parseFeeDec(fmt.Sprintf("pool %d fee", pool.Id), pool.Fee)
 			if err != nil {
 				return err

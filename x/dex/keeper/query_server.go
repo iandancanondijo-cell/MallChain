@@ -31,7 +31,7 @@ func (q queryServer) Pool(ctx context.Context, req *types.QueryPoolRequest) (*ty
 		return nil, status.Error(codes.NotFound, "pool not found")
 	}
 
-	return &types.QueryPoolResponse{Pool: pool}, nil
+	return &types.QueryPoolResponse{Pool: *pool}, nil
 }
 
 // Pools implements types.QueryServer
@@ -51,9 +51,9 @@ func (q queryServer) Pools(ctx context.Context, req *types.QueryPoolsRequest) (*
 	}
 
 	paginatedPools := pools[start:end]
-	resPools := make([]*types.Pool, len(paginatedPools))
+	resPools := make([]types.Pool, len(paginatedPools))
 	for i := range paginatedPools {
-		resPools[i] = paginatedPools[i]
+		resPools[i] = *paginatedPools[i]
 	}
 
 	return &types.QueryPoolsResponse{
@@ -75,22 +75,19 @@ func (q queryServer) PoolLiquidity(ctx context.Context, req *types.QueryPoolLiqu
 		liquidity = sdk.NewCoin("", math.ZeroInt())
 	}
 
-	return &types.QueryPoolLiquidityResponse{Liquidity: &liquidity}, nil
+	return &types.QueryPoolLiquidityResponse{Liquidity: liquidity}, nil
 }
 
 // EstimateSwap implements types.QueryServer
 func (q queryServer) EstimateSwap(ctx context.Context, req *types.QueryEstimateSwapRequest) (*types.QueryEstimateSwapResponse, error) {
-	if req.TokenIn == nil {
-		return nil, status.Error(codes.InvalidArgument, "token_in cannot be nil")
-	}
-	tokenOut, fee, err := q.k.EstimateSwap(ctx, req.PoolId, *req.TokenIn, req.TokenOutDenom)
+	tokenOut, fee, err := q.k.EstimateSwap(ctx, req.PoolId, req.TokenIn, req.TokenOutDenom)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	return &types.QueryEstimateSwapResponse{
-		TokenOut: &tokenOut,
-		Fee:      &fee,
+		TokenOut: tokenOut,
+		Fee:      fee,
 	}, nil
 }
 
@@ -101,5 +98,5 @@ func (q queryServer) Params(ctx context.Context, req *types.QueryParamsRequest) 
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	return &types.QueryParamsResponse{Params: params}, nil
+	return &types.QueryParamsResponse{Params: *params}, nil
 }

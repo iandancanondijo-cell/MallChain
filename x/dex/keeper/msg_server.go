@@ -29,10 +29,7 @@ func (m msgServer) CreatePool(ctx context.Context, msg *types.MsgCreatePool) (*t
 		return nil, fmt.Errorf("invalid address: %w", err)
 	}
 
-	if msg.TokenA == nil || msg.TokenB == nil {
-		return nil, fmt.Errorf("token_a and token_b cannot be nil")
-	}
-	poolId, err := m.k.CreatePool(ctx, creator, *msg.TokenA, *msg.TokenB, msg.Fee)
+	poolId, err := m.k.CreatePool(ctx, creator, msg.TokenA, msg.TokenB, msg.Fee)
 	if err != nil {
 		return nil, err
 	}
@@ -59,10 +56,7 @@ func (m msgServer) AddLiquidity(ctx context.Context, msg *types.MsgAddLiquidity)
 		return nil, fmt.Errorf("invalid address: %w", err)
 	}
 
-	if msg.TokenAAmount == nil || msg.TokenBAmount == nil {
-		return nil, fmt.Errorf("token_a_amount and token_b_amount cannot be nil")
-	}
-	err = m.k.AddLiquidity(ctx, provider, msg.PoolId, *msg.TokenAAmount, *msg.TokenBAmount)
+	err = m.k.AddLiquidity(ctx, provider, msg.PoolId, msg.TokenAAmount, msg.TokenBAmount)
 	if err != nil {
 		return nil, err
 	}
@@ -89,10 +83,7 @@ func (m msgServer) RemoveLiquidity(ctx context.Context, msg *types.MsgRemoveLiqu
 		return nil, fmt.Errorf("invalid address: %w", err)
 	}
 
-	if msg.LiquidityTokens == nil {
-		return nil, fmt.Errorf("liquidity_tokens cannot be nil")
-	}
-	tokenAOut, tokenBOut, err := m.k.RemoveLiquidity(ctx, provider, msg.PoolId, *msg.LiquidityTokens)
+	tokenAOut, tokenBOut, err := m.k.RemoveLiquidity(ctx, provider, msg.PoolId, msg.LiquidityTokens)
 	if err != nil {
 		return nil, err
 	}
@@ -108,8 +99,8 @@ func (m msgServer) RemoveLiquidity(ctx context.Context, msg *types.MsgRemoveLiqu
 	})
 
 	return &types.MsgRemoveLiquidityResponse{
-		TokenAAmount: &tokenAOut,
-		TokenBAmount: &tokenBOut,
+		TokenAAmount: tokenAOut,
+		TokenBAmount: tokenBOut,
 	}, nil
 }
 
@@ -122,10 +113,7 @@ func (m msgServer) Swap(ctx context.Context, msg *types.MsgSwap) (*types.MsgSwap
 		return nil, fmt.Errorf("invalid address: %w", err)
 	}
 
-	if msg.TokenIn == nil || msg.MinTokenOut == nil {
-		return nil, fmt.Errorf("token_in and min_token_out cannot be nil")
-	}
-	tokenOut, err := m.k.Swap(ctx, sender, msg.PoolId, *msg.TokenIn, msg.TokenOutDenom, *msg.MinTokenOut)
+	tokenOut, err := m.k.Swap(ctx, sender, msg.PoolId, msg.TokenIn, msg.TokenOutDenom, msg.MinTokenOut)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +128,7 @@ func (m msgServer) Swap(ctx context.Context, msg *types.MsgSwap) (*types.MsgSwap
 		),
 	})
 
-	return &types.MsgSwapResponse{TokenOut: &tokenOut}, nil
+	return &types.MsgSwapResponse{TokenOut: tokenOut}, nil
 }
 
 // UpdateParams implements types.MsgServer
@@ -149,13 +137,10 @@ func (m msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams)
 		return nil, fmt.Errorf("invalid authority; expected %s, got %s", m.k.GetAuthority(), msg.Authority)
 	}
 
-	if msg.Params == nil {
-		return nil, fmt.Errorf("params cannot be nil")
-	}
 	if err := msg.Params.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
-	err := m.k.SetParams(ctx, msg.Params)
+	err := m.k.SetParams(ctx, &msg.Params)
 	if err != nil {
 		return nil, err
 	}

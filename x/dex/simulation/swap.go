@@ -32,16 +32,10 @@ func SimulateMsgSwap(
 		var tokenIn sdk.Coin
 		var tokenOutDenom string
 		if r.Intn(2) == 0 {
-			if pool.TokenAReserve == nil {
-				return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(&types.MsgSwap{}), "pool has nil token_a_reserve"), nil, nil
-			}
-			tokenIn = *pool.TokenAReserve
+			tokenIn = pool.TokenAReserve
 			tokenOutDenom = pool.TokenBDenom
 		} else {
-			if pool.TokenBReserve == nil {
-				return simtypes.NoOpMsg(types.ModuleName, sdk.MsgTypeURL(&types.MsgSwap{}), "pool has nil token_b_reserve"), nil, nil
-			}
-			tokenIn = *pool.TokenBReserve
+			tokenIn = pool.TokenBReserve
 			tokenOutDenom = pool.TokenADenom
 		}
 
@@ -56,9 +50,9 @@ func SimulateMsgSwap(
 		msg := &types.MsgSwap{
 			Sender:        sender.Address.String(),
 			PoolId:        pool.Id,
-			TokenIn:       &tokenIn,
+			TokenIn:       tokenIn,
 			TokenOutDenom: tokenOutDenom,
-			MinTokenOut:   &minTokenOut,
+			MinTokenOut:   minTokenOut,
 		}
 
 		server := keeper.NewMsgServerImpl(k)

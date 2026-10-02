@@ -11,35 +11,28 @@ import (
 
 // InitGenesis initializes the dex module's state from a provided genesis state.
 func (k Keeper) InitGenesis(ctx context.Context, genState *types.GenesisState) error {
-	if genState.Params != nil {
-		if err := k.SetParams(ctx, genState.Params); err != nil {
-			return err
-		}
+	if err := k.SetParams(ctx, &genState.Params); err != nil {
+		return err
 	}
 
 	if err := k.SetNextPoolId(ctx, genState.NextPoolId); err != nil {
 		return err
 	}
 
-	for _, pool := range genState.Pools {
-		if pool == nil {
-			continue
-		}
-		if err := k.pools.Set(ctx, pool.Id, pool); err != nil {
+	for i := range genState.Pools {
+		pool := &genState.Pools[i]
+		if err := k.pools.Set(ctx, pool.Id, *pool); err != nil {
 			return err
 		}
 	}
 
 	for _, entry := range genState.PoolLiquidity {
-		if entry == nil {
-			continue
-		}
 		addrBytes, err := sdk.AccAddressFromBech32(entry.Address)
 		if err != nil {
 			return err
 		}
 		key := collections.Join(entry.PoolId, addrBytes.Bytes())
-		if err := k.poolLiquidity.Set(ctx, key, *entry.Liquidity); err != nil {
+		if err := k.poolLiquidity.Set(ctx, key, entry.Liquidity); err != nil {
 			return err
 		}
 	}
@@ -59,18 +52,22 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 		return nil, err
 	}
 
-	pools, err := k.GetAllPools(ctx)
+	ptrPools, err := k.GetAllPools(ctx)
 	if err != nil {
 		return nil, err
 	}
+	pools := make([]types.Pool, len(ptrPools))
+	for i, p := range ptrPools {
+		pools[i] = *p
+	}
 
-	var lpEntries []*types.PoolLiquidityEntry
+	var lpEntries []types.PoolLiquidityEntry
 	err = k.poolLiquidity.Walk(ctx, nil, func(key collections.Pair[uint64, []byte], val sdk.Coin) (bool, error) {
 		addrStr := sdk.AccAddress(key.K2()).String()
-		lpEntries = append(lpEntries, &types.PoolLiquidityEntry{
+		lpEntries = append(lpEntries, types.PoolLiquidityEntry{
 			PoolId:    key.K1(),
 			Address:   addrStr,
-			Liquidity: &val,
+			Liquidity: val,
 		})
 		return false, nil
 	})
@@ -79,7 +76,7 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 	}
 
 	return &types.GenesisState{
-		Params:        params,
+		Params:        *params,
 		Pools:         pools,
 		NextPoolId:    nextPoolId,
 		PoolLiquidity: lpEntries,

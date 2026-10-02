@@ -171,7 +171,7 @@ func CmdQueryEstimateSwap() *cobra.Command {
 
 			res, err := queryClient.EstimateSwap(cmd.Context(), &types.QueryEstimateSwapRequest{
 				PoolId:        poolId,
-				TokenIn:       &tokenIn,
+				TokenIn:       tokenIn,
 				TokenOutDenom: tokenOutDenom,
 			})
 			if err != nil {

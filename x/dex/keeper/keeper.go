@@ -2,7 +2,6 @@ package keeper
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
 
@@ -11,67 +10,9 @@ import (
 	"cosmossdk.io/math"
 	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"google.golang.org/protobuf/proto"
 
 	"marketplace/x/dex/types"
 )
-
-// poolCodec uses deterministic protobuf binary encoding for consensus-critical
-// on-chain storage (Encode/Decode), with JSON reserved for CLI/REST display
-// (EncodeJSON/DecodeJSON). The previous implementation used encoding/json for
-// both, which is non-deterministic across Go versions for map fields and could
-// cause consensus splits.
-type poolCodec struct{}
-
-func (poolCodec) Encode(value *types.Pool) ([]byte, error) {
-	return proto.MarshalOptions{Deterministic: true}.Marshal(value)
-}
-func (poolCodec) Decode(b []byte) (*types.Pool, error) {
-	v := &types.Pool{}
-	err := proto.Unmarshal(b, v)
-	return v, err
-}
-func (poolCodec) EncodeJSON(value *types.Pool) ([]byte, error) {
-	return json.Marshal(value)
-}
-func (poolCodec) DecodeJSON(b []byte) (*types.Pool, error) {
-	v := &types.Pool{}
-	err := json.Unmarshal(b, v)
-	return v, err
-}
-func (poolCodec) Stringify(value *types.Pool) string {
-	bz, _ := json.Marshal(value)
-	return string(bz)
-}
-func (poolCodec) ValueType() string {
-	return "dex/Pool"
-}
-
-type paramsCodec struct{}
-
-func (paramsCodec) Encode(value *types.Params) ([]byte, error) {
-	return proto.MarshalOptions{Deterministic: true}.Marshal(value)
-}
-func (paramsCodec) Decode(b []byte) (*types.Params, error) {
-	v := &types.Params{}
-	err := proto.Unmarshal(b, v)
-	return v, err
-}
-func (paramsCodec) EncodeJSON(value *types.Params) ([]byte, error) {
-	return json.Marshal(value)
-}
-func (paramsCodec) DecodeJSON(b []byte) (*types.Params, error) {
-	v := &types.Params{}
-	err := json.Unmarshal(b, v)
-	return v, err
-}
-func (paramsCodec) Stringify(value *types.Params) string {
-	bz, _ := json.Marshal(value)
-	return string(bz)
-}
-func (paramsCodec) ValueType() string {
-	return "dex/Params"
-}
 
 type Keeper struct {
 	storeService store.KVStoreService
@@ -79,9 +20,9 @@ type Keeper struct {
 	authority    string
 
 	Schema        collections.Schema
-	pools         collections.Map[uint64, *types.Pool]
+	pools         collections.Map[uint64, types.Pool]
 	poolLiquidity collections.Map[collections.Pair[uint64, []byte], sdk.Coin]
-	params        collections.Item[*types.Params]
+	params        collections.Item[types.Params]
 	nextPoolId    collections.Item[uint64]
 }
 
@@ -97,14 +38,13 @@ func NewKeeper(
 		storeService: storeService,
 		bankKeeper:   bankKeeper,
 		authority:    authority,
-		pools:        collections.NewMap(sb, types.PoolsKeyPrefix, "pools", collections.Uint64Key, codec.CollValue[*types.Pool](cdc)),
+		pools:        collections.NewMap(sb, types.PoolsKeyPrefix, "pools", collections.Uint64Key, codec.CollValue[types.Pool](cdc)),
 		poolLiquidity: collections.NewMap(sb, types.PoolLiquidityKeyPrefix, "pool_liquidity",
 			collections.PairKeyCodec(collections.Uint64Key, collections.BytesKey),
 			codec.CollValue[sdk.Coin](cdc)),
-		params:     collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[*types.Params](cdc)),
+		params:     collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[types.Params](cdc)),
 		nextPoolId: collections.NewItem(sb, types.NextPoolIdKey, "next_pool_id", collections.Uint64Value),
 	}
-
 	schema, err := sb.Build()
 	if err != nil {
 		return Keeper{}, err
@@ -119,11 +59,15 @@ func (k Keeper) GetAuthority() string {
 }
 
 func (k Keeper) SetParams(ctx context.Context, params *types.Params) error {
-	return k.params.Set(ctx, params)
+	return k.params.Set(ctx, *params)
 }
 
 func (k Keeper) GetParams(ctx context.Context) (*types.Params, error) {
-	return k.params.Get(ctx)
+	params, err := k.params.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &params, nil
 }
 
 func (k Keeper) GetNextPoolId(ctx context.Context) (uint64, error) {
@@ -199,14 +143,14 @@ func (k Keeper) CreatePool(ctx context.Context, creator sdk.AccAddress, tokenA, 
 		Id:             poolId,
 		TokenADenom:    tokenA.Denom,
 		TokenBDenom:    tokenB.Denom,
-		TokenAReserve:  &tokenA,
-		TokenBReserve:  &tokenB,
-		TotalLiquidity: &liquidityTokens,
+		TokenAReserve:  tokenA,
+		TokenBReserve:  tokenB,
+		TotalLiquidity: liquidityTokens,
 		Fee:            fee,
 		Creator:        creator.String(),
 	}
 
-	if err := k.pools.Set(ctx, poolId, &pool); err != nil {
+	if err := k.pools.Set(ctx, poolId, pool); err != nil {
 		return 0, err
 	}
 
@@ -289,11 +233,11 @@ func (k Keeper) AddLiquidity(ctx context.Context, provider sdk.AccAddress, poolI
 	}
 
 	tokenAReserve := pool.TokenAReserve.Add(tokenAAmount)
-	pool.TokenAReserve = &tokenAReserve
+	pool.TokenAReserve = tokenAReserve
 	tokenBReserve := pool.TokenBReserve.Add(tokenBAmount)
-	pool.TokenBReserve = &tokenBReserve
+	pool.TokenBReserve = tokenBReserve
 	totalLiquidity := pool.TotalLiquidity.Add(liquidityTokens)
-	pool.TotalLiquidity = &totalLiquidity
+	pool.TotalLiquidity = totalLiquidity
 
 	if err := k.pools.Set(ctx, poolId, pool); err != nil {
 		return err
@@ -348,11 +292,11 @@ func (k Keeper) RemoveLiquidity(ctx context.Context, provider sdk.AccAddress, po
 	}
 
 	tokenAReserve := pool.TokenAReserve.Sub(tokenAOut)
-	pool.TokenAReserve = &tokenAReserve
+	pool.TokenAReserve = tokenAReserve
 	tokenBReserve := pool.TokenBReserve.Sub(tokenBOut)
-	pool.TokenBReserve = &tokenBReserve
+	pool.TokenBReserve = tokenBReserve
 	totalLiquidity := pool.TotalLiquidity.Sub(liquidityTokens)
-	pool.TotalLiquidity = &totalLiquidity
+	pool.TotalLiquidity = totalLiquidity
 
 	if err := k.pools.Set(ctx, poolId, pool); err != nil {
 		return sdk.Coin{}, sdk.Coin{}, err
@@ -392,11 +336,11 @@ func (k Keeper) Swap(ctx context.Context, sender sdk.AccAddress, poolId uint64, 
 	var tokenOut sdk.Coin
 	var reserveOut sdk.Coin
 	if tokenIn.Denom == pool.TokenADenom && tokenOutDenom == pool.TokenBDenom {
-		tokenOut = k.calculateSwap(tokenIn, *pool.TokenAReserve, *pool.TokenBReserve, pool.Fee, params.MaxPoolDrainPercent)
-		reserveOut = *pool.TokenBReserve
+		tokenOut = k.calculateSwap(tokenIn, pool.TokenAReserve, pool.TokenBReserve, pool.Fee, params.MaxPoolDrainPercent)
+		reserveOut = pool.TokenBReserve
 	} else if tokenIn.Denom == pool.TokenBDenom && tokenOutDenom == pool.TokenADenom {
-		tokenOut = k.calculateSwap(tokenIn, *pool.TokenBReserve, *pool.TokenAReserve, pool.Fee, params.MaxPoolDrainPercent)
-		reserveOut = *pool.TokenAReserve
+		tokenOut = k.calculateSwap(tokenIn, pool.TokenBReserve, pool.TokenAReserve, pool.Fee, params.MaxPoolDrainPercent)
+		reserveOut = pool.TokenAReserve
 	} else {
 		return sdk.Coin{}, fmt.Errorf("invalid token pair for swap")
 	}
@@ -423,14 +367,14 @@ func (k Keeper) Swap(ctx context.Context, sender sdk.AccAddress, poolId uint64, 
 
 	if tokenIn.Denom == pool.TokenADenom {
 		tokenAReserve := pool.TokenAReserve.Add(tokenIn)
-		pool.TokenAReserve = &tokenAReserve
+		pool.TokenAReserve = tokenAReserve
 		tokenBReserve := pool.TokenBReserve.Sub(tokenOut)
-		pool.TokenBReserve = &tokenBReserve
+		pool.TokenBReserve = tokenBReserve
 	} else {
 		tokenBReserve := pool.TokenBReserve.Add(tokenIn)
-		pool.TokenBReserve = &tokenBReserve
+		pool.TokenBReserve = tokenBReserve
 		tokenAReserve := pool.TokenAReserve.Sub(tokenOut)
-		pool.TokenAReserve = &tokenAReserve
+		pool.TokenAReserve = tokenAReserve
 	}
 
 	if err := k.pools.Set(ctx, poolId, pool); err != nil {
@@ -476,13 +420,17 @@ func (k Keeper) calculateSwap(tokenIn, reserveIn, reserveOut sdk.Coin, fee strin
 }
 
 func (k Keeper) GetPool(ctx context.Context, poolId uint64) (*types.Pool, error) {
-	return k.pools.Get(ctx, poolId)
+	pool, err := k.pools.Get(ctx, poolId)
+	if err != nil {
+		return nil, err
+	}
+	return &pool, nil
 }
 
 func (k Keeper) GetAllPools(ctx context.Context) ([]*types.Pool, error) {
 	var pools []*types.Pool
-	err := k.pools.Walk(ctx, nil, func(key uint64, value *types.Pool) (bool, error) {
-		pools = append(pools, value)
+	err := k.pools.Walk(ctx, nil, func(key uint64, value types.Pool) (bool, error) {
+		pools = append(pools, &value)
 		return false, nil
 	})
 	return pools, err
@@ -506,9 +454,9 @@ func (k Keeper) EstimateSwap(ctx context.Context, poolId uint64, tokenIn sdk.Coi
 
 	var tokenOut sdk.Coin
 	if tokenIn.Denom == pool.TokenADenom && tokenOutDenom == pool.TokenBDenom {
-		tokenOut = k.calculateSwap(tokenIn, *pool.TokenAReserve, *pool.TokenBReserve, pool.Fee, params.MaxPoolDrainPercent)
+		tokenOut = k.calculateSwap(tokenIn, pool.TokenAReserve, pool.TokenBReserve, pool.Fee, params.MaxPoolDrainPercent)
 	} else if tokenIn.Denom == pool.TokenBDenom && tokenOutDenom == pool.TokenADenom {
-		tokenOut = k.calculateSwap(tokenIn, *pool.TokenBReserve, *pool.TokenAReserve, pool.Fee, params.MaxPoolDrainPercent)
+		tokenOut = k.calculateSwap(tokenIn, pool.TokenBReserve, pool.TokenAReserve, pool.Fee, params.MaxPoolDrainPercent)
 	} else {
 		return sdk.Coin{}, sdk.Coin{}, fmt.Errorf("invalid token pair for swap")
 	}
