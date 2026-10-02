@@ -46,7 +46,7 @@ func (m mockMlcoinKeeper) GetConversionRatio(ctx context.Context) (mlptsPerMlcns
 }
 
 func (m mockMlcoinKeeper) GetConversionRateBounds(ctx context.Context) (minRate uint64, maxRate uint64) {
-	return 0, 0
+	return 1, 10_000_000_000
 }
 
 func initFixture(t *testing.T) *fixture {
@@ -111,8 +111,9 @@ func TestConvertToMallcoinIntegration(t *testing.T) {
 	sdkCtx := f.ctx.(sdk.Context).WithBlockTime(time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC))
 	wrappedCtx := sdk.WrapSDKContext(sdkCtx)
 	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{
-		Creator: user,
-		Amount:  1000,
+		Creator:      user,
+		Amount:       1000,
+		ProposedRate: 3_200_000,
 	})
 	require.NoError(t, err)
 	userPoints, err := f.keeper.UserPoints.Get(wrappedCtx, user)
@@ -164,7 +165,7 @@ func TestConvertToMallcoinMintsCorrectMlcnsAmount(t *testing.T) {
 	sdkCtx = sdkCtx.WithBlockTime(time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC))
 	wrappedCtx := sdk.WrapSDKContext(sdkCtx)
 
-	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{Creator: user, Amount: 1000})
+	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{Creator: user, Amount: 1000, ProposedRate: 3_200_000})
 	require.NoError(t, err)
 
 	require.Equal(t, 1, mlcoinKeeper.mintCalls)
@@ -183,8 +184,9 @@ func TestConvertToMallcoinWindowClosed(t *testing.T) {
 	sdkCtx := f.ctx.(sdk.Context).WithBlockTime(time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC))
 	wrappedCtx := sdk.WrapSDKContext(sdkCtx)
 	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{
-		Creator: user,
-		Amount:  1000,
+		Creator:      user,
+		Amount:       1000,
+		ProposedRate: 3_200_000,
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "conversion window is closed")
@@ -208,7 +210,7 @@ func TestConvertToMallcoinNonBadgeHolderDec27(t *testing.T) {
 	_ = k.UserPoints.Set(sdkCtx, user, types.UserPoints{Address: user, Points: 5000})
 	sdkCtx = sdkCtx.WithBlockTime(time.Date(2026, 12, 27, 12, 0, 0, 0, time.UTC))
 	wrappedCtx := sdk.WrapSDKContext(sdkCtx)
-	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{Creator: user, Amount: 1000})
+	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{Creator: user, Amount: 1000, ProposedRate: 3_200_000})
 	require.NoError(t, err)
 }
 
@@ -230,7 +232,7 @@ func TestConvertToMallcoinNonBadgeHolderWrongDate(t *testing.T) {
 	_ = k.UserPoints.Set(sdkCtx, user, types.UserPoints{Address: user, Points: 5000})
 	sdkCtx = sdkCtx.WithBlockTime(time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC))
 	wrappedCtx := sdk.WrapSDKContext(sdkCtx)
-	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{Creator: user, Amount: 1000})
+	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{Creator: user, Amount: 1000, ProposedRate: 3_200_000})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "conversion window is closed")
 }
@@ -242,7 +244,7 @@ func TestConvertToMallcoinInsufficientPoints(t *testing.T) {
 	_ = f.keeper.UserPoints.Set(f.ctx, user, types.UserPoints{Address: user, Points: 100})
 	sdkCtx := f.ctx.(sdk.Context).WithBlockTime(time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC))
 	wrappedCtx := sdk.WrapSDKContext(sdkCtx)
-	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{Creator: user, Amount: 1000})
+	_, err := srv.ConvertToMallcoin(wrappedCtx, &types.MsgConvertToMallcoin{Creator: user, Amount: 1000, ProposedRate: 3_200_000})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "insufficient Mallpoints balance")
 }

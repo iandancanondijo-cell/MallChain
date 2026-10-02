@@ -164,9 +164,10 @@ func TestGetAllContracts(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, contracts)
 
+	codeID, err := k.StoreCode(ctx, minimalValidWasm)
+	require.NoError(t, err)
+
 	for i := 0; i < 3; i++ {
-		codeID, err := k.StoreCode(ctx, minimalValidWasm)
-		require.NoError(t, err)
 		_, err = k.InstantiateContract(ctx, "cosmos1wdjkuer9wf0kzerywfjhxu6lta047h6lta047h6ltukxm685", codeID, "test-contract", []byte("{}"))
 		require.NoError(t, err)
 	}
