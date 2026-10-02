@@ -97,11 +97,11 @@ func NewKeeper(
 		storeService: storeService,
 		bankKeeper:   bankKeeper,
 		authority:    authority,
-		pools:        collections.NewMap(sb, types.PoolsKeyPrefix, "pools", collections.Uint64Key, poolCodec{}),
+		pools:        collections.NewMap(sb, types.PoolsKeyPrefix, "pools", collections.Uint64Key, codec.CollValue[*types.Pool](cdc)),
 		poolLiquidity: collections.NewMap(sb, types.PoolLiquidityKeyPrefix, "pool_liquidity",
 			collections.PairKeyCodec(collections.Uint64Key, collections.BytesKey),
 			codec.CollValue[sdk.Coin](cdc)),
-		params:     collections.NewItem(sb, types.ParamsKey, "params", paramsCodec{}),
+		params:     collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[*types.Params](cdc)),
 		nextPoolId: collections.NewItem(sb, types.NextPoolIdKey, "next_pool_id", collections.Uint64Value),
 	}
 
