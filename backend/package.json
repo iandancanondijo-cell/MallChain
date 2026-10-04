@@ -13,7 +13,9 @@
     "explorer:all": "concurrently \"npm run explorer:indexer\" \"npm run explorer:api\"",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "test:load": "k6 run load-tests/api-load-test.js",
+    "test:load:stress": "k6 run --vus 100 --duration 2m load-tests/api-load-test.js"
   },
   "dependencies": {
     "@cosmjs/amino": "^0.39.0",
@@ -38,7 +40,7 @@
     "bullmq": "^6.3.4",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
-    "dotenv": "^17.2.3",
+    "dotenv": "^17.4.2",
     "elliptic": "^6.6.1",
     "ethers": "^6.0.0",
     "express": "^5.2.1",

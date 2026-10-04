@@ -21,6 +21,10 @@ const apiKeyAuth = require('./middleware/apiKeyAuth')
 const { errorHandler } = require('./utils/errorHandler')
 const logger = require('./utils/logger')
 const correlationId = require('./middleware/correlationId')
+const { sloMiddleware } = require('./middleware/sloTracker')
+const { cacheControlMiddleware, attachVersionId } = require('./middleware/cacheControl')
+const { paginationMiddleware } = require('./utils/pagination')
+const { installMongoProfiler } = require('./middleware/mongoProfiler')
 const { metricsMiddleware, register, socketErrorsTotal, socketRoomCapRejectionsTotal, recordCspViolation } = require('./utils/metrics')
 const { initCacheService } = require('./services/cacheService')
 const { maintenanceGuard } = require('./middleware/maintenanceMode')
@@ -166,7 +170,13 @@ app.use(helmet({
 }));
 app.disable('x-powered-by');
 app.use(correlationId);
+const { apiVersionMiddleware } = require('./middleware/apiVersioning');
+app.use(apiVersionMiddleware);
+app.use(sloMiddleware);
 app.use(metricsMiddleware);
+app.use(attachVersionId);
+app.use(cacheControlMiddleware);
+app.use(paginationMiddleware);
 /**
  * Task 3.1-3.6: CORS (Cross-Origin Resource Sharing) Configuration
  * 
@@ -264,13 +274,6 @@ app.use('/api/tx', apiLimiter);
 app.use('/api/mallwallet/treasury', apiLimiter);
 // Task 7.1: Mines endpoint uses minesLimiter (gaming feature, moderate rate limiting)
 app.use('/api/mines', minesLimiter);
-
-// Request ID middleware for tracing
-app.use((req, res, next) => {
-  req.id = req.headers['x-request-id'] || `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  res.setHeader('X-Request-ID', req.id);
-  next();
-});
 
 // Passport for OAuth (Google)
 // Session cookies are signed with SESSION_SECRET — mounting this middleware
@@ -456,13 +459,15 @@ app.get('/api', (req, res) => res.json({
 }));
 
 app.use('/api/auth', authRoutes);
+const flagsRoutes = require('./routes/flags');
+app.use('/api/flags', flagsRoutes);
 app.use('/api/gdpr', gdprRoutes);
 app.use('/api/vault', maintenanceGuard('vault'), vaultRoutes);
 app.use('/api/tx', txRoutes);
 app.use('/api/market', marketRoutes);
 app.use('/api/fx', fxRoutes);
 app.use('/api/send', maintenanceGuard('send'), sendRoutes);
-app.use('/api/blockchain', blockchainRoutes);
+app.use('/api/blockchain', limiters.lenient, blockchainRoutes);
 app.use('/api/blockchain/tx', blockchainTxRoutes);
 app.use('/api/wallets', walletsRoutes);
 app.use('/api/kyc', kycRoutes);
@@ -513,6 +518,12 @@ app.use('/api/task-assignment', taskAssignmentRoutes);
 
 const economyRoutes = require('./routes/economy');
 app.use('/api/economy', economyRoutes);
+const observabilityRoutes = require('./routes/observability');
+app.use('/api/observability', observabilityRoutes);
+const securityRoutes = require('./routes/security');
+app.use('/api/security', securityRoutes);
+const { sseHandler, getSseStats } = require('./routes/sse');
+app.get('/api/events', sseHandler);
 const eduRoutes = require('./routes/edu');
 app.use('/api/edu', eduRoutes);
 const mallwalletRoutes = require('./routes/mallwallet');
@@ -575,7 +586,8 @@ function isExplorerLocalPath(subPath) {
 
 // Mount local explorer FIRST so the proxy doesn't shadow routes that the
 // local backend already handles natively.
-app.use(EXPLORER_PROXY_PREFIX, explorerRoutes)
+// Apply lenient rate limiting to explorer endpoints (read-only data endpoints)
+app.use(EXPLORER_PROXY_PREFIX, limiters.lenient, explorerRoutes)
 
 // Only install the proxy forwarder when the standalone backend is
 // configured. Use the existing axios dep (no http-proxy-middleware added
@@ -838,6 +850,7 @@ async function start() {
       ...mongoTlsOptions,
     });
     logger.info('Mongo connected', { mongo });
+    installMongoProfiler();
     await initializeDefaultBurnPolicies();
     await initializeDefaultDynamicThresholds();
   } catch (err) {
@@ -886,6 +899,17 @@ async function start() {
       logger.info('Redis cache service initialized');
     } catch (err) {
       logger.warn('Failed to initialize cache service', { error: err.message });
+    }
+
+    // Initialize event persistence (Redis Streams) for real-time event durability
+    try {
+      const { getInstance: getEventPersistence } = require('./services/eventPersistence');
+      const eventPersistence = getEventPersistence(global.redisClient);
+      await eventPersistence.initialize();
+      global.eventPersistence = eventPersistence;
+      logger.info('Event persistence (Redis Streams) initialized');
+    } catch (err) {
+      logger.warn('Failed to initialize event persistence', { error: err.message });
     }
   }
 
@@ -975,6 +999,11 @@ io.use((socket, next) => {
 // rooms indefinitely.
 const MAX_ROOMS_PER_SOCKET = 20
 
+// Global connection backpressure: cap total concurrent Socket.IO connections
+// to prevent resource exhaustion under load or connection storms.
+const MAX_IO_CONNECTIONS = Number(process.env.MAX_IO_CONNECTIONS || 5000)
+let activeIoConnections = 0
+
 function joinRoomWithCap(socket, room) {
   if (socket.rooms.has(room)) return true // already joined, not a new room
   if (socket.rooms.size >= MAX_ROOMS_PER_SOCKET) {
@@ -988,7 +1017,19 @@ function joinRoomWithCap(socket, room) {
 }
 
 io.on('connection', socket => {
-  logger.info('Socket connected', { socketId: socket.id })
+  if (activeIoConnections >= MAX_IO_CONNECTIONS) {
+    logger.warn('Socket.IO connection cap reached, rejecting', { socketId: socket.id, active: activeIoConnections, max: MAX_IO_CONNECTIONS })
+    socket.emit('error', { message: 'Server at capacity, try again later' })
+    socket.disconnect(true)
+    return
+  }
+  activeIoConnections++
+
+  socket.on('disconnect', () => {
+    activeIoConnections = Math.max(0, activeIoConnections - 1)
+  })
+
+  logger.info('Socket connected', { socketId: socket.id, activeConnections: activeIoConnections })
 
   // Send initial connection message to notify client of successful connection
   // Timestamp helps detect connection delays in real-time debug scenarios

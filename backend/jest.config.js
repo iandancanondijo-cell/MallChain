@@ -32,10 +32,10 @@ module.exports = {
   // untested), tracked outside this config change.
   coverageThreshold: {
     global: {
-      branches: 30,
-      functions: 35,
-      lines: 40,
-      statements: 40
+      branches: 34,
+      functions: 38,
+      lines: 43,
+      statements: 42
     }
   }
 };

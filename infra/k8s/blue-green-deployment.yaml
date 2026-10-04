@@ -1,0 +1,324 @@
+# Blue-Green Deployment Strategy for Mallchain Backend
+# Enables zero-downtime deployments with instant rollback capability
+# 
+# Flow:
+# 1. Deploy new version to "green" environment
+# 2. Run health checks and smoke tests against green
+# 3. Switch service selector from blue to green
+# 4. Keep blue running for rollback (delete after verification period)
+
+---
+# Blue Deployment (current stable)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mallchain-backend-blue
+  namespace: mallchain
+  labels:
+    app: mallchain-backend
+    color: blue
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mallchain-backend
+      color: blue
+  template:
+    metadata:
+      labels:
+        app: mallchain-backend
+        color: blue
+        version: v1
+    spec:
+      serviceAccountName: mallchain-backend
+      containers:
+      - name: backend
+        image: mallchain/backend:stable
+        ports:
+        - containerPort: 3001
+          name: http
+        
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: DEPLOYMENT_COLOR
+          value: blue
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /api/live
+            port: 3001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
+        
+        # Resource limits
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        
+        # Graceful shutdown
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 15"]
+      
+      terminationGracePeriodSeconds: 60
+
+---
+# Green Deployment (next version)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mallchain-backend-green
+  namespace: mallchain
+  labels:
+    app: mallchain-backend
+    color: green
+    version: v2
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mallchain-backend
+      color: green
+  template:
+    metadata:
+      labels:
+        app: mallchain-backend
+        color: green
+        version: v2
+    spec:
+      serviceAccountName: mallchain-backend
+      containers:
+      - name: backend
+        image: mallchain/backend:latest
+        ports:
+        - containerPort: 3001
+          name: http
+        
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: DEPLOYMENT_COLOR
+          value: green
+        
+        livenessProbe:
+          httpGet:
+            path: /api/live
+            port: 3001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
+        
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 15"]
+      
+      terminationGracePeriodSeconds: 60
+
+---
+# Service (routes to active color)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mallchain-backend
+  namespace: mallchain
+  labels:
+    app: mallchain-backend
+spec:
+  selector:
+    app: mallchain-backend
+    color: blue  # Switch this to 'green' during deployment
+  ports:
+  - port: 80
+    targetPort: 3001
+    protocol: TCP
+  type: ClusterIP
+
+---
+# Green Service (for testing before switch)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mallchain-backend-green
+  namespace: mallchain
+  labels:
+    app: mallchain-backend
+    color: green
+spec:
+  selector:
+    app: mallchain-backend
+    color: green
+  ports:
+  - port: 80
+    targetPort: 3001
+    protocol: TCP
+  type: ClusterIP
+
+---
+# Blue Service (for testing/rollback)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mallchain-backend-blue
+  namespace: mallchain
+  labels:
+    app: mallchain-backend
+    color: blue
+spec:
+  selector:
+    app: mallchain-backend
+    color: blue
+  ports:
+  - port: 80
+    targetPort: 3001
+    protocol: TCP
+  type: ClusterIP
+
+---
+# Deployment Script (ConfigMap)
+# Run this to switch from blue to green
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blue-green-switch
+  namespace: mallchain
+data:
+  switch-to-green.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "Switching traffic from blue to green..."
+    
+    # Update service selector to point to green
+    kubectl patch service mallchain-backend -n mallchain -p '{"spec":{"selector":{"color":"green"}}}'
+    
+    echo "Waiting for service to update..."
+    sleep 10
+    
+    # Verify green is healthy
+    echo "Verifying green deployment health..."
+    kubectl rollout status deployment/mallchain-backend-green -n mallchain --timeout=5m
+    
+    echo "✓ Traffic switched to green deployment"
+    echo "Blue deployment kept for rollback. Delete with: kubectl scale deployment/mallchain-backend-blue --replicas=0"
+  
+  switch-to-blue.sh: |
+    #!/bin/bash
+    set -e
+    
+    echo "Rolling back: switching traffic from green to blue..."
+    
+    # Update service selector to point to blue
+    kubectl patch service mallchain-backend -n mallchain -p '{"spec":{"selector":{"color":"blue"}}}'
+    
+    echo "Waiting for service to update..."
+    sleep 10
+    
+    # Verify blue is healthy
+    echo "Verifying blue deployment health..."
+    kubectl rollout status deployment/mallchain-backend-blue -n mallchain --timeout=5m
+    
+    echo "✓ Traffic rolled back to blue deployment"
+
+---
+# ArgoCD Rollout (alternative to manual blue-green)
+# Uses Argo Rollouts for automated canary/blue-green
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: mallchain-backend-rollout
+  namespace: mallchain
+spec:
+  replicas: 6
+  strategy:
+    blueGreen:
+      activeService: mallchain-backend
+      previewService: mallchain-backend-preview
+      autoPromotionEnabled: false  # Require manual approval
+      autoPromotionSeconds: 300   # Auto-promote after 5 min if healthy
+      scaleDownDelaySeconds: 60   # Keep old ReplicaSet for 1 min
+      
+  selector:
+    matchLabels:
+      app: mallchain-backend
+  
+  template:
+    metadata:
+      labels:
+        app: mallchain-backend
+    spec:
+      containers:
+      - name: backend
+        image: mallchain/backend:latest
+        ports:
+        - containerPort: 3001
+        
+        livenessProbe:
+          httpGet:
+            path: /api/live
+            port: 3001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+
+---
+# Preview Service for Argo Rollout
+apiVersion: v1
+kind: Service
+metadata:
+  name: mallchain-backend-preview
+  namespace: mallchain
+spec:
+  selector:
+    app: mallchain-backend
+  ports:
+  - port: 80
+    targetPort: 3001
+  type: ClusterIP
