@@ -1,0 +1,196 @@
+{
+  "timestamp": "2026-09-29T02:43:41.045Z",
+  "tests": [
+    {
+      "name": "Valid signature",
+      "status": "PASS",
+      "data": {
+        "signature": "rnan5Zff9nFnYZjVgZiLu5eqyeQ7oZOX+fQS8SN7kGchO825GZzBRnlHKO8+/cZaMi8q+c7O8hb7u9bIdPRb0A==",
+        "pubKey": {
+          "0": 2,
+          "1": 36,
+          "2": 140,
+          "3": 118,
+          "4": 231,
+          "5": 102,
+          "6": 128,
+          "7": 46,
+          "8": 32,
+          "9": 246,
+          "10": 154,
+          "11": 252,
+          "12": 145,
+          "13": 143,
+          "14": 176,
+          "15": 89,
+          "16": 164,
+          "17": 231,
+          "18": 121,
+          "19": 153,
+          "20": 247,
+          "21": 121,
+          "22": 77,
+          "23": 220,
+          "24": 196,
+          "25": 30,
+          "26": 76,
+          "27": 0,
+          "28": 12,
+          "29": 40,
+          "30": 124,
+          "31": 104,
+          "32": 62
+        },
+        "address": "mall198h9saq46c4243r0zg88ma62a55xvsttnf7z3y",
+        "message": "Hello, Mallchain!",
+        "signDoc": {
+          "chain_id": "",
+          "account_number": "0",
+          "sequence": "0",
+          "fee": {
+            "amount": [],
+            "gas": "0"
+          },
+          "msgs": [
+            {
+              "type": "sign/MsgSignData",
+              "value": {
+                "signer": "mall198h9saq46c4243r0zg88ma62a55xvsttnf7z3y",
+                "data": "SGVsbG8sIE1hbGxjaGFpbiE="
+              }
+            }
+          ],
+          "memo": ""
+        }
+      }
+    },
+    {
+      "name": "Wrong message",
+      "status": "PASS",
+      "data": {
+        "signature": "hENWb1nmj7+9BtG8SS/d2r3AZGTv1NnvHUKi/iaVv51j4//Gx7hmLf8sYocbwm+K83wNuPorliLxV9rBAtMTjg==",
+        "pubKey": {
+          "0": 2,
+          "1": 36,
+          "2": 140,
+          "3": 118,
+          "4": 231,
+          "5": 102,
+          "6": 128,
+          "7": 46,
+          "8": 32,
+          "9": 246,
+          "10": 154,
+          "11": 252,
+          "12": 145,
+          "13": 143,
+          "14": 176,
+          "15": 89,
+          "16": 164,
+          "17": 231,
+          "18": 121,
+          "19": 153,
+          "20": 247,
+          "21": 121,
+          "22": 77,
+          "23": 220,
+          "24": 196,
+          "25": 30,
+          "26": 76,
+          "27": 0,
+          "28": 12,
+          "29": 40,
+          "30": 124,
+          "31": 104,
+          "32": 62
+        },
+        "address": "mall198h9saq46c4243r0zg88ma62a55xvsttnf7z3y",
+        "message": "Original message",
+        "signDoc": {
+          "chain_id": "",
+          "account_number": "0",
+          "sequence": "0",
+          "fee": {
+            "amount": [],
+            "gas": "0"
+          },
+          "msgs": [
+            {
+              "type": "sign/MsgSignData",
+              "value": {
+                "signer": "mall198h9saq46c4243r0zg88ma62a55xvsttnf7z3y",
+                "data": "T3JpZ2luYWwgbWVzc2FnZQ=="
+              }
+            }
+          ],
+          "memo": ""
+        },
+        "tamperedMessage": "Tampered message"
+      }
+    },
+    {
+      "name": "Wrong address",
+      "status": "PASS",
+      "data": {
+        "signature": "aQpm5fFEI7JH1OcgpoFS9kyq7onmUhHuqRiCqByuaH5dxvaNeyF0oFsHLP/L1AE3g+hhXlFXFoRndE0PxCs71g==",
+        "pubKey": {
+          "0": 2,
+          "1": 36,
+          "2": 140,
+          "3": 118,
+          "4": 231,
+          "5": 102,
+          "6": 128,
+          "7": 46,
+          "8": 32,
+          "9": 246,
+          "10": 154,
+          "11": 252,
+          "12": 145,
+          "13": 143,
+          "14": 176,
+          "15": 89,
+          "16": 164,
+          "17": 231,
+          "18": 121,
+          "19": 153,
+          "20": 247,
+          "21": 121,
+          "22": 77,
+          "23": 220,
+          "24": 196,
+          "25": 30,
+          "26": 76,
+          "27": 0,
+          "28": 12,
+          "29": 40,
+          "30": 124,
+          "31": 104,
+          "32": 62
+        },
+        "address": "mall198h9saq46c4243r0zg88ma62a55xvsttnf7z3y",
+        "message": "Test message",
+        "signDoc": {
+          "chain_id": "",
+          "account_number": "0",
+          "sequence": "0",
+          "fee": {
+            "amount": [],
+            "gas": "0"
+          },
+          "msgs": [
+            {
+              "type": "sign/MsgSignData",
+              "value": {
+                "signer": "mall198h9saq46c4243r0zg88ma62a55xvsttnf7z3y",
+                "data": "VGVzdCBtZXNzYWdl"
+              }
+            }
+          ],
+          "memo": ""
+        },
+        "claimedAddress": "mall1ezs4gg35npymrcsje96tm8ctqsjzrca9ap0hfc"
+      }
+    }
+  ]
+}

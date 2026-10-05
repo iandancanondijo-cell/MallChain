@@ -1,0 +1,26 @@
+{
+  "TEST_USER_A": {
+    "name": "TEST_USER_A",
+    "address": "mall198h9saq46c4243r0zg88ma62a55xvsttnf7z3y",
+    "pubkey": "AiSMdudmgC4g9pr8kY+wWaTneZn3eU3cxB5MAAwofGg+",
+    "mnemonic": "genre category scissors width parent equip detect large sheriff jacket success abstract parade wrap arctic gospel nation yellow lazy engine write buzz more rather",
+    "hdPath": "m/44'/118'/0'/0/0",
+    "createdAt": "2026-09-29T02:27:31.085Z"
+  },
+  "TEST_USER_B": {
+    "name": "TEST_USER_B",
+    "address": "mall1ezs4gg35npymrcsje96tm8ctqsjzrca9ap0hfc",
+    "pubkey": "ApHahnZ0PSOCU4URfldtKwGwpuzV4qIVaiZJcabRNc2u",
+    "mnemonic": "wet relax mansion clean meat amateur during vapor people two sand pencil busy master junior sound west submit february narrow rotate regret diagram match",
+    "hdPath": "m/44'/118'/0'/0/0",
+    "createdAt": "2026-09-29T02:27:31.196Z"
+  },
+  "TEST_ADMIN": {
+    "name": "TEST_ADMIN",
+    "address": "mall17q95wy3grw0uajhsq62gdrwycurktz4gg36ldc",
+    "pubkey": "A94p6MSR65QcW340UXledHz1KT91PtAtprIbcN51QuEP",
+    "mnemonic": "appear mail power giant price cheap fat avoid need term answer bottom style like tired six crime section expose eyebrow decide reject journey carry",
+    "hdPath": "m/44'/118'/0'/0/0",
+    "createdAt": "2026-09-29T02:27:31.216Z"
+  }
+}

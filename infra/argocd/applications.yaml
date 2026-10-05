@@ -1,0 +1,288 @@
+# ArgoCD Applications for GitOps Deployment
+# Syncs application manifests from Git repository
+# Enables continuous deployment with automated rollbacks
+
+---
+# Namespace for ArgoCD
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+
+---
+# ArgoCD Application: Mallchain Backend
+# Syncs backend deployment, services, and configuration from Git
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mallchain-backend
+  namespace: argocd
+spec:
+  project: default
+
+  # Source: Git repository
+  source:
+    repoURL: https://github.com/mallchain/deployment-manifests.git
+    targetRevision: main
+    path: kubernetes/backend
+    
+    # Helm values overrides (if using Helm charts)
+    helm:
+      releaseName: mallchain-backend
+      values: |
+        image:
+          tag: latest
+        replicas: 3
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+
+  # Destination: Kubernetes cluster
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: mallchain
+
+  # Sync policy: Automatic with rollback
+  syncPolicy:
+    automated:
+      prune: true          # Delete resources not in Git
+      selfHeal: true       # Re-sync if cluster diverges
+      allowEmpty: false    # Never sync empty manifests
+    
+    # Progressive sync: start with canary, then full rollout
+    syncOptions:
+    - CreateNamespace=true
+    - RespectIgnoreDifferences=true
+    - FailOnSharedResource=true
+    
+    # Retry on sync failure
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 5m
+
+  # Health assessment
+  healthAssessment:
+    enabled: true
+
+  # Notifications on sync events
+  notifications:
+    enabled: true
+
+---
+# ArgoCD Application: Monitoring Stack (Prometheus, Grafana)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mallchain-monitoring
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/mallchain/deployment-manifests.git
+    targetRevision: main
+    path: kubernetes/monitoring
+    helm:
+      releaseName: monitoring
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 5m
+
+---
+# ArgoCD Application: Tracing Stack (Jaeger)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mallchain-tracing
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/mallchain/deployment-manifests.git
+    targetRevision: main
+    path: kubernetes/tracing
+    helm:
+      releaseName: tracing
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tracing
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 5m
+
+---
+# ArgoCD Application: Ingress and TLS
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: mallchain-ingress
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/mallchain/deployment-manifests.git
+    targetRevision: main
+    path: kubernetes/ingress
+    helm:
+      releaseName: ingress
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ingress-nginx
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    retry:
+      limit: 5
+
+---
+# ArgoCD AppProject: Default project
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd
+spec:
+  sourceRepos:
+  - 'https://github.com/mallchain/*'
+  
+  destinations:
+  - namespace: 'mallchain'
+    server: https://kubernetes.default.svc
+  - namespace: 'monitoring'
+    server: https://kubernetes.default.svc
+  - namespace: 'tracing'
+    server: https://kubernetes.default.svc
+  - namespace: 'ingress-nginx'
+    server: https://kubernetes.default.svc
+
+  # Policies
+  clusterResourceWhitelist:
+  - group: '*'
+    kind: '*'
+  
+  clusterResourceBlacklist:
+  - group: 'rbac.authorization.k8s.io'
+    kind: 'ClusterRole'
+  - group: 'rbac.authorization.k8s.io'
+    kind: 'ClusterRoleBinding'
+
+---
+# Notification Rule: Slack notifications on sync
+apiVersion: argoproj.io/v1alpha1
+kind: ArgoCDNotificationRule
+metadata:
+  name: sync-notifications
+  namespace: argocd
+spec:
+  triggers:
+  - on-sync-failed
+  - on-sync-succeeded
+  - on-health-degraded
+  
+  destinations:
+  - slack:
+      channel: '#deployments'
+
+---
+# Secrets Rotation CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: secret-rotation
+  namespace: mallchain
+spec:
+  schedule: "0 2 * * 0"  # Weekly at 2 AM Sunday
+  
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: secret-rotator
+          containers:
+          - name: rotator
+            image: mallchain/secret-rotator:latest
+            env:
+            - name: NAMESPACE
+              value: mallchain
+            - name: ROTATE_JWT
+              value: "true"
+            - name: ROTATE_API_KEYS
+              value: "true"
+          
+          restartPolicy: OnFailure
+
+---
+# ServiceAccount for secret rotation
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: secret-rotator
+  namespace: mallchain
+
+---
+# ClusterRole for secret rotation
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: secret-rotator
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "patch", "update"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "patch", "update"]
+
+---
+# ClusterRoleBinding for secret rotation
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: secret-rotator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: secret-rotator
+subjects:
+- kind: ServiceAccount
+  name: secret-rotator
+  namespace: mallchain

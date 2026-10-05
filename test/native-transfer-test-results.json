@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-09-29T02:44:59.207Z",
+  "test": "Native transfer",
+  "status": "PASS",
+  "data": {
+    "transactionHash": "D76AE7DA672B9D45AF76B5BF61DE1AE1F24074FCD66D649964847556D0DEBFBB",
+    "height": 36,
+    "senderDelta": "-3000",
+    "recipientDelta": "1000"
+  }
+}
