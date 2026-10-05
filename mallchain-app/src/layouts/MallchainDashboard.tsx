@@ -475,6 +475,8 @@ export function MallchainDashboard({ onOpenCreateWallet }: { onOpenCreateWallet?
           networkName={mallchainClient.getNetwork().name}
           networkStatus={state.networkStatus}
           chainId={mallchainClient.getNetwork().chainId}
+          wallet={state.wallet}
+          recentTxCount={state.transactions.length}
         />
 
         {/* Main Content */}
@@ -745,6 +747,8 @@ interface DashboardHeaderProps {
   networkName: string;
   networkStatus: string;
   chainId: string;
+  wallet: MallchainWallet | null;
+  recentTxCount: number;
 }
 
 function DashboardHeader({
@@ -758,9 +762,29 @@ function DashboardHeader({
   networkName,
   networkStatus,
   chainId,
+  wallet,
+  recentTxCount,
 }: DashboardHeaderProps) {
   const statusColor = networkStatus === 'CONNECTED' ? '#22c55e' : '#ef4444';
   const statusLabel = networkStatus === 'CONNECTED' ? 'Live' : 'Offline';
+
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    return 'Good evening';
+  })();
+  const displayName = wallet?.name || 'User';
+
+  const avatarInitials = (() => {
+    if (wallet?.name) {
+      const parts = wallet.name.split(/\s+/);
+      if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+      return parts[0].slice(0, 2).toUpperCase();
+    }
+    if (wallet?.address) return wallet.address.slice(4, 6).toUpperCase();
+    return '?';
+  })();
 
   return (
     <header className="dashboard-header" ref={dropdownRef}>
@@ -768,7 +792,7 @@ function DashboardHeader({
       <div className="header-greeting">
         <span className="header-greeting-emoji">👋</span>
         <div>
-          <div className="header-greeting-text">Good afternoon</div>
+          <div className="header-greeting-text">{greeting}, {displayName}</div>
           <div className="header-shortcut" style={{ fontSize: '12px', color: '#9ca3af' }}>
             {networkName} •{' '}
             <span style={{ color: statusColor, fontWeight: 600 }}>{statusLabel}</span>
@@ -792,7 +816,7 @@ function DashboardHeader({
             onClick={onToggleNotifications}
           >
             🔔
-            <div className="header-notification-badge">7</div>
+            {recentTxCount > 0 && <div className="header-notification-badge">{recentTxCount}</div>}
           </button>
           {notificationOpen && (
             <div className="dropdown-menu" style={{ right: 0, top: '45px' }}>
@@ -812,7 +836,7 @@ function DashboardHeader({
         </button>
 
         {/* Avatar (4.8) */}
-        <div className="header-profile-avatar">IM</div>
+        <div className="header-profile-avatar">{avatarInitials}</div>
       </div>
     </header>
   );
@@ -2185,27 +2209,133 @@ function BuyPage({
 }
 
 function MarketplacePage() {
+  const [escrows, setEscrows] = useState<Array<{ _id: string; orderId: string; buyer: string; seller: string; amount: string; status: string; createdAt: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/marketplace/escrow', { headers: { Accept: 'application/json' } });
+        const data = await res.json();
+        if (isMounted) {
+          if (res.ok) setEscrows(Array.isArray(data) ? data : data.escrows || []);
+          else setError(data.error || 'Failed to load marketplace data');
+        }
+      } catch {
+        if (isMounted) setError('Could not connect to backend');
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+    load();
+    return () => { isMounted = false; };
+  }, []);
+
   return (
     <div className="card">
       <h2 style={{ margin: '0 0 24px 0', fontSize: '24px', fontWeight: 600 }}>
         Marketplace
       </h2>
-      <div style={{ padding: '24px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
-        Marketplace listings will be populated from the backend when available.
-      </div>
+      {loading && <div style={{ padding: '24px', textAlign: 'center', color: '#9ca3af' }}>Loading escrows...</div>}
+      {error && <div style={{ padding: '24px', textAlign: 'center', color: '#ef4444' }}>{error}</div>}
+      {!loading && !error && escrows.length === 0 && (
+        <div style={{ padding: '24px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
+          No marketplace escrows yet. Escrows appear here when merchant POS transactions are initiated.
+        </div>
+      )}
+      {escrows.length > 0 && (
+        <table className="table">
+          <thead className="table-header">
+            <tr>
+              <th className="table-header-cell">Order ID</th>
+              <th className="table-header-cell">Status</th>
+              <th className="table-header-cell">Amount</th>
+              <th className="table-header-cell">Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {escrows.map((e) => (
+              <tr key={e._id} className="table-body-row">
+                <td className="table-body-cell" style={{ fontFamily: 'monospace', fontSize: '13px' }}>{e.orderId}</td>
+                <td className="table-body-cell">
+                  <span className={`status-pill ${e.status === 'released' ? 'green' : e.status === 'disputed' ? 'red' : 'amber'}`}>{e.status}</span>
+                </td>
+                <td className="table-body-cell">{e.amount}</td>
+                <td className="table-body-cell">{new Date(e.createdAt).toLocaleDateString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
 
 function GovernancePage({ showToast }: { showToast: (msg: string) => void }) {
+  const [proposals, setProposals] = useState<Array<{ id: string; title: string; status: string; submitTime: string; votingEndTime: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/governance/proposals', { headers: { Accept: 'application/json' } });
+        const data = await res.json();
+        if (isMounted) {
+          if (res.ok) setProposals(Array.isArray(data) ? data : data.proposals || []);
+          else setError(data.error || 'Failed to load proposals');
+        }
+      } catch {
+        if (isMounted) setError('Could not connect to backend');
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+    load();
+    return () => { isMounted = false; };
+  }, []);
+
   return (
     <div className="card">
       <h2 style={{ margin: '0 0 24px 0', fontSize: '24px', fontWeight: 600 }}>
         Governance
       </h2>
-      <div style={{ padding: '24px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
-        Governance proposals will be fetched from the blockchain governance module.
-      </div>
+      {loading && <div style={{ padding: '24px', textAlign: 'center', color: '#9ca3af' }}>Loading proposals...</div>}
+      {error && <div style={{ padding: '24px', textAlign: 'center', color: '#ef4444' }}>{error}</div>}
+      {!loading && !error && proposals.length === 0 && (
+        <div style={{ padding: '24px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
+          No governance proposals found. Proposals appear here once submitted on-chain via the governance module.
+        </div>
+      )}
+      {proposals.length > 0 && (
+        <table className="table">
+          <thead className="table-header">
+            <tr>
+              <th className="table-header-cell">ID</th>
+              <th className="table-header-cell">Title</th>
+              <th className="table-header-cell">Status</th>
+              <th className="table-header-cell">Voting Ends</th>
+            </tr>
+          </thead>
+          <tbody>
+            {proposals.map((p) => (
+              <tr key={p.id} className="table-body-row">
+                <td className="table-body-cell" style={{ fontFamily: 'monospace' }}>{p.id}</td>
+                <td className="table-body-cell">{p.title}</td>
+                <td className="table-body-cell">
+                  <span className={`status-pill ${p.status === 'PROPOSAL_STATUS_PASSED' ? 'green' : p.status === 'PROPOSAL_STATUS_REJECTED' ? 'red' : 'amber'}`}>
+                    {p.status.replace('PROPOSAL_STATUS_', '')}
+                  </span>
+                </td>
+                <td className="table-body-cell">{p.votingEndTime ? new Date(p.votingEndTime).toLocaleDateString() : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
@@ -2482,19 +2612,65 @@ function ContractsPage() {
 }
 
 function DevHubPage() {
+  const network = mallchainClient.getNetwork();
+
   return (
-    <div
-      className="card"
-      style={{
-        textAlign: 'center',
-        padding: '48px 24px',
-      }}
-    >
-      <div style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>
-        Developer Hub
+    <div>
+      <div className="card" style={{ marginBottom: '24px' }}>
+        <h2 style={{ margin: '0 0 16px 0', fontSize: '24px', fontWeight: 600 }}>
+          Developer Hub
+        </h2>
+        <p style={{ color: '#9ca3af', fontSize: '14px', margin: '0 0 24px 0' }}>
+          Connect to the Mallchain network, deploy smart contracts, and build on-chain applications.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+          <div style={{ padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Network</div>
+            <div style={{ fontSize: '16px', fontWeight: 600 }}>{network.name}</div>
+          </div>
+          <div style={{ padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Chain ID</div>
+            <div style={{ fontSize: '16px', fontWeight: 600, fontFamily: 'monospace' }}>{network.chainId}</div>
+          </div>
+          <div style={{ padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>RPC Endpoint</div>
+            <div style={{ fontSize: '14px', fontWeight: 500, fontFamily: 'monospace', wordBreak: 'break-all' }}>{network.rpcUrl}</div>
+          </div>
+          <div style={{ padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>REST Endpoint</div>
+            <div style={{ fontSize: '14px', fontWeight: 500, fontFamily: 'monospace', wordBreak: 'break-all' }}>{network.restUrl}</div>
+          </div>
+        </div>
       </div>
-      <div style={{ color: '#9ca3af' }}>
-        Documentation and API reference coming soon
+
+      <div className="card" style={{ marginBottom: '24px' }}>
+        <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', fontWeight: 600 }}>Quick Start</h3>
+        <div style={{ color: '#9ca3af', fontSize: '14px', lineHeight: 1.8 }}>
+          <div style={{ marginBottom: '12px' }}><strong style={{ color: '#e5e7eb' }}>1.</strong> Create or import a wallet in the Wallet section</div>
+          <div style={{ marginBottom: '12px' }}><strong style={{ color: '#e5e7eb' }}>2.</strong> Fund gas fees via the Faucet (free testnet tokens)</div>
+          <div style={{ marginBottom: '12px' }}><strong style={{ color: '#e5e7eb' }}>3.</strong> Purchase MLPTS via M-Pesa or earn through mining</div>
+          <div style={{ marginBottom: '12px' }}><strong style={{ color: '#e5e7eb' }}>4.</strong> Convert MLPTS → MLCNS to participate in staking and governance</div>
+          <div><strong style={{ color: '#e5e7eb' }}>5.</strong> Deploy smart contracts via x/wasm (CosmWasm compatible)</div>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', fontWeight: 600 }}>API Reference</h3>
+        <div style={{ display: 'grid', gap: '8px', fontSize: '14px' }}>
+          {[
+            { method: 'GET', path: '/api/send/account/:address', desc: 'Query account info' },
+            { method: 'POST', path: '/api/send/mallcoins', desc: 'Broadcast signed transfer' },
+            { method: 'GET', path: '/api/marketplace/escrow', desc: 'List marketplace escrows' },
+            { method: 'GET', path: '/api/governance/proposals', desc: 'List governance proposals' },
+            { method: 'GET', path: '/api/governance/voting-power/:address', desc: 'Query voting power' },
+          ].map((ep) => (
+            <div key={ep.path} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, fontFamily: 'monospace', color: ep.method === 'GET' ? '#22c55e' : '#eab308', minWidth: '40px' }}>{ep.method}</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '13px', color: '#e5e7eb' }}>{ep.path}</span>
+              <span style={{ marginLeft: 'auto', color: '#9ca3af', fontSize: '12px' }}>{ep.desc}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
