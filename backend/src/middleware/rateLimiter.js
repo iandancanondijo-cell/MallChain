@@ -1,15 +1,20 @@
 const rateLimit = require('express-rate-limit')
-const { ipKeyGenerator } = require('express-rate-limit')
-
 /**
- * Create a generic rate limiter
+ * IPv6-safe IP key generator. express-rate-limit's built-in ipKeyGenerator
+ * throws ERR_ERL_KEY_GEN_IPV6 on IPv6 addresses; req.ip handles both.
  */
+function safeIpKeyGenerator(req) {
+  return req.ip || ''
+}
+
 function createLimiter(opts = {}){
   return rateLimit(Object.assign({
     windowMs: opts.windowMs || 60 * 1000,
     max: opts.max || 60,
+    keyGenerator: safeIpKeyGenerator,
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    validate: { keyGeneratorIpFallback: false }
   }, opts || {}))
 }
 
@@ -76,8 +81,7 @@ function accountKeyGenerator(req) {
     body.buyerAddress ||
     body.buyer ||
     body.address ||
-    ipKeyGenerator(req) ||
-    req.headers['x-forwarded-for']?.split(',')[0]
+    req.ip || ''
   )
 }
 
@@ -88,6 +92,7 @@ function createUserLimiter(opts = {}) {
     keyGenerator: accountKeyGenerator,
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { keyGeneratorIpFallback: false },
     message: { error: 'rate_limit_exceeded', message: 'Too many requests from your account. Please try again later.' }
   }, opts || {}))
 }

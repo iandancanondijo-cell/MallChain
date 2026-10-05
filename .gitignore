@@ -124,7 +124,7 @@ wallet_data/
 # The CSS is specifically included for the Dark Glassmorphism Dashboard
 !mallchain-app/src/styles/dashboard.css
 mallchain-app/
-mallwallet/
+/mallwallet/
 
 # Lighthouse CI local run artifacts (mallchain-os-v14/lighthouserc.cjs)
 .lighthouseci/

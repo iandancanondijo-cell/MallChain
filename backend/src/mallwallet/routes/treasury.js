@@ -1,10 +1,10 @@
 const router = require('express').Router()
 const axios = require('axios')
-const apiKeyAuth = require('../../middleware/apiKeyAuth')
+const { apiKeyAuth } = require('../../middleware/apiKeyAuth')
 
 const RPC = process.env.RPC
 
-router.get('/metrics', apiKeyAuth, async (_req, res) => {
+router.get('/metrics', apiKeyAuth(), async (_req, res) => {
   try {
     const response = await axios.get(
       `${RPC}/marketplace/mlcoin/v1/treasury_metrics`
@@ -18,7 +18,7 @@ router.get('/metrics', apiKeyAuth, async (_req, res) => {
   }
 })
 
-router.get('/history', apiKeyAuth, async (_req, res) => {
+router.get('/history', apiKeyAuth(), async (_req, res) => {
   try {
     const response = await axios.get(
       `${RPC}/marketplace/mlcoin/v1/treasury_history`

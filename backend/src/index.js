@@ -17,7 +17,7 @@ const cookie = require('cookie');
 const User = require('./models/user');
 const Conversation = require('./models/Conversation');
 const { createLimiter, limiters } = require('./middleware/rateLimiter')
-const apiKeyAuth = require('./middleware/apiKeyAuth')
+const { apiKeyAuth } = require('./middleware/apiKeyAuth')
 const { errorHandler } = require('./utils/errorHandler')
 const logger = require('./utils/logger')
 const correlationId = require('./middleware/correlationId')
@@ -462,6 +462,18 @@ app.use('/api/auth', authRoutes);
 const flagsRoutes = require('./routes/flags');
 app.use('/api/flags', flagsRoutes);
 app.use('/api/gdpr', gdprRoutes);
+const complianceRoutes = require('./routes/compliance');
+app.use('/api/compliance', complianceRoutes);
+const sessionsRoutes = require('./routes/sessions');
+app.use('/api/sessions', sessionsRoutes);
+const loginActivityRoutes = require('./routes/loginActivity');
+app.use('/api/login-activity', loginActivityRoutes);
+const emailManagementRoutes = require('./routes/emailManagement');
+app.use('/api/email-management', emailManagementRoutes);
+const notificationPreferencesRoutes = require('./routes/notificationPreferences');
+app.use('/api/notification-preferences', notificationPreferencesRoutes);
+const apiKeyRoutes = require('./routes/apiKeys');
+app.use('/api/api-keys', apiKeyRoutes);
 app.use('/api/vault', maintenanceGuard('vault'), vaultRoutes);
 app.use('/api/tx', txRoutes);
 app.use('/api/market', marketRoutes);
@@ -778,7 +790,7 @@ async function startBackgroundWorkers() {
 // own separate one, so there's nothing left to merge.
 try {
   require('./mallwallet/monitoring/prometheus');
-  app.get('/metrics', apiKeyAuth.metrics, async (_req, res) => {
+  app.get('/metrics', apiKeyAuth(), async (_req, res) => {
     res.set('Content-Type', register.contentType);
     res.end(await register.metrics());
   });
@@ -933,7 +945,10 @@ async function start() {
 // - Server broadcasts wallet:update only to subscribed clients
 // - Prevents unauthorized access to other wallets' data
 const server = http.createServer(app)
-const socketAllowedOrigins = [process.env.FRONTEND_URL].filter(Boolean)
+const socketAllowedOrigins = [
+  process.env.FRONTEND_URL,
+  ...(process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean),
+].filter(Boolean)
 if (!config.isProduction) {
   socketAllowedOrigins.push('http://localhost:5173', 'http://127.0.0.1:5173')
 }
