@@ -1,5 +1,5 @@
 const { Worker } = require('bullmq')
-const getRedisConnection = require('../queue/redis')
+const { getBullMQConnection } = require('../queue/redis')
 const { processQueuedWithdrawals } = require('../../services/withdrawalLiquidityQueueService')
 const { scheduleWithdrawalLiquidityScan } = require('../queue/withdrawalLiquidityQueue')
 const logger = require('../../utils/logger')
@@ -11,7 +11,7 @@ const worker = new Worker(
   'withdrawal-liquidity-scan',
   async () => processQueuedWithdrawals(),
   {
-    connection: getRedisConnection(),
+    connection: getBullMQConnection(),
     concurrency: 1,
   },
 )

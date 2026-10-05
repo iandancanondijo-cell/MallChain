@@ -11,7 +11,7 @@ jest.mock('../models/transaction', () => ({
   findById: jest.fn(),
 }));
 
-jest.mock('../queue/transactionQueue', () => {
+jest.mock('../mallwallet/queue/transactionQueue', () => {
   const addMock = jest.fn().mockResolvedValue({ id: 'job-1' });
   return {
     getTransactionQueue: jest.fn(() => ({
@@ -36,7 +36,7 @@ jest.mock('../utils/activityTracker', () => ({
 
 const User = require('../models/user');
 const Transaction = require('../models/transaction');
-const { getTransactionQueue, __addMock: addMock } = require('../queue/transactionQueue');
+const { getTransactionQueue, __addMock: addMock } = require('../mallwallet/queue/transactionQueue');
 const transactionsRouter = require('../routes/transactions');
 
 function authHeader(userId = 'user-1') {

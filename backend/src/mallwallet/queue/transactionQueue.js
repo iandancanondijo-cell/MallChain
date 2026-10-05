@@ -1,11 +1,11 @@
 const { Queue } = require('bullmq')
-const getRedisConnection = require('./redis')
+const { getBullMQConnection } = require('./redis')
 
 let transactionQueue = null
 
 function getTransactionQueue() {
   if (!transactionQueue) {
-    const connection = getRedisConnection()
+    const connection = getBullMQConnection()
     transactionQueue = new Queue('transactions', {
       connection,
       defaultJobOptions: {

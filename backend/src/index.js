@@ -761,7 +761,6 @@ async function startBackgroundWorkers() {
     }
 
     require('./mallwallet/workers/transactionWorker');
-    require('./workers/transactionWorker');
     require('./mallwallet/workers/paymentCallbackWorker');
     // C2: Mallpoints convert-flow liquidity dead-letter outbox worker.
     // Retries pool liquidity adds that failed after a successful creditMlcns.

@@ -1,5 +1,5 @@
 const { Queue } = require('bullmq')
-const getRedisConnection = require('./redis')
+const { getBullMQConnection } = require('./redis')
 
 // Liquidity clearing is an indefinite external wait (could be hours), not a
 // transient failure — the existing DLQ pattern (convertLiquidityQueue.js's
@@ -14,7 +14,7 @@ let withdrawalLiquidityQueue = null
 
 function getWithdrawalLiquidityQueue() {
   if (!withdrawalLiquidityQueue) {
-    const connection = getRedisConnection()
+    const connection = getBullMQConnection()
     withdrawalLiquidityQueue = new Queue('withdrawal-liquidity-scan', {
       connection,
       defaultJobOptions: {
@@ -37,16 +37,19 @@ function getWithdrawalLiquidityQueue() {
 }
 
 /**
- * Schedules the recurring scan, once. A fixed jobId means a process
- * restart re-adds the *same* repeatable job instead of creating a
- * duplicate one running alongside it.
+ * Schedules the recurring scan via BullMQ's Job Scheduler API — on BullMQ 6
+ * `queue.add(..., {repeat})` is silently ignored (resolves undefined and
+ * creates nothing). jobSchedulerId is the dedup key, so a process restart
+ * upserts the same schedule instead of creating a duplicate one running
+ * alongside it. The queue's defaultJobOptions apply to each generated job.
  */
 async function scheduleWithdrawalLiquidityScan() {
   const queue = getWithdrawalLiquidityQueue()
-  await queue.add('scan', {}, {
-    repeat: { every: SCAN_INTERVAL_MS },
-    jobId: RECURRING_JOB_ID,
-  })
+  await queue.upsertJobScheduler(
+    RECURRING_JOB_ID,
+    { every: SCAN_INTERVAL_MS },
+    { name: 'scan', data: {} },
+  )
 }
 
 module.exports = { getWithdrawalLiquidityQueue, scheduleWithdrawalLiquidityScan, SCAN_INTERVAL_MS }

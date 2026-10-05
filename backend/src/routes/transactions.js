@@ -1,6 +1,6 @@
 const router = require('express').Router()
 const Transaction = require('../models/transaction')
-const { getTransactionQueue } = require('../queue/transactionQueue')
+const { getTransactionQueue } = require('../mallwallet/queue/transactionQueue')
 const crypto = require('crypto')
 const { bech32 } = require('bech32')
 const { asyncHandler } = require('../utils/errorHandler')
@@ -82,7 +82,12 @@ router.post('/send', requireAuth(), asyncHandler(async (req, res) => {
       {
         ...jobData
       },
-      { jobId: transaction._id.toString(), removeOnComplete: true }
+      {
+        jobId: transaction._id.toString(),
+        removeOnComplete: true,
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5000 }
+      }
     )
 
     res.json({

@@ -1,5 +1,5 @@
 const { Queue } = require('bullmq')
-const getRedisConnection = require('./redis')
+const { getBullMQConnection } = require('./redis')
 
 // Dead-letter queue for M-Pesa/B2C callbacks that failed to process
 // synchronously (see routes/buy.js, services/b2cPayoutService.js). Safaricom
@@ -13,7 +13,7 @@ let queue = null
 
 function getPaymentCallbackQueue() {
   if (!queue) {
-    const connection = getRedisConnection()
+    const connection = getBullMQConnection()
     queue = new Queue('payment-callbacks', {
       connection,
       defaultJobOptions: {

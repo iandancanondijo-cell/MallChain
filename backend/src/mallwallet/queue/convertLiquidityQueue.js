@@ -1,11 +1,11 @@
 const { Queue } = require('bullmq')
-const getRedisConnection = require('./redis')
+const { getBullMQConnection } = require('./redis')
 
 let convertLiquidityQueue = null
 
 function getConvertLiquidityQueue() {
   if (!convertLiquidityQueue) {
-    const connection = getRedisConnection()
+    const connection = getBullMQConnection()
     convertLiquidityQueue = new Queue('convert-liquidity-dlq', {
       connection,
       defaultJobOptions: {

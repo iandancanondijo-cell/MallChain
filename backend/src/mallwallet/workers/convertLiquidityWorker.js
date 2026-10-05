@@ -1,5 +1,5 @@
 const { Worker } = require('bullmq')
-const getRedisConnection = require('../queue/redis')
+const { getBullMQConnection } = require('../queue/redis')
 const mongoose = require('mongoose')
 const { addLiquidityToPool } = require('../../controllers/liquidityController')
 const { recordLiquidityActivity } = require('../../services/liquidityActivityService')
@@ -50,7 +50,7 @@ const worker = new Worker(
     }
   },
   {
-    connection: getRedisConnection(),
+    connection: getBullMQConnection(),
     concurrency: 2,
     settings: {
       lockDuration: 120000,     // 2 min — long enough for signAndBroadcast to complete

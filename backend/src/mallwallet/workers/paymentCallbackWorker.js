@@ -1,5 +1,5 @@
 const { Worker } = require('bullmq')
-const getRedisConnection = require('../queue/redis')
+const { getBullMQConnection } = require('../queue/redis')
 const logger = require('../../utils/logger')
 const { processMpesaCallback } = require('../../services/mpesaCallbackService')
 
@@ -22,7 +22,7 @@ const worker = new Worker(
     throw new Error(`unknown payment-callback job type: ${job.name}`)
   },
   {
-    connection: getRedisConnection(),
+    connection: getBullMQConnection(),
     concurrency: 2,
   }
 )
