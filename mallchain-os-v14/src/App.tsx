@@ -40,7 +40,7 @@ import './styles/animated-background.css';
 /** Maps a route path to a section ID for per-section ambient theming via [data-section] in global.css. */
 function getSectionId(path: string): string {
   const p = path.split('?')[0];
-  if (p === '/' || p === '/activity') return 'dashboard';
+  if (p === '/') return 'dashboard';
   if (p.startsWith('/wallet') || p === '/transactions' || p === '/security') return 'wallet';
   if (p.startsWith('/marketplace')) return 'marketplace';
   if (p.startsWith('/staking')) return 'staking';

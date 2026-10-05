@@ -145,7 +145,6 @@ export const ROUTES: RouteDef[] = [
   { path: '/analytics', title: 'Analytics', render: () => <AnalyticsView /> },
   { path: '/help', title: 'Help Center', render: () => <Help /> },
   { path: '/search', title: 'Search', render: (n) => <SearchResults navigate={n} /> },
-  { path: '/activity', title: 'Dashboard', render: (n) => <Dashboard navigate={n} /> },
 ];
 
 /** Routes only 'admin'/'superadmin' may reach — checked as an exact-or-prefix match, same as the public-route check below. */

@@ -14,7 +14,7 @@
 import { useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
-  Home, Activity, Bell, Wallet, Send, Download, Repeat, History, List,
+  Home, Bell, Wallet, Send, Download, Repeat, History, List,
   ShoppingBag, Layers, Scale, Vote, SlidersHorizontal, Compass, Megaphone,
   CheckCircle, DollarSign, Trophy, BarChart3, ShieldCheck, Lock, Shield,
   ClipboardEdit, User, Search, MessageCircle, Link as LinkIcon, FileCode,
@@ -43,7 +43,6 @@ const GROUPS: NavGroup[] = [
     title: 'Home',
     items: [
       { label: 'Dashboard', path: '/', icon: Home },
-      { label: 'Activity', path: '/activity', icon: Activity },
       { label: 'Notifications', path: '/notifications', icon: Bell },
     ],
   },

@@ -217,7 +217,7 @@ export function getSEOForRoute(path: string): SEOConfig {
   const cleanPath = path.split('?')[0].split('#')[0];
 
   if (cleanPath === '/') return SEO_PRESETS.landing;
-  if (cleanPath === '/dashboard' || cleanPath === '/activity') return SEO_PRESETS.dashboard;
+  if (cleanPath === '/dashboard') return SEO_PRESETS.dashboard;
   if (cleanPath.startsWith('/marketplace')) return SEO_PRESETS.marketplace;
   if (cleanPath.startsWith('/wallet')) return SEO_PRESETS.wallet;
   if (cleanPath.startsWith('/staking')) return SEO_PRESETS.staking;
