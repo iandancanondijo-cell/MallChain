@@ -250,6 +250,9 @@ exports.login = async (req, res) => {
   const lock = await checkAccountLock(email);
   if (lock.locked) {
     console.log('[LOGIN] Step 2.5: Account locked:', lock);
+    if (lock.reason === 'lockout_check_unavailable') {
+      return res.status(503).json({ error: 'service temporarily unavailable, please retry in a moment', retryAfterSeconds: lock.retryAfterSeconds });
+    }
     return res.status(423).json({ error: 'account temporarily locked after repeated failed logins', retryAfterSeconds: lock.retryAfterSeconds });
   }
 

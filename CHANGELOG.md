@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rotated all secrets and mnemonics
 
 ### Fixed
+- First login of the day failing after overnight Redis idle — connections are now kept alive and a retryable 503 is returned when the lockout check is unavailable
 - Enabled the local node REST API (127.0.0.1:1317) so the backend can serve blockchain stats, transactions, and explorer data instead of 503s
 - Moved local node gRPC to port 9099 — the default 9090 collided with system Prometheus and silently killed the API server on startup
 - FeesAccumulated state initialization in blockchain

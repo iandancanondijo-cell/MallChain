@@ -10,7 +10,7 @@ function getConnection() {
       port: Number(process.env.REDIS_PORT || 6379),
       password: process.env.REDIS_PASSWORD || undefined,
       lazyConnect: true,
-      maxRetriesPerRequest: 0,
+      maxRetriesPerRequest: 1,
       enableOfflineQueue: false,
       retryStrategy: null,
       connectTimeout: Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 2000),
@@ -21,6 +21,15 @@ function getConnection() {
       if (err && err.code === 'ECONNREFUSED') return
       console.error('[mallwallet redis] error', err)
     })
+
+    // Keep the connection alive so overnight idle periods don't cause
+    // a cold-start failure on the first user request.
+    const keepalive = setInterval(() => {
+      if (connection.status === 'ready') {
+        connection.ping().catch(() => {})
+      }
+    }, 60_000)
+    keepalive.unref()
   }
   return connection
 }
