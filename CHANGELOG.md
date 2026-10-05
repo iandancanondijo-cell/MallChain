@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker security hardening (non-root users, healthchecks)
 
 ### Changed
+- Throttled mallchain-app dashboard chain requests with per-endpoint cache TTLs and added a Degraded network status indicator
 - Upgraded Node.js from 18 to 20
 - Standardized Dockerfiles with multi-stage builds
 - Improved CI pipeline to fail on vulnerabilities

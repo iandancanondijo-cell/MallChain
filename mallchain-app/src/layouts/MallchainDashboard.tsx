@@ -12,6 +12,7 @@ import { mallchainClient } from '../blockchain/client';
 import { walletService } from '../services/walletService';
 import { sendMallcoinTransfer, MallcoinTxError, getNetworkFeeEstimate } from '../services/mallcoinTx';
 import { buyApi, type BuyConfig, type BuyQuote } from '../services/buyApi';
+import { requestCache } from '../services/requestCache';
 import QRCode from 'qrcode';
 import type { MallchainWallet } from '../wallet/MallchainWallet';
 
@@ -150,7 +151,7 @@ export function MallchainDashboard({ onOpenCreateWallet }: { onOpenCreateWallet?
   }, []);
 
   // ========================================================================
-  // REAL DATA LOADING: Block height from mallchainClient
+  // REAL DATA LOADING: Block height from mallchainClient (with caching)
   // ========================================================================
 
   useEffect(() => {
@@ -158,7 +159,13 @@ export function MallchainDashboard({ onOpenCreateWallet }: { onOpenCreateWallet?
 
     const loadNetworkData = async () => {
       try {
-        const status = await mallchainClient.getNetworkStatus();
+        // Use throttled request with 5 second cache TTL
+        const status = await requestCache.throttledRequest(
+          'network-status',
+          () => mallchainClient.getNetworkStatus(),
+          5000  // Cache for 5 seconds
+        );
+        
         if (isMounted) {
           setState((prev) => ({
             ...prev,
@@ -205,7 +212,7 @@ export function MallchainDashboard({ onOpenCreateWallet }: { onOpenCreateWallet?
   }, []);
 
   // ========================================================================
-  // REAL DATA LOADING: Wallet balances
+  // REAL DATA LOADING: Wallet balances (with caching)
   // ========================================================================
 
   useEffect(() => {
@@ -215,7 +222,11 @@ export function MallchainDashboard({ onOpenCreateWallet }: { onOpenCreateWallet?
 
     const loadBalances = async () => {
       try {
-        const balances = await mallchainClient.getBalances(state.wallet!.address);
+        const balances = await requestCache.throttledRequest(
+          `balances-${state.wallet!.address}`,
+          () => mallchainClient.getBalances(state.wallet!.address),
+          5000  // Cache for 5 seconds
+        );
         if (isMounted) {
           setState((prev) => ({ ...prev, balances, error: null }));
         }
@@ -238,7 +249,7 @@ export function MallchainDashboard({ onOpenCreateWallet }: { onOpenCreateWallet?
   }, [state.wallet?.address]);
 
   // ========================================================================
-  // REAL DATA LOADING: Transaction history
+  // REAL DATA LOADING: Transaction history (with caching)
   // ========================================================================
 
   useEffect(() => {
@@ -248,7 +259,12 @@ export function MallchainDashboard({ onOpenCreateWallet }: { onOpenCreateWallet?
 
     const loadTransactions = async () => {
       try {
-        const txs = await mallchainClient.getTransactions(state.wallet!.address);
+        // Use throttled request with 10 second cache TTL
+        const txs = await requestCache.throttledRequest(
+          `transactions-${state.wallet!.address}`,
+          () => mallchainClient.getTransactions(state.wallet!.address),
+          10000  // Cache for 10 seconds
+        );
         if (isMounted) {
           const formattedTxs = txs.slice(0, 10).map((tx: any) => {
             const isReceive = tx.type === 'receive';
@@ -319,7 +335,7 @@ export function MallchainDashboard({ onOpenCreateWallet }: { onOpenCreateWallet?
   }, [state.wallet?.address]);
 
   // ========================================================================
-  // REAL DATA LOADING: Validators
+  // REAL DATA LOADING: Validators (with caching)
   // ========================================================================
 
   useEffect(() => {
@@ -327,7 +343,12 @@ export function MallchainDashboard({ onOpenCreateWallet }: { onOpenCreateWallet?
 
     const loadValidators = async () => {
       try {
-        const validators = await mallchainClient.getValidators();
+        // Use throttled request with 30 second cache TTL
+        const validators = await requestCache.throttledRequest(
+          'validators-list',
+          () => mallchainClient.getValidators(),
+          30000  // Cache for 30 seconds
+        );
         if (isMounted) {
           const formattedValidators = validators.slice(0, 5).map((v: any) => ({
             name: v.description?.moniker || 'Validator',
@@ -765,8 +786,14 @@ function DashboardHeader({
   wallet,
   recentTxCount,
 }: DashboardHeaderProps) {
-  const statusColor = networkStatus === 'CONNECTED' ? '#22c55e' : '#ef4444';
-  const statusLabel = networkStatus === 'CONNECTED' ? 'Live' : 'Offline';
+  const statusColor = 
+    networkStatus === 'CONNECTED' ? '#22c55e' : 
+    networkStatus === 'DEGRADED' ? '#f59e0b' : 
+    '#ef4444';
+  const statusLabel = 
+    networkStatus === 'CONNECTED' ? 'Live' : 
+    networkStatus === 'DEGRADED' ? 'Degraded' : 
+    'Offline';
 
   const greeting = (() => {
     const h = new Date().getHours();
