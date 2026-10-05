@@ -23,6 +23,7 @@ const MallpointsPurchase = lazy(() => import('./pages/MallpointsPurchase'));
 /* feature modules — each maps to a v14 view */
 import Dashboard from './features/dashboard/Dashboard';
 import AuthFlow from './features/auth/AuthFlow';
+import EnhancedRegistrationFlow from './features/auth/EnhancedRegistrationFlow';
 const WalletHub = lazy(() => import('./features/wallet/WalletHub'));
 const WalletSend = lazy(() => import('./features/wallet/WalletSend'));
 const WalletReceive = lazy(() => import('./features/wallet/WalletReceive'));
@@ -79,8 +80,17 @@ export const ROUTES: RouteDef[] = [
   { path: '/landing', title: 'Welcome', render: (n) => <Landing navigate={n} /> },
   { path: '/', title: 'Dashboard', render: (n) => <Dashboard navigate={n} /> },
   /* auth - redirect to landing if already authenticated */
-  { path: '/auth', title: 'Sign in', render: (n) => <AuthFlow navigate={n} /> },
+  { path: '/auth', title: 'Sign in', render: (n) => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const mode = searchParams.get('mode');
+    if (mode === 'signup') {
+      return <EnhancedRegistrationFlow navigate={n} />;
+    }
+    return <AuthFlow navigate={n} />;
+  } },
   { path: '/login', title: 'Sign in', render: (n) => <AuthFlow navigate={n} /> },
+  /* new enhanced signup flow (gradual rollout) */
+  { path: '/signup-v2', title: 'Create Account', render: (n) => <EnhancedRegistrationFlow navigate={n} /> },
   /* wallet */
   { path: '/wallet/settings', title: 'Wallet Settings', render: () => <WalletSettings /> },
   { path: '/wallet/address-book', title: 'Address Book', render: () => <AddressBook /> },

@@ -85,6 +85,10 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
   });
   const [showPass, setShowPass] = useState(false);
   const [showConfirmPass, setShowConfirmPass] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [recoveryMnemonic, setRecoveryMnemonic] = useState('');
+  const [recoveryPassword, setRecoveryPassword] = useState('');
   // Set once the backend reports this account has real 2FA enabled — see
   // authController.js's checkTwoFactor(). Shows a code input and blocks
   // submission until a valid TOTP/backup code is provided.
@@ -260,6 +264,31 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
     await createWallet(importMnemonic.trim());
   };
 
+  const recoverWallet = async () => {
+    setErr('');
+    const words = recoveryMnemonic.trim().split(/\s+/);
+    if (words.length !== 12 && words.length !== 24) {
+      setErr('Recovery phrase must be 12 or 24 words');
+      return;
+    }
+    if (recoveryPassword.length < 8) {
+      setErr('New password must be at least 8 characters');
+      return;
+    }
+    setBusy(true);
+    try {
+      await createWallet(recoveryMnemonic.trim());
+      toast('Wallet recovered from mnemonic. Set a new password going forward.');
+      setRecoveryMode(false);
+      setRecoveryMnemonic('');
+      setRecoveryPassword('');
+    } catch {
+      setErr('Recovery failed — check your mnemonic phrase');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submitKYC = async () => {
     setBusy(true);
     setErr('');
@@ -310,6 +339,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
     if (mode === 'signup') {
       if (pass !== confirmPass) { setErr('Passwords do not match.'); return; }
       if (strength() < 2) { setErr('Password is too weak. Please use a stronger password.'); return; }
+      if (!termsAccepted) { setErr('You must accept the Terms of Service and Privacy Policy.'); return; }
     }
     
     setBusy(true);
@@ -504,7 +534,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
       <div className="view-head">
         <h1>You're already signed in</h1>
         <div className="row mt">
-          <button className="btn btn-primary" onClick={() => navigate('/')}>Go to Mission Control</button>
+          <button className="btn btn-primary" onClick={() => navigate('/')}>Go to Mallchain Network</button>
           <button className="btn btn-ghost" onClick={() => authService.logout(navigate)}>Sign out</button>
         </div>
       </div>
@@ -541,24 +571,165 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         transition={{ duration: 0.4, delay: 0.1 }}
         style={{ textAlign: 'center', marginBottom: 40 }}
       >
-        <div style={{ 
-          display: 'inline-flex', 
-          alignItems: 'center', 
-          justifyContent: 'center',
-          width: 80, 
-          height: 80, 
-          borderRadius: '50%',
-          background: 'linear-gradient(135deg, var(--gold), #c9781a)',
-          marginBottom: 20,
-          boxShadow: '0 8px 32px rgba(255, 211, 92, 0.3)'
-        }}>
-          <span style={{ 
-            fontSize: 36, 
-            fontWeight: 800, 
-            color: 'var(--gold-ink)',
-            fontFamily: 'var(--font-display)'
-          }}>M</span>
-        </div>
+        <motion.div style={{ position: 'relative', width: 120, height: 120, marginBottom: 20 }}>
+          {/* Outer rotating ring - represents blockchain network */}
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
+            style={{
+              position: 'absolute',
+              width: 120,
+              height: 120,
+              border: '2px solid',
+              borderColor: 'var(--gold)',
+              borderRadius: '50%',
+              opacity: 0.3,
+            }}
+          />
+
+          {/* Middle pulsing ring - block confirmation */}
+          <motion.div
+            animate={{ scale: [1, 1.15, 1] }}
+            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+            style={{
+              position: 'absolute',
+              width: 100,
+              height: 100,
+              border: '2px solid',
+              borderColor: 'var(--gold)',
+              borderRadius: '50%',
+              top: 10,
+              left: 10,
+              opacity: 0.5,
+            }}
+          />
+
+          {/* Animated blocks around the circle - representing block formations */}
+          {[0, 1, 2, 3].map((i) => (
+            <motion.div
+              key={`block-${i}`}
+              animate={{
+                opacity: [0, 1, 1, 0],
+                x: [0, Math.cos((i * Math.PI) / 2) * 50, Math.cos((i * Math.PI) / 2) * 50, 0],
+                y: [0, Math.sin((i * Math.PI) / 2) * 50, Math.sin((i * Math.PI) / 2) * 50, 0],
+              }}
+              transition={{
+                duration: 3,
+                repeat: Infinity,
+                delay: i * 0.75,
+                ease: 'easeInOut',
+              }}
+              style={{
+                position: 'absolute',
+                width: 16,
+                height: 16,
+                background: 'linear-gradient(135deg, var(--gold), #c9781a)',
+                borderRadius: 4,
+                top: '50%',
+                left: '50%',
+                marginTop: -8,
+                marginLeft: -8,
+                boxShadow: '0 4px 12px rgba(255, 211, 92, 0.6)',
+              }}
+            />
+          ))}
+
+          {/* Transaction lines connecting blocks */}
+          <svg
+            style={{
+              position: 'absolute',
+              width: 120,
+              height: 120,
+              top: 0,
+              left: 0,
+              pointerEvents: 'none',
+            }}
+          >
+            {[0, 1, 2, 3].map((i) => {
+              const angle = (i * Math.PI) / 2;
+              const nextAngle = ((i + 1) * Math.PI) / 2;
+              const x1 = 60 + Math.cos(angle) * 50;
+              const y1 = 60 + Math.sin(angle) * 50;
+              const x2 = 60 + Math.cos(nextAngle) * 50;
+              const y2 = 60 + Math.sin(nextAngle) * 50;
+
+              return (
+                <motion.line
+                  key={`line-${i}`}
+                  x1={x1}
+                  y1={y1}
+                  x2={x2}
+                  y2={y2}
+                  stroke="var(--gold)"
+                  strokeWidth="2"
+                  opacity="0.3"
+                  animate={{
+                    opacity: [0.1, 0.6, 0.1],
+                  }}
+                  transition={{
+                    duration: 2.5,
+                    repeat: Infinity,
+                    delay: i * 0.6,
+                    ease: 'easeInOut',
+                  }}
+                />
+              );
+            })}
+          </svg>
+
+          {/* Checkmark pulses - confirmed transactions */}
+          {[0, 1, 2].map((i) => (
+            <motion.div
+              key={`check-${i}`}
+              animate={{
+                opacity: [0, 1, 0],
+                scale: [0.5, 1, 1.5],
+              }}
+              transition={{
+                duration: 1.5,
+                repeat: Infinity,
+                delay: i * 0.5,
+                ease: 'easeOut',
+              }}
+              style={{
+                position: 'absolute',
+                fontSize: 16,
+                top: '50%',
+                left: '50%',
+                marginTop: -8,
+                marginLeft: -8,
+                color: 'var(--gold)',
+              }}
+            >
+              ✓
+            </motion.div>
+          ))}
+
+          {/* Central M Logo */}
+          <div style={{ 
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            marginTop: -40,
+            marginLeft: -40,
+            display: 'inline-flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            width: 80, 
+            height: 80, 
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, var(--gold), #c9781a)',
+            boxShadow: '0 8px 32px rgba(255, 211, 92, 0.3)',
+            zIndex: 10,
+          }}>
+            <span style={{ 
+              fontSize: 36, 
+              fontWeight: 800, 
+              color: 'var(--gold-ink)',
+              fontFamily: 'var(--font-display)'
+            }}>M</span>
+          </div>
+        </motion.div>
         <h1 style={{ 
           fontSize: 32, 
           fontWeight: 800, 
@@ -992,10 +1163,11 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
           color: 'var(--txt-3)', 
           lineHeight: 1.5 
         }}>
-          <input 
-            type="checkbox" 
-            defaultChecked 
-            style={{ marginTop: 2, accentColor: 'var(--gold)' }} 
+          <input
+            type="checkbox"
+            checked={mode === 'login' ? true : termsAccepted}
+            onChange={(e) => { if (mode === 'signup') setTermsAccepted(e.target.checked); }}
+            style={{ marginTop: 2, accentColor: 'var(--gold)' }}
           />
           <span>
             {mode === 'login' 
@@ -1008,7 +1180,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         {/* Submit Button */}
         <button
           onClick={submitAuth}
-          disabled={busy || (mode === 'signup' && !confirmPass) || (requires2fa && !otp)}
+          disabled={busy || (mode === 'signup' && !confirmPass) || (mode === 'signup' && !termsAccepted) || (requires2fa && !otp)}
           style={{
             width: '100%',
             padding: 16,
@@ -1093,14 +1265,63 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
 
         {/* Footer Links */}
         <div style={{ textAlign: 'center', fontSize: 13 }}>
-          {mode === 'login' ? (
+          {recoveryMode ? (
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--txt)', marginBottom: 12 }}>
+                Recover wallet
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--txt-3)', marginBottom: 16, lineHeight: 1.5 }}>
+                Enter the 12 or 24-word recovery phrase you saved when creating your wallet. This will restore your wallet with a new password.
+              </div>
+              <div className="field" style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 12, color: 'var(--txt-3)', marginBottom: 4, display: 'block' }}>Recovery phrase</label>
+                <textarea
+                  value={recoveryMnemonic}
+                  onChange={(e) => setRecoveryMnemonic(e.target.value)}
+                  placeholder="word1 word2 word3 ..."
+                  rows={3}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border-soft)', background: 'var(--bg-2)', color: 'var(--txt)', fontSize: 13, fontFamily: 'monospace', resize: 'vertical' }}
+                />
+              </div>
+              <div className="field" style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, color: 'var(--txt-3)', marginBottom: 4, display: 'block' }}>New password</label>
+                <input
+                  type="password"
+                  value={recoveryPassword}
+                  onChange={(e) => setRecoveryPassword(e.target.value)}
+                  placeholder="Min 8 characters"
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border-soft)', background: 'var(--bg-2)', color: 'var(--txt)', fontSize: 13 }}
+                />
+              </div>
+              <button
+                onClick={recoverWallet}
+                disabled={busy || !recoveryMnemonic.trim() || recoveryPassword.length < 8}
+                style={{
+                  width: '100%', padding: 12, background: 'linear-gradient(135deg, var(--gold), #c9781a)',
+                  border: 'none', borderRadius: 10, color: '#fff', fontWeight: 600, fontSize: 14,
+                  cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1,
+                }}
+              >
+                {busy ? 'Recovering...' : 'Recover wallet'}
+              </button>
+              <button
+                onClick={() => { setRecoveryMode(false); setRecoveryMnemonic(''); setRecoveryPassword(''); setErr(''); }}
+                style={{
+                  width: '100%', padding: 10, marginTop: 8, background: 'transparent',
+                  border: 'none', color: 'var(--txt-3)', cursor: 'pointer', fontSize: 13,
+                }}
+              >
+                Back to login
+              </button>
+            </div>
+          ) : mode === 'login' ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-              <button 
-                onClick={() => toast('Password reset (demo)')}
-                style={{ 
-                  background: 'transparent', 
-                  border: 'none', 
-                  color: 'var(--txt-3)', 
+              <button
+                onClick={() => { setRecoveryMode(true); setErr(''); }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--txt-3)',
                   cursor: 'pointer',
                   fontSize: 13
                 }}
@@ -1108,12 +1329,12 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 Forgot password?
               </button>
               <span style={{ color: 'var(--border-soft)' }}>·</span>
-              <button 
-                onClick={() => toast('2FA setup (demo)')}
-                style={{ 
-                  background: 'transparent', 
-                  border: 'none', 
-                  color: 'var(--txt-3)', 
+              <button
+                onClick={() => toast('2FA recovery requires your mnemonic phrase — use "Forgot password?" to restore access')}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--txt-3)',
                   cursor: 'pointer',
                   fontSize: 13
                 }}

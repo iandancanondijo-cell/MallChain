@@ -1,7 +1,7 @@
 /**
- * Real contracts API — wraps backend/src/routes/contracts.js. Deploy/interact
- * are simulated (no real wasm upload pipeline in this repo), but the records
- * are real and persist per user.
+ * Contracts API — wraps backend/src/routes/contracts.js. Records persist
+ * server-side per user. Deploy/interact accept optional real chain tx data
+ * (txHash, on-chain address) so the record reflects actual wasm operations.
  */
 import { api } from './api';
 import { type ApiResult } from './api';
@@ -13,6 +13,7 @@ export interface ContractRecord {
   code: string;
   description: string;
   address: string;
+  txHash?: string;
   deployedAt: string;
   txs: number;
   status: 'active' | 'paused';
@@ -31,12 +32,23 @@ class ContractsApi {
     return unwrap(api.get('/api/contracts'));
   }
 
-  async deploy(payload: { name: string; type: string; code: string; description?: string }): Promise<ApiResult<ContractRecord>> {
+  async deploy(payload: {
+    name: string;
+    type: string;
+    code: string;
+    description?: string;
+    txHash?: string;
+    address?: string;
+  }): Promise<ApiResult<ContractRecord>> {
     return unwrap(api.post('/api/contracts/deploy', payload));
   }
 
-  async interact(id: string, method: string, params?: unknown): Promise<ApiResult<{ txHash: string; status: string; result: unknown }>> {
-    return unwrap(api.post(`/api/contracts/${encodeURIComponent(id)}/interact`, { method, params }));
+  async interact(id: string, method: string, params?: unknown, txHash?: string): Promise<ApiResult<{ txHash: string; status: string; result: unknown }>> {
+    return unwrap(api.post(`/api/contracts/${encodeURIComponent(id)}/interact`, { method, params, txHash }));
+  }
+
+  async broadcast(txBytes: string): Promise<ApiResult<{ txHash: string; txResponse: unknown }>> {
+    return unwrap(api.post('/api/contracts/broadcast', { txBytes }));
   }
 
   async remove(id: string): Promise<ApiResult<{ deleted: boolean }>> {

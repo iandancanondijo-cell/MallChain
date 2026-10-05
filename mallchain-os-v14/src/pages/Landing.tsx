@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { useScrollAnimation } from '../hooks/useScrollAnimation';
 import { economyApi, type EconomyState } from '../services/economyApi';
+import { Button, Card, Badge, Heading, Text } from '../components/shared';
 import '../styles/landing.css';
 
 interface LandingProps {
@@ -329,22 +330,25 @@ export default function Landing({ navigate }: LandingProps) {
 
         <div className={`features-grid scroll-stagger ${goalsVisible ? 'scroll-visible' : 'scroll-animate'}`}>
           {GOALS.map(({ Icon, title, body, cta, featured }) => (
-            <div
+            <Card 
               key={title}
-              className={`feature-card card-hover${featured ? ' feature-card-featured' : ''}`}
+              variant={featured ? "featured" : "hover"}
+              className={`feature-card ${featured ? 'feature-card-featured' : ''}`}
             >
               <div className="feature-icon-badge">
                 <Icon size={22} />
               </div>
-              <h3>{title}</h3>
-              <p>{body}</p>
-              <button
-                className="btn btn-ghost btn-sm feature-cta"
+              <Heading level={3} className="feature-card-heading">{title}</Heading>
+              <Text size="sm" color="secondary" className="feature-card-text">{body}</Text>
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={() => navigate('/auth?mode=signup')}
+                className="feature-cta"
               >
                 {cta} <ArrowRight size={14} />
-              </button>
-            </div>
+              </Button>
+            </Card>
           ))}
         </div>
       </section>
@@ -516,16 +520,17 @@ export default function Landing({ navigate }: LandingProps) {
       <section className="cta-footer-section" ref={ctaRef as React.RefObject<HTMLElement>}>
         <div className="cta-glow" aria-hidden="true" />
         <div className={`cta-content ${ctaVisible ? 'scroll-visible' : 'scroll-animate'}`}>
-          <h2>Ready to pick your first goal?</h2>
-          <p>Create your wallet, then buy Mallcoin, earn Mallpoints, or head straight to the marketplace.</p>
+          <Heading level={2}>Ready to pick your first goal?</Heading>
+          <Text size="lg">Create your wallet, then buy Mallcoin, earn Mallpoints, or head straight to the marketplace.</Text>
 
           <div className="cta-buttons">
-            <button
-              className="btn btn-primary btn-large"
+            <Button
+              variant="primary"
+              size="lg"
               onClick={() => navigate('/auth?mode=signup')}
             >
               Create Your Account
-            </button>
+            </Button>
           </div>
         </div>
       </section>

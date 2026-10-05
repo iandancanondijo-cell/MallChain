@@ -1,0 +1,91 @@
+/**
+ * Button Component Styles
+ * 
+ * Overrides and enhancements on top of design-system.css .btn classes
+ * for component-specific behavior (animations, focus states, etc.)
+ */
+
+.btn-spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(22, 24, 29, 0.3);
+  border-top-color: #16181d;
+  border-radius: 50%;
+  animation: btn-spin 0.7s linear infinite;
+}
+
+.btn-ghost .btn-spinner,
+.btn-danger .btn-spinner,
+.btn-outline .btn-spinner {
+  border-color: rgba(255, 255, 255, 0.25);
+  border-top-color: currentColor;
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2em;
+  height: 1.2em;
+  flex-shrink: 0;
+}
+
+.btn.loading {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Enhanced focus state */
+.btn:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* Smooth transitions for all button variants */
+.btn {
+  transition: all var(--duration-300) var(--ease);
+}
+
+/* Active state feedback */
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Hover state for primary */
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(243, 186, 47, 0.4);
+}
+
+/* Hover state for ghost */
+.btn-ghost:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(243, 186, 47, 0.15);
+}
+
+/* Hover state for danger */
+.btn-danger:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(248, 113, 113, 0.15);
+}
+
+/* Hover state for success */
+.btn-success:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(74, 222, 128, 0.15);
+}
+
+/* Disabled state */
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}

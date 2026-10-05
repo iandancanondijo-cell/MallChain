@@ -1,0 +1,94 @@
+/**
+ * Card Component Styles
+ * 
+ * Enhancements on top of design-system.css .card classes
+ */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* Smooth transitions for all cards */
+.card {
+  transition: all var(--duration-300) var(--ease);
+}
+
+/* Hover variant - lifts on hover with enhanced shadow */
+.card-hover {
+  cursor: default;
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  border-color: var(--gold);
+}
+
+/* Interactive variant - clickable cards with accent color on hover */
+.card-interactive {
+  cursor: pointer;
+  transition: all var(--duration-300) var(--ease);
+}
+
+.card-interactive:hover {
+  border-color: var(--gold);
+  box-shadow: 0 10px 30px rgba(243, 186, 47, 0.1);
+  transform: translateY(-2px);
+}
+
+.card-interactive:active {
+  transform: translateY(-1px);
+}
+
+/* Featured variant - stands out with gradient background */
+.card-featured {
+  position: relative;
+  overflow: hidden;
+}
+
+.card-featured::before {
+  content: '';
+  position: absolute;
+  top: -100%;
+  right: -20%;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(243, 186, 47, 0.15) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  transition: all var(--duration-500) var(--ease);
+}
+
+.card-featured:hover::before {
+  top: -50%;
+  right: -10%;
+  background: radial-gradient(circle, rgba(243, 186, 47, 0.25) 0%, transparent 70%);
+}
+
+/* Compact variant - reduced padding */
+.card-compact {
+  padding: var(--space-4);
+}
+
+/* Dense variant - minimal padding */
+.card-dense {
+  padding: var(--space-3);
+}
+
+/* Focus state for accessibility */
+.card:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* Support for nested cards */
+.card .card {
+  box-shadow: none;
+  border-color: var(--line-soft);
+}
+
+.card .card:hover {
+  border-color: var(--line-2);
+}

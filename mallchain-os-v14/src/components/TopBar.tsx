@@ -1,11 +1,9 @@
 /**
- * TopBar — universal search, wallet selector, notifications bell with badge,
- * theme/currency/language switchers, user chip. In an admin session
- * (isAdminRoute) the user-facing search, wallet chip, and preferences panel
- * are hidden entirely — only connection status, notifications, and account
- * identity remain.
+ * TopBar — unified settings & notifications panel with search, wallet display,
+ * network status, admin access, and preferences (currency, language, theme).
+ * Admin route shows only notifications and network status.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import { Search, Bell, SlidersHorizontal, ShieldAlert, Wrench, Menu } from 'lucide-react';
 import { store } from '../store/store';
 import { useStoreVersion, fmtNum, toast, BadgeCheckmark } from './ui';
@@ -25,7 +23,7 @@ const ACCENTS = ['gold', 'cyan', 'purple', 'emerald'];
 
 export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { navigate: (p: string) => void; isAdminRoute?: boolean; onToggleMobileNav?: () => void }) {
   const [q, setQ] = useState('');
-  const [open, setOpen] = useState<'notif' | 'prefs' | null>(null);
+  const [open, setOpen] = useState<'unified' | null>(null);
   const [nf, setNf] = useState<'all' | 'unread'>('all');
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [contact, setContact] = useState<ContactInfo | null>(null);
@@ -62,6 +60,11 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
 
   const unread = notifications.filter((n) => !n.read).length;
   const notifs = notifications.filter((n) => (nf === 'all' ? true : !n.read));
+  
+  // Memoize currency and language options for performance
+  const currencyButtons = useMemo(() => COMMON_CURRENCIES, []);
+  const languageButtons = useMemo(() => LANGS, []);
+  const accentButtons = useMemo(() => ACCENTS, []);
 
   const markAllRead = () => {
     notificationsApi.markAllRead();
@@ -136,102 +139,79 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
         <button
           type="button"
           className="tb-icon"
-          title={t('Preferences')}
-          aria-label={t('Preferences')}
+          title={t('Settings & Notifications')}
+          aria-label={unread > 0 ? `${t('Settings & Notifications')} (${unread} ${t('unread')})` : t('Settings & Notifications')}
           aria-haspopup="true"
-          aria-expanded={open === 'prefs'}
-          onClick={() => setOpen(open === 'prefs' ? null : 'prefs')}
+          aria-expanded={open === 'unified'}
+          onClick={() => setOpen(open === 'unified' ? null : 'unified')}
         >
           <SlidersHorizontal size={16} aria-hidden="true" />
+          {unread > 0 && <span className="tb-badge" aria-hidden="true">{unread}</span>}
         </button>
       )}
-      <button
-        type="button"
-        className="tb-icon"
-        title={t('Notifications')}
-        aria-label={unread > 0 ? `${t('Notifications')} (${unread} ${t('unread')})` : t('Notifications')}
-        aria-haspopup="true"
-        aria-expanded={open === 'notif'}
-        onClick={() => setOpen(open === 'notif' ? null : 'notif')}
-      >
-        <Bell size={16} aria-hidden="true" />
-        {unread > 0 && <span className="tb-badge" aria-hidden="true">{unread}</span>}
-      </button>
-      {open === 'prefs' && !isAdminRoute && (
-        <div className="panel" style={{ right: 90 }}>
-          <div className="panel-head"><span className="grow">{t('Preferences')}</span></div>
-          <div style={{ padding: '12px 14px' }}>
-            <div className="field">
-              <label>{t('Currency')}</label>
-              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                {COMMON_CURRENCIES.map((c) => (
-                  <button key={c} className={'btn btn-ghost btn-sm' + (st.prefs.currency === c ? ' gold' : '')} onClick={() => { st.prefs.currency = c as never; store.commit(); toastLocal('Currency → ' + c); }}>
-                    {c}
-                  </button>
-                ))}
-              </div>
-              {allCurrencies.length > 0 && (
-                <select
-                  className="input"
-                  style={{ marginTop: 6 }}
-                  value={COMMON_CURRENCIES.includes(st.prefs.currency) ? '' : st.prefs.currency}
-                  onChange={(e) => { if (!e.target.value) return; st.prefs.currency = e.target.value as never; store.commit(); toastLocal('Currency → ' + e.target.value); }}
-                >
-                  <option value="">{t('More currencies…')}</option>
-                  {allCurrencies.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-            <div className="field">
-              <label>{t('Language')}</label>
-              <div className="row" style={{ gap: 6 }}>
-                {LANGS.map((l) => (
-                  <button key={l} className={'btn btn-ghost btn-sm' + (st.prefs.lang === l ? ' gold' : '')} onClick={() => { st.prefs.lang = l as never; document.documentElement.lang = l.toLowerCase(); store.commit(); toastLocal('Language → ' + l); }}>
-                    {l}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="field">
-              <label>{t('Theme accent')}</label>
-              <div className="row" style={{ gap: 6 }}>
-                {ACCENTS.map((a) => (
-                  <button key={a} className={'btn btn-ghost btn-sm' + (st.prefs.accent === a ? ' gold' : '')} onClick={() => applyAccent(a)}>
-                    {a}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="field">
-              <label>{t('Network')}</label>
-              <span className="chip gold">{config.network}</span>
-            </div>
-          </div>
-        </div>
+      {isAdminRoute && (
+        <button
+          type="button"
+          className="tb-icon"
+          title={t('Notifications')}
+          aria-label={unread > 0 ? `${t('Notifications')} (${unread} ${t('unread')})` : t('Notifications')}
+          aria-haspopup="true"
+          aria-expanded={open === 'unified'}
+          onClick={() => setOpen(open === 'unified' ? null : 'unified')}
+        >
+          <Bell size={16} aria-hidden="true" />
+          {unread > 0 && <span className="tb-badge" aria-hidden="true">{unread}</span>}
+        </button>
       )}
-      {open === 'notif' && (
-        <div className="panel" role="dialog" aria-label={t('Notifications')}>
-          {/* Notification setup wizard — shown when no channel is verified yet */}
-          {showWizard && st.user.authed && (
-            <NotificationSetupWizard
-              contact={contact}
-              userEmail={st.user.email}
-              onComplete={() => {
-                setShowWizard(false);
-                // Refresh contact info so the panel reflects the new state.
-                settingsApi.getContact().then((r) => { if (r.ok && r.data) setContact(r.data); });
-              }}
-              onDismiss={() => setShowWizard(false)}
-            />
-          )}
-          <div className="panel-head">
-            <span className="grow">{t('Notifications')}</span>
-            <button type="button" className="chip" onClick={() => setNf(nf === 'all' ? 'unread' : 'all')}>{nf === 'all' ? t('All') : t('Unread')}</button>
+      {open === 'unified' && (
+        <div className="panel" style={{ right: 20, maxWidth: 420 }}>
+          <div className="panel-head" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span className="grow">{isAdminRoute ? t('Notifications') : t('Settings & Notifications')}</span>
+            {!isAdminRoute && <button type="button" className="chip" onClick={() => setNf(nf === 'all' ? 'unread' : 'all')}>{nf === 'all' ? t('All') : t('Unread')}</button>}
             <button type="button" className="chip gold" onClick={markAllRead}>{t('Mark all read')}</button>
           </div>
-          {/* Setup prompt banner — shown when channels aren't configured and wizard isn't open */}
+
+          {!isAdminRoute && (
+            <>
+              <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--line-1)' }}>
+                <div className="field">
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>{t('Currency')}</label>
+                  <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                    {currencyButtons.map((c) => (
+                      <button key={c} className={'btn btn-ghost btn-sm' + (st.prefs.currency === c ? ' gold' : '')} onClick={() => { st.prefs.currency = c as never; store.commit(); toastLocal('Currency → ' + c); }}>
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="field" style={{ marginTop: 12 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>{t('Language')}</label>
+                  <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                    {languageButtons.map((l) => (
+                      <button key={l} className={'btn btn-ghost btn-sm' + (st.prefs.lang === l ? ' gold' : '')} onClick={() => { st.prefs.lang = l as never; document.documentElement.lang = l.toLowerCase(); store.commit(); toastLocal('Language → ' + l); }}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="field" style={{ marginTop: 12 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>{t('Theme')}</label>
+                  <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                    {accentButtons.map((a) => (
+                      <button key={a} className={'btn btn-ghost btn-sm' + (st.prefs.accent === a ? ' gold' : '')} onClick={() => applyAccent(a)}>
+                        {a}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--line-1)', fontSize: 11, color: 'var(--txt-3)' }}>
+                🌐 {t('Network')}: <span className="chip" style={{ marginLeft: 4 }}>{config.network}</span>
+              </div>
+            </>
+          )}
+
+          {/* Setup prompt banner */}
           {!showWizard && st.user.authed && contact && !contact.phoneVerified && !contact.emailVerified && (
             <div style={{
               padding: '10px 14px', borderBottom: '1px solid var(--line-1)',
@@ -240,7 +220,7 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
             }}>
               <Bell size={15} style={{ color: 'var(--accent, #f3ba2f)', flex: 'none' }} />
               <div style={{ flex: 1, fontSize: 11.5, color: 'var(--txt-2)', lineHeight: 1.4 }}>
-                Receive real-time notifications and messages directly
+                {t('Enable notifications for real-time updates')}
               </div>
               <button
                 type="button"
@@ -248,13 +228,29 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
                 style={{ fontSize: 11, flex: 'none' }}
                 onClick={() => setShowWizard(true)}
               >
-                Set up
+                {t('Set up')}
               </button>
             </div>
           )}
+
+          {showWizard && st.user.authed && (
+            <div style={{ padding: '12px 14px' }}>
+              <NotificationSetupWizard
+                contact={contact}
+                userEmail={st.user.email}
+                onComplete={() => {
+                  setShowWizard(false);
+                  settingsApi.getContact().then((r) => { if (r.ok && r.data) setContact(r.data); });
+                }}
+                onDismiss={() => setShowWizard(false)}
+              />
+            </div>
+          )}
+
+          {/* Notifications list */}
           <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-            {notifs.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--txt-3)', fontSize: 12.5 }}>{t('No notifications yet')}</div>}
-            {notifs.map((n) => (
+            {notifications.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--txt-3)', fontSize: 12.5 }}>{t('No notifications yet')}</div>}
+            {notifications.filter((n) => (nf === 'all' ? true : !n.read)).map((n) => (
               <div key={n._id} className={'panel-item' + (n.read ? '' : ' unread')}>
                 <div className="grow">
                   <div className="pt">{n.title}</div>

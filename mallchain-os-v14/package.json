@@ -3,7 +3,7 @@
   "private": true,
   "version": "14.0.0",
   "type": "module",
-  "description": "Mallchain Mission Control Web3 OS — production-grade frontend (v14)",
+  "description": "Mallchain Network Web3 OS — production-grade frontend (v14)",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

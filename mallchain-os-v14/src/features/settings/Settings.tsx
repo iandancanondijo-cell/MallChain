@@ -9,6 +9,11 @@ import { settingsApi, type UserSettingsData, type ContactInfo } from '../../serv
 import { kycApi, type KycStatusResponse } from '../../services/kycApi';
 import { api } from '../../services/api';
 import { badgeApi, type BadgeConfig, type BadgeQuote } from '../../services/badgeApi';
+import { SessionManager } from './components/SessionManager';
+import { LoginActivityComponent } from './components/LoginActivity';
+import { EmailManagement } from './components/EmailManagement';
+import { NotificationEnhancements } from './components/NotificationEnhancements';
+import { APIKeyManager } from './components/APIKeyManager';
 
 /** Profile & Settings — one page combining real username/phone (backend/src/routes/mines.js),
  *  real 2FA / preferences / notifications / privacy (backend/src/routes/settings.js),
@@ -352,6 +357,16 @@ export default function Settings() {
               <button className="btn btn-ghost btn-sm" onClick={() => setShowChangePw(true)}>Change password</button>
             </div>
           </div>
+
+          <SessionManager />
+
+          <LoginActivityComponent />
+
+          <EmailManagement />
+
+          <NotificationEnhancements />
+
+          <APIKeyManager />
 
           <div className="card mb">
             <div className="sec-title"><h2>Preferences</h2></div>

@@ -7,6 +7,8 @@ import { priceApi } from '../../services/priceApi';
 import { useFxRate, toDisplayCurrency } from '../../services/currency';
 import { api } from '../../services/api';
 import { TrendingUp, Wallet, Zap, Shield, ArrowUpRight, ArrowDownLeft, Repeat, Sparkles } from 'lucide-react';
+import { Button, Card, Badge, Heading, Text } from '../../components/shared';
+import './Dashboard.css';
 
 function dayKey(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { weekday: 'short' });
@@ -15,7 +17,7 @@ function dayKey(iso: string): string {
 /**
  * KYC pending banner — shown on the dashboard when the user's kycLevel < 2.
  * Fetches the latest KYC status from the backend and displays it with a
- * "Check Status" button that refreshes the status.
+ * "Refresh Status" button that refreshes the status.
  */
 function KycPendingBanner() {
   const [status, setStatus] = useState<{ status: string; riskLevel?: string; submittedAt?: string; reviewedAt?: string; reviewNotes?: string } | null>(null);
@@ -36,83 +38,53 @@ function KycPendingBanner() {
 
   const statusLabel = (s: string) => {
     switch (s) {
-      case 'pending': return { text: 'Under Review', color: 'var(--gold)' };
-      case 'approved': return { text: 'Approved', color: 'var(--green)' };
-      case 'rejected': return { text: 'Rejected', color: 'var(--red)' };
-      default: return { text: s, color: 'var(--txt-2)' };
+      case 'pending': return { text: 'Under Review', color: 'gold' as const };
+      case 'approved': return { text: 'Approved', color: 'success' as const };
+      case 'rejected': return { text: 'Rejected', color: 'error' as const };
+      default: return { text: s, color: 'info' as const };
     }
   };
 
-  const label = status ? statusLabel(status.status) : { text: 'Loading...', color: 'var(--txt-3)' };
+  const label = status ? statusLabel(status.status) : { text: 'Loading...', color: 'info' as const };
 
   return (
-    <div className="card" style={{
-      marginTop: 14,
-      background: 'linear-gradient(135deg, rgba(243, 186, 47, 0.08), rgba(243, 186, 47, 0.02))',
-      border: '1px solid rgba(243, 186, 47, 0.3)',
-      padding: '16px 20px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: 16
-    }}>
-      <div style={{
-        width: 40,
-        height: 40,
-        borderRadius: '50%',
-        background: 'rgba(243, 186, 47, 0.15)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0
-      }}>
-        <Shield size={20} style={{ color: 'var(--gold)' }} />
+    <Card variant="featured" className="kyc-banner">
+      <div className="kyc-banner-icon">
+        <Shield size={20} />
       </div>
-      <div style={{ flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-          <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--gold)' }}>
+      <div className="kyc-banner-content">
+        <div className="kyc-banner-header">
+          <Heading level={3} className="kyc-banner-title">
             Identity Verification
-          </span>
-          <span style={{
-            fontSize: 11,
-            fontWeight: 600,
-            padding: '2px 8px',
-            borderRadius: 4,
-            background: `${label.color}20`,
-            color: label.color
-          }}>
+          </Heading>
+          <Badge color={label.color}>
             {label.text}
-          </span>
+          </Badge>
         </div>
-        <div style={{ fontSize: 12.5, color: 'var(--txt-2)', lineHeight: 1.5 }}>
+        <Text size="sm" color="secondary" className="kyc-banner-message">
           {status?.status === 'rejected'
             ? `Your KYC submission was rejected.${status.reviewNotes ? ` Reason: ${status.reviewNotes}` : ''} Please resubmit.`
             : 'Your KYC submission is under review. Some features (withdrawals, high-value transactions) are limited until verification is complete.'}
-        </div>
+        </Text>
         {status?.submittedAt && (
-          <div style={{ fontSize: 11, color: 'var(--txt-3)', marginTop: 4 }}>
+          <Text size="xs" color="tertiary" className="kyc-banner-timestamp">
             Submitted: {new Date(status.submittedAt).toLocaleString()}
-          </div>
+          </Text>
         )}
       </div>
-      <button
-        className="btn btn-sm"
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => {
           fetchStatus();
           toast('Status refreshed');
         }}
-        disabled={loading}
-        style={{
-          background: 'rgba(243, 186, 47, 0.15)',
-          border: '1px solid var(--gold)',
-          color: 'var(--gold)',
-          fontSize: 12,
-          fontWeight: 600,
-          whiteSpace: 'nowrap'
-        }}
+        loading={loading}
+        className="kyc-banner-button"
       >
-        {loading ? 'Loading...' : 'Refresh Status'}
-      </button>
-    </div>
+        Refresh Status
+      </Button>
+    </Card>
   );
 }
 
@@ -199,7 +171,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
       <div className="dash-hero">
         <div className="dash-hero-left">
           <div className="dash-hero-greeting">
-            <h1>Mission Control</h1>
+            <h1>Mallchain Network</h1>
             {st.user.frozen && <span className="frozen-badge">❄ Frozen</span>}
           </div>
           <p className="dash-hero-sub">Welcome back, {st.user.name ? st.user.name.split(' ')[0] : 'Guest'}</p>

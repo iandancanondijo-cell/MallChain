@@ -21,6 +21,16 @@ import { socketManager } from './services/socket';
 import { api } from './services/api';
 import { authService } from './services/auth';
 import { useMaintenanceStatus } from './services/maintenanceApi';
+import { 
+  AgeVerificationModal, 
+  TOSAcceptanceModal, 
+  PrivacyPolicyModal,
+  useComplianceStatus,
+  GeographicRestrictionAlert,
+  KYCStatusAlert
+} from './components/ComplianceGates';
+import { SkeletonFallback } from './components/Skeleton';
+import { updateSEO, getSEOForRoute, generateCanonicalUrl } from './utils/seo';
 import './styles/auth.css';
 import './styles/wallet-data.css';
 import './styles/wallet-ops.css';
@@ -59,6 +69,13 @@ export default function App() {
   const [expandedBanner, setExpandedBanner] = useState<'maintenance' | 'frozen' | null>(null);
   const [adminTab, setAdminTab] = useState<'dashboard' | 'users' | 'kyc' | 'aml' | 'validators' | 'mining' | 'badges' | 'liquidity' | 'reconciliation' | 'withdrawals' | 'treasury' | 'audit' | 'local'>('dashboard');
   const maintenance = useMaintenanceStatus();
+  
+  // Compliance state
+  const complianceStatus = useComplianceStatus();
+  const [showAgeVerification, setShowAgeVerification] = useState(false);
+  const [showTOSAcceptance, setShowTOSAcceptance] = useState(false);
+  const [showPrivacyAcceptance, setShowPrivacyAcceptance] = useState(false);
+  const [complianceSequence, setComplianceSequence] = useState<'age' | 'tos' | 'privacy' | 'complete'>('age');
 
   useEffect(() => {
     // Initialize auth state first, before any routing decisions
@@ -140,7 +157,7 @@ export default function App() {
 
     initializeAuth();
 
-    // Apply saved accent
+  // Apply saved accent
     const map: Record<string, string> = { gold: '#f3ba2f', cyan: '#22d3ee', purple: '#a78bfa', emerald: '#34d399' };
     const a = map[st.prefs.accent] || '#f3ba2f';
     document.documentElement.style.setProperty('--accent', a);
@@ -220,6 +237,44 @@ export default function App() {
     }
   }, [authInitialized, st.user.authed, path, navigate]);
 
+  // SEO: Update meta tags and structured data on route change
+  useEffect(() => {
+    const seoConfig = getSEOForRoute(path);
+    const canonicalUrl = generateCanonicalUrl(path);
+    
+    updateSEO({
+      ...seoConfig,
+      canonicalUrl,
+      ogUrl: canonicalUrl,
+    });
+  }, [path]);
+
+  // Compliance: Check age verification, TOS/privacy acceptance, geographic restrictions
+  useEffect(() => {
+    if (!authInitialized || !st.user.authed) return;
+
+    // Check if user is from restricted country
+    if (complianceStatus.geographicRestriction) {
+      toastKind(`Service unavailable in your region: ${complianceStatus.restrictedReason || 'Geographic restriction'}`, 'warning');
+      // Optionally block access or show modal
+      return;
+    }
+
+    // Compliance sequence: age → TOS → privacy
+    if (!complianceStatus.ageVerified) {
+      setComplianceSequence('age');
+      setShowAgeVerification(true);
+    } else if (!complianceStatus.tosAccepted) {
+      setComplianceSequence('tos');
+      setShowTOSAcceptance(true);
+    } else if (!complianceStatus.privacyAccepted) {
+      setComplianceSequence('privacy');
+      setShowPrivacyAcceptance(true);
+    } else {
+      setComplianceSequence('complete');
+    }
+  }, [authInitialized, st.user.authed, complianceStatus]);
+
   const isAuthenticated = st.user.authed;
   const route = matchRoute(path, isAuthenticated, st.user.role);
   const hiddenNav = path.startsWith('/auth') || path.startsWith('/landing');
@@ -230,7 +285,7 @@ export default function App() {
 
   // index.html's single static <title> never changed on navigation before
   // this — every route (and every browser tab/history entry) read
-  // "Mallchain Mission Control" regardless of what was actually open.
+  // "Mallchain Network" regardless of what was actually open.
   useEffect(() => {
     document.title = `${route.title} · Mallchain`;
   }, [route.title]);
@@ -337,7 +392,7 @@ export default function App() {
         )}
 
         <ErrorBoundary resetKey={path}>
-          <Suspense fallback={<div className="tiny" role="status" style={{ padding: 20 }}>Loading…</div>}>
+          <Suspense fallback={<SkeletonFallback type="page" />}>
             {isAdminRoute
               ? <Admin activeTab={adminTab} onTabChange={setAdminTab} />
               : route.render(navigate)}
@@ -348,6 +403,54 @@ export default function App() {
       <ToastHost />
       <PinChallengeHost />
       <CookieConsentBanner />
+      
+      {/* Compliance Gates */}
+      {authInitialized && st.user.authed && complianceSequence !== 'complete' && (
+        <>
+          {showAgeVerification && complianceSequence === 'age' && (
+            <AgeVerificationModal
+              onVerify={() => {
+                setShowAgeVerification(false);
+                // Move to next step
+                setTimeout(() => {
+                  setComplianceSequence('tos');
+                }, 300);
+              }}
+            />
+          )}
+          
+          {showTOSAcceptance && complianceSequence === 'tos' && (
+            <TOSAcceptanceModal
+              onAccept={() => {
+                setShowTOSAcceptance(false);
+                // Move to next step
+                setTimeout(() => {
+                  setComplianceSequence('privacy');
+                }, 300);
+              }}
+            />
+          )}
+          
+          {showPrivacyAcceptance && complianceSequence === 'privacy' && (
+            <PrivacyPolicyModal
+              onAccept={() => {
+                setShowPrivacyAcceptance(false);
+                setComplianceSequence('complete');
+              }}
+            />
+          )}
+        </>
+      )}
+      
+      {/* KYC Status Alert */}
+      {authInitialized && st.user.authed && complianceSequence === 'complete' && !hiddenNav && (
+        <KYCStatusAlert />
+      )}
+      
+      {/* Geographic Restriction */}
+      {authInitialized && st.user.authed && complianceStatus.geographicRestriction && (
+        <GeographicRestrictionAlert reason={complianceStatus.restrictedReason} />
+      )}
       </div>
     </>
   );
