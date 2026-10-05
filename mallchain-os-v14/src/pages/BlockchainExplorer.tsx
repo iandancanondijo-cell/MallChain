@@ -37,30 +37,35 @@ export default function BlockchainExplorer() {
   const [activeTab, setActiveTab] = useState<'overview' | 'blocks' | 'txs'>('overview');
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  // Load data
+  // Load data — each endpoint settles independently. A single failing/503
+  // endpoint used to reject the Promise.all and skip all four setState
+  // calls, freezing every panel at stale data until a fully-clean cycle.
   const loadData = useCallback(async () => {
-    try {
-      setError('');
-      const [block, blockStats, txs, blocks] = await Promise.all([
-        getLatestBlock(),
-        getBlockchainStats(),
-        getRecentTransactions(20),
-        getRecentBlocks(20),
-      ]);
-      setLatestBlock(block);
-      setStats(blockStats);
-      setRecentTxs(txs);
-      setRecentBlocks(blocks);
-      setLoading(false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to load blockchain data';
-      setError(msg);
-      setLoading(false);
-      if (autoRefresh) {
-        setTimeout(loadData, 5000);
+    const results = await Promise.allSettled([
+      getLatestBlock(),
+      getBlockchainStats(),
+      getRecentTransactions(20),
+      getRecentBlocks(20),
+    ]);
+
+    const [block, blockStats, txs, blocks] = results;
+    if (block.status === 'fulfilled') setLatestBlock(block.value);
+    if (blockStats.status === 'fulfilled') setStats(blockStats.value);
+    if (txs.status === 'fulfilled') setRecentTxs(txs.value);
+    if (blocks.status === 'fulfilled') setRecentBlocks(blocks.value);
+
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (rejected.length === results.length) {
+      const reason = rejected[0].reason;
+      setError(reason instanceof Error ? reason.message : 'Failed to load blockchain data');
+    } else {
+      if (rejected.length > 0) {
+        console.warn('[BlockchainExplorer] Partial load failure:', rejected.map(f => f.reason?.message ?? f.reason));
       }
+      setError('');
     }
-  }, [autoRefresh]);
+    setLoading(false);
+  }, []);
 
   // Initial load + auto-refresh
   useEffect(() => {
@@ -83,21 +88,32 @@ export default function BlockchainExplorer() {
     // Listen for new block events
     const unsubscribe = socketManager.onBlockUpdate((data: SocketBlockData) => {
       console.log('[BlockchainExplorer] Received new block from socket:', data);
-      
+
       // Update stats height only (socket data is limited)
       setStats(prev => prev ? { ...prev, height: data.height } : null);
-      
+
+      // Apply to both cards — Recent Blocks used to refresh only via the
+      // 10s poll, so it stalled whenever a poll cycle failed.
+      const applyBlock = (block: BlockData) => {
+        setLatestBlock(block);
+        setRecentBlocks(prev =>
+          prev.length === 0 || block.height > prev[0].height
+            ? [block, ...prev.filter(b => b.height !== block.height)].slice(0, 20)
+            : prev
+        );
+      };
+
       // Fetch full block data from API to get all fields
       getLatestBlock()
         .then(block => {
-          setLatestBlock(block);
           console.log('[BlockchainExplorer] Fetched full block data from API:', block);
+          applyBlock(block);
         })
         .catch(err => {
           console.error('[BlockchainExplorer] Failed to fetch full block data:', err);
           // Fallback: update with socket data if API fails
           const timestamp = new Date(data.timestamp).getTime() / 1000;
-          setLatestBlock({
+          applyBlock({
             height: data.height,
             hash: data.hash,
             timestamp: timestamp,

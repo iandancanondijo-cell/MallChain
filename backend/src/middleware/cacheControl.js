@@ -58,20 +58,31 @@ function etagMatches(currentETag, clientETag) {
  * Get cache duration based on content type and endpoint
  */
 function getCacheDuration(req, contentType) {
-  const path = req.path || '';
-  
+  // Routers are mounted with prefixes (app.use('/api/blockchain', ...)), which
+  // strips the prefix from req.url — at res.json() time req.path here is just
+  // '/stats', so none of the /api/... branches ever matched and every response
+  // fell through to the 300s default. Match the full original URL instead.
+  const path = req.originalUrl || req.path || '';
+
+  // Real-time chain/explorer data: the dashboards poll these every ~10s and
+  // blocks arrive every ~5s — any browser caching here freezes the block
+  // overview for the whole TTL window. Never cache.
+  if (path.includes('/api/blockchain') || path.includes('/api/explorer')) {
+    return 0;
+  }
+
   // Public data: cache for 1 hour
-  if (path.includes('/api/market') || path.includes('/api/explorer')) {
+  if (path.includes('/api/market')) {
     return 3600;
   }
-  
+
   // User data: cache for 5 minutes
   if (path.includes('/api/wallet') || path.includes('/api/user')) {
     return 300;
   }
-  
+
   // Real-time data: minimal caching
-  if (path.includes('/api/blockchain') || path.includes('/api/staking')) {
+  if (path.includes('/api/staking')) {
     return 60;
   }
   

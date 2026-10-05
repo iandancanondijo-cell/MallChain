@@ -284,21 +284,29 @@ class SocketManager {
     });
   }
 
+  /**
+   * Room subscriptions follow "record intent, emit when connected": the room
+   * is always recorded in `subscriptions`, but the emit only fires when the
+   * socket is up. Components routinely call these right after connect(),
+   * while the handshake is still in flight — silently dropping the intent
+   * then meant the room was never joined AND resubscribeAll() replayed an
+   * empty set after every reconnect (observed live: "Re-subscribing to
+   * 0 rooms" with the blocks panel frozen for the whole session).
+   */
   /** Subscribe to live messages for a specific conversation. */
   subscribeConversation(conversationId: string): void {
-    if (!this.socket?.connected || !conversationId) return;
+    if (!conversationId) return;
     const room = `conversation:${conversationId}`;
     if (this.subscriptions.has(room)) return;
-    this.socket.emit('subscribe:conversation', conversationId);
     this.subscriptions.add(room);
+    if (this.socket?.connected) this.socket.emit('subscribe:conversation', conversationId);
   }
 
   unsubscribeConversation(conversationId: string): void {
-    if (!this.socket?.connected || !conversationId) return;
+    if (!conversationId) return;
     const room = `conversation:${conversationId}`;
-    if (!this.subscriptions.has(room)) return;
-    this.socket.emit('unsubscribe:conversation', conversationId);
-    this.subscriptions.delete(room);
+    if (!this.subscriptions.delete(room)) return;
+    if (this.socket?.connected) this.socket.emit('unsubscribe:conversation', conversationId);
   }
 
   /** Register a live-message listener. */
@@ -340,11 +348,6 @@ class SocketManager {
    * Emits 'subscribe:wallet' event and joins 'wallet:address' room
    */
   subscribeWallet(address: string): void {
-    if (!this.socket?.connected) {
-      console.warn('[Socket] Cannot subscribe - socket not connected');
-      return;
-    }
-
     if (!address) {
       console.error('[Socket] Cannot subscribe to wallet - no address provided');
       return;
@@ -357,33 +360,27 @@ class SocketManager {
     }
 
     console.log('[Socket] Subscribing to wallet:', address);
-    this.socket.emit('subscribe:wallet', address);
     this.subscriptions.add(room);
+    if (this.socket?.connected) this.socket.emit('subscribe:wallet', address);
   }
 
   /**
    * Task 5.4: Unsubscribe from wallet updates for a specific address
    */
   unsubscribeWallet(address: string): void {
-    if (!this.socket?.connected) {
-      console.warn('[Socket] Cannot unsubscribe - socket not connected');
-      return;
-    }
-
     if (!address) {
       console.error('[Socket] Cannot unsubscribe from wallet - no address provided');
       return;
     }
 
     const room = `wallet:${address}`;
-    if (!this.subscriptions.has(room)) {
+    if (!this.subscriptions.delete(room)) {
       console.log('[Socket] Not subscribed to', room);
       return;
     }
 
     console.log('[Socket] Unsubscribing from wallet:', address);
-    this.socket.emit('unsubscribe:wallet', address);
-    this.subscriptions.delete(room);
+    if (this.socket?.connected) this.socket.emit('unsubscribe:wallet', address);
   }
 
   /**
@@ -391,11 +388,6 @@ class SocketManager {
    * Emits 'subscribe:market' event and joins 'market:feed' room
    */
   subscribeMarket(): void {
-    if (!this.socket?.connected) {
-      console.warn('[Socket] Cannot subscribe - socket not connected');
-      return;
-    }
-
     const room = 'market:feed';
     if (this.subscriptions.has(room)) {
       console.log('[Socket] Already subscribed to market feed');
@@ -403,8 +395,8 @@ class SocketManager {
     }
 
     console.log('[Socket] Subscribing to market feed');
-    this.socket.emit('subscribe:market');
     this.subscriptions.add(room);
+    if (this.socket?.connected) this.socket.emit('subscribe:market');
   }
 
   /**
@@ -412,11 +404,6 @@ class SocketManager {
    * Emits 'subscribe:price' event and joins 'price:updates' room
    */
   subscribePrice(): void {
-    if (!this.socket?.connected) {
-      console.warn('[Socket] Cannot subscribe - socket not connected');
-      return;
-    }
-
     const room = 'price:updates';
     if (this.subscriptions.has(room)) {
       console.log('[Socket] Already subscribed to price updates');
@@ -424,8 +411,8 @@ class SocketManager {
     }
 
     console.log('[Socket] Subscribing to price updates');
-    this.socket.emit('subscribe:price');
     this.subscriptions.add(room);
+    if (this.socket?.connected) this.socket.emit('subscribe:price');
   }
 
   /**
@@ -433,11 +420,6 @@ class SocketManager {
    * Emits 'subscribe:blocks' event and joins 'blocks:live' room
    */
   subscribeBlocks(): void {
-    if (!this.socket?.connected) {
-      console.warn('[Socket] Cannot subscribe - socket not connected');
-      return;
-    }
-
     const room = 'blocks:live';
     if (this.subscriptions.has(room)) {
       console.log('[Socket] Already subscribed to live blocks');
@@ -445,8 +427,8 @@ class SocketManager {
     }
 
     console.log('[Socket] Subscribing to live blocks');
-    this.socket.emit('subscribe:blocks');
     this.subscriptions.add(room);
+    if (this.socket?.connected) this.socket.emit('subscribe:blocks');
   }
 
   /**
