@@ -205,7 +205,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
       </div>
 
       {/* ── KYC pending banner ── */}
-      {st.user.authed && st.user.kycLevel < 2 && (
+      {st.user.authed && st.user.kycLevel < 2 && st.user.role !== 'admin' && st.user.role !== 'superadmin' && (
         <KycPendingBanner />
       )}
 

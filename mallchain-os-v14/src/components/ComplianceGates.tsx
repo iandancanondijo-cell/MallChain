@@ -251,9 +251,11 @@ export function TOSAcceptanceModal({ onAccept }: { onAccept: () => void }) {
 export function KYCStatusAlert() {
   const st = store.state;
   const kycLevel = st.user.kycLevel || 0;
+  const isAdmin = st.user.role === 'admin' || st.user.role === 'superadmin';
 
-  if (kycLevel >= 2) {
-    return null; // KYC complete
+  // Admin users are exempt from KYC restrictions
+  if (kycLevel >= 2 || isAdmin) {
+    return null; // KYC complete or admin (exempt)
   }
 
   return (
