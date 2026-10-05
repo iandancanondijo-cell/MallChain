@@ -8,5 +8,6 @@ const ConversationSchema = new Schema({
 
 ConversationSchema.index({ participants: 1 });
 ConversationSchema.index({ lastMessageAt: -1 });
+ConversationSchema.index({ participants: 1, lastMessageAt: -1 });
 
 module.exports = mongoose.models.Conversation || mongoose.model('Conversation', ConversationSchema);

@@ -100,6 +100,7 @@ async function initiateMpesaRequest(purchase, phone) {
   }
 
   const stkBody = buildStkBody(purchase, phone);
+  console.log('[BADGE STK] Sending to Safaricom:', { phone, businessCode: stkBody.BusinessShortCode });
   const stkRes = await axios.post(
     `${SAFARICOM_API.replace(/\/$/, '')}/mpesa/stkpush/v1/processrequest`,
     stkBody,
@@ -185,15 +186,24 @@ router.post('/reserve', validate(schemas.badgeReserve), async (req, res) => {
 
 router.post('/mpesa', validate(schemas.badgeMpesaInitiate), async (req, res) => {
   try {
+    console.log('[BADGE MPESA] Starting request with body:', req.validatedBody);
     const { quoteId, phone } = req.validatedBody;
     const purchase = await BadgePurchase.findOne({ quoteId });
-    if (!purchase) return res.status(404).json({ error: 'Quote not found' });
+    if (!purchase) {
+      console.log('[BADGE MPESA] Purchase not found for quoteId:', quoteId);
+      return res.status(404).json({ error: 'Quote not found' });
+    }
 
+    console.log('[BADGE MPESA] Found purchase, calling initiateMpesaRequest');
     const response = await initiateMpesaRequest(purchase, phone);
+    console.log('[BADGE MPESA] Success response:', response);
     return res.json({ ...response, quoteId: purchase.quoteId, amountKes: purchase.fiatAmount });
   } catch (e) {
-    logger.error('badge', { route: req.originalUrl, error: e.message || String(e) });
-    res.status(e.status || 500).json({ error: (e.status === 400) ? 'invalid request' : 'internal error' });
+    const status = e.response?.status || e.status || 500;
+    const message = e.response?.data?.errorMessage || e.response?.data?.message || e.message || 'unknown error';
+    console.error('[BADGE MPESA] Error:', { status, message, error: e.message });
+    logger.error('badge', { route: req.originalUrl, error: message, status, response: e.response?.data });
+    res.status(status).json({ error: message || (status === 400 ? 'invalid request' : 'internal error') });
   }
 });
 

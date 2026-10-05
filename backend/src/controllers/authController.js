@@ -243,26 +243,43 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   const { password, otp } = req.body;
   const email = normalizeEmail(req.body.email);
+  console.log('[LOGIN] Step 1: Email normalized:', email);
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
 
+  console.log('[LOGIN] Step 2: Checking account lock...');
   const lock = await checkAccountLock(email);
   if (lock.locked) {
+    console.log('[LOGIN] Step 2.5: Account locked:', lock);
     return res.status(423).json({ error: 'account temporarily locked after repeated failed logins', retryAfterSeconds: lock.retryAfterSeconds });
   }
 
-  const u = await User.findOne({ email_blind: blindIndex(email) });
+  console.log('[LOGIN] Step 3: Looking up user by email_blind...');
+  const blindEmailIndex = blindIndex(email);
+  console.log('[LOGIN] Step 3.1: blind index computed:', blindEmailIndex);
+  const u = await User.findOne({ email_blind: blindEmailIndex }).select('+password');
+  console.log('[LOGIN] Step 3.2: User lookup result:', u ? `Found user ${u._id}` : 'No user found');
   if (!u) { await recordFailedLogin(email); return res.status(400).json({ error: 'invalid credentials' }); }
   if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
+  
+  console.log('[LOGIN] Step 4: Comparing password...');
   const ok = await bcrypt.compare(password, u.password);
+  console.log('[LOGIN] Step 4.1: Password match:', ok);
   if (!ok) { await recordFailedLogin(email); return res.status(400).json({ error: 'invalid credentials' }); }
 
+  console.log('[LOGIN] Step 5: Checking 2FA...');
   const twoFactorResult = await checkTwoFactor(u._id, otp);
+  console.log('[LOGIN] Step 5.1: 2FA result:', twoFactorResult);
   if (twoFactorResult?.requires2fa) return res.json({ requires2fa: true });
   if (twoFactorResult?.error) return res.status(twoFactorResult.status).json({ error: twoFactorResult.error });
 
+  console.log('[LOGIN] Step 6: Clearing failed logins...');
   await clearFailedLogins(email);
+  
+  console.log('[LOGIN] Step 7: Updating lastLoginAt...');
   u.lastLoginAt = new Date();
   await u.save();
+  
+  console.log('[LOGIN] Step 8: Signing token...');
   const { token, sessionTtlMin, expiresAt } = signToken(u);
   setAuthCookie(res, token, sessionTtlMin);
   res.json({ expiresAt, user: toPublicUser(u) });

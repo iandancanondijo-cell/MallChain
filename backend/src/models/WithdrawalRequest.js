@@ -55,6 +55,7 @@ WithdrawalRequestSchema.index({ burnTxHash: 1 })
 WithdrawalRequestSchema.index({ createdAt: -1 })
 WithdrawalRequestSchema.index({ walletAddress: 1, status: 1 })
 WithdrawalRequestSchema.index({ status: 1, createdAt: -1 })
+WithdrawalRequestSchema.index({ walletAddress: 1, status: 1, createdAt: -1 })
 // FIFO scan of the liquidity-hold queue (withdrawalLiquidityQueueService.js).
 WithdrawalRequestSchema.index({ status: 1, queuedAt: 1 })
 // Rolling-window rate-limit/structuring queries (withdrawalRateLimitService.js,

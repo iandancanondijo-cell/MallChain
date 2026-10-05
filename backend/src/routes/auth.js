@@ -21,6 +21,7 @@ const auth = require('../middleware/auth');
 const passport = require('passport');
 const { validateInput, preventNoSQLInjection, sanitizeInputs, limitPayloadSize, schemas } = require('../middleware/inputValidation');
 const { limiters } = require('../middleware/rateLimiter');
+const { asyncHandler } = require('../utils/errorHandler');
 
 /**
  * Task 4.1: POST /api/auth/register
@@ -37,7 +38,7 @@ router.post('/register',
   limitPayloadSize(0.1),
   sanitizeInputs,
   validateInput(schemas.auth.register),
-  authCtrl.register
+  asyncHandler(authCtrl.register)
 );
 
 /**
@@ -49,19 +50,15 @@ router.get('/email-exists',
   limiters.auth,
   preventNoSQLInjection,
   sanitizeInputs,
-  async (req, res) => {
-    try {
-      const { email } = req.query;
-      if (!email) return res.status(400).json({ error: 'email required' });
-      const User = require('../models/user');
-      const { blindIndex } = require('../utils/fieldEncryption');
-      const normalizedEmail = email.toLowerCase().trim();
-      const existing = await User.findOne({ email_blind: blindIndex(normalizedEmail) });
-      res.json({ exists: !!existing });
-    } catch (e) {
-      res.status(500).json({ error: 'check failed' });
-    }
-  }
+  asyncHandler(async (req, res) => {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ error: 'email required' });
+    const User = require('../models/user');
+    const { blindIndex } = require('../utils/fieldEncryption');
+    const normalizedEmail = email.toLowerCase().trim();
+    const existing = await User.findOne({ email_blind: blindIndex(normalizedEmail) });
+    res.json({ exists: !!existing });
+  })
 );
 
 /**
@@ -80,7 +77,7 @@ router.post('/login',
   limitPayloadSize(0.1),
   sanitizeInputs,
   validateInput(schemas.auth.login),
-  authCtrl.login
+  asyncHandler(authCtrl.login)
 );
 
 /**
@@ -93,7 +90,7 @@ router.post('/register-username',
   preventNoSQLInjection,
   sanitizeInputs,
   validateInput(schemas.auth.registerUsername),
-  authCtrl.registerUsername
+  asyncHandler(authCtrl.registerUsername)
 );
 
 /**
@@ -106,7 +103,7 @@ router.post('/login-username',
   preventNoSQLInjection,
   sanitizeInputs,
   validateInput(schemas.auth.loginUsername),
-  authCtrl.loginUsername
+  asyncHandler(authCtrl.loginUsername)
 );
 
 /**
@@ -116,7 +113,7 @@ router.post('/login-username',
  * cookie — see authController.js's me() (does its own inline jwt.verify
  * rather than the shared auth middleware, so it can support both).
  */
-router.get('/me', authCtrl.me);
+router.get('/me', asyncHandler(authCtrl.me));
 
 /**
  * POST /api/auth/link-wallet — associate the logged-in account with an
@@ -128,14 +125,14 @@ router.get('/me', authCtrl.me);
  * session cookie, gets CSRF-checked when cookie-authenticated, and honors
  * the token denylist/banned-user checks like every other protected route.
  */
-router.post('/link-wallet', auth, authCtrl.linkWallet);
+router.post('/link-wallet', auth, asyncHandler(authCtrl.linkWallet));
 
 /**
  * POST /api/auth/refresh — silently renews the session (new JWT/cookie,
  * new expiry) without requiring a full re-login. authService.ts's
  * isSessionExpiringSoon() drives when the frontend calls this.
  */
-router.post('/refresh', auth, authCtrl.refresh);
+router.post('/refresh', auth, asyncHandler(authCtrl.refresh));
 
 /**
  * POST /api/auth/logout — revokes this token server-side (see
@@ -143,13 +140,13 @@ router.post('/refresh', auth, authCtrl.refresh);
  * than this file's other routes' inline jwt.verify) specifically so
  * req.tokenPayload (jti/exp) is populated for the handler.
  */
-router.post('/logout', auth, authCtrl.logout);
+router.post('/logout', auth, asyncHandler(authCtrl.logout));
 
 /**
  * POST /api/auth/logout-everywhere — revokes every token issued to this
  * account up to now. Backs SecuritySettings' "Sign Out Everywhere".
  */
-router.post('/logout-everywhere', auth, authCtrl.logoutEverywhere);
+router.post('/logout-everywhere', auth, asyncHandler(authCtrl.logoutEverywhere));
 
 /**
  * Task 4.1: Google OAuth routes
@@ -185,6 +182,6 @@ router.get('/google', requireGoogleConfigured, (req, res, next) => {
   const state = req.query.ref ? String(req.query.ref).trim().slice(0, 64) : undefined;
   passport.authenticate('google', { scope: ['profile', 'email'], state })(req, res, next);
 });
-router.get('/google/callback', requireGoogleConfigured, passport.authenticate('google', { session: false, failureRedirect: '/' }), authCtrl.googleCallback);
+router.get('/google/callback', requireGoogleConfigured, passport.authenticate('google', { session: false, failureRedirect: '/' }), asyncHandler(authCtrl.googleCallback));
 
 module.exports = router;

@@ -152,6 +152,7 @@ class Logger {
       duration: `${duration}ms`,
       ip: req.ip,
       correlationId: req.correlationId || 'none',
+      requestId: req.id || 'none',
     }
     if (req && req._rawBodyForLogging) {
       try {

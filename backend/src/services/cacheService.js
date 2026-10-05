@@ -5,10 +5,17 @@
 
 const logger = require('../utils/logger');
 
+const CACHE_VERSION = process.env.CACHE_VERSION || '1';
+const KEY_PREFIX = `mc:v${CACHE_VERSION}:`;
+
 class CacheService {
   constructor(redisClient) {
     this.redis = redisClient;
     this.defaultTTL = 300; // 5 minutes default TTL
+  }
+
+  prefixKey(key) {
+    return `${KEY_PREFIX}${key}`;
   }
 
   /**
@@ -27,7 +34,7 @@ class CacheService {
     }
 
     try {
-      const value = await this.redis.get(key);
+      const value = await this.redis.get(this.prefixKey(key));
       if (value === null) {
         return null;
       }
@@ -54,7 +61,7 @@ class CacheService {
 
     try {
       const serialized = typeof value === 'string' ? value : JSON.stringify(value);
-      await this.redis.setex(key, ttl, serialized);
+      await this.redis.setex(this.prefixKey(key), ttl, serialized);
       return true;
     } catch (err) {
       logger.warn('cache-service', 'Failed to set cached value', err, { key });
@@ -71,7 +78,7 @@ class CacheService {
     }
 
     try {
-      await this.redis.del(key);
+      await this.redis.del(this.prefixKey(key));
       return true;
     } catch (err) {
       logger.warn('cache-service', 'Failed to delete cached value', err, { key });
@@ -88,7 +95,7 @@ class CacheService {
     }
 
     try {
-      const keys = await this.redis.keys(pattern);
+      const keys = await this.redis.keys(this.prefixKey(pattern));
       if (keys.length > 0) {
         await this.redis.del(...keys);
       }
@@ -137,6 +144,12 @@ class CacheService {
     
     // Exchange rate cache: exchange_rate:{pair}
     exchangeRate: (pair) => `exchange_rate:${pair}`,
+
+    // Oracle conversion rate: oracle:conversion_rate
+    oracleConversionRate: () => `oracle:conversion_rate`,
+
+    // Latest block height: chain:latest_height
+    latestBlockHeight: () => `chain:latest_height`,
   };
 
   /**

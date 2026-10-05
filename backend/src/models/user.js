@@ -55,6 +55,13 @@ const UserSchema = new Schema({
   // KYC: 1 = unverified/pending, 2 = approved. Set by kycController on a low-risk KYC decision.
   kycLevel: { type: Number, default: 1 },
 
+  // Compliance & Regulatory
+  ageVerifiedAt: { type: Date },
+  tosAcceptedAt: { type: Date },
+  tosVersion: { type: String }, // e.g., "1.0"
+  privacyAcceptedAt: { type: Date },
+  privacyVersion: { type: String }, // e.g., "1.0"
+
   // Referrals
   referralCode: { type: String, unique: true, sparse: true },
   referredBy: { type: Schema.Types.ObjectId, ref: 'User' },
@@ -92,6 +99,8 @@ UserSchema.index({ createdAt: -1 })
 UserSchema.index({ lastLoginAt: -1 })
 UserSchema.index({ role: 1, banned: 1 })
 UserSchema.index({ fraud_status: 1, banned: 1 })
+UserSchema.index({ role: 1, createdAt: -1 })
+UserSchema.index({ banned: 1, createdAt: -1 })
 
 // Encrypt PII fields before writing to the database. Also computes
 // deterministic blind indexes for email and walletAddress so exact-match

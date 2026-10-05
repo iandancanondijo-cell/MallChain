@@ -5,7 +5,7 @@ const { DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
 const { Console } = require('console');
 const { stdout, stderr } = require('process');
 const console = new Console(stdout, stderr);
-const config = require('../config');
+const { config } = require('../config');
 
 const CHAIN_RPC = config.chain.rpc;
 const GAS_PRICE = config.chain.gasPrice;
