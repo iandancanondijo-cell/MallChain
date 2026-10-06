@@ -50,9 +50,8 @@ const NotificationPreferencesSchema = new Schema({
 });
 
 // Update updatedAt on save
-NotificationPreferencesSchema.pre('save', function (next) {
+NotificationPreferencesSchema.pre('save', function () {
   this.updatedAt = new Date();
-  next();
 });
 
 module.exports = mongoose.models.NotificationPreferences ||
