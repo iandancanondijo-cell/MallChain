@@ -20,7 +20,6 @@ import { OfflineIndicator } from './components/OfflineIndicator';
 import { MobileBottomNav } from './components/MobileBottomNav';
 
 // Pages
-import { DashboardPage } from './pages/DashboardPage';
 import { SendPage } from './pages/SendPage';
 import { ReceivePage } from './pages/ReceivePage';
 import { TransactionsPage } from './pages/TransactionsPage';
@@ -71,7 +70,7 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Send pre-fill
-  const [sendAsset, setSendAsset] = useState<string>('MLCNS');
+  const [sendAsset] = useState<string>('MLCNS');
 
   useEffect(() => {
     const unsubWallet = walletService.subscribe(() => {
@@ -89,11 +88,6 @@ export default function App() {
   const handleNetworkChange = (id: MallchainNetworkId) => {
     mallchainClient.switchNetwork(id);
     setNetworkId(id);
-  };
-
-  const handleOpenSend = (asset = 'MLCNS') => {
-    setSendAsset(asset);
-    setActiveTab('send');
   };
 
   const handleLockToggle = () => {
@@ -336,17 +330,6 @@ export default function App() {
         ) : (
           /* Legacy Dashboard */
           <>
-            {activeTab === 'dashboard' && (
-              <DashboardPage
-                wallet={wallet}
-                onNavigate={(page) => setActiveTab(page)}
-                onOpenReceive={() => setActiveTab('receive')}
-                onOpenSend={handleOpenSend}
-                onOpenUnlock={() => setUnlockModalOpen(true)}
-                onOpenCreateWallet={() => setWalletModalOpen(true)}
-              />
-            )}
-
             {activeTab === 'send' && (
               <SendPage
                 wallet={wallet}
