@@ -26,14 +26,13 @@ This binary is deliberately minimal — a node-runner only, no `tx`/`keys`/
 `query` CLI (see `cmd/marketplaced/main.go`: the root command never wires
 up a client codec context). Two consequences:
 
-1. **There is no `marketplaced init` command.** Nothing in this repo
-   currently regenerates a fresh `config/`+`data/` layout from scratch —
-   the existing `blockchain_working/` directory was produced by an external
-   tool once, not something you can re-run. If you're standing up a
-   genuinely new node (not just reusing `blockchain_working/`), you'll
-   need `ignite chain init` (already a project dependency — see `~/go/bin/
-   ignite`) or CometBFT's own `init` from a standalone `cometbft` binary to
-   produce a fresh `priv_validator_key.json` and node config.
+1. **There is no `marketplaced init` command.** The binary never wires up a
+   genesis/keys initializer. Use the in-repo helper instead:
+   `go run scripts/gen_node_home.go <home-dir>` generates
+   `node_key.json`, `priv_validator_key.json` + state, and a default
+   `config.toml` using the same CometBFT version as the binary. See
+   `10-run-a-blockchain-node.md` for the full node-setup walkthrough (or
+   `scripts/install-remote-node.sh`, which does the whole flow).
 2. **`marketplaced comet show-validator` panics** (nil pointer dereference
    — the same missing client-context issue). Read your consensus pubkey
    directly from `priv_validator_key.json`'s `pub_key.value` field instead
@@ -46,7 +45,8 @@ Neither of these blocks you — the steps below route around both.
 
 1. **Have a node running** with its own `priv_validator_key.json` (an
    existing synced node's `blockchain_working/config/priv_validator_key.json`,
-   or a freshly-initialized one via `ignite`/`cometbft init`).
+   or a fresh one from `go run scripts/gen_node_home.go <home-dir>` — see
+   `10-run-a-blockchain-node.md`).
 
 2. **Fund an account to self-delegate from.** This account's address IS
    your validator's operator address (just re-encoded with the
