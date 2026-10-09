@@ -19,10 +19,11 @@ const SecuritySettings = lazy(() => import('./pages/SecuritySettings'));
 const TransactionHistory = lazy(() => import('./pages/TransactionHistory'));
 const BlockchainExplorer = lazy(() => import('./pages/BlockchainExplorer'));
 const MallpointsPurchase = lazy(() => import('./pages/MallpointsPurchase'));
+const Dmca = lazy(() => import('./pages/Dmca'));
 
 /* feature modules — each maps to a v14 view */
 import Dashboard from './features/dashboard/Dashboard';
-import AuthFlow from './features/auth/AuthFlow';
+import AuthPage from './features/auth/AuthPage';
 import EnhancedRegistrationFlow from './features/auth/EnhancedRegistrationFlow';
 const WalletHub = lazy(() => import('./features/wallet/WalletHub'));
 const WalletSend = lazy(() => import('./features/wallet/WalletSend'));
@@ -79,16 +80,9 @@ export interface RouteDef {
 export const ROUTES: RouteDef[] = [
   { path: '/landing', title: 'Welcome', render: (n) => <Landing navigate={n} /> },
   { path: '/', title: 'Dashboard', render: (n) => <Dashboard navigate={n} /> },
-  /* auth - redirect to landing if already authenticated */
-  { path: '/auth', title: 'Sign in', render: (n) => {
-    const searchParams = new URLSearchParams(window.location.search);
-    const mode = searchParams.get('mode');
-    if (mode === 'signup') {
-      return <EnhancedRegistrationFlow navigate={n} />;
-    }
-    return <AuthFlow navigate={n} />;
-  } },
-  { path: '/login', title: 'Sign in', render: (n) => <AuthFlow navigate={n} /> },
+  /* auth - unified new auth page */
+  { path: '/auth', title: 'Sign in', render: (n) => <AuthPage /> },
+  { path: '/login', title: 'Sign in', render: (n) => <AuthPage /> },
   /* new enhanced signup flow (gradual rollout) */
   { path: '/signup-v2', title: 'Create Account', render: (n) => <EnhancedRegistrationFlow navigate={n} /> },
   /* wallet */
@@ -145,6 +139,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/analytics', title: 'Analytics', render: () => <AnalyticsView /> },
   { path: '/help', title: 'Help Center', render: () => <Help /> },
   { path: '/search', title: 'Search', render: (n) => <SearchResults navigate={n} /> },
+  { path: '/dmca', title: 'DMCA Policy', render: () => <Dmca /> },
 ];
 
 /** Routes only 'admin'/'superadmin' may reach — checked as an exact-or-prefix match, same as the public-route check below. */
@@ -154,7 +149,7 @@ export function matchRoute(path: string, isAuthenticated: boolean = true, role: 
   const clean = path.split('?')[0];
 
   // PHASE 0 FIX: Public routes that don't require authentication
-  const publicRoutes = ['/landing', '/auth'];
+  const publicRoutes = ['/landing', '/auth', '/login', '/dmca'];
   const isAdmin = role === 'admin' || role === 'superadmin';
 
   const denyIfAdminOnly = (routePath: string): RouteDef | null => {
@@ -170,9 +165,9 @@ export function matchRoute(path: string, isAuthenticated: boolean = true, role: 
 
   const exact = ROUTES.find((r) => r.path === clean);
   if (exact) {
-    // If route requires auth but user not authenticated, return landing page
+    // If route requires auth but user not authenticated, return login page
     if (!isAuthenticated && !publicRoutes.includes(clean)) {
-      return { path: '/landing', title: 'Welcome', render: (n) => <Landing navigate={n} /> };
+      return { path: '/auth', title: 'Sign in', render: (n) => <AuthPage /> };
     }
     return denyIfAdminOnly(clean) || exact;
   }
@@ -182,14 +177,14 @@ export function matchRoute(path: string, isAuthenticated: boolean = true, role: 
   if (byPrefix) {
     // Check auth for prefix routes too
     if (!isAuthenticated && !publicRoutes.includes(byPrefix.path)) {
-      return { path: '/landing', title: 'Welcome', render: (n) => <Landing navigate={n} /> };
+      return { path: '/auth', title: 'Sign in', render: (n) => <AuthPage /> };
     }
     return denyIfAdminOnly(byPrefix.path) || byPrefix;
   }
 
-  // Default: if unauthenticated, go to landing; otherwise dashboard
+  // Default: if unauthenticated, go to login; otherwise dashboard
   if (!isAuthenticated) {
-    return { path: '/landing', title: 'Welcome', render: (n) => <Landing navigate={n} /> };
+    return { path: '/auth', title: 'Sign in', render: (n) => <AuthPage /> };
   }
   return { path: '/', title: 'Dashboard', render: (n) => <Dashboard navigate={n} /> };
 }
