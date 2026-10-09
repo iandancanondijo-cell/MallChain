@@ -189,10 +189,10 @@ const config = {
     ],
   },
 
-  // Best-effort — see emailService.js/smsService.js's isConfigured() guards.
-  // Unlike payment.safaricom, neither is production-required: a badge
-  // notification failing to send shouldn't take down the API, unlike a
-  // failed M-Pesa payment.
+  // Legacy generic SMTP — used only when EMAIL_PROVIDER=smtp (see
+  // notifications.email.provider). Best-effort: not production-required, a
+  // failed notification must never take down the API (unlike a failed
+  // M-Pesa payment).
   email: {
     smtp: {
       host: process.env.SMTP_HOST || '',
@@ -204,12 +204,62 @@ const config = {
     },
   },
 
-  sms: {
-    africastalking: {
-      apiKey: process.env.AFRICASTALKING_API_KEY || '',
-      username: process.env.AFRICASTALKING_USERNAME || '',
-      senderId: process.env.AFRICASTALKING_SENDER_ID || '',
-      apiBaseUrl: process.env.AFRICASTALKING_API_BASE_URL || 'https://api.africastalking.com',
+  // Notification providers (best-effort — see each provider's isConfigured()
+  // guard). Each channel selects its provider via the matching *_PROVIDER env
+  // var; every provider is independently optional so a missing key only
+  // disables that channel, never the API. Configures to "both per channel":
+  // email can run on SendGrid (API) or Twilio SendGrid (SMTP); SMS on Twilio
+  // (Programmable Messaging) or Africa's Talking; WhatsApp on Meta's Cloud API
+  // (Facebook for Developers → WhatsApp Business Platform).
+  notifications: {
+    email: {
+      // 'sendgrid' | 'twilio' — Twilio's email path is SendGrid over SMTP.
+      provider: (process.env.EMAIL_PROVIDER || '').toLowerCase() || 'sendgrid',
+      sendgrid: {
+        apiKey: process.env.SENDGRID_API_KEY || '',
+        from: process.env.SENDGRID_FROM || 'noreply@mallchain.local',
+        replyTo: process.env.SENDGRID_REPLY_TO || '',
+      },
+      twilio: {
+        accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+        authToken: process.env.TWILIO_AUTH_TOKEN || '',
+        from: process.env.TWILIO_EMAIL_FROM || 'noreply@mallchain.local',
+      },
+    },
+    sms: {
+      // 'twilio' | 'africastalking'
+      provider: (process.env.SMS_PROVIDER || '').toLowerCase() || 'twilio',
+      twilio: {
+        accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+        authToken: process.env.TWILIO_AUTH_TOKEN || '',
+        from: process.env.TWILIO_PHONE_FROM || '',
+        apiBaseUrl: process.env.TWILIO_API_BASE_URL || 'https://api.twilio.com',
+      },
+      africastalking: {
+        apiKey: process.env.AFRICASTALKING_API_KEY || '',
+        username: process.env.AFRICASTALKING_USERNAME || '',
+        senderId: process.env.AFRICASTALKING_SENDER_ID || '',
+        apiBaseUrl: process.env.AFRICASTALKING_API_BASE_URL || 'https://api.africastalking.com',
+      },
+    },
+    whatsapp: {
+      // 'meta' — Meta WhatsApp Cloud API (Facebook for Developers).
+      provider: (process.env.WHATSAPP_PROVIDER || '').toLowerCase() || 'meta',
+      meta: {
+        accessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
+        phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+        businessAccountId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '',
+        // Graph API version pin — Cloud API URLs are versioned.
+        apiVersion: process.env.WHATSAPP_API_VERSION || 'v21.0',
+        apiBaseUrl: process.env.WHATSAPP_API_BASE_URL || 'https://graph.facebook.com',
+        // Business-initiated messages (badge alerts, tx confirmations, etc.)
+        // MUST use a pre-approved template — Meta rejects free-form text sent
+        // outside a 24h customer-service window (error 131047). Set these to
+        // your approved template; leave blank to fall back to plain text
+        // (dev/local only, or inside an active session window).
+        templateName: process.env.WHATSAPP_TEMPLATE_NAME || '',
+        templateLanguage: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en',
+      },
     },
   },
 

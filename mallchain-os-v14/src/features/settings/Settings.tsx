@@ -5,6 +5,7 @@ import { config } from '../../services/config';
 import { COMMON_CURRENCIES } from '../../services/locale';
 import { useSupportedCurrencies } from '../../services/currency';
 import { settingsApi, type UserSettingsData } from '../../services/settingsApi';
+import { notificationsApi, type NotificationProviders } from '../../services/notificationsApi';
 
 /** Settings — real per-user preferences/notifications/security/privacy (backend/src/routes/settings.js). */
 export default function Settings() {
@@ -13,6 +14,11 @@ export default function Settings() {
   const [settings, setSettings] = useState<UserSettingsData | null>(null);
   const [loading, setLoading] = useState(false);
   const allCurrencies = useSupportedCurrencies();
+
+  // Notification delivery status + test-send. Loaded lazily so a failure here
+  // never blocks the rest of the settings page.
+  const [providers, setProviders] = useState<NotificationProviders | null>(null);
+  const [sendingTest, setSendingTest] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -33,9 +39,29 @@ export default function Settings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Load provider status once settings are present.
+  const loadProviders = useCallback(async () => {
+    const res = await notificationsApi.providers();
+    if (res.ok && res.data) setProviders(res.data);
+  }, []);
+
+  const sendTest = async () => {
+    setSendingTest(true);
+    const res = await notificationsApi.sendTest();
+    setSendingTest(false);
+    if (res.ok && res.data?.results) {
+      const { email, sms, whatsapp } = res.data.results;
+      const parts = [`email ${email ? 'sent' : 'failed'}`, `sms ${sms ? 'sent' : 'failed'}`, `whatsapp ${whatsapp ? 'sent' : 'failed'}`];
+      toast('Test notification: ' + parts.join(', '));
+    } else {
+      toast(res.error || 'Test notification failed');
+    }
+  };
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadProviders();
+  }, [load, loadProviders]);
 
   const applyAccent = async (a: string) => {
     const map: Record<string, string> = { gold: '#f3ba2f', cyan: '#22d3ee', purple: '#a78bfa', emerald: '#34d399' };
@@ -60,9 +86,16 @@ export default function Settings() {
     toast('Language → ' + l);
   };
 
-  const toggleNotif = async (channel: 'email' | 'push', key: string, value: boolean) => {
+  const toggleNotif = async (channel: 'email' | 'push' | 'sms' | 'whatsapp', key: string, value: boolean) => {
     if (!settings) return;
     const updated = { ...settings, notifications: { ...settings.notifications, [channel]: { ...settings.notifications[channel], [key]: value } } };
+    setSettings(updated);
+    await settingsApi.update({ notifications: updated.notifications });
+  };
+
+  const setFrequency = async (value: string) => {
+    if (!settings) return;
+    const updated = { ...settings, notifications: { ...settings.notifications, frequency: value } };
     setSettings(updated);
     await settingsApi.update({ notifications: updated.notifications });
   };
@@ -122,15 +155,67 @@ export default function Settings() {
         <>
           <div className="card mb">
             <div className="sec-title"><h2>Notifications</h2></div>
-            {(['transactions', 'campaigns', 'governance', 'security'] as const).map((key) => (
+
+            {/* Delivery frequency — controls how often the paid external
+                channels (email/SMS/WhatsApp) deliver. In-app notifications
+                always arrive instantly regardless of this setting. */}
+            <div className="flag-row">
+              <div className="desc">
+                <div className="t">Delivery frequency</div>
+                <div className="m">How often email/SMS/WhatsApp notifications are sent. In-app alerts are always instant.</div>
+              </div>
+              <select
+                className="input"
+                style={{ maxWidth: 200 }}
+                aria-label="Notification delivery frequency"
+                value={settings.notifications.frequency}
+                onChange={(e) => setFrequency(e.target.value)}
+              >
+                <option value="realtime">Real-time</option>
+                <option value="hourly">Hourly digest</option>
+                <option value="daily">Daily digest</option>
+              </select>
+            </div>
+
+            {(['transactions', 'campaigns', 'governance', 'marketing', 'security', 'badgeAlerts'] as const).map((key) => (
               <div key={key} className="flag-row">
                 <div className="desc"><div className="t">{key}</div></div>
                 <label className="switch"><input type="checkbox" aria-label={`Email notifications for ${key}`} checked={settings.notifications.email[key]} onChange={(e) => toggleNotif('email', key, e.target.checked)} /><span className="track" /><span className="knob" /></label>
                 <span className="tiny">email</span>
                 <label className="switch"><input type="checkbox" aria-label={`Push notifications for ${key}`} checked={settings.notifications.push[key]} onChange={(e) => toggleNotif('push', key, e.target.checked)} /><span className="track" /><span className="knob" /></label>
                 <span className="tiny">push</span>
+                <label className="switch"><input type="checkbox" aria-label={`SMS notifications for ${key}`} checked={settings.notifications.sms[key]} onChange={(e) => toggleNotif('sms', key, e.target.checked)} /><span className="track" /><span className="knob" /></label>
+                <span className="tiny">sms</span>
+                <label className="switch"><input type="checkbox" aria-label={`WhatsApp notifications for ${key}`} checked={settings.notifications.whatsapp[key]} onChange={(e) => toggleNotif('whatsapp', key, e.target.checked)} /><span className="track" /><span className="knob" /></label>
+                <span className="tiny">whatsapp</span>
               </div>
             ))}
+
+            {/* Delivery status + one-off test send — shows which provider backs
+                each channel and whether it's actually configured, so a user can
+                see why a channel is (or isn't) delivering before relying on it. */}
+            <div className="flag-row" style={{ marginTop: 12 }}>
+              <div className="desc">
+                <div className="t">Delivery channels</div>
+                <div className="m">
+                  {providers ? (
+                    <>
+                      email: <span className="mono">{providers.email.provider}</span>{' '}
+                      <span className={providers.email.configured ? 'chip' : 'chip gold'}>{providers.email.configured ? 'ready' : 'not set up'}</span>
+                      {' · '}sms: <span className="mono">{providers.sms.provider}</span>{' '}
+                      <span className={providers.sms.configured ? 'chip' : 'chip gold'}>{providers.sms.configured ? 'ready' : 'not set up'}</span>
+                      {' · '}whatsapp: <span className="mono">{providers.whatsapp.provider}</span>{' '}
+                      <span className={providers.whatsapp.configured ? 'chip' : 'chip gold'}>{providers.whatsapp.configured ? 'ready' : 'not set up'}</span>
+                    </>
+                  ) : (
+                    'checking…'
+                  )}
+                </div>
+              </div>
+              <button className="btn btn-ghost" onClick={sendTest} disabled={sendingTest}>
+                {sendingTest ? 'Sending…' : 'Send test'}
+              </button>
+            </div>
           </div>
 
           <div className="card mb">

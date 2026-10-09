@@ -5,8 +5,10 @@ import { type ApiResult } from './api';
 export interface UserSettingsData {
   prefs: { accent: string; currency: string; lang: string; theme: string };
   notifications: {
-    email: { transactions: boolean; campaigns: boolean; governance: boolean; marketing: boolean; security: boolean };
-    push: { transactions: boolean; campaigns: boolean; governance: boolean; marketing: boolean; security: boolean };
+    email: { transactions: boolean; campaigns: boolean; governance: boolean; marketing: boolean; security: boolean; badgeAlerts: boolean };
+    push: { transactions: boolean; campaigns: boolean; governance: boolean; marketing: boolean; security: boolean; badgeAlerts: boolean };
+    sms: { transactions: boolean; campaigns: boolean; governance: boolean; marketing: boolean; security: boolean; badgeAlerts: boolean };
+    whatsapp: { transactions: boolean; campaigns: boolean; governance: boolean; marketing: boolean; security: boolean; badgeAlerts: boolean };
     frequency: string;
   };
   security: {

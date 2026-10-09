@@ -1142,6 +1142,11 @@ io.on('connection', socket => {
   // bonded some treasury stake to a validator.
   require('./jobs/treasuryRewardsSweeper').start();
 
+  // Flushes batched (hourly/daily digest) notifications queued by notify.js
+  // for users who chose a non-realtime delivery frequency — see
+  // jobs/notificationDigest.js.
+  require('./jobs/notificationDigest').start();
+
   // Cleanup on shutdown
   process.on('SIGINT', () => {
     logger.info('Shutting down...')

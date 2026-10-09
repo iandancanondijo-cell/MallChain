@@ -15,6 +15,19 @@ export interface AppNotification {
   createdAt: string;
 }
 
+/** Per-channel provider selection + whether it's actually configured. */
+export interface NotificationProviders {
+  email: { provider: string; configured: boolean };
+  sms: { provider: string; configured: boolean };
+  whatsapp: { provider: string; configured: boolean };
+}
+
+/** Per-channel result of a test send. */
+export interface TestNotificationResult {
+  ok: boolean;
+  results: { email: boolean; sms: boolean; whatsapp: boolean };
+}
+
 class NotificationsApi {
   async list(): Promise<ApiResult<{ notifications: AppNotification[] }>> {
     return api.get('/api/notifications/me');
@@ -26,6 +39,16 @@ class NotificationsApi {
 
   async markAllRead(): Promise<ApiResult<{ ok: boolean }>> {
     return api.post('/api/notifications/read-all', {});
+  }
+
+  /** Which provider backs each channel and whether it's configured (secret-free). */
+  async providers(): Promise<ApiResult<NotificationProviders>> {
+    return api.get('/api/notifications/providers');
+  }
+
+  /** Send a one-off test notification across the caller's available channels. */
+  async sendTest(): Promise<ApiResult<TestNotificationResult>> {
+    return api.post('/api/notifications/test', {});
   }
 }
 

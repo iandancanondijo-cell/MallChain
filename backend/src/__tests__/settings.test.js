@@ -21,7 +21,7 @@ function fakeSettings(overrides = {}) {
   return {
     userId: 'user1',
     prefs: { accent: 'gold', currency: 'USD', lang: 'EN', theme: 'dark' },
-    notifications: { email: { transactions: true }, push: { transactions: true }, frequency: 'realtime' },
+    notifications: { email: { transactions: true }, push: { transactions: true }, sms: { transactions: false }, whatsapp: { transactions: false }, frequency: 'realtime' },
     security: { twoFactorEnabled: false },
     privacy: { profileVisibility: 'public' },
     display: { compactMode: false },
@@ -83,6 +83,21 @@ describe('settings routes', () => {
 
     expect(existing.security.twoFactorEnabled).toBe(true);
     expect(existing.security.notAllowedField).toBeUndefined();
+  });
+
+  test('PUT /notifications persists sms and whatsapp channel preferences', async () => {
+    const existing = fakeSettings();
+    UserSettings.findOne.mockResolvedValue(existing);
+
+    const res = await request(app).put('/api/settings/notifications').send({
+      sms: { transactions: true },
+      whatsapp: { transactions: true },
+    });
+
+    expect(res.status).toBe(200);
+    expect(existing.notifications.sms.transactions).toBe(true);
+    expect(existing.notifications.whatsapp.transactions).toBe(true);
+    expect(existing.save).toHaveBeenCalled();
   });
 
   test('POST /reset deletes and recreates default settings', async () => {

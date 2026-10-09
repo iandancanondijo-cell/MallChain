@@ -39,6 +39,8 @@ router.put('/', auth, async (req, res) => {
     if (req.body.notifications) {
       if (req.body.notifications.email) Object.assign(settings.notifications.email, req.body.notifications.email);
       if (req.body.notifications.push) Object.assign(settings.notifications.push, req.body.notifications.push);
+      if (req.body.notifications.sms) Object.assign(settings.notifications.sms, req.body.notifications.sms);
+      if (req.body.notifications.whatsapp) Object.assign(settings.notifications.whatsapp, req.body.notifications.whatsapp);
       if (req.body.notifications.frequency) settings.notifications.frequency = req.body.notifications.frequency;
     }
     if (req.body.security) Object.assign(settings.security, req.body.security);
@@ -59,6 +61,8 @@ router.put('/notifications', auth, async (req, res) => {
 
     if (req.body.email) Object.assign(settings.notifications.email, req.body.email);
     if (req.body.push) Object.assign(settings.notifications.push, req.body.push);
+    if (req.body.sms) Object.assign(settings.notifications.sms, req.body.sms);
+    if (req.body.whatsapp) Object.assign(settings.notifications.whatsapp, req.body.whatsapp);
     if (req.body.frequency) settings.notifications.frequency = req.body.frequency;
 
     await settings.save();

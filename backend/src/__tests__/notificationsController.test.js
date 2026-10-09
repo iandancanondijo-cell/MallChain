@@ -6,6 +6,21 @@ jest.mock('../models/Notification', () => ({
   findOneAndUpdate: jest.fn(),
   updateMany: jest.fn(),
 }));
+jest.mock('../models/user', () => ({
+  findById: jest.fn(),
+}));
+jest.mock('../services/emailService', () => ({
+  sendEmail: jest.fn(),
+  isConfigured: jest.fn(),
+}));
+jest.mock('../services/smsService', () => ({
+  sendSms: jest.fn(),
+  isConfigured: jest.fn(),
+}));
+jest.mock('../services/whatsappService', () => ({
+  sendWhatsApp: jest.fn(),
+  isConfigured: jest.fn(),
+}));
 jest.mock('../middleware/auth', () =>
   jest.fn((req, res, next) => {
     req.user = { _id: 'user1' };
@@ -14,6 +29,10 @@ jest.mock('../middleware/auth', () =>
 );
 
 const Notification = require('../models/Notification');
+const User = require('../models/user');
+const emailService = require('../services/emailService');
+const smsService = require('../services/smsService');
+const whatsappService = require('../services/whatsappService');
 const notificationsRoutes = require('../routes/notifications');
 
 describe('notifications routes', () => {
@@ -72,5 +91,84 @@ describe('notifications routes', () => {
 
     expect(res.status).toBe(200);
     expect(Notification.updateMany).toHaveBeenCalledWith({ userId: 'user1', read: false }, { $set: { read: true } });
+  });
+});
+
+describe('notification provider status + test', () => {
+  let app;
+
+  beforeAll(() => {
+    app = express();
+    app.use(express.json());
+    app.use('/api/notifications', notificationsRoutes);
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('GET /providers reports each channel\'s selected provider + configured flag', async () => {
+    emailService.isConfigured.mockReturnValue(true);
+    smsService.isConfigured.mockReturnValue(false);
+    whatsappService.isConfigured.mockReturnValue(true);
+
+    const res = await request(app).get('/api/notifications/providers');
+
+    expect(res.status).toBe(200);
+    expect(res.body.email.provider).toBe('sendgrid');
+    expect(res.body.email.configured).toBe(true);
+    expect(res.body.sms.configured).toBe(false);
+    expect(res.body.whatsapp.provider).toBe('meta');
+    expect(res.body.whatsapp.configured).toBe(true);
+  });
+
+  test('GET /providers never leaks secrets', async () => {
+    emailService.isConfigured.mockReturnValue(true);
+    smsService.isConfigured.mockReturnValue(false);
+    whatsappService.isConfigured.mockReturnValue(false);
+
+    const res = await request(app).get('/api/notifications/providers');
+    const body = JSON.stringify(res.body);
+    expect(body).not.toMatch(/apiKey|api_key|accessToken|token|secret/i);
+  });
+
+  test('POST /test sends email always, sms/whatsapp only when a phone exists', async () => {
+    User.findById.mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ _id: 'user1', email: 'a@b.com', phone: '+254700000000' }) }) });
+    emailService.sendEmail.mockResolvedValue(true);
+    smsService.sendSms.mockResolvedValue(true);
+    whatsappService.sendWhatsApp.mockResolvedValue(true);
+
+    const res = await request(app).post('/api/notifications/test');
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.results).toEqual({ email: true, sms: true, whatsapp: true });
+    expect(emailService.sendEmail).toHaveBeenCalled();
+    expect(smsService.sendSms).toHaveBeenCalled();
+    // Test WhatsApp uses forceText so it doesn't burn a template send.
+    expect(whatsappService.sendWhatsApp).toHaveBeenCalledWith(
+      '+254700000000',
+      expect.any(String),
+      { forceText: true }
+    );
+  });
+
+  test('POST /test only attempts email when no phone is on file', async () => {
+    User.findById.mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue({ _id: 'user1', email: 'a@b.com', phone: null }) }) });
+    emailService.sendEmail.mockResolvedValue(true);
+
+    const res = await request(app).post('/api/notifications/test');
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual({ email: true, sms: false, whatsapp: false });
+    expect(smsService.sendSms).not.toHaveBeenCalled();
+    expect(whatsappService.sendWhatsApp).not.toHaveBeenCalled();
+  });
+
+  test('POST /test 404s when the user does not exist', async () => {
+    User.findById.mockReturnValue({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }) });
+
+    const res = await request(app).post('/api/notifications/test');
+    expect(res.status).toBe(404);
   });
 });

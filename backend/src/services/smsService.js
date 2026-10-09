@@ -1,55 +1,42 @@
 /**
- * SMS sending via Africa's Talking's REST API — plain axios call, matching
- * this codebase's existing pattern for external providers (see buy.js's
- * Safaricom calls) rather than pulling in another SDK. Best-effort: if
- * unconfigured, sendSms no-ops with a warning rather than throwing.
+ * SMS provider dispatcher — routes to the configured provider based on
+ * SMS_PROVIDER env var. Supports:
+ * - 'twilio' — Twilio Programmable Messaging (default)
+ * - 'africastalking' — Africa's Talking REST API
+ *
+ * Best-effort: if the selected provider is unconfigured, sendSms no-ops with a
+ * warning rather than throwing.
  */
-const axios = require('axios');
 const { config } = require('../config');
 const logger = require('../utils/logger');
 
-function isConfigured() {
-  const { apiKey, username } = config.sms.africastalking;
-  return Boolean(apiKey && username);
-}
-
-let warnedOnce = false;
-
-/** Returns true if the SMS was actually sent, false if skipped (never throws). */
 async function sendSms(phone, message) {
   if (!phone || !message) return false;
 
-  if (!isConfigured()) {
-    if (!warnedOnce) {
-      warnedOnce = true;
-      logger.warn('smsService', 'Africa\'s Talking not configured — SMS notifications disabled (development mode)');
-    }
-    return false;
-  }
-
-  const { apiKey, username, senderId, apiBaseUrl } = config.sms.africastalking;
+  const provider = config.notifications.sms.provider;
 
   try {
-    const body = new URLSearchParams({ username, to: phone, message });
-    if (senderId) body.set('from', senderId);
-
-    const res = await axios.post(`${apiBaseUrl.replace(/\/$/, '')}/version1/messaging`, body.toString(), {
-      headers: {
-        apiKey,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-      },
-      timeout: 10000,
-    });
-
-    const recipients = res.data?.SMSMessageData?.Recipients || [];
-    const ok = recipients.some((r) => String(r.status || '').toLowerCase().includes('success'));
-    if (!ok) {
-      logger.warn('smsService', 'Africa\'s Talking accepted the request but reported no successful recipient', { phone, recipients });
+    if (provider === 'africastalking') {
+      const { sendSms: atSendSms } = require('./africastalkingService');
+      return await atSendSms(phone, message);
     }
-    return ok;
+    // Default: Twilio
+    const { sendSms: twilioSendSms } = require('./twilioService');
+    return await twilioSendSms(phone, message);
   } catch (err) {
-    logger.error('smsService', 'failed to send SMS', err, { phone });
+    logger.error('smsService', `failed to send SMS via ${provider}`, err, { phone });
+    return false;
+  }
+}
+
+function isConfigured() {
+  const provider = config.notifications.sms.provider;
+  try {
+    if (provider === 'africastalking') {
+      return require('./africastalkingService').isConfigured();
+    }
+    return require('./twilioService').isSmsConfigured();
+  } catch {
     return false;
   }
 }

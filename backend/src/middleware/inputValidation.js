@@ -26,6 +26,7 @@
 
 const Joi = require('joi');
 const sanitizeHtml = require('sanitize-html');
+const { normalizePhone } = require('../utils/phone');
 
 function emailOptions() {
   if (process.env.TEST_MODE === 'true') {
@@ -76,8 +77,23 @@ const authSchemas = {
         'string.min': 'Password must be at least 8 characters',
         'string.pattern.base': 'Password must contain uppercase, lowercase, and numbers',
       }),
+    // Optional phone — normalized to E.164 and only accepted if deliverable.
+    // SMS/WhatsApp notifications have nowhere to send without it, so capture
+    // it at signup when offered (see utils/phone.js for the normalization).
+    phone: Joi.string()
+      .trim()
+      .max(20)
+      .custom((value, helpers) => {
+        const normalized = normalizePhone(value);
+        if (!normalized) return helpers.error('phone.invalid');
+        return normalized;
+      })
+      .optional()
+      .messages({
+        'phone.invalid': 'Invalid phone number — use international format, e.g. +254712345678',
+      }),
   }),
-  
+
   // Registration with username
   registerUsername: Joi.object({
     username: Joi.string()
@@ -102,6 +118,19 @@ const authSchemas = {
         'string.pattern.base': 'Password must contain uppercase, lowercase, and numbers',
       }),
     referralCode: Joi.string().trim().optional(),
+    // Same optional E.164 phone capture as email registration.
+    phone: Joi.string()
+      .trim()
+      .max(20)
+      .custom((value, helpers) => {
+        const normalized = normalizePhone(value);
+        if (!normalized) return helpers.error('phone.invalid');
+        return normalized;
+      })
+      .optional()
+      .messages({
+        'phone.invalid': 'Invalid phone number — use international format, e.g. +254712345678',
+      }),
   }),
 
   // Login with email

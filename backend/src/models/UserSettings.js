@@ -32,13 +32,24 @@ const UserSettingsSchema = new Schema({
       security: { type: Boolean, default: true },
       badgeAlerts: { type: Boolean, default: true },
     },
+    // SMS and WhatsApp are opt-in only — email (Gmail) is the sole
+    // default-on channel, so a user who never touches settings still gets
+    // notified but is never charged for SMS/WhatsApp they didn't ask for.
     sms: {
       transactions: { type: Boolean, default: false },
       campaigns: { type: Boolean, default: false },
       governance: { type: Boolean, default: false },
       marketing: { type: Boolean, default: false },
       security: { type: Boolean, default: false },
-      badgeAlerts: { type: Boolean, default: true },
+      badgeAlerts: { type: Boolean, default: false },
+    },
+    whatsapp: {
+      transactions: { type: Boolean, default: false },
+      campaigns: { type: Boolean, default: false },
+      governance: { type: Boolean, default: false },
+      marketing: { type: Boolean, default: false },
+      security: { type: Boolean, default: false },
+      badgeAlerts: { type: Boolean, default: false },
     },
     frequency: { type: String, default: 'realtime' },
   },

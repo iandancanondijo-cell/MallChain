@@ -1,51 +1,81 @@
-const mockSendMail = jest.fn();
-jest.mock('nodemailer', () => ({
-  createTransport: jest.fn(() => ({ sendMail: mockSendMail })),
+jest.mock('../services/sendgridService', () => ({
+  sendEmail: jest.fn(),
+  isConfigured: jest.fn(),
+}));
+jest.mock('../services/twilioService', () => ({
+  sendEmail: jest.fn(),
+  sendSms: jest.fn(),
+  isEmailConfigured: jest.fn(),
+  isSmsConfigured: jest.fn(),
+}));
+jest.mock('../services/smtpService', () => ({
+  sendEmail: jest.fn(),
+  isConfigured: jest.fn(),
 }));
 
-describe('emailService', () => {
+// The dispatcher reads config.notifications.email.provider at module load,
+// and config caches EMAIL_PROVIDER once. So every test sets its env var,
+// resets the registry, then requires a fresh dispatcher + provider mock.
+function load(provider) {
+  if (provider === undefined) delete process.env.EMAIL_PROVIDER;
+  else process.env.EMAIL_PROVIDER = provider;
+  jest.resetModules();
+  return {
+    sendgrid: require('../services/sendgridService'),
+    twilio: require('../services/twilioService'),
+    smtp: require('../services/smtpService'),
+    dispatcher: require('../services/emailService'),
+  };
+}
+
+describe('emailService (dispatcher)', () => {
   beforeEach(() => {
-    jest.resetModules();
     jest.clearAllMocks();
-    delete process.env.SMTP_HOST;
-    delete process.env.SMTP_USER;
-    delete process.env.SMTP_PASS;
   });
 
-  test('no-ops without throwing when SMTP is not configured', async () => {
-    const { sendEmail, isConfigured } = require('../services/emailService');
-    expect(isConfigured()).toBe(false);
-    await expect(sendEmail('a@b.com', 'Subject', 'Body')).resolves.toBe(false);
-    expect(mockSendMail).not.toHaveBeenCalled();
-  });
+  test('routes to SendGrid by default', async () => {
+    const { sendgrid, dispatcher } = load(undefined);
+    sendgrid.sendEmail.mockResolvedValue(true);
 
-  test('sends via nodemailer when SMTP is configured', async () => {
-    process.env.SMTP_HOST = 'smtp.example.com';
-    process.env.SMTP_USER = 'user';
-    process.env.SMTP_PASS = 'pass';
-    mockSendMail.mockResolvedValue({});
-
-    const { sendEmail, isConfigured } = require('../services/emailService');
-    expect(isConfigured()).toBe(true);
-
-    const result = await sendEmail('a@b.com', 'Subject', 'Body');
+    const result = await dispatcher.sendEmail('a@b.com', 'Subject', 'Body');
     expect(result).toBe(true);
-    expect(mockSendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'a@b.com', subject: 'Subject', text: 'Body' }));
+    expect(sendgrid.sendEmail).toHaveBeenCalledWith('a@b.com', 'Subject', 'Body');
   });
 
-  test('returns false (does not throw) when the transport rejects', async () => {
-    process.env.SMTP_HOST = 'smtp.example.com';
-    process.env.SMTP_USER = 'user';
-    process.env.SMTP_PASS = 'pass';
-    mockSendMail.mockRejectedValue(new Error('smtp down'));
+  test('routes to Twilio when EMAIL_PROVIDER=twilio', async () => {
+    const { twilio, dispatcher } = load('twilio');
+    twilio.sendEmail.mockResolvedValue(true);
 
-    const { sendEmail } = require('../services/emailService');
-    await expect(sendEmail('a@b.com', 'Subject', 'Body')).resolves.toBe(false);
+    const result = await dispatcher.sendEmail('a@b.com', 'Subject', 'Body');
+    expect(result).toBe(true);
+    expect(twilio.sendEmail).toHaveBeenCalledWith('a@b.com', 'Subject', 'Body');
+  });
+
+  test('routes to SMTP when EMAIL_PROVIDER=smtp', async () => {
+    const { smtp, dispatcher } = load('smtp');
+    smtp.sendEmail.mockResolvedValue(true);
+
+    const result = await dispatcher.sendEmail('a@b.com', 'Subject', 'Body');
+    expect(result).toBe(true);
+    expect(smtp.sendEmail).toHaveBeenCalledWith('a@b.com', 'Subject', 'Body');
+  });
+
+  test('never throws even if the provider fails', async () => {
+    const { sendgrid, dispatcher } = load(undefined);
+    sendgrid.sendEmail.mockRejectedValue(new Error('provider down'));
+
+    await expect(dispatcher.sendEmail('a@b.com', 'Subject', 'Body')).resolves.toBe(false);
   });
 
   test('no-ops when recipient or subject is missing', async () => {
-    const { sendEmail } = require('../services/emailService');
-    await expect(sendEmail('', 'Subject', 'Body')).resolves.toBe(false);
-    await expect(sendEmail('a@b.com', '', 'Body')).resolves.toBe(false);
+    const { dispatcher } = load(undefined);
+    await expect(dispatcher.sendEmail('', 'Subject', 'Body')).resolves.toBe(false);
+    await expect(dispatcher.sendEmail('a@b.com', '', 'Body')).resolves.toBe(false);
+  });
+
+  test('isConfigured delegates to the selected provider', () => {
+    const { sendgrid, dispatcher } = load(undefined);
+    sendgrid.isConfigured.mockReturnValue(true);
+    expect(dispatcher.isConfigured()).toBe(true);
   });
 });

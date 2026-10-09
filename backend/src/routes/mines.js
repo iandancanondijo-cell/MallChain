@@ -14,6 +14,7 @@ const { autoAssignReviewers } = require('../services/minesReviewService');
 const { PLATFORMS, DEFAULT_DAILY_CAP_MLPTS, getDailyCapMlpts } = require('../config/socialRewardRates');
 const { computeCampaignRate, clampMultiplier, MIN_CAMPAIGN_MULTIPLIER, MAX_CAMPAIGN_MULTIPLIER } = require('../services/rewardEngineService');
 const { markActiveToday } = require('../utils/activityTracker');
+const { normalizePhone } = require('../utils/phone');
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -242,7 +243,19 @@ router.put('/profile', verifyToken, async (req, res) => {
   try {
     const updates = {};
     if (req.body.username !== undefined) updates.username = req.body.username;
-    if (req.body.phone !== undefined) updates.phone = req.body.phone;
+    if (req.body.phone !== undefined) {
+      // Normalize to E.164 and reject anything undeliverable — a raw
+      // "0712..." stored verbatim makes every later SMS/WhatsApp send fail
+      // silently at the provider. Allow explicit empty string to clear it.
+      const raw = String(req.body.phone).trim();
+      if (raw === '') {
+        updates.phone = undefined;
+      } else {
+        const normalized = normalizePhone(raw);
+        if (!normalized) return badRequest(res, 'Invalid phone number — use international format, e.g. +254712345678');
+        updates.phone = normalized;
+      }
+    }
     const u = await User.findByIdAndUpdate(req.userId, { $set: updates }, { new: true }).select('-password').lean();
     res.json(ok(u));
   } catch (e) { res.status(400).json(fail(e)); }

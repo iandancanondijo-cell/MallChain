@@ -1,56 +1,56 @@
 /**
- * Generic-SMTP email sending (nodemailer) — no vendor lock-in, works with
- * any SMTP provider (SendGrid/SES/Mailgun's SMTP interface, or a real
- * mailserver). Best-effort: if unconfigured, sendEmail no-ops with a
- * warning rather than throwing — a badge notification failing to send must
- * never take down the request/job that triggered it.
+ * Email provider dispatcher — routes to the configured provider based on
+ * EMAIL_PROVIDER env var. Supports:
+ * - 'sendgrid' — SendGrid REST API (default)
+ * - 'twilio' — Twilio/SendGrid SMTP (requires SENDGRID_API_KEY)
+ * - 'smtp' — Generic SMTP via nodemailer (legacy fallback)
+ *
+ * Best-effort: if the selected provider is unconfigured, sendEmail no-ops with
+ * a warning rather than throwing — a notification failing to send must never
+ * take down the request/job that triggered it.
  */
-const nodemailer = require('nodemailer');
 const { config } = require('../config');
 const logger = require('../utils/logger');
 
-let transporter = null;
-let warnedOnce = false;
-
-function isConfigured() {
-  const { host, user, pass } = config.email.smtp;
-  return Boolean(host && user && pass);
-}
-
-function getTransporter() {
-  if (!transporter && isConfigured()) {
-    transporter = nodemailer.createTransport({
-      host: config.email.smtp.host,
-      port: config.email.smtp.port,
-      secure: config.email.smtp.secure,
-      auth: { user: config.email.smtp.user, pass: config.email.smtp.pass },
-    });
-  }
-  return transporter;
-}
-
-/** Returns true if an email was actually sent, false if skipped (never throws). */
+/**
+ * Send via the configured email provider.
+ * @returns {Promise<boolean>} true if sent, false if skipped/failed (never throws)
+ */
 async function sendEmail(to, subject, body) {
   if (!to || !subject) return false;
 
-  if (!isConfigured()) {
-    if (!warnedOnce) {
-      warnedOnce = true;
-      logger.warn('emailService', 'SMTP not configured — email notifications disabled (development mode)');
-    }
-    return false;
-  }
+  const provider = config.notifications.email.provider;
 
   try {
-    await getTransporter().sendMail({
-      from: config.email.smtp.from,
-      to,
-      subject,
-      text: body,
-    });
-    return true;
+    if (provider === 'twilio') {
+      const { sendEmail: twilioSendEmail } = require('./twilioService');
+      return await twilioSendEmail(to, subject, body);
+    } else if (provider === 'smtp') {
+      const { sendEmail: smtpSendEmail } = require('./smtpService');
+      return await smtpSendEmail(to, subject, body);
+    } else {
+      // Default: SendGrid
+      const { sendEmail: sendgridSendEmail } = require('./sendgridService');
+      return await sendgridSendEmail(to, subject, body);
+    }
   } catch (err) {
-    logger.error('emailService', 'failed to send email', err, { to, subject });
+    logger.error('emailService', `failed to send email via ${provider}`, err, { to, subject });
+    return false;
+  }
+}
+
+function isConfigured() {
+  const provider = config.notifications.email.provider;
+
+  try {
+    if (provider === 'twilio') {
+      return require('./twilioService').isEmailConfigured();
+    } else if (provider === 'smtp') {
+      return require('./smtpService').isConfigured();
+    } else {
+      return require('./sendgridService').isConfigured();
+    }
+  } catch {
     return false;
   }
 }

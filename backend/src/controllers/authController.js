@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const totp = require('../utils/totp');
 const { config } = require('../config');
+const { normalizePhone } = require('../utils/phone');
 const { revokeToken, revokeAllUserTokens } = require('../middleware/tokenDenylist');
 const getRedis = require('../mallwallet/queue/redis');
 
@@ -220,7 +221,13 @@ exports.register = async (req, res) => {
   if (existing) return res.status(400).json({ error: 'email exists' });
   const hash = await bcrypt.hash(password, 10);
 
-  const u = await User.create({ email, password: hash });
+  // Optional phone (normalized to E.164 by the Joi schema already; re-normalize
+  // here since these handlers read req.body, not req.validatedBody) — the
+  // destination for SMS/WhatsApp notifications. Invalid input is rejected by
+  // the schema before reaching here, so a present value is deliverable.
+  const phone = normalizePhone(req.body.phone);
+
+  const u = await User.create({ email, password: hash, ...(phone ? { phone } : {}) });
   await assignReferralCode(u, referralCode);
 
   const { token, sessionTtlMin, expiresAt } = signToken(u);
@@ -275,7 +282,8 @@ exports.registerUsername = async (req, res) => {
   if (existingEmail) return res.status(400).json({ error: 'username exists' });
 
   const hash = await bcrypt.hash(password, 10);
-  const u = await User.create({ username, email: syntheticEmail, password: hash });
+  const phone = normalizePhone(req.body?.phone);
+  const u = await User.create({ username, email: syntheticEmail, password: hash, ...(phone ? { phone } : {}) });
   await assignReferralCode(u, req.body?.referralCode);
 
   const { token, sessionTtlMin, expiresAt } = signToken(u);

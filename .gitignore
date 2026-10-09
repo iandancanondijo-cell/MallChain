@@ -74,6 +74,23 @@ blockchain_working/config/gentx/
 .kiro/
 .mines/
 .claude/
+.refact/
+.zhanlu/
+
+# Local dev artifacts that were accidentally committed — Go installer binary
+# and a UTF-16 module-list dump containing a local Windows path.
+go.msi
+modlist.json
+
+# Root-level scratch/debug scripts (one-off manual tests with hardcoded local
+# paths — not part of the jest/pytest suites under backend/ or e2e/).
+/test_*.js
+/test_*.py
+
+# Vendored/zipped toolchains and binaries (regeneratable, never commit)
+*.msi
+*.zip
+nodejs/node.zip
 
 # Blockchain data (large, regeneratable — never commit)
 blockchain_working/data/
