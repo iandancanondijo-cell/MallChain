@@ -1,0 +1,5 @@
+#!/bin/bash
+export PATH=$HOME/go/bin:$PATH
+export GOROOT=$HOME/go
+export GOPATH=$HOME/go-workspace
+export GOPRIVATE=github.com

@@ -16,7 +16,7 @@ const BadgePurchaseSchema = new mongoose.Schema({
   currency: { type: String, default: 'KES' },
   status: {
     type: String,
-    enum: ['pending', 'payment_initiated', 'confirmed', 'processing', 'issued', 'failed'],
+    enum: ['pending', 'payment_initiated', 'confirmed', 'awaiting_admin', 'processing', 'issued', 'failed', 'rejected'],
     default: 'pending',
   },
   paymentId: { type: String },

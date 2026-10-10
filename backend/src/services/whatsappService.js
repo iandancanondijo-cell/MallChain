@@ -1,139 +1,155 @@
 /**
- * WhatsApp Business API notification delivery — uses the official
- * Meta Cloud API (graph.facebook.com) to send template messages.
- * Best-effort: if unconfigured, sendWhatsApp no-ops with a warning
- * rather than throwing — matching the emailService/smsService pattern.
+ * WhatsApp notification service using Twilio WhatsApp API.
  *
- * Requires: WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN, and
- * optionally WHATSAPP_BUSINESS_ACCOUNT_ID in the environment.
+ * Environment variables:
+ *   TWILIO_ACCOUNT_SID       - Twilio Account SID (same as SMS)
+ *   TWILIO_AUTH_TOKEN        - Twilio Auth Token (same as SMS)
+ *   TWILIO_WHATSAPP_NUMBER   - Twilio WhatsApp number (e.g., +14155238886 for sandbox)
  *
- * Template messages are the only way to initiate conversations with
- * users who haven't messaged the business in the last 24 hours (the
- * "24-hour customer care window"). Templates must be pre-approved by
- * Meta — see the template name constants below.
+ * If TWILIO_ACCOUNT_SID is not set, messages are logged but not sent (dev mode).
+ *
+ * Note: With Twilio sandbox, recipients must opt-in by sending "join <keyword>" to the sandbox number.
+ * For production, you'll need a dedicated Twilio WhatsApp number and pre-approved templates.
  */
-const axios = require('axios');
-const { config } = require('../config');
+
 const logger = require('../utils/logger');
 
-// Pre-approved Meta template names. These must exist in the WhatsApp
-// Business Manager's template library before they can be sent.
-const TEMPLATES = {
-  // Generic notification template — used for most wallet events.
-  TRANSACTION_ALERT: 'transaction_alert',
-  // Security alert — login from new device, password change, etc.
-  SECURITY_ALERT: 'security_alert',
-  // KYC/AML review status update.
-  REVIEW_UPDATE: 'review_update',
-  // Withdrawal processed or requires action.
-  WITHDRAWAL_UPDATE: 'withdrawal_update',
-};
-
-function isConfigured() {
-  const { phoneNumberId, accessToken } = config.whatsapp.meta;
-  return Boolean(phoneNumberId && accessToken);
-}
-
-let warnedOnce = false;
+const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01';
 
 /**
- * Sends a WhatsApp template message to the given phone number.
- * @param {string} to - Recipient phone in E.164 format (e.g. "+254712345678")
- * @param {string} templateName - One of the TEMPLATES constants
- * @param {Array<{type: string, text?: string}>} components - Template components
- * @returns {boolean} true if sent, false if skipped or failed
+ * Send a WhatsApp message via Twilio.
+ *
+ * @param {string} to - Recipient phone number in international format (e.g., +254712345678)
+ * @param {string} message - Text message body
+ * @returns {Promise<{success: boolean, messageId?: string, error?: string}>}
  */
-async function sendWhatsApp(to, templateName, components = []) {
-  if (!to || !templateName) return false;
+async function sendWhatsApp(to, message) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const whatsappNumber = process.env.TWILIO_WHATSAPP_NUMBER;
 
-  if (!isConfigured()) {
-    if (!warnedOnce) {
-      warnedOnce = true;
-      logger.warn('whatsappService', 'WhatsApp Business API not configured — WhatsApp notifications disabled (development mode)');
-    }
-    return false;
+  if (!accountSid || !authToken || !whatsappNumber) {
+    logger.warn('whatsappService', 'WhatsApp not configured — message logged but not sent', {
+      to,
+      message: message.substring(0, 100),
+    });
+    return { success: false, error: 'WhatsApp not configured' };
   }
 
-  const { phoneNumberId, accessToken, apiVersion } = config.whatsapp.meta;
-  const url = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`;
-
-  const payload = {
-    messaging_product: 'whatsapp',
-    to: to.replace(/^\+/, ''), // Meta expects phone without the leading +
-    type: 'template',
-    template: {
-      name: templateName,
-      language: { code: 'en' },
-    },
-  };
-
-  // Only attach components if provided — Meta rejects empty component arrays
-  // on some template types.
-  if (components.length > 0) {
-    payload.template.components = components;
+  if (!to || !message) {
+    return { success: false, error: 'Missing required fields: to, message' };
   }
+
+  const url = `${TWILIO_API_BASE}/Accounts/${accountSid}/Messages.json`;
+
+  const payload = new URLSearchParams({
+    From: `whatsapp:${whatsappNumber}`,
+    To: `whatsapp:${to}`,
+    Body: message,
+  });
 
   try {
-    const res = await axios.post(url, payload, {
+    const response = await fetch(url, {
+      method: 'POST',
       headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
+        'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-      timeout: 15000,
+      body: payload.toString(),
     });
 
-    const messageId = res.data?.messages?.[0]?.id;
-    if (!messageId) {
-      logger.warn('whatsappService', 'Meta accepted the request but returned no message ID', { to, templateName, response: res.data });
+    if (!response.ok) {
+      const errorData = await response.json();
+      logger.error('whatsappService', 'WhatsApp API error', {
+        status: response.status,
+        error: errorData,
+        to,
+      });
+      return { success: false, error: `WhatsApp error: ${errorData.message || response.status}` };
     }
-    return Boolean(messageId);
-  } catch (err) {
-    // Meta returns detailed error objects — log the relevant parts.
-    const metaError = err.response?.data?.error;
-    if (metaError) {
-      logger.error('whatsappService', `Meta API error: ${metaError.message} (code ${metaError.code}, type ${metaError.type})`, { to, templateName });
-    } else {
-      logger.error('whatsappService', 'failed to send WhatsApp message', err, { to, templateName });
-    }
-    return false;
+
+    const data = await response.json();
+    logger.info('whatsappService', 'WhatsApp message sent', { to, messageId: data.sid });
+    return { success: true, messageId: data.sid };
+  } catch (error) {
+    logger.error('whatsappService', 'Failed to send WhatsApp message', { error: error.message, to });
+    return { success: false, error: error.message };
   }
 }
 
 /**
- * Convenience: send a simple text-based transaction alert.
- * Builds the template components from a title and body.
+ * Send a template message via Twilio WhatsApp.
+ * Note: Twilio handles templates differently - you create them in the Twilio Console.
+ * For now, this sends a formatted message. For production, use Twilio's Content Templates.
+ *
+ * @param {string} to - Recipient phone number (e.g., +254712345678)
+ * @param {string} templateName - Template identifier (for logging)
+ * @param {Object} params - Template parameters: { header: [], body: [], buttons: [] }
+ * @returns {Promise<{success: boolean, messageId?: string, error?: string}>}
  */
-async function sendTransactionAlert(to, title, body) {
-  return sendWhatsApp(to, TEMPLATES.TRANSACTION_ALERT, [
-    {
-      type: 'body',
-      parameters: [
-        { type: 'text', text: title },
-        { type: 'text', text: body || '' },
-      ],
-    },
-  ]);
-}
+async function sendTemplate(to, templateName, params = {}) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const whatsappNumber = process.env.TWILIO_WHATSAPP_NUMBER;
 
-/**
- * Convenience: send a security alert (login, password change, etc.).
- */
-async function sendSecurityAlert(to, title, body) {
-  return sendWhatsApp(to, TEMPLATES.SECURITY_ALERT, [
-    {
-      type: 'body',
-      parameters: [
-        { type: 'text', text: title },
-        { type: 'text', text: body || '' },
-      ],
-    },
-  ]);
+  if (!accountSid || !authToken || !whatsappNumber) {
+    logger.warn('whatsappService', 'WhatsApp not configured — template message logged but not sent', {
+      to,
+      templateName,
+    });
+    return { success: false, error: 'WhatsApp not configured' };
+  }
+
+  if (!to || !templateName) {
+    return { success: false, error: 'Missing required fields: to, templateName' };
+  }
+
+  let message = `[${templateName}]\n`;
+  if (params.body && params.body.length > 0) {
+    message += params.body.join('\n');
+  } else {
+    message += 'Notification';
+  }
+
+  const url = `${TWILIO_API_BASE}/Accounts/${accountSid}/Messages.json`;
+
+  const payload = new URLSearchParams({
+    From: `whatsapp:${whatsappNumber}`,
+    To: `whatsapp:${to}`,
+    Body: message,
+  });
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: payload.toString(),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      logger.error('whatsappService', 'WhatsApp template API error', {
+        status: response.status,
+        error: errorData,
+        to,
+        templateName,
+      });
+      return { success: false, error: `WhatsApp error: ${errorData.message || response.status}` };
+    }
+
+    const data = await response.json();
+    logger.info('whatsappService', 'WhatsApp template sent', { to, templateName, messageId: data.sid });
+    return { success: true, messageId: data.sid };
+  } catch (error) {
+    logger.error('whatsappService', 'Failed to send WhatsApp template', { error: error.message, to, templateName });
+    return { success: false, error: error.message };
+  }
 }
 
 module.exports = {
   sendWhatsApp,
-  sendTransactionAlert,
-  sendSecurityAlert,
-  isConfigured,
-  TEMPLATES,
+  sendTemplate,
 };

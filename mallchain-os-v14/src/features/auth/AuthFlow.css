@@ -1,0 +1,485 @@
+/* AuthFlow (login) styles — Mallchain OS v14
+ * Aligned with KycWizard.css design tokens and patterns so the login
+ * and signup flows share a consistent visual language.
+ */
+
+/* Page wrapper */
+.auth-page {
+  min-height: 100vh;
+  background: var(--bg-0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+/* Card container */
+.auth-container {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 40px 20px;
+}
+
+/* Header */
+.auth-header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.auth-title {
+  font-size: 34px;
+  font-weight: 700;
+  margin: 12px 0 8px;
+  font-family: var(--font-display);
+  color: var(--txt-1);
+}
+
+.auth-subtitle {
+  color: var(--txt-3);
+  font-size: 15px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Mode tabs (Sign in / Create account) */
+.auth-tabs {
+  display: flex;
+  background: var(--bg-1);
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 32px;
+  border: 1.5px solid var(--line-1);
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 12px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--txt-3);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  font: inherit;
+  font-weight: 700;
+}
+
+.auth-tab.active {
+  background: var(--gold);
+  color: var(--gold-ink, #1b1305);
+}
+
+/* Social login divider */
+.auth-social {
+  margin-bottom: 24px;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.auth-divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--line-1);
+}
+
+.auth-divider-text {
+  font-size: 12px;
+  color: var(--txt-3);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Social button */
+.auth-social-btn {
+  width: 100%;
+  padding: 12px;
+  background: var(--bg-1);
+  border: 1.5px solid var(--line-1);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: border-color 0.2s;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--txt-1);
+}
+
+.auth-social-btn:hover {
+  border-color: var(--gold);
+}
+
+/* Form layout */
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Field group */
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-field label {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--txt-1);
+}
+
+/* Input with leading icon */
+.auth-input-wrap {
+  position: relative;
+}
+
+.auth-input-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--txt-3);
+  pointer-events: none;
+}
+
+.auth-input {
+  width: 100%;
+  font: inherit;
+  color: var(--txt-1);
+  background: var(--bg-1);
+  border: 1.5px solid var(--line-1);
+  border-radius: 8px;
+  padding: 11px 12px;
+  min-height: 46px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+
+.auth-input--with-icon-left {
+  padding-left: 44px;
+}
+
+.auth-input--with-icon-right {
+  padding-right: 44px;
+}
+
+.auth-input:focus {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+  border-color: var(--gold);
+}
+
+.auth-input[aria-invalid="true"] {
+  border-color: var(--red);
+}
+
+/* Password visibility toggle */
+.auth-pass-toggle {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--txt-3);
+  padding: 4px;
+  display: flex;
+}
+
+.auth-pass-toggle:hover {
+  color: var(--txt-1);
+}
+
+/* Field-level error */
+.auth-field-error {
+  font-size: 12px;
+  color: var(--red);
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Form-level error banner — mirrors .kyc-error */
+.auth-error {
+  color: var(--red);
+  font-size: 13px;
+  padding: 12px;
+  background: var(--red-dim, rgba(232, 65, 47, 0.1));
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Remember-me checkbox — mirrors .kyc-checkbox */
+.auth-checkbox {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 14px;
+  padding: 16px;
+  background: var(--bg-1);
+  border-radius: 12px;
+  border: 1px solid var(--line-1);
+  cursor: pointer;
+}
+
+.auth-checkbox input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  accent-color: var(--gold);
+}
+
+.auth-checkbox span {
+  color: var(--txt-2);
+  line-height: 1.5;
+}
+
+/* Submit button — mirrors .kyc-btn-primary but with gold treatment
+   to differentiate the login CTA from the KYC wizard's brand-colored one */
+.auth-submit {
+  width: 100%;
+  padding: 12px 22px;
+  min-height: 46px;
+  background: var(--brand, #0F4C45);
+  border: none;
+  border-radius: 8px;
+  color: var(--on-brand, #fff);
+  font: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+
+.auth-submit:hover:not(:disabled) {
+  background: var(--gold);
+  color: var(--gold-ink, #1b1305);
+}
+
+.auth-submit:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* Footer links */
+.auth-footer {
+  text-align: center;
+  font-size: 13px;
+}
+
+.auth-footer-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.auth-footer-btn {
+  background: transparent;
+  border: none;
+  color: var(--txt-3);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+  transition: color 0.2s;
+}
+
+.auth-footer-btn:hover {
+  color: var(--gold);
+}
+
+.auth-footer-sep {
+  color: var(--line-1);
+}
+
+/* Recovery section */
+.auth-recovery {
+  text-align: left;
+}
+
+.auth-recovery-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--txt-1);
+  margin-bottom: 12px;
+}
+
+.auth-recovery-desc {
+  font-size: 12px;
+  color: var(--txt-3);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.auth-recovery .auth-field {
+  margin-bottom: 12px;
+}
+
+.auth-recovery .auth-field label {
+  font-size: 12px;
+  color: var(--txt-3);
+  font-weight: 500;
+}
+
+.auth-recovery-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1.5px solid var(--line-1);
+  background: var(--bg-1);
+  color: var(--txt-1);
+  font: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.auth-recovery-input:focus {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+  border-color: var(--gold);
+}
+
+.auth-recovery-textarea {
+  font-family: monospace;
+  resize: vertical;
+}
+
+.auth-recovery-submit {
+  width: 100%;
+  padding: 12px;
+  background: var(--brand, #0F4C45);
+  border: none;
+  border-radius: 8px;
+  color: var(--on-brand, #fff);
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.auth-recovery-submit:hover:not(:disabled) {
+  background: var(--gold);
+  color: var(--gold-ink, #1b1305);
+}
+
+.auth-recovery-submit:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.auth-recovery-back {
+  width: 100%;
+  padding: 10px;
+  margin-top: 8px;
+  background: transparent;
+  border: none;
+  color: var(--txt-3);
+  cursor: pointer;
+  font-size: 13px;
+  transition: color 0.2s;
+}
+
+.auth-recovery-back:hover {
+  color: var(--gold);
+}
+
+/* Features section */
+.auth-features {
+  margin-top: 40px;
+  padding: 24px;
+  background: var(--bg-1);
+  border-radius: 12px;
+  border: 1.5px solid var(--line-1);
+}
+
+.auth-features-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.auth-features-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--txt-1);
+}
+
+.auth-features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.auth-feature {
+  text-align: center;
+}
+
+.auth-feature-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--soft, rgba(15, 76, 69, 0.1));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 8px;
+}
+
+.auth-feature-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--txt-1);
+  margin-bottom: 2px;
+}
+
+.auth-feature-desc {
+  font-size: 11px;
+  color: var(--txt-3);
+}
+
+/* Mobile responsive */
+@media (max-width: 820px) {
+  .auth-container {
+    padding: 28px 18px;
+  }
+
+  .auth-title {
+    font-size: 28px;
+  }
+
+  .auth-features-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-container *,
+  .auth-container *::before,
+  .auth-container *::after {
+    transition: none !important;
+  }
+}

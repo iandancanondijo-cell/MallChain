@@ -1,0 +1,1 @@
+var e=`mallchain_address_book`;function t(){try{let t=localStorage.getItem(e);return t?JSON.parse(t):[]}catch{return[]}}export{t as n,e as t};

@@ -42,6 +42,21 @@ export default function Staking() {
     try {
       const result = await stakeMlcns({ mnemonic, fromAddress: address, amountMlcns: a });
       toast(`Staked ${a} MLCNS — tx ${result.txHash.slice(0, 10)}…`);
+      
+      // Send notification through all channels
+      store.applyTx({
+        type: 'stake',
+        amount: a,
+        asset: 'MLPTS',
+        kind: 'debit',
+        note: `Staked ${a} MLPTS`,
+        notifTitle: `Staked ${a} MLPTS`,
+        notifKind: 'tx',
+        notifCategory: 'governance',
+        activityText: `Staked ${a} MLPTS (tx ${result.txHash.slice(0, 10)}…)`,
+        status: 'confirmed',
+      });
+      
       setAmt('');
       load();
     } catch (e) {
@@ -57,6 +72,15 @@ export default function Staking() {
     try {
       const result = await unstake({ mnemonic, fromAddress: address, stakeId });
       toast(`Unstaked — principal + rewards paid out (tx ${result.txHash.slice(0, 10)}…)`);
+      
+      // Send notification through all channels
+      store.pushNotification(
+        'Unstaked Successfully',
+        'Your principal and rewards have been paid out',
+        'tx',
+        'governance'
+      );
+      
       load();
     } catch (e) {
       toast(e instanceof StakingTxError || e instanceof Error ? e.message : 'Unstake failed', false);

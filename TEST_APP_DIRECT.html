@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mallchain App - Direct Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #020617;
+            color: #e2e8f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .status {
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        .status.loading {
+            background: #1e3a5f;
+            color: #7dd3fc;
+        }
+        .status.success {
+            background: #064e3b;
+            color: #86efac;
+        }
+        .status.error {
+            background: #7c2d12;
+            color: #fca5a5;
+        }
+        h1 {
+            color: #06b6d4;
+            margin-bottom: 20px;
+        }
+        h2 {
+            color: #0891b2;
+            margin-top: 30px;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        .test-section {
+            margin: 20px 0;
+            border: 1px solid #1e293b;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        button {
+            padding: 8px 16px;
+            background: #06b6d4;
+            color: #020617;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            margin: 5px 5px 5px 0;
+        }
+        button:hover {
+            background: #0891b2;
+        }
+        #app {
+            margin-top: 40px;
+            min-height: 500px;
+            border: 2px dashed #1e293b;
+            border-radius: 8px;
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔬 Mallchain App - Direct Browser Test</h1>
+        
+        <div class="test-section">
+            <h2>1. Module Loading Test</h2>
+            <p>Testing if Vite modules can be loaded...</p>
+            <div id="vite-status" class="status loading">⏳ Loading Vite client...</div>
+            <div id="main-status" class="status loading">⏳ Loading app entry...</div>
+        </div>
+
+        <div class="test-section">
+            <h2>2. Manual App Loading</h2>
+            <button onclick="loadApp()">Load App in iframe</button>
+            <button onclick="loadAppDirect()">Load App Direct</button>
+            <p style="font-size: 12px; color: #9ca3af;">If neither button works, there's a module loading issue.</p>
+        </div>
+
+        <div class="test-section">
+            <h2>3. API Connectivity Test</h2>
+            <button onclick="testDevServer()">Test Dev Server</button>
+            <button onclick="testModules()">Test Modules Directly</button>
+            <div id="api-status" class="status"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>4. App Container</h2>
+            <div id="app"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>5. Console Capture</h2>
+            <p>Any errors will appear below:</p>
+            <div id="console-output" style="background: #0f172a; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto; font-size: 11px;">
+                (Console logs will appear here)
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Capture all console output
+        const originalLog = console.log;
+        const originalError = console.error;
+        const consoleOutput = document.getElementById('console-output');
+        
+        console.log = function(...args) {
+            originalLog(...args);
+            const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ');
+            consoleOutput.innerHTML += `<div style="color: #86efac;">✓ ${msg}</div>`;
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        };
+        
+        console.error = function(...args) {
+            originalError(...args);
+            const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ');
+            consoleOutput.innerHTML += `<div style="color: #fca5a5;">✗ ${msg}</div>`;
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        };
+
+        // Test 1: Check if Vite client can be fetched
+        fetch('http://localhost:3000/@vite/client')
+            .then(r => {
+                document.getElementById('vite-status').className = r.ok ? 'status success' : 'status error';
+                document.getElementById('vite-status').textContent = r.ok ? 
+                    '✓ Vite client module is accessible' : 
+                    `✗ Vite client returned HTTP ${r.status}`;
+            })
+            .catch(e => {
+                document.getElementById('vite-status').className = 'status error';
+                document.getElementById('vite-status').textContent = '✗ Failed to fetch Vite client: ' + e.message;
+            });
+
+        // Test 2: Check if main.tsx is accessible
+        fetch('http://localhost:3000/src/main.tsx')
+            .then(r => {
+                document.getElementById('main-status').className = r.ok ? 'status success' : 'status error';
+                document.getElementById('main-status').textContent = r.ok ? 
+                    '✓ App entry point is accessible' : 
+                    `✗ Main entry returned HTTP ${r.status}`;
+            })
+            .catch(e => {
+                document.getElementById('main-status').className = 'status error';
+                document.getElementById('main-status').textContent = '✗ Failed to fetch main.tsx: ' + e.message;
+            });
+
+        // Test dev server connectivity
+        function testDevServer() {
+            console.log('Testing dev server connectivity...');
+            fetch('http://localhost:3000/')
+                .then(r => {
+                    const status = document.getElementById('api-status');
+                    status.className = 'status success';
+                    status.innerHTML = `✓ Dev server is responding (HTTP ${r.status})`;
+                    console.log('Dev server connectivity: OK');
+                })
+                .catch(e => {
+                    const status = document.getElementById('api-status');
+                    status.className = 'status error';
+                    status.innerHTML = `✗ Dev server error: ${e.message}`;
+                    console.error('Dev server connectivity failed:', e.message);
+                });
+        }
+
+        // Test module loading directly
+        async function testModules() {
+            const status = document.getElementById('api-status');
+            status.className = 'status loading';
+            status.innerHTML = '⏳ Testing module loading...';
+            
+            try {
+                const clients = ['/@vite/client', '/@react-refresh', '/src/main.tsx'];
+                const results = [];
+                
+                for (const client of clients) {
+                    const r = await fetch(`http://localhost:3000${client}`);
+                    results.push(`${client}: ${r.status} (${r.headers.get('content-type')})`);
+                }
+                
+                status.className = 'status success';
+                status.innerHTML = '✓ All modules accessible:<br>' + results.join('<br>');
+                results.forEach(r => console.log(r));
+            } catch (e) {
+                status.className = 'status error';
+                status.innerHTML = `✗ Module test failed: ${e.message}`;
+                console.error('Module test error:', e);
+            }
+        }
+
+        // Load app in iframe
+        function loadApp() {
+            console.log('Attempting to load app in iframe...');
+            const app = document.getElementById('app');
+            app.innerHTML = '<iframe src="http://localhost:3000" style="width: 100%; height: 600px; border: none; border-radius: 4px;"></iframe>';
+        }
+
+        // Load app directly (inject root div and script)
+        function loadAppDirect() {
+            console.log('Attempting to load app directly...');
+            const app = document.getElementById('app');
+            
+            // Create a new root div
+            const root = document.createElement('div');
+            root.id = 'root-app';
+            app.innerHTML = '';
+            app.appendChild(root);
+            
+            // Try to load the main script dynamically
+            const script = document.createElement('script');
+            script.type = 'module';
+            script.textContent = `
+                try {
+                    console.log('Starting app load...');
+                    import('http://localhost:3000/src/main.tsx').then(() => {
+                        console.log('App loaded successfully!');
+                    }).catch(e => {
+                        console.error('Failed to load app:', e);
+                        document.getElementById('root-app').innerHTML = '<p style="color: red;">Failed to load app: ' + e.message + '</p>';
+                    });
+                } catch (e) {
+                    console.error('Import failed:', e);
+                }
+            `;
+            app.appendChild(script);
+        }
+
+        console.log('Test page initialized. Ready for testing.');
+    </script>
+</body>
+</html>

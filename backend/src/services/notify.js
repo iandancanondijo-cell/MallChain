@@ -61,8 +61,8 @@ async function notifyUser(user, { kind = 'system', title, body = '', category = 
   const whatsappOptIn = prefs?.contactInfo?.whatsappOptIn ?? false;
 
   if (emailEnabled && user.email) {
-    const { sendEmail } = require('./emailService');
-    await sendEmail(user.email, title, body);
+    const { sendEmail, complianceFooter } = require('./emailService');
+    await sendEmail(user.email, title, `${body}${complianceFooter()}`);
   }
   if (smsEnabled && user.phone) {
     const { sendSms } = require('./smsService');

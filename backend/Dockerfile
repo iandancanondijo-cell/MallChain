@@ -2,7 +2,7 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Production stage
 FROM node:20-alpine
@@ -27,6 +27,11 @@ WORKDIR /app
 COPY --from=deps /app/package*.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY src ./src
+# WORKDIR /app was created as root — the app creates logs/ and uploads/ at
+# startup via mkdirSync. Pre-create them and hand ownership to the non-root
+# user so nodejs can write at runtime.
+RUN mkdir -p /app/logs /app/uploads/kyc /app/uploads/aml /app/uploads/edu \
+  && chown -R nodejs:nodejs /app/logs /app/uploads
 USER nodejs
 EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

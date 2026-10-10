@@ -12,14 +12,17 @@ import { config, chain } from '../../services/config';
 import { useWizard } from '../../hooks/useWizard';
 import WalletFlow from '../wallet/WalletFlow';
 import { KycWizard, type KycData } from './KycWizard';
-import { Mail, Lock, Eye, EyeOff, ArrowRight, Check, AlertTriangle, Sparkles, Shield, Zap, Globe, Upload, FileText, User, MapPin, Phone, Calendar, CreditCard, AlertCircle, ChevronRight, ChevronLeft } from 'lucide-react';
+import BlockchainLogo from './BlockchainLogo';
+import './AuthFlow.css';
+import { Mail, Lock, Eye, EyeOff, ArrowRight, AlertTriangle, Sparkles, Shield, Zap, Globe, AlertCircle } from 'lucide-react';
 
 /**
- * KYC wizard steps. 'inactive' means the KYC flow hasn't started — kept as
- * steps[0] so `kyc.stepIndex` lines up with the legacy 0-5 numbering used
- * throughout this file's render logic (1=Personal .. 5=Review).
+ * KYC wizard steps. 'inactive' means the flow hasn't started — kept as
+ * steps[0] so `kyc.stepIndex` lines up: 1=Create, 2=Verify .. 7=Review.
+ * The wizard IS the signup flow — account creation and email verification
+ * are steps 1 and 2, replacing the old separate signup form.
  */
-const KYC_STEPS = ['inactive', 'personal', 'address', 'identity', 'financial', 'review'] as const;
+const KYC_STEPS = ['inactive', 'create', 'verify', 'personal', 'address', 'identity', 'selfie', 'review'] as const;
 type KycStep = typeof KYC_STEPS[number];
 
 /**
@@ -36,6 +39,11 @@ interface AuthResponse {
 }
 
 const INITIAL_KYC_DATA: KycData = {
+  email: '',
+  password: '',
+  confirmPassword: '',
+  referralCode: '',
+  otp: '',
   firstName: '',
   lastName: '',
   dateOfBirth: '',
@@ -49,11 +57,13 @@ const INITIAL_KYC_DATA: KycData = {
   idNumber: '',
   idExpiry: '',
   idDocumentUrl: '',
+  selfieUrl: '',
   occupation: '',
   sourceOfFunds: '',
   annualIncome: '',
   politicalExposure: false,
   acceptTerms: false,
+  confirmAge: false,
 };
 
 /** Auth flow — sign in / sign up → wallet create/import → security → dashboard. */
@@ -78,14 +88,12 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
   });
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
-  const [confirmPass, setConfirmPass] = useState('');
-  const [referralCode, setReferralCode] = useState(() => {
+  const [referralCode] = useState(() => {
     const match = /[?&]ref=([^&]+)/.exec(window.location.hash);
     return match ? decodeURIComponent(match[1]) : '';
   });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showPass, setShowPass] = useState(false);
-  const [showConfirmPass, setShowConfirmPass] = useState(false);
-  const [termsAccepted, setTermsAccepted] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [recoveryMnemonic, setRecoveryMnemonic] = useState('');
   const [recoveryPassword, setRecoveryPassword] = useState('');
@@ -107,9 +115,10 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
     key: 'kyc',
     tier: 'session',
     steps: KYC_STEPS,
-    initialData: INITIAL_KYC_DATA,
+    initialData: { ...INITIAL_KYC_DATA, referralCode },
+    initialStep: mode === 'signup' ? 'create' : 'inactive',
   });
-  const kycStep = kyc.stepIndex; // 0=inactive .. 5=review, matches the legacy numeric steps below
+  const kycStep = kyc.stepIndex; // 0=inactive .. 7=review
   const kycData = kyc.data;
 
   // Load saved KYC draft from backend on mount — lets a user resume their
@@ -157,16 +166,36 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
     return () => clearTimeout(timer);
   }, [kycData, kyc.step, st.user.authed]);
 
+  // Keep the auth screen in sync when the hash router changes only the query
+  // string, such as switching from /auth?mode=login to /auth?mode=signup.
+  useEffect(() => {
+    const syncModeFromHash = () => {
+      const match = /[?&]mode=([^&]+)/.exec(window.location.hash);
+      const nextMode = match?.[1] === 'signup' ? 'signup' : 'login';
+      setMode(nextMode);
+
+      if (nextMode === 'signup' && kyc.stepIndex === 0) {
+        kyc.goTo('create');
+      } else if (nextMode === 'login' && kyc.stepIndex > 0) {
+        kyc.reset();
+      }
+    };
+
+    window.addEventListener('hashchange', syncModeFromHash);
+    return () => window.removeEventListener('hashchange', syncModeFromHash);
+  }, [kyc.stepIndex]);
+
   // Required fields per step, matching backend/src/routes/kyc.js's Joi schema
   // exactly (every field there is .required()). Previously Next/Submit had no
   // client-side gating at all, so a user could click straight through empty
   // fields and hit a 400 "validation_failed" from the backend — silently,
   // before the error-banner fix, and still avoidably even after it.
   const KYC_REQUIRED_FIELDS: Record<number, (keyof KycData)[]> = {
-    1: ['firstName', 'lastName', 'dateOfBirth', 'nationality'],
-    2: ['address', 'city', 'country', 'postalCode', 'phoneNumber'],
-    3: ['idType', 'idNumber', 'idExpiry', 'idDocumentUrl'],
-    4: ['occupation', 'sourceOfFunds', 'annualIncome'],
+    1: ['email', 'password', 'confirmPassword', 'acceptTerms'],
+    2: ['otp'],
+    3: ['firstName', 'lastName', 'dateOfBirth', 'nationality'],
+    4: ['address', 'city', 'country', 'postalCode', 'phoneNumber'],
+    5: ['idType', 'idNumber', 'idExpiry'],
   };
   const isKycStepValid = (step: number): boolean => {
     const fields = KYC_REQUIRED_FIELDS[step];
@@ -213,15 +242,6 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
       }
     }
   }, [step, mnemonic]);
-
-  const strength = () => {
-    let s = 0;
-    if (pass.length >= 8) s++;
-    if (/[A-Z]/.test(pass)) s++;
-    if (/[a-z]/.test(pass)) s++;
-    if (/[0-9]/.test(pass)) s++;
-    return s;
-  };
 
   const createWallet = async (mnemonicToUse?: string) => {
     setBusy(true);
@@ -330,152 +350,54 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
 
   const submitAuth = async () => {
     setErr('');
-    
-    // Common validation
+    setFieldErrors({});
+
     if (!email.includes('@')) { setErr('Enter a valid email address.'); return; }
     if (pass.length < 8) { setErr('Password must be at least 8 characters.'); return; }
-    
-    // Signup-specific validation
-    if (mode === 'signup') {
-      if (pass !== confirmPass) { setErr('Passwords do not match.'); return; }
-      if (strength() < 2) { setErr('Password is too weak. Please use a stronger password.'); return; }
-      if (!termsAccepted) { setErr('You must accept the Terms of Service and Privacy Policy.'); return; }
-    }
-    
+
     setBusy(true);
-    
-    if (mode === 'signup') {
-      // Signup flow
-      const res = await api.post<AuthResponse>('/api/auth/register', {
-        email,
-        password: pass,
-        referralCode: referralCode.trim() || undefined,
-      });
 
-      if (res.ok && res.data) {
-        // The JWT was set as an httpOnly cookie by this same response —
-        // only the non-secret expiry hint is recorded client-side.
-        authService.setSession(res.data.expiresAt);
+    const res = await api.post<AuthResponse>('/api/auth/login', { email, password: pass, otp: otp || undefined });
 
-        // A brand-new account must start from a clean slate — reset first,
-        // so any stale local data left over from a previous session/account
-        // on this browser (wallet, balances, mines/staking/governance
-        // caches, etc.) doesn't leak into it and make a new signup look
-        // like "the same app state as before." (store.reset() reassigns
-        // store.state to a fresh object, so read it fresh afterward rather
-        // than the possibly-stale `st` closure captured at render time.)
+    if (res.ok && res.data?.requires2fa) {
+      setRequires2fa(true);
+      setBusy(false);
+      return;
+    }
+
+    if (res.ok && res.data) {
+      authService.setSession(res.data.expiresAt);
+
+      const u = res.data.user;
+      if (store.state.user.id !== (u?.id || '')) {
         store.reset();
-
-        // Update store auth state — id/banned/kycLevel/role come from the
-        // real backend user object (toPublicUser() in authController.js),
-        // not derived client-side.
-        const u = res.data.user;
-        store.state.user = {
-          ...store.state.user,
-          id: u?.id || '',
-          authed: true,
-          // Prefer a real name (KYC-derived) or chosen username over a guessed one.
-          name: u?.name || u?.username || email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-          email,
-          avatarInitial: email[0].toUpperCase(),
-          frozen: !!u?.banned,
-          kycLevel: u?.kycLevel ?? 1,
-          role: u?.role || 'user',
-        };
-        store.commit();
-        // App.tsx's own subscribeUser() call only runs once, at boot — for
-        // a real signup/login within an already-open tab (no reload), that
-        // effect already ran and finished before this token existed, so it
-        // never fires again on its own. Without this, real-time
-        // notification push (badges, governance, etc.) would silently never
-        // activate for anyone who doesn't hard-refresh after signing up.
-        // reauth() first — the socket connected anonymously (no token yet)
-        // when App.tsx booted, and the backend's io.use() JWT middleware
-        // only reads the token at connection time, so subscribeUser() below
-        // would otherwise be rejected as unauthenticated.
-        socketManager.reauth();
-        if (u?.id) socketManager.subscribeUser(u.id);
-        toast('Account created successfully!');
-        setBusy(false);
-        kyc.goTo('personal'); // Start KYC process
-      } else {
-        const errorMsg = res.error || 'Registration failed';
-        console.error('Registration error details:', res);
-        console.error('Validation details:', (res as any).details);
-        // Show detailed validation error if available
-        if ((res as any).details && (res as any).details.length > 0) {
-          const fieldErrors = (res as any).details.map((d: any) => `${d.field}: ${d.message}`).join(', ');
-          setErr(`Validation failed: ${fieldErrors}`);
-        } else {
-          setErr(errorMsg);
-        }
-        handleApiError({ ok: res.ok, error: res.error, code: res.code } as any, 
-          { action: 'creating account', endpoint: '/api/auth/register' }, 
-          false
-        );
-        setBusy(false);
       }
+      store.state.user = {
+        ...store.state.user,
+        id: u?.id || '',
+        authed: true,
+        name: u?.name || u?.username || email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+        email,
+        avatarInitial: email[0].toUpperCase(),
+        frozen: !!u?.banned,
+        kycLevel: u?.kycLevel ?? 1,
+        role: u?.role || 'user',
+      };
+      store.commit();
+      socketManager.reauth();
+      if (u?.id) socketManager.subscribeUser(u.id);
+      toast('Welcome back to Mallchain!');
+      setBusy(false);
+      const role = u?.role || 'user';
+      navigate(role === 'admin' || role === 'superadmin' ? '/admin' : '/');
     } else {
-      // Login flow
-      const res = await api.post<AuthResponse>('/api/auth/login', { email, password: pass, otp: otp || undefined });
-
-      if (res.ok && res.data?.requires2fa) {
-        setRequires2fa(true);
-        setBusy(false);
-        return;
-      }
-
-      if (res.ok && res.data) {
-        // The JWT was set as an httpOnly cookie by this same response —
-        // only the non-secret expiry hint is recorded client-side.
-        authService.setSession(res.data.expiresAt);
-
-        const u = res.data.user;
-        // Only reset if this browser's cached local data belongs to a
-        // DIFFERENT account than the one signing in (including the common
-        // case of stale/demo data with no account attached at all, where
-        // the cached id is ''). If the same account is logging back in on
-        // this browser, leave local state (wallet, caches) untouched —
-        // there's no server-side wallet↔account link (walletCreationController
-        // never persists it), so resetting here could orphan a real wallet.
-        if (store.state.user.id !== (u?.id || '')) {
-          store.reset();
-        }
-        store.state.user = {
-          ...store.state.user,
-          id: u?.id || '',
-          authed: true,
-          // Prefer a real name (KYC-derived) or chosen username over a guessed one.
-          name: u?.name || u?.username || email.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
-          email,
-          avatarInitial: email[0].toUpperCase(),
-          frozen: !!u?.banned,
-          kycLevel: u?.kycLevel ?? 1,
-          role: u?.role || 'user',
-        };
-        store.commit();
-        // See the matching comment in the signup branch above — App.tsx's
-        // boot-time subscribeUser() call has already run and won't fire
-        // again for a login that happens within an already-open tab, and
-        // reauth() is needed so the socket carries this session's token.
-        socketManager.reauth();
-        if (u?.id) socketManager.subscribeUser(u.id);
-        toast('Welcome back to Mallchain!');
-        setBusy(false);
-        // Admin/superadmin credentials go straight to the admin control
-        // center — an operator signing in has no reason to land on the
-        // regular user dashboard first.
-        const role = u?.role || 'user';
-        navigate(role === 'admin' || role === 'superadmin' ? '/admin' : '/');
-      } else {
-        const errorMsg = res.error || 'Login failed';
-        setErr(errorMsg);
-        handleApiError({ ok: res.ok, error: res.error, code: res.code } as any, 
-          { action: 'signing in', endpoint: '/api/auth/login' }, 
-          false
-        );
-        setBusy(false);
-      }
+      const errorMsg = res.error || 'Login failed';
+      setErr(errorMsg);
+      handleApiError({ ok: res.ok, error: res.error, code: res.code } as any,
+        { action: 'signing in', endpoint: '/api/auth/login' },
+        false
+      );
+      setBusy(false);
     }
   };
 
@@ -487,13 +409,66 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         data={kycData}
         setData={(data) => kyc.setData(data)}
         error={err}
-        onNext={() => {
+        onNext={async () => {
           setErr('');
-          kyc.next();
+          if (kyc.stepIndex === 1) {
+            // Step 1: Create account — validate and register
+            const { email: em, password: pw, confirmPassword: cpw, acceptTerms: terms, confirmAge: ageOk } = kycData;
+            if (!em || !em.includes('@')) { setErr('Enter a valid email address.'); return; }
+            if (!pw || pw.length < 8) { setErr('Password must be at least 8 characters.'); return; }
+            if (pw !== cpw) { setErr('Passwords do not match.'); return; }
+            if (!ageOk) { setErr('You must confirm you are at least 18 years old.'); return; }
+            if (!terms) { setErr('You must agree to the Terms of Service.'); return; }
+            setBusy(true);
+            const res = await api.post<AuthResponse>('/api/auth/register', {
+              email: em,
+              password: pw,
+              referralCode: kycData.referralCode.trim() || undefined,
+            });
+            if (res.ok && res.data) {
+              authService.setSession(res.data.expiresAt);
+              store.reset();
+              const u = res.data.user;
+              store.state.user = {
+                ...store.state.user,
+                id: u?.id || '',
+                authed: true,
+                name: u?.name || u?.username || em.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+                email: em,
+                avatarInitial: em[0].toUpperCase(),
+                frozen: !!u?.banned,
+                kycLevel: u?.kycLevel ?? 1,
+                role: u?.role || 'user',
+              };
+              store.commit();
+              socketManager.reauth();
+              if (u?.id) socketManager.subscribeUser(u.id);
+              toast('Account created! Check your email for the verification code.');
+              setBusy(false);
+              kyc.next();
+            } else {
+              const errorMsg = res.error || 'Registration failed';
+              const parsed: Record<string, string> = {};
+              if ((res as any).details && Array.isArray((res as any).details)) {
+                for (const d of (res as any).details) {
+                  if (d.field && d.message) parsed[d.field] = d.message;
+                }
+              }
+              setErr(Object.values(parsed).join('; ') || errorMsg);
+              setBusy(false);
+            }
+          } else {
+            kyc.next();
+          }
         }}
         onBack={() => {
           setErr('');
-          kyc.back();
+          if (kyc.stepIndex <= 1) {
+            kyc.reset();
+            navigate('/landing');
+          } else {
+            kyc.back();
+          }
         }}
         onSubmit={async () => {
           setBusy(true);
@@ -552,874 +527,403 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
     );
   }
 
-  const renderAuthForm = () => (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      transition={{ duration: 0.3 }}
-      style={{ 
-        maxWidth: 480, 
-        margin: '0 auto', 
-        padding: '40px 20px'
-      }}
-    >
-      {/* Header */}
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.4, delay: 0.1 }}
-        style={{ textAlign: 'center', marginBottom: 40 }}
-      >
-        <motion.div style={{ position: 'relative', width: 120, height: 120, marginBottom: 20 }}>
-          {/* Outer rotating ring - represents blockchain network */}
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
-            style={{
-              position: 'absolute',
-              width: 120,
-              height: 120,
-              border: '2px solid',
-              borderColor: 'var(--gold)',
-              borderRadius: '50%',
-              opacity: 0.3,
-            }}
-          />
-
-          {/* Middle pulsing ring - block confirmation */}
-          <motion.div
-            animate={{ scale: [1, 1.15, 1] }}
-            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-            style={{
-              position: 'absolute',
-              width: 100,
-              height: 100,
-              border: '2px solid',
-              borderColor: 'var(--gold)',
-              borderRadius: '50%',
-              top: 10,
-              left: 10,
-              opacity: 0.5,
-            }}
-          />
-
-          {/* Animated blocks around the circle - representing block formations */}
-          {[0, 1, 2, 3].map((i) => (
-            <motion.div
-              key={`block-${i}`}
-              animate={{
-                opacity: [0, 1, 1, 0],
-                x: [0, Math.cos((i * Math.PI) / 2) * 50, Math.cos((i * Math.PI) / 2) * 50, 0],
-                y: [0, Math.sin((i * Math.PI) / 2) * 50, Math.sin((i * Math.PI) / 2) * 50, 0],
-              }}
-              transition={{
-                duration: 3,
-                repeat: Infinity,
-                delay: i * 0.75,
-                ease: 'easeInOut',
-              }}
-              style={{
-                position: 'absolute',
-                width: 16,
-                height: 16,
-                background: 'linear-gradient(135deg, var(--gold), #c9781a)',
-                borderRadius: 4,
-                top: '50%',
-                left: '50%',
-                marginTop: -8,
-                marginLeft: -8,
-                boxShadow: '0 4px 12px rgba(255, 211, 92, 0.6)',
-              }}
-            />
-          ))}
-
-          {/* Transaction lines connecting blocks */}
-          <svg
-            style={{
-              position: 'absolute',
-              width: 120,
-              height: 120,
-              top: 0,
-              left: 0,
-              pointerEvents: 'none',
-            }}
-          >
-            {[0, 1, 2, 3].map((i) => {
-              const angle = (i * Math.PI) / 2;
-              const nextAngle = ((i + 1) * Math.PI) / 2;
-              const x1 = 60 + Math.cos(angle) * 50;
-              const y1 = 60 + Math.sin(angle) * 50;
-              const x2 = 60 + Math.cos(nextAngle) * 50;
-              const y2 = 60 + Math.sin(nextAngle) * 50;
-
-              return (
-                <motion.line
-                  key={`line-${i}`}
-                  x1={x1}
-                  y1={y1}
-                  x2={x2}
-                  y2={y2}
-                  stroke="var(--gold)"
-                  strokeWidth="2"
-                  opacity="0.3"
-                  animate={{
-                    opacity: [0.1, 0.6, 0.1],
-                  }}
-                  transition={{
-                    duration: 2.5,
-                    repeat: Infinity,
-                    delay: i * 0.6,
-                    ease: 'easeInOut',
-                  }}
-                />
-              );
-            })}
-          </svg>
-
-          {/* Checkmark pulses - confirmed transactions */}
-          {[0, 1, 2].map((i) => (
-            <motion.div
-              key={`check-${i}`}
-              animate={{
-                opacity: [0, 1, 0],
-                scale: [0.5, 1, 1.5],
-              }}
-              transition={{
-                duration: 1.5,
-                repeat: Infinity,
-                delay: i * 0.5,
-                ease: 'easeOut',
-              }}
-              style={{
-                position: 'absolute',
-                fontSize: 16,
-                top: '50%',
-                left: '50%',
-                marginTop: -8,
-                marginLeft: -8,
-                color: 'var(--gold)',
-              }}
-            >
-              ✓
-            </motion.div>
-          ))}
-
-          {/* Central M Logo */}
-          <div style={{ 
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            marginTop: -40,
-            marginLeft: -40,
-            display: 'inline-flex', 
-            alignItems: 'center', 
-            justifyContent: 'center',
-            width: 80, 
-            height: 80, 
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, var(--gold), #c9781a)',
-            boxShadow: '0 8px 32px rgba(255, 211, 92, 0.3)',
-            zIndex: 10,
-          }}>
-            <span style={{ 
-              fontSize: 36, 
-              fontWeight: 800, 
-              color: 'var(--gold-ink)',
-              fontFamily: 'var(--font-display)'
-            }}>M</span>
-          </div>
-        </motion.div>
-        <h1 style={{ 
-          fontSize: 32, 
-          fontWeight: 800, 
-          marginBottom: 8,
-          background: 'linear-gradient(135deg, var(--txt), var(--gold))',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          backgroundClip: 'text'
-        }}>
-          {mode === 'login' ? 'Welcome back' : 'Join Mallchain'}
-        </h1>
-        <p style={{ 
-          color: 'var(--txt-3)', 
-          fontSize: 15,
-          lineHeight: 1.6
-        }}>
-          {mode === 'login' 
-            ? 'Sign in to access your decentralized commerce hub'
-            : 'Create your account and start building on the decentralized web'
-          }
-        </p>
-      </motion.div>
-
-      {/* Mode Toggle */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.15 }}
-        style={{ 
-          display: 'flex',
-          background: 'var(--bg-2)',
-          borderRadius: 12,
-          padding: 4,
-          marginBottom: 32
-        }}
-      >
-        <button
-          onClick={() => { setMode('login'); setErr(''); setConfirmPass(''); setRequires2fa(false); setOtp(''); }}
-          style={{
-            flex: 1,
-            padding: 12,
-            background: mode === 'login' ? 'var(--gold)' : 'transparent',
-            border: 'none',
-            borderRadius: 10,
-            color: mode === 'login' ? 'var(--gold-ink)' : 'var(--txt-3)',
-            fontSize: 14,
-            fontWeight: 700,
-            cursor: 'pointer',
-            transition: 'all 0.2s'
-          }}
-        >
-          Sign in
-        </button>
-        <button
-          onClick={() => { setMode('signup'); setErr(''); setConfirmPass(''); setRequires2fa(false); setOtp(''); }}
-          style={{
-            flex: 1,
-            padding: 12,
-            background: mode === 'signup' ? 'var(--gold)' : 'transparent',
-            border: 'none',
-            borderRadius: 10,
-            color: mode === 'signup' ? 'var(--gold-ink)' : 'var(--txt-3)',
-            fontSize: 14,
-            fontWeight: 700,
-            cursor: 'pointer',
-            transition: 'all 0.2s'
-          }}
-        >
-          Create account
-        </button>
-      </motion.div>
-
-      {/* Social Login (Demo) */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.2 }}
-        style={{ marginBottom: 24 }}
-      >
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: 16, 
-          marginBottom: 16 
-        }}>
-          <div style={{ flex: 1, height: 1, background: 'var(--border-soft)' }} />
-          <span style={{ fontSize: 12, color: 'var(--txt-3)', fontWeight: 600 }}>
-            {mode === 'login' ? 'Or continue with' : 'Quick signup'}
-          </span>
-          <div style={{ flex: 1, height: 1, background: 'var(--border-soft)' }} />
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
-          {/* Apple/GitHub removed — there's no backend OAuth support for
-              either (only Google has a real passport strategy wired up in
-              backend/src/routes/auth.js), so those buttons only ever showed
-              a "(demo)" toast. A button that can't do anything is worse than
-              no button. */}
+  const renderAuthForm = () => {
+    return (
+      <div className="auth-container">
+        {/* Tab switcher */}
+        <div className="auth-tabs" role="tablist" aria-label="Account access">
           <button
-            onClick={() => {
-              const ref = referralCode.trim();
-              window.location.href = `${config.apiBaseUrl}/api/auth/google${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`;
-            }}
-            style={{
-              padding: 12,
-              background: 'var(--bg-2)',
-              border: '1px solid var(--border)',
-              borderRadius: 10,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              transition: 'all 0.2s'
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--gold)'}
-            onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
+            onClick={() => { setMode('login'); setErr(''); kyc.reset(); }}
+            className={`auth-tab${mode === 'login' ? ' active' : ''}`}
+            role="tab"
+            aria-selected={mode === 'login'}
           >
-            <Globe size={20} style={{ color: '#4285F4' }} />
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Continue with Google</span>
+            Sign in
+          </button>
+          <button
+            onClick={() => { setMode('signup'); setErr(''); kyc.goTo('create'); }}
+            className={`auth-tab${mode === 'signup' ? ' active' : ''}`}
+            role="tab"
+            aria-selected={mode === 'signup'}
+          >
+            Create account
           </button>
         </div>
-      </motion.div>
 
-      {/* Form */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.25 }}
-        style={{ display: 'flex', flexDirection: 'column', gap: 20 }}
-      >
-        {/* Email */}
+        {/* Form container */}
         <div>
-          <label htmlFor="auth-email" style={{
-            display: 'block',
-            fontSize: 13,
-            fontWeight: 600,
-            marginBottom: 8,
-            color: 'var(--txt-2)'
-          }}>
-            Email address
-          </label>
-          <div style={{ position: 'relative' }}>
-            <Mail size={18} aria-hidden="true" style={{
-              position: 'absolute',
-              left: 14,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: 'var(--txt-3)'
-            }} />
-            <input
-              id="auth-email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              autoCapitalize="off"
-              autoCorrect="off"
-              inputMode="email"
-              aria-invalid={err && !email.includes('@') ? true : undefined}
-              aria-describedby={err ? 'auth-form-error' : undefined}
-              style={{
-                width: '100%',
-                padding: '14px 14px 14px 44px',
-                background: 'var(--bg-2)',
-                border: `1px solid ${err && !email.includes('@') ? 'var(--red)' : 'var(--border)'}`,
-                borderRadius: 12,
-                color: 'var(--txt)',
-                fontSize: 14,
-                transition: 'border-color 0.2s'
-              }}
-              onFocus={(e) => e.currentTarget.style.borderColor = 'var(--gold)'}
-              onBlur={(e) => e.currentTarget.style.borderColor = err && !email.includes('@') ? 'var(--red)' : 'var(--border)'}
-            />
-          </div>
-        </div>
+          <AnimatePresence mode="wait">
+            {mode === 'login' ? (
+              <motion.div
+                key="login"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                {/* Header */}
+                <div className="auth-header">
+                  <BlockchainLogo />
+                  <h1 className="auth-title">
+                    Welcome back.
+                  </h1>
+                  <p className="auth-subtitle">
+                    Sign in to your commerce hub.
+                  </p>
+                </div>
 
-        {/* Password */}
-        <div>
-          <label htmlFor="auth-password" style={{
-            display: 'block',
-            fontSize: 13,
-            fontWeight: 600,
-            marginBottom: 8,
-            color: 'var(--txt-2)'
-          }}>
-            Password
-          </label>
-          <div style={{ position: 'relative' }}>
-            <Lock size={18} aria-hidden="true" style={{
-              position: 'absolute',
-              left: 14,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: 'var(--txt-3)'
-            }} />
-            <input
-              id="auth-password"
-              type={showPass ? 'text' : 'password'}
-              value={pass}
-              onChange={(e) => setPass(e.target.value)}
-              placeholder="••••••••"
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              aria-invalid={err && pass.length < 8 ? true : undefined}
-              aria-describedby={err ? 'auth-form-error' : undefined}
-              style={{
-                width: '100%',
-                padding: '14px 44px 14px 44px',
-                background: 'var(--bg-2)',
-                border: `1px solid ${err && pass.length < 8 ? 'var(--red)' : 'var(--border)'}`,
-                borderRadius: 12,
-                color: 'var(--txt)',
-                fontSize: 14,
-                transition: 'border-color 0.2s'
-              }}
-              onFocus={(e) => e.currentTarget.style.borderColor = 'var(--gold)'}
-              onBlur={(e) => e.currentTarget.style.borderColor = err && pass.length < 8 ? 'var(--red)' : 'var(--border)'}
-            />
-            <button
-              type="button"
-              aria-label={showPass ? 'Hide password' : 'Show password'}
-              aria-pressed={showPass}
-              onClick={() => setShowPass(!showPass)}
-              style={{
-                position: 'absolute',
-                right: 14,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--txt-3)',
-                padding: 4
-              }}
-            >
-              {showPass ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
-            </button>
-          </div>
+                {/* Error */}
+                <AnimatePresence>
+                  {err && (
+                    <motion.div
+                      role="alert"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="auth-error"
+                    >
+                      <AlertTriangle size={16} aria-hidden="true" />
+                      {err}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
-          {/* 2FA challenge — shown once the backend reports this account has
-              real TOTP enabled (checkTwoFactor() in authController.js). */}
-          {mode === 'login' && requires2fa && (
-            <div style={{ marginTop: 12 }}>
-              <label htmlFor="auth-otp" style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 600, color: 'var(--txt-2)' }}>
-                Authenticator code
-              </label>
-              <input
-                id="auth-otp"
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                autoFocus
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                placeholder="6-digit code or backup code"
-                style={{
-                  width: '100%',
-                  padding: '14px',
-                  background: 'var(--bg-2)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 12,
-                  color: 'var(--txt)',
-                  fontSize: 14,
-                }}
-              />
-            </div>
-          )}
+                {/* Email */}
+                <div className="auth-field">
+                  <label htmlFor="auth-email-login">Email address</label>
+                  <div className="auth-input-wrap">
+                    <Mail className="auth-input-icon" size={18} aria-hidden="true" />
+                    <input
+                      id="auth-email-login"
+                      className="auth-input auth-input--with-icon-left"
+                      type="email"
+                      value={email}
+                      onChange={(e) => { setEmail(e.target.value); setFieldErrors({}); }}
+                      placeholder="you@example.com"
+                      autoComplete="email"
+                      autoCapitalize="off"
+                    />
+                  </div>
+                </div>
 
-          {/* Password Strength */}
-          {mode === 'signup' && pass.length > 0 && (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ 
-                display: 'flex', 
-                gap: 4, 
-                marginBottom: 6 
-              }}>
-                {[1, 2, 3, 4].map((i) => (
-                  <div
-                    key={i}
-                    style={{
-                      flex: 1,
-                      height: 4,
-                      borderRadius: 2,
-                      background: i <= strength() 
-                        ? strength() >= 3 ? 'var(--green)' 
-                        : strength() >= 2 ? 'var(--gold)' 
-                        : 'var(--red)'
-                        : 'var(--border)'
-                    }}
+                {/* Password */}
+                <div className="auth-field">
+                  <label htmlFor="auth-password-login">Password</label>
+                  <div className="auth-input-wrap">
+                    <Lock className="auth-input-icon" size={18} aria-hidden="true" />
+                    <input
+                      id="auth-password-login"
+                      className="auth-input auth-input--with-icon-left auth-input--with-icon-right"
+                      type={showPass ? 'text' : 'password'}
+                      value={pass}
+                      onChange={(e) => { setPass(e.target.value); setFieldErrors({}); }}
+                      placeholder="Enter your password"
+                      autoComplete="current-password"
+                    />
+                    <button
+                      type="button"
+                      className="auth-pass-toggle"
+                      aria-label={showPass ? 'Hide password' : 'Show password'}
+                      onClick={() => setShowPass((visible) => !visible)}
+                    >
+                      {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2FA if needed */}
+                {requires2fa && (
+                  <div className="auth-field">
+                    <label htmlFor="auth-otp-login">Authenticator code</label>
+                    <input
+                      id="auth-otp-login"
+                      type="text"
+                      inputMode="numeric"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value)}
+                      placeholder="6-digit code"
+                      autoComplete="one-time-code"
+                    />
+                  </div>
+                )}
+
+                {/* Remember me + Forgot password */}
+                <div className="auth-options">
+                  <label className="auth-checkbox">
+                    <input type="checkbox" defaultChecked />
+                    <span>Remember me on this device</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => { setRecoveryMode(true); setErr(''); }}
+                    className="auth-footer-btn"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+
+                {/* Sign in button */}
+                <button
+                  onClick={submitAuth}
+                  disabled={busy || (requires2fa && !otp)}
+                  className="auth-submit"
+                >
+                  {busy ? 'Processing...' : 'Sign in'}
+                </button>
+
+                {/* Google login */}
+                <button
+                  onClick={() => {
+                    window.location.href = `${config.apiBaseUrl}/api/auth/google`;
+                  }}
+                  className="auth-social-btn"
+                >
+                  <Globe size={16} style={{ color: '#4285F4' }} />
+                  Continue with Google
+                </button>
+
+                {/* Recovery mode */}
+                {recoveryMode && (
+                  <div className="auth-recovery">
+                    <h3 className="auth-recovery-title">Recover wallet</h3>
+                    <p className="auth-recovery-desc">
+                      Enter your recovery phrase to restore access.
+                    </p>
+                    <div className="auth-field">
+                      <label>Recovery phrase</label>
+                      <textarea
+                        value={recoveryMnemonic}
+                        onChange={(e) => setRecoveryMnemonic(e.target.value)}
+                        placeholder="word1 word2 word3 ..."
+                        rows={3}
+                        className="auth-recovery-input auth-recovery-textarea"
+                      />
+                    </div>
+                    <div className="auth-field">
+                      <label>New password</label>
+                      <input
+                        type="password"
+                        value={recoveryPassword}
+                        onChange={(e) => setRecoveryPassword(e.target.value)}
+                        placeholder="Min 8 characters"
+                        className="auth-recovery-input"
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        onClick={recoverWallet}
+                        disabled={busy}
+                        className="auth-recovery-submit"
+                      >
+                        Recover wallet
+                      </button>
+                      <button
+                        onClick={() => { setRecoveryMode(false); setRecoveryMnemonic(''); setRecoveryPassword(''); }}
+                        className="auth-recovery-back"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            ) : (
+              <motion.div
+                key="signup"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                {/* Header */}
+                <div style={{ marginBottom: 28, textAlign: 'center' }}>
+                  <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 12, color: 'var(--txt-1)', fontFamily: 'monospace' }}>
+                    Create your account.
+                  </h1>
+                  <p style={{ fontSize: 14, color: 'var(--txt-3)', margin: 0 }}>
+                    Start your journey on the decentralized web.
+                  </p>
+                </div>
+
+                {/* Step indicator */}
+                <div style={{ fontSize: 12, color: 'var(--txt-3)', marginBottom: 24, textAlign: 'center' }}>
+                  Step 1 of 7. Verifying your identity takes about five minutes. You will need a valid government ID and a camera or photo of yourself.
+                </div>
+
+                {/* Error */}
+                <AnimatePresence>
+                  {err && (
+                    <motion.div
+                      role="alert"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="kyc-error"
+                      style={{ marginBottom: 20 }}
+                    >
+                      <AlertTriangle size={16} aria-hidden="true" />
+                      {err}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Email */}
+                <div className="kyc-field">
+                  <label htmlFor="auth-email-signup">Email address</label>
+                  <input
+                    id="auth-email-signup"
+                    type="email"
+                    value={kycData.email}
+                    onChange={(e) => kyc.setData({ email: e.target.value })}
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                    autoCapitalize="off"
                   />
-                ))}
-              </div>
-              <div style={{ 
-                fontSize: 12, 
-                color: strength() >= 3 ? 'var(--green)' : strength() >= 2 ? 'var(--gold)' : 'var(--txt-3)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4
-              }}>
-                {strength() >= 3 ? <Check size={12} /> : null}
-                {['Very weak', 'Weak', 'Fair', 'Good', 'Strong'][strength()]}
-              </div>
-            </div>
-          )}
+                </div>
+
+                {/* Password */}
+                <div className="kyc-field">
+                  <label htmlFor="auth-password-signup">Password</label>
+                  <input
+                    id="auth-password-signup"
+                    type={showPass ? 'text' : 'password'}
+                    value={kycData.password}
+                    onChange={(e) => kyc.setData({ password: e.target.value })}
+                    placeholder="Min 8 characters"
+                    autoComplete="new-password"
+                  />
+                </div>
+
+                {/* Confirm password */}
+                <div className="kyc-field">
+                  <label htmlFor="auth-confirm-signup">Confirm password</label>
+                  <input
+                    id="auth-confirm-signup"
+                    type={showPass ? 'text' : 'password'}
+                    value={kycData.confirmPassword}
+                    onChange={(e) => kyc.setData({ confirmPassword: e.target.value })}
+                    placeholder="Repeat your password"
+                    autoComplete="new-password"
+                  />
+                </div>
+
+                {/* Referral code */}
+                <div className="kyc-field">
+                  <label htmlFor="auth-referral">Referral code (optional)</label>
+                  <input
+                    id="auth-referral"
+                    type="text"
+                    value={kycData.referralCode}
+                    onChange={(e) => kyc.setData({ referralCode: e.target.value })}
+                    placeholder="MALL-XXXXXXXX"
+                    autoComplete="off"
+                  />
+                </div>
+
+                {/* Checkboxes */}
+                <label className="kyc-checkbox" style={{ marginBottom: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={kycData.confirmAge}
+                    onChange={(e) => kyc.setData({ confirmAge: e.target.checked })}
+                  />
+                  <span>I confirm I am at least 18 years old</span>
+                </label>
+
+                <label className="kyc-checkbox" style={{ marginBottom: 24 }}>
+                  <input
+                    type="checkbox"
+                    checked={kycData.acceptTerms}
+                    onChange={(e) => kyc.setData({ acceptTerms: e.target.checked })}
+                  />
+                  <span>I agree to the Terms of Service and Privacy Policy</span>
+                </label>
+
+                {/* Continue button */}
+                <button
+                  onClick={async () => {
+                    setErr('');
+                    const { email: em, password: pw, confirmPassword: cpw, acceptTerms: terms, confirmAge: ageOk } = kycData;
+                    if (!em || !em.includes('@')) { setErr('Enter a valid email address.'); return; }
+                    if (!pw || pw.length < 8) { setErr('Password must be at least 8 characters.'); return; }
+                    if (pw !== cpw) { setErr('Passwords do not match.'); return; }
+                    if (!ageOk) { setErr('You must confirm you are at least 18 years old.'); return; }
+                    if (!terms) { setErr('You must agree to the Terms of Service.'); return; }
+                    setBusy(true);
+                    const res = await api.post<AuthResponse>('/api/auth/register', {
+                      email: em,
+                      password: pw,
+                      referralCode: kycData.referralCode.trim() || undefined,
+                    });
+                    if (res.ok && res.data) {
+                      authService.setSession(res.data.expiresAt);
+                      store.reset();
+                      const u = res.data.user;
+                      store.state.user = {
+                        ...store.state.user,
+                        id: u?.id || '',
+                        authed: true,
+                        name: u?.name || u?.username || em.split('@')[0],
+                        email: em,
+                        avatarInitial: em[0].toUpperCase(),
+                        frozen: !!u?.banned,
+                        kycLevel: u?.kycLevel ?? 1,
+                        role: u?.role || 'user',
+                      };
+                      store.commit();
+                      socketManager.reauth();
+                      if (u?.id) socketManager.subscribeUser(u.id);
+                      toast('Account created! Check your email for the verification code.');
+                      setBusy(false);
+                      kyc.next();
+                    } else {
+                      setErr(res.error || 'Registration failed');
+                      setBusy(false);
+                    }
+                  }}
+                  disabled={busy}
+                  className="kyc-btn kyc-btn-primary"
+                  style={{ width: '100%', marginBottom: 16 }}
+                >
+                  {busy ? 'Creating account...' : 'Continue'}
+                </button>
+
+                {/* Google login */}
+                <button
+                  onClick={() => {
+                    window.location.href = `${config.apiBaseUrl}/api/auth/google`;
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: 12,
+                    background: 'var(--bg-1)',
+                    border: '1.5px solid var(--line-1)',
+                    borderRadius: 8,
+                    color: 'var(--txt-1)',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    marginBottom: 20
+                  }}
+                >
+                  <Globe size={16} style={{ color: '#4285F4' }} />
+                  Continue with Google
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
+      </div>
+    );
+  };
 
-        {/* Confirm Password */}
-        {mode === 'signup' && (
-          <div>
-            <label htmlFor="auth-confirm-password" style={{
-              display: 'block',
-              fontSize: 13,
-              fontWeight: 600,
-              marginBottom: 8,
-              color: 'var(--txt-2)'
-            }}>
-              Confirm password
-            </label>
-            <div style={{ position: 'relative' }}>
-              <Lock size={18} aria-hidden="true" style={{
-                position: 'absolute',
-                left: 14,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                color: 'var(--txt-3)'
-              }} />
-              <input
-                id="auth-confirm-password"
-                type={showConfirmPass ? 'text' : 'password'}
-                value={confirmPass}
-                onChange={(e) => setConfirmPass(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="new-password"
-                aria-invalid={err && pass !== confirmPass ? true : undefined}
-                aria-describedby={err ? 'auth-form-error' : undefined}
-                style={{
-                  width: '100%',
-                  padding: '14px 44px 14px 44px',
-                  background: 'var(--bg-2)',
-                  border: `1px solid ${err && pass !== confirmPass ? 'var(--red)' : 'var(--border)'}`,
-                  borderRadius: 12,
-                  color: 'var(--txt)',
-                  fontSize: 14,
-                  transition: 'border-color 0.2s'
-                }}
-                onFocus={(e) => e.currentTarget.style.borderColor = 'var(--gold)'}
-                onBlur={(e) => e.currentTarget.style.borderColor = err && pass !== confirmPass ? 'var(--red)' : 'var(--border)'}
-              />
-              <button
-                type="button"
-                aria-label={showConfirmPass ? 'Hide password' : 'Show password'}
-                aria-pressed={showConfirmPass}
-                onClick={() => setShowConfirmPass(!showConfirmPass)}
-                style={{
-                  position: 'absolute',
-                  right: 14,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: 'var(--txt-3)',
-                  padding: 4
-                }}
-              >
-                {showConfirmPass ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Referral code (signup only) */}
-        {mode === 'signup' && (
-          <div>
-            <label htmlFor="auth-referral" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>
-              Referral code (optional)
-            </label>
-            <input
-              id="auth-referral"
-              type="text"
-              value={referralCode}
-              onChange={(e) => setReferralCode(e.target.value)}
-              placeholder="MALL-XXXXXXXX"
-              autoComplete="off"
-              autoCapitalize="characters"
-              style={{
-                width: '100%',
-                padding: '14px',
-                background: 'var(--bg-2)',
-                border: '1px solid var(--border)',
-                borderRadius: 12,
-                color: 'var(--txt)',
-                fontSize: 14,
-              }}
-            />
-          </div>
-        )}
-
-        {/* Error */}
-        <AnimatePresence>
-          {err && (
-            <motion.div
-              id="auth-form-error"
-              role="alert"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              style={{
-                color: 'var(--red)',
-                fontSize: 13,
-                padding: 12,
-                background: 'var(--red-dim)',
-                borderRadius: 10,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8
-              }}
-            >
-              <AlertTriangle size={16} aria-hidden="true" />
-              {err}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Terms */}
-        <label style={{ 
-          display: 'flex', 
-          alignItems: 'flex-start', 
-          gap: 10, 
-          fontSize: 13, 
-          color: 'var(--txt-3)', 
-          lineHeight: 1.5 
-        }}>
-          <input
-            type="checkbox"
-            checked={mode === 'login' ? true : termsAccepted}
-            onChange={(e) => { if (mode === 'signup') setTermsAccepted(e.target.checked); }}
-            style={{ marginTop: 2, accentColor: 'var(--gold)' }}
-          />
-          <span>
-            {mode === 'login' 
-              ? 'Remember me on this device'
-              : 'I agree to the Terms of Service and Privacy Policy'
-            }
-          </span>
-        </label>
-
-        {/* Submit Button */}
-        <button
-          onClick={submitAuth}
-          disabled={busy || (mode === 'signup' && !confirmPass) || (mode === 'signup' && !termsAccepted) || (requires2fa && !otp)}
-          style={{
-            width: '100%',
-            padding: 16,
-            background: 'linear-gradient(135deg, var(--gold), #c9781a)',
-            border: 'none',
-            borderRadius: 12,
-            color: 'var(--gold-ink)',
-            fontSize: 15,
-            fontWeight: 700,
-            cursor: busy || (mode === 'signup' && !confirmPass) ? 'not-allowed' : 'pointer',
-            opacity: busy || (mode === 'signup' && !confirmPass) ? 0.5 : 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            boxShadow: '0 4px 20px rgba(255, 211, 92, 0.3)',
-            transition: 'all 0.2s'
-          }}
-          onMouseEnter={(e) => !busy && !(mode === 'signup' && !confirmPass) && (e.currentTarget.style.transform = 'translateY(-2px)')}
-          onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
-        >
-          {busy ? (
-            <>
-              <span className="spin" style={{ width: 16, height: 16, border: '2px solid var(--gold-ink)', borderTopColor: 'transparent' }} />
-              Processing...
-            </>
-          ) : (
-            <>
-              {mode === 'login' ? (requires2fa ? 'Verify code' : 'Sign in') : 'Create account'}
-              <ArrowRight size={18} />
-            </>
-          )}
-        </button>
-
-        {/* Prominent "Already have an account?" button — shown only in signup mode */}
-        {mode === 'signup' && (
-          <motion.div
-            initial={{ opacity: 0, y: 5 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, delay: 0.1 }}
-            style={{
-              padding: 16,
-              background: 'var(--bg-2)',
-              border: '1px solid var(--border)',
-              borderRadius: 12,
-              textAlign: 'center'
-            }}
-          >
-            <div style={{ fontSize: 14, color: 'var(--txt-2)', marginBottom: 10 }}>
-              Already have an account?
-            </div>
-            <button
-              onClick={() => { setMode('login'); setErr(''); setConfirmPass(''); setRequires2fa(false); setOtp(''); }}
-              style={{
-                padding: '10px 24px',
-                background: 'transparent',
-                border: '1px solid var(--gold)',
-                borderRadius: 8,
-                color: 'var(--gold)',
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                transition: 'all 0.2s'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--gold-dim)';
-                e.currentTarget.style.transform = 'translateY(-1px)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.transform = 'translateY(0)';
-              }}
-            >
-              Sign in to your account
-              <ArrowRight size={14} />
-            </button>
-          </motion.div>
-        )}
-
-        {/* Footer Links */}
-        <div style={{ textAlign: 'center', fontSize: 13 }}>
-          {recoveryMode ? (
-            <div style={{ textAlign: 'left' }}>
-              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--txt)', marginBottom: 12 }}>
-                Recover wallet
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--txt-3)', marginBottom: 16, lineHeight: 1.5 }}>
-                Enter the 12 or 24-word recovery phrase you saved when creating your wallet. This will restore your wallet with a new password.
-              </div>
-              <div className="field" style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: 12, color: 'var(--txt-3)', marginBottom: 4, display: 'block' }}>Recovery phrase</label>
-                <textarea
-                  value={recoveryMnemonic}
-                  onChange={(e) => setRecoveryMnemonic(e.target.value)}
-                  placeholder="word1 word2 word3 ..."
-                  rows={3}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border-soft)', background: 'var(--bg-2)', color: 'var(--txt)', fontSize: 13, fontFamily: 'monospace', resize: 'vertical' }}
-                />
-              </div>
-              <div className="field" style={{ marginBottom: 16 }}>
-                <label style={{ fontSize: 12, color: 'var(--txt-3)', marginBottom: 4, display: 'block' }}>New password</label>
-                <input
-                  type="password"
-                  value={recoveryPassword}
-                  onChange={(e) => setRecoveryPassword(e.target.value)}
-                  placeholder="Min 8 characters"
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border-soft)', background: 'var(--bg-2)', color: 'var(--txt)', fontSize: 13 }}
-                />
-              </div>
-              <button
-                onClick={recoverWallet}
-                disabled={busy || !recoveryMnemonic.trim() || recoveryPassword.length < 8}
-                style={{
-                  width: '100%', padding: 12, background: 'linear-gradient(135deg, var(--gold), #c9781a)',
-                  border: 'none', borderRadius: 10, color: '#fff', fontWeight: 600, fontSize: 14,
-                  cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1,
-                }}
-              >
-                {busy ? 'Recovering...' : 'Recover wallet'}
-              </button>
-              <button
-                onClick={() => { setRecoveryMode(false); setRecoveryMnemonic(''); setRecoveryPassword(''); setErr(''); }}
-                style={{
-                  width: '100%', padding: 10, marginTop: 8, background: 'transparent',
-                  border: 'none', color: 'var(--txt-3)', cursor: 'pointer', fontSize: 13,
-                }}
-              >
-                Back to login
-              </button>
-            </div>
-          ) : mode === 'login' ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-              <button
-                onClick={() => { setRecoveryMode(true); setErr(''); }}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--txt-3)',
-                  cursor: 'pointer',
-                  fontSize: 13
-                }}
-              >
-                Forgot password?
-              </button>
-              <span style={{ color: 'var(--border-soft)' }}>·</span>
-              <button
-                onClick={() => toast('2FA recovery requires your mnemonic phrase — use "Forgot password?" to restore access')}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--txt-3)',
-                  cursor: 'pointer',
-                  fontSize: 13
-                }}
-              >
-                2FA / recovery
-              </button>
-            </div>
-          ) : (
-            <span style={{ color: 'var(--txt-3)' }}>
-              Already have an account?{' '}
-              <button
-                onClick={() => { setMode('login'); setErr(''); setConfirmPass(''); setRequires2fa(false); setOtp(''); }}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--gold)',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  fontWeight: 600
-                }}
-              >
-                Sign in
-              </button>
-            </span>
-          )}
-        </div>
-      </motion.div>
-
-      {/* Features */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.35 }}
-        style={{ 
-          marginTop: 40, 
-          padding: 24, 
-          background: 'var(--bg-2)', 
-          borderRadius: 16,
-          border: '1px solid var(--border-soft)'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-          <Sparkles size={20} style={{ color: 'var(--gold)' }} />
-          <span style={{ fontSize: 14, fontWeight: 600 }}>Why Mallchain?</span>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-          {[
-            { icon: Shield, title: 'Secure', desc: 'Bank-grade security' },
-            { icon: Zap, title: 'Fast', desc: 'Instant transactions' },
-            { icon: Globe, title: 'Global', desc: 'Worldwide access' }
-          ].map((feature) => (
-            <div key={feature.title} style={{ textAlign: 'center' }}>
-              <div style={{ 
-                width: 40, 
-                height: 40, 
-                borderRadius: 10, 
-                background: 'var(--gold-dim)', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                margin: '0 auto 8'
-              }}>
-                <feature.icon size={20} style={{ color: 'var(--gold)' }} />
-              </div>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>{feature.title}</div>
-              <div style={{ fontSize: 11, color: 'var(--txt-3)' }}>{feature.desc}</div>
-            </div>
-          ))}
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-
-  // Reached only when step === 0 && kycStep === 'inactive' — every other
-  // step value already returned early above (KYC flow, wallet create/import,
-  // already-signed-in, wallet connection), so this only ever renders the
-  // auth form.
+  // Reached only when step === 0 && kycStep === 'inactive'
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, var(--bg) 0%, var(--bg-2) 100%)',
-      display: 'flex',
-      alignItems: 'center',
-      padding: '20px'
-    }}>
+    <div className="auth-page">
       <AnimatePresence mode="wait">
         {renderAuthForm()}
       </AnimatePresence>

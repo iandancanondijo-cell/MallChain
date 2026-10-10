@@ -95,6 +95,15 @@ export default function Governance() {
       const result = await castVote({ mnemonic, fromAddress: address, proposalId: sel.id, option });
       toast(`Vote cast — tx ${result.txHash.slice(0, 10)}…`);
       setSel((cur) => (cur ? { ...cur, userVote: { voted: true, option } } : cur));
+      
+      // Send notification through all channels
+      store.pushNotification(
+        `Vote Cast: ${option}`,
+        `You voted ${option} on proposal #${sel.id}`,
+        'tx',
+        'governance'
+      );
+      
       load();
     } catch (e) {
       toast(e instanceof GovernanceTxError || e instanceof Error ? e.message : 'Vote failed', false);
@@ -139,6 +148,15 @@ export default function Governance() {
         initialDepositAmount: toBaseUnits(amt), denom: 'stake',
       });
       toast(`Proposal submitted — tx ${result.txHash.slice(0, 10)}…`);
+      
+      // Send notification through all channels
+      store.pushNotification(
+        'Proposal Submitted',
+        `"${npTitle.trim()}" submitted with ${amt} STAKE deposit`,
+        'tx',
+        'governance'
+      );
+      
       setNewProposalOpen(false);
       setNpTitle(''); setNpSummary('');
       load();

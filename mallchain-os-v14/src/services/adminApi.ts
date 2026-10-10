@@ -116,7 +116,7 @@ export interface AdminBadgePurchase {
   phone: string;
   fiatAmount: number;
   currency: string;
-  status: 'pending' | 'payment_initiated' | 'confirmed' | 'processing' | 'issued' | 'failed';
+  status: 'pending' | 'payment_initiated' | 'confirmed' | 'awaiting_admin' | 'processing' | 'issued' | 'failed' | 'rejected';
   mpesaRef?: string;
   badgeTxHash?: string;
   reason?: string;
@@ -131,6 +131,16 @@ export interface AdminBadgeIssuance {
   badgeType: string;
   txHash?: string;
   issuedAt: string;
+}
+
+export interface BadgeDesignRecord {
+  _id: string;
+  imageUrl: string;
+  originalName?: string;
+  month: number;
+  year: number;
+  active: boolean;
+  createdAt: string;
 }
 
 export interface AuditLogEntry {
@@ -238,6 +248,36 @@ export interface TreasuryMetricTotal {
   count: number;
 }
 
+export interface ChainStatus {
+  blockHeight: number;
+  blockTime: string | null;
+  chainId: string;
+  nodeVersion: string;
+  moniker: string;
+  syncing: boolean;
+  latestBlockHash: string | null;
+  peerCount: number;
+  txCountInBlock: number;
+}
+
+export interface ChainBlock {
+  height: number;
+  hash: string;
+  proposer: string;
+  time: string;
+  txCount: number;
+}
+
+export interface ChainValidator {
+  moniker: string;
+  operatorAddress: string;
+  consensusAddress: string;
+  status: string;
+  tokens: string;
+  commission: string;
+  jailed: boolean;
+}
+
 class AdminApi {
   async getMe(): Promise<ApiResult<{ user: CurrentUser }>> {
     return api.get('/api/auth/me');
@@ -343,6 +383,26 @@ class AdminApi {
     return api.post(`/api/admin/badges/purchases/${encodeURIComponent(quoteId)}/void`, { reason });
   }
 
+  async approveBadge(quoteId: string, walletAddress: string): Promise<ApiResult<{ purchase: AdminBadgePurchase; txHash: string }>> {
+    return api.post('/api/admin/badges/approve', { quoteId, walletAddress });
+  }
+
+  async rejectBadge(quoteId: string, reason: string): Promise<ApiResult<{ purchase: AdminBadgePurchase }>> {
+    return api.post('/api/admin/badges/reject', { quoteId, reason });
+  }
+
+  async uploadBadgeDesign(file: File, month: number, year: number): Promise<ApiResult<{ design: BadgeDesignRecord }>> {
+    const fd = new FormData();
+    fd.append('badgeImage', file);
+    fd.append('month', String(month));
+    fd.append('year', String(year));
+    return api.upload<{ design: BadgeDesignRecord }>('/api/admin/badges/design', fd);
+  }
+
+  async getBadgeDesign(): Promise<ApiResult<{ design: BadgeDesignRecord | null }>> {
+    return api.get('/api/admin/badges/design');
+  }
+
   async listLiquidityActivity(params?: {
     flow?: string;
     limit?: number;
@@ -429,6 +489,22 @@ class AdminApi {
   /** Toggling requires superadmin (backend/src/routes/adminPanel.js). */
   async setMaintenance(payload: { global?: boolean; scope?: string; paused?: boolean; reason?: string }): Promise<ApiResult<MaintenanceState>> {
     return api.post('/api/admin/maintenance', payload);
+  }
+
+  async getChainStatus(): Promise<ApiResult<{ status: ChainStatus }>> {
+    return api.get('/api/admin/chain/status');
+  }
+
+  async getChainBlocks(limit = 10): Promise<ApiResult<{ blocks: ChainBlock[] }>> {
+    return api.get('/api/admin/chain/blocks', { limit });
+  }
+
+  async getChainValidators(): Promise<ApiResult<{ validators: ChainValidator[]; bondedTokens: string }>> {
+    return api.get('/api/admin/chain/validators');
+  }
+
+  async broadcastNotification(payload: { title: string; message: string; type?: string; channels?: { email?: boolean; sms?: boolean; whatsapp?: boolean; inApp?: boolean } }): Promise<ApiResult<{ recipientCount: number }>> {
+    return api.post('/api/admin/notifications/broadcast', payload);
   }
 }
 

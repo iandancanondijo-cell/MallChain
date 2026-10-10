@@ -1,0 +1,3531 @@
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+ <= read (data resources)
+
+Terraform will perform the following actions:
+
+  # data.aws_iam_policy_document.github_actions_deploy_permissions will be read during apply
+  # (config refers to values not yet known)
+ <= data "aws_iam_policy_document" "github_actions_deploy_permissions" {
+      + id            = (known after apply)
+      + json          = (known after apply)
+      + minified_json = (known after apply)
+
+      + statement {
+          + actions   = [
+              + "ecr:BatchCheckLayerAvailability",
+              + "ecr:CompleteLayerUpload",
+              + "ecr:GetAuthorizationToken",
+              + "ecr:GetDownloadUrlForLayer",
+              + "ecr:InitiateLayerUpload",
+              + "ecr:PutImage",
+              + "ecr:UploadLayerPart",
+            ]
+          + effect    = "Allow"
+          + resources = [
+              + "*",
+            ]
+        }
+      + statement {
+          + actions   = [
+              + "eks:DescribeCluster",
+            ]
+          + effect    = "Allow"
+          + resources = [
+              + (known after apply),
+            ]
+        }
+    }
+
+  # data.aws_iam_policy_document.github_actions_trust will be read during apply
+  # (config refers to values not yet known)
+ <= data "aws_iam_policy_document" "github_actions_trust" {
+      + id            = (known after apply)
+      + json          = (known after apply)
+      + minified_json = (known after apply)
+
+      + statement {
+          + actions = [
+              + "sts:AssumeRoleWithWebIdentity",
+            ]
+          + effect  = "Allow"
+
+          + condition {
+              + test     = "StringEquals"
+              + values   = [
+                  + "sts.amazonaws.com",
+                ]
+              + variable = "token.actions.githubusercontent.com:aud"
+            }
+          + condition {
+              + test     = "StringLike"
+              + values   = [
+                  + "repo:iandancanondijo-cell/MarketplaceBlockchain-Mallchain:ref:refs/heads/main",
+                  + "repo:iandancanondijo-cell/MarketplaceBlockchain-Mallchain:ref:refs/tags/*",
+                ]
+              + variable = "token.actions.githubusercontent.com:sub"
+            }
+
+          + principals {
+              + identifiers = [
+                  + (known after apply),
+                ]
+              + type        = "Federated"
+            }
+        }
+    }
+
+  # aws_ecr_lifecycle_policy.expire_untagged["backend"] will be created
+  + resource "aws_ecr_lifecycle_policy" "expire_untagged" {
+      + id          = (known after apply)
+      + policy      = jsonencode(
+            {
+              + rules = [
+                  + {
+                      + action       = {
+                          + type = "expire"
+                        }
+                      + description  = "expire untagged images after 14 days"
+                      + rulePriority = 1
+                      + selection    = {
+                          + countNumber = 14
+                          + countType   = "sinceImagePushed"
+                          + countUnit   = "days"
+                          + tagStatus   = "untagged"
+                        }
+                    },
+                ]
+            }
+        )
+      + region      = "eu-west-1"
+      + registry_id = (known after apply)
+      + repository  = "mallchain-backend"
+    }
+
+  # aws_ecr_lifecycle_policy.expire_untagged["frontend"] will be created
+  + resource "aws_ecr_lifecycle_policy" "expire_untagged" {
+      + id          = (known after apply)
+      + policy      = jsonencode(
+            {
+              + rules = [
+                  + {
+                      + action       = {
+                          + type = "expire"
+                        }
+                      + description  = "expire untagged images after 14 days"
+                      + rulePriority = 1
+                      + selection    = {
+                          + countNumber = 14
+                          + countType   = "sinceImagePushed"
+                          + countUnit   = "days"
+                          + tagStatus   = "untagged"
+                        }
+                    },
+                ]
+            }
+        )
+      + region      = "eu-west-1"
+      + registry_id = (known after apply)
+      + repository  = "mallchain-frontend"
+    }
+
+  # aws_ecr_lifecycle_policy.expire_untagged["marketplaced"] will be created
+  + resource "aws_ecr_lifecycle_policy" "expire_untagged" {
+      + id          = (known after apply)
+      + policy      = jsonencode(
+            {
+              + rules = [
+                  + {
+                      + action       = {
+                          + type = "expire"
+                        }
+                      + description  = "expire untagged images after 14 days"
+                      + rulePriority = 1
+                      + selection    = {
+                          + countNumber = 14
+                          + countType   = "sinceImagePushed"
+                          + countUnit   = "days"
+                          + tagStatus   = "untagged"
+                        }
+                    },
+                ]
+            }
+        )
+      + region      = "eu-west-1"
+      + registry_id = (known after apply)
+      + repository  = "mallchain-marketplaced"
+    }
+
+  # aws_ecr_repository.backend will be created
+  + resource "aws_ecr_repository" "backend" {
+      + arn                  = (known after apply)
+      + id                   = (known after apply)
+      + image_tag_mutability = "IMMUTABLE"
+      + name                 = "mallchain-backend"
+      + region               = "eu-west-1"
+      + registry_id          = (known after apply)
+      + repository_url       = (known after apply)
+      + tags_all             = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+
+      + image_scanning_configuration {
+          + scan_on_push = true
+        }
+    }
+
+  # aws_ecr_repository.frontend will be created
+  + resource "aws_ecr_repository" "frontend" {
+      + arn                  = (known after apply)
+      + id                   = (known after apply)
+      + image_tag_mutability = "IMMUTABLE"
+      + name                 = "mallchain-frontend"
+      + region               = "eu-west-1"
+      + registry_id          = (known after apply)
+      + repository_url       = (known after apply)
+      + tags_all             = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+
+      + image_scanning_configuration {
+          + scan_on_push = true
+        }
+    }
+
+  # aws_ecr_repository.marketplaced will be created
+  + resource "aws_ecr_repository" "marketplaced" {
+      + arn                  = (known after apply)
+      + id                   = (known after apply)
+      + image_tag_mutability = "IMMUTABLE"
+      + name                 = "mallchain-marketplaced"
+      + region               = "eu-west-1"
+      + registry_id          = (known after apply)
+      + repository_url       = (known after apply)
+      + tags_all             = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+
+      + image_scanning_configuration {
+          + scan_on_push = true
+        }
+    }
+
+  # aws_iam_openid_connect_provider.github_actions will be created
+  + resource "aws_iam_openid_connect_provider" "github_actions" {
+      + arn             = (known after apply)
+      + client_id_list  = [
+          + "sts.amazonaws.com",
+        ]
+      + id              = (known after apply)
+      + tags_all        = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+      + thumbprint_list = [
+          + "ab9d0263244dd0326eb67015705a667e79cfe998",
+        ]
+      + url             = "https://token.actions.githubusercontent.com"
+    }
+
+  # aws_iam_role.github_actions_deploy will be created
+  + resource "aws_iam_role" "github_actions_deploy" {
+      + arn                   = (known after apply)
+      + assume_role_policy    = (known after apply)
+      + create_date           = (known after apply)
+      + force_detach_policies = false
+      + id                    = (known after apply)
+      + managed_policy_arns   = (known after apply)
+      + max_session_duration  = 3600
+      + name                  = "mallchain-production-github-deploy"
+      + name_prefix           = (known after apply)
+      + path                  = "/"
+      + tags_all              = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+      + unique_id             = (known after apply)
+
+      + inline_policy (known after apply)
+    }
+
+  # aws_iam_role_policy.github_actions_deploy will be created
+  + resource "aws_iam_role_policy" "github_actions_deploy" {
+      + id          = (known after apply)
+      + name        = "deploy-permissions"
+      + name_prefix = (known after apply)
+      + policy      = (known after apply)
+      + role        = (known after apply)
+    }
+
+  # aws_kms_alias.data_services will be created
+  + resource "aws_kms_alias" "data_services" {
+      + arn            = (known after apply)
+      + id             = (known after apply)
+      + name           = "alias/mallchain-production-data-services-key"
+      + name_prefix    = (known after apply)
+      + region         = "eu-west-1"
+      + target_key_arn = (known after apply)
+      + target_key_id  = (known after apply)
+    }
+
+  # aws_kms_alias.vault_master will be created
+  + resource "aws_kms_alias" "vault_master" {
+      + arn            = (known after apply)
+      + id             = (known after apply)
+      + name           = "alias/mallchain-production-vault-master-key"
+      + name_prefix    = (known after apply)
+      + region         = "eu-west-1"
+      + target_key_arn = (known after apply)
+      + target_key_id  = (known after apply)
+    }
+
+  # aws_kms_key.data_services will be created
+  + resource "aws_kms_key" "data_services" {
+      + arn                                = (known after apply)
+      + bypass_policy_lockout_safety_check = false
+      + customer_master_key_spec           = "SYMMETRIC_DEFAULT"
+      + deletion_window_in_days            = 30
+      + description                        = "mallchain-production data services encryption key (Postgres/Redis/DocDB)"
+      + enable_key_rotation                = true
+      + id                                 = (known after apply)
+      + is_enabled                         = true
+      + key_id                             = (known after apply)
+      + key_usage                          = "ENCRYPT_DECRYPT"
+      + multi_region                       = false
+      + policy                             = (known after apply)
+      + region                             = "eu-west-1"
+      + rotation_period_in_days            = (known after apply)
+      + tags                               = {
+          + "Name"     = "mallchain-production-data-services-key"
+          + "Rotation" = "auto"
+          + "Services" = "postgres,redis,docdb,alb-logs"
+        }
+      + tags_all                           = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-data-services-key"
+          + "Project"     = "mallchain"
+          + "Rotation"    = "auto"
+          + "Services"    = "postgres,redis,docdb,alb-logs"
+        }
+    }
+
+  # aws_kms_key.vault_master will be created
+  + resource "aws_kms_key" "vault_master" {
+      + arn                                = (known after apply)
+      + bypass_policy_lockout_safety_check = false
+      + customer_master_key_spec           = "SYMMETRIC_DEFAULT"
+      + deletion_window_in_days            = 30
+      + description                        = "mallchain-production Vault master key (seals + EBS)"
+      + enable_key_rotation                = true
+      + id                                 = (known after apply)
+      + is_enabled                         = true
+      + key_id                             = (known after apply)
+      + key_usage                          = "ENCRYPT_DECRYPT"
+      + multi_region                       = false
+      + policy                             = (known after apply)
+      + region                             = "eu-west-1"
+      + rotation_period_in_days            = (known after apply)
+      + tags                               = {
+          + "Name"     = "mallchain-production-vault-master-key"
+          + "Rotation" = "auto"
+          + "Service"  = "vault"
+        }
+      + tags_all                           = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-vault-master-key"
+          + "Project"     = "mallchain"
+          + "Rotation"    = "auto"
+          + "Service"     = "vault"
+        }
+    }
+
+  # module.eks.data.tls_certificate.this[0] will be read during apply
+  # (config refers to values not yet known)
+ <= data "tls_certificate" "this" {
+      + certificates = (known after apply)
+      + id           = (known after apply)
+      + url          = (known after apply)
+    }
+
+  # module.eks.aws_cloudwatch_log_group.this[0] will be created
+  + resource "aws_cloudwatch_log_group" "this" {
+      + arn                         = (known after apply)
+      + deletion_protection_enabled = (known after apply)
+      + id                          = (known after apply)
+      + log_group_class             = (known after apply)
+      + name                        = "/aws/eks/mallchain-production/cluster"
+      + name_prefix                 = (known after apply)
+      + region                      = "eu-west-1"
+      + retention_in_days           = 90
+      + skip_destroy                = false
+      + tags                        = {
+          + "Name" = "/aws/eks/mallchain-production/cluster"
+        }
+      + tags_all                    = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "/aws/eks/mallchain-production/cluster"
+          + "Project"     = "mallchain"
+        }
+    }
+
+  # module.eks.aws_eks_cluster.this[0] will be created
+  + resource "aws_eks_cluster" "this" {
+      + arn                           = (known after apply)
+      + bootstrap_self_managed_addons = false
+      + certificate_authority         = (known after apply)
+      + cluster_id                    = (known after apply)
+      + created_at                    = (known after apply)
+      + deletion_protection           = (known after apply)
+      + enabled_cluster_log_types     = [
+          + "api",
+          + "audit",
+          + "authenticator",
+        ]
+      + endpoint                      = (known after apply)
+      + id                            = (known after apply)
+      + identity                      = (known after apply)
+      + name                          = "mallchain-production"
+      + platform_version              = (known after apply)
+      + region                        = "eu-west-1"
+      + role_arn                      = (known after apply)
+      + status                        = (known after apply)
+      + tags_all                      = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+      + version                       = "1.31"
+
+      + access_config {
+          + authentication_mode                         = "API_AND_CONFIG_MAP"
+          + bootstrap_cluster_creator_admin_permissions = false
+        }
+
+      + compute_config (known after apply)
+
+      + control_plane_scaling_config (known after apply)
+
+      + encryption_config {
+          + resources = [
+              + "secrets",
+            ]
+
+          + provider {
+              + key_arn = (known after apply)
+            }
+        }
+
+      + kube_api_server_config (known after apply)
+
+      + kube_controller_manager_config (known after apply)
+
+      + kube_scheduler_config (known after apply)
+
+      + kubernetes_network_config {
+          + ip_family         = "ipv4"
+          + service_ipv4_cidr = (known after apply)
+          + service_ipv6_cidr = (known after apply)
+
+          + elastic_load_balancing (known after apply)
+        }
+
+      + storage_config (known after apply)
+
+      + upgrade_policy (known after apply)
+
+      + vpc_config {
+          + cluster_security_group_id = (known after apply)
+          + control_plane_egress_mode = (known after apply)
+          + endpoint_private_access   = true
+          + endpoint_public_access    = true
+          + public_access_cidrs       = [
+              + "0.0.0.0/0",
+            ]
+          + security_group_ids        = (known after apply)
+          + subnet_ids                = (known after apply)
+          + vpc_id                    = (known after apply)
+        }
+    }
+
+  # module.eks.aws_iam_openid_connect_provider.oidc_provider[0] will be created
+  + resource "aws_iam_openid_connect_provider" "oidc_provider" {
+      + arn             = (known after apply)
+      + client_id_list  = [
+          + "sts.amazonaws.com",
+        ]
+      + id              = (known after apply)
+      + tags            = {
+          + "Name" = "mallchain-production-eks-irsa"
+        }
+      + tags_all        = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-eks-irsa"
+          + "Project"     = "mallchain"
+        }
+      + thumbprint_list = (known after apply)
+      + url             = (known after apply)
+    }
+
+  # module.eks.aws_iam_policy.cluster_encryption[0] will be created
+  + resource "aws_iam_policy" "cluster_encryption" {
+      + arn              = (known after apply)
+      + attachment_count = (known after apply)
+      + description      = "Cluster encryption policy to allow cluster role to utilize CMK provided"
+      + id               = (known after apply)
+      + name             = (known after apply)
+      + name_prefix      = "mallchain-production-cluster-ClusterEncryption"
+      + path             = "/"
+      + policy           = (known after apply)
+      + policy_id        = (known after apply)
+      + tags_all         = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+    }
+
+  # module.eks.aws_iam_role.this[0] will be created
+  + resource "aws_iam_role" "this" {
+      + arn                   = (known after apply)
+      + assume_role_policy    = jsonencode(
+            {
+              + Statement = [
+                  + {
+                      + Action    = [
+                          + "sts:TagSession",
+                          + "sts:AssumeRole",
+                        ]
+                      + Effect    = "Allow"
+                      + Principal = {
+                          + Service = "eks.amazonaws.com"
+                        }
+                      + Sid       = "EKSClusterAssumeRole"
+                    },
+                ]
+              + Version   = "2012-10-17"
+            }
+        )
+      + create_date           = (known after apply)
+      + force_detach_policies = true
+      + id                    = (known after apply)
+      + managed_policy_arns   = (known after apply)
+      + max_session_duration  = 3600
+      + name                  = (known after apply)
+      + name_prefix           = "mallchain-production-cluster-"
+      + path                  = "/"
+      + tags_all              = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+      + unique_id             = (known after apply)
+
+      + inline_policy (known after apply)
+    }
+
+  # module.eks.aws_iam_role_policy_attachment.cluster_encryption[0] will be created
+  + resource "aws_iam_role_policy_attachment" "cluster_encryption" {
+      + id         = (known after apply)
+      + policy_arn = (known after apply)
+      + role       = (known after apply)
+    }
+
+  # module.eks.aws_iam_role_policy_attachment.this["AmazonEKSClusterPolicy"] will be created
+  + resource "aws_iam_role_policy_attachment" "this" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+      + role       = (known after apply)
+    }
+
+  # module.eks.aws_security_group.cluster[0] will be created
+  + resource "aws_security_group" "cluster" {
+      + arn                    = (known after apply)
+      + description            = "EKS cluster security group"
+      + egress                 = (known after apply)
+      + id                     = (known after apply)
+      + ingress                = (known after apply)
+      + name                   = (known after apply)
+      + name_prefix            = "mallchain-production-cluster-"
+      + owner_id               = (known after apply)
+      + region                 = "eu-west-1"
+      + revoke_rules_on_delete = false
+      + tags                   = {
+          + "Name" = "mallchain-production-cluster"
+        }
+      + tags_all               = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-cluster"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                 = (known after apply)
+    }
+
+  # module.eks.aws_security_group.node[0] will be created
+  + resource "aws_security_group" "node" {
+      + arn                    = (known after apply)
+      + description            = "EKS node shared security group"
+      + egress                 = (known after apply)
+      + id                     = (known after apply)
+      + ingress                = (known after apply)
+      + name                   = (known after apply)
+      + name_prefix            = "mallchain-production-node-"
+      + owner_id               = (known after apply)
+      + region                 = "eu-west-1"
+      + revoke_rules_on_delete = false
+      + tags                   = {
+          + "Name"                                       = "mallchain-production-node"
+          + "kubernetes.io/cluster/mallchain-production" = "owned"
+        }
+      + tags_all               = {
+          + "Environment"                                = "production"
+          + "ManagedBy"                                  = "terraform"
+          + "Name"                                       = "mallchain-production-node"
+          + "Project"                                    = "mallchain"
+          + "kubernetes.io/cluster/mallchain-production" = "owned"
+        }
+      + vpc_id                 = (known after apply)
+    }
+
+  # module.eks.aws_security_group_rule.cluster["ingress_nodes_443"] will be created
+  + resource "aws_security_group_rule" "cluster" {
+      + description              = "Node groups to cluster API"
+      + from_port                = 443
+      + id                       = (known after apply)
+      + protocol                 = "tcp"
+      + region                   = "eu-west-1"
+      + security_group_id        = (known after apply)
+      + security_group_rule_id   = (known after apply)
+      + self                     = false
+      + source_security_group_id = (known after apply)
+      + to_port                  = 443
+      + type                     = "ingress"
+    }
+
+  # module.eks.aws_security_group_rule.node["egress_all"] will be created
+  + resource "aws_security_group_rule" "node" {
+      + cidr_blocks              = [
+          + "0.0.0.0/0",
+        ]
+      + description              = "Allow all egress"
+      + from_port                = 0
+      + id                       = (known after apply)
+      + protocol                 = "-1"
+      + region                   = "eu-west-1"
+      + security_group_id        = (known after apply)
+      + security_group_rule_id   = (known after apply)
+      + self                     = false
+      + source_security_group_id = (known after apply)
+      + to_port                  = 0
+      + type                     = "egress"
+    }
+
+  # module.eks.aws_security_group_rule.node["ingress_cluster_10251_webhook"] will be created
+  + resource "aws_security_group_rule" "node" {
+      + description              = "Cluster API to node 10251/tcp webhook"
+      + from_port                = 10251
+      + id                       = (known after apply)
+      + protocol                 = "tcp"
+      + region                   = "eu-west-1"
+      + security_group_id        = (known after apply)
+      + security_group_rule_id   = (known after apply)
+      + self                     = false
+      + source_security_group_id = (known after apply)
+      + to_port                  = 10251
+      + type                     = "ingress"
+    }
+
+  # module.eks.aws_security_group_rule.node["ingress_cluster_443"] will be created
+  + resource "aws_security_group_rule" "node" {
+      + description              = "Cluster API to node groups"
+      + from_port                = 443
+      + id                       = (known after apply)
+      + protocol                 = "tcp"
+      + region                   = "eu-west-1"
+      + security_group_id        = (known after apply)
+      + security_group_rule_id   = (known after apply)
+      + self                     = false
+      + source_security_group_id = (known after apply)
+      + to_port                  = 443
+      + type                     = "ingress"
+    }
+
+  # module.eks.aws_security_group_rule.node["ingress_cluster_4443_webhook"] will be created
+  + resource "aws_security_group_rule" "node" {
+      + description              = "Cluster API to node 4443/tcp webhook"
+      + from_port                = 4443
+      + id                       = (known after apply)
+      + protocol                 = "tcp"
+      + region                   = "eu-west-1"
+      + security_group_id        = (known after apply)
+      + security_group_rule_id   = (known after apply)
+      + self                     = false
+      + source_security_group_id = (known after apply)
+      + to_port                  = 4443
+      + type                     = "ingress"
+    }
+
+  # module.eks.aws_security_group_rule.node["ingress_cluster_6443_webhook"] will be created
+  + resource "aws_security_group_rule" "node" {
+      + description              = "Cluster API to node 6443/tcp webhook"
+      + from_port                = 6443
+      + id                       = (known after apply)
+      + protocol                 = "tcp"
+      + region                   = "eu-west-1"
+      + security_group_id        = (known after apply)
+      + security_group_rule_id   = (known after apply)
+      + self                     = false
+      + source_security_group_id = (known after apply)
+      + to_port                  = 6443
+      + type                     = "ingress"
+    }
+
+  # module.eks.aws_security_group_rule.node["ingress_cluster_8443_webhook"] will be created
+  + resource "aws_security_group_rule" "node" {
+      + description              = "Cluster API to node 8443/tcp webhook"
+      + from_port                = 8443
+      + id                       = (known after apply)
+      + protocol                 = "tcp"
+      + region                   = "eu-west-1"
+      + security_group_id        = (known after apply)
+      + security_group_rule_id   = (known after apply)
+      + self                     = false
+      + source_security_group_id = (known after apply)
+      + to_port                  = 8443
+      + type                     = "ingress"
+    }
+
+  # module.eks.aws_security_group_rule.node["ingress_cluster_9443_webhook"] will be created
+  + resource "aws_security_group_rule" "node" {
+      + description              = "Cluster API to node 9443/tcp webhook"
+      + from_port                = 9443
+      + id                       = (known after apply)
+      + protocol                 = "tcp"
+      + region                   = "eu-west-1"
+      + security_group_id        = (known after apply)
+      + security_group_rule_id   = (known after apply)
+      + self                     = false
+      + source_security_group_id = (known after apply)
+      + to_port                  = 9443
+      + type                     = "ingress"
+    }
+
+  # module.eks.aws_security_group_rule.node["ingress_cluster_kubelet"] will be created
+  + resource "aws_security_group_rule" "node" {
+      + description              = "Cluster API to node kubelets"
+      + from_port                = 10250
+      + id                       = (known after apply)
+      + protocol                 = "tcp"
+      + region                   = "eu-west-1"
+      + security_group_id        = (known after apply)
+      + security_group_rule_id   = (known after apply)
+      + self                     = false
+      + source_security_group_id = (known after apply)
+      + to_port                  = 10250
+      + type                     = "ingress"
+    }
+
+  # module.eks.aws_security_group_rule.node["ingress_nodes_ephemeral"] will be created
+  + resource "aws_security_group_rule" "node" {
+      + description              = "Node to node ingress on ephemeral ports"
+      + from_port                = 1025
+      + id                       = (known after apply)
+      + protocol                 = "tcp"
+      + region                   = "eu-west-1"
+      + security_group_id        = (known after apply)
+      + security_group_rule_id   = (known after apply)
+      + self                     = true
+      + source_security_group_id = (known after apply)
+      + to_port                  = 65535
+      + type                     = "ingress"
+    }
+
+  # module.eks.aws_security_group_rule.node["ingress_self_coredns_tcp"] will be created
+  + resource "aws_security_group_rule" "node" {
+      + description              = "Node to node CoreDNS"
+      + from_port                = 53
+      + id                       = (known after apply)
+      + protocol                 = "tcp"
+      + region                   = "eu-west-1"
+      + security_group_id        = (known after apply)
+      + security_group_rule_id   = (known after apply)
+      + self                     = true
+      + source_security_group_id = (known after apply)
+      + to_port                  = 53
+      + type                     = "ingress"
+    }
+
+  # module.eks.aws_security_group_rule.node["ingress_self_coredns_udp"] will be created
+  + resource "aws_security_group_rule" "node" {
+      + description              = "Node to node CoreDNS UDP"
+      + from_port                = 53
+      + id                       = (known after apply)
+      + protocol                 = "udp"
+      + region                   = "eu-west-1"
+      + security_group_id        = (known after apply)
+      + security_group_rule_id   = (known after apply)
+      + self                     = true
+      + source_security_group_id = (known after apply)
+      + to_port                  = 53
+      + type                     = "ingress"
+    }
+
+  # module.eks.time_sleep.this[0] will be created
+  + resource "time_sleep" "this" {
+      + create_duration = "30s"
+      + id              = (known after apply)
+      + triggers        = {
+          + "certificate_authority_data" = (known after apply)
+          + "endpoint"                   = (known after apply)
+          + "kubernetes_version"         = "1.31"
+          + "name"                       = (known after apply)
+          + "service_cidr"               = (known after apply)
+        }
+    }
+
+  # module.mongo_replica.aws_docdb_cluster.mongo will be created
+  + resource "aws_docdb_cluster" "mongo" {
+      + apply_immediately               = false
+      + arn                             = (known after apply)
+      + availability_zones              = (known after apply)
+      + backup_retention_period         = 35
+      + cluster_identifier              = "mallchain-production-docdb"
+      + cluster_identifier_prefix       = (known after apply)
+      + cluster_members                 = (known after apply)
+      + cluster_resource_id             = (known after apply)
+      + db_cluster_parameter_group_name = "mallchain-production-docdb"
+      + db_subnet_group_name            = "mallchain-production-docdb"
+      + deletion_protection             = true
+      + endpoint                        = (known after apply)
+      + engine                          = "docdb"
+      + engine_version                  = "5.0.0"
+      + final_snapshot_identifier       = "mallchain-production-docdb-final"
+      + hosted_zone_id                  = (known after apply)
+      + id                              = (known after apply)
+      + kms_key_id                      = (known after apply)
+      + master_password                 = (sensitive value)
+      + master_user_secret              = (known after apply)
+      + master_username                 = "mallchain_admin"
+      + network_type                    = (known after apply)
+      + port                            = 27017
+      + preferred_backup_window         = "02:00-03:00"
+      + preferred_maintenance_window    = "sun:04:00-sun:05:00"
+      + reader_endpoint                 = (known after apply)
+      + region                          = "eu-west-1"
+      + skip_final_snapshot             = false
+      + storage_encrypted               = true
+      + tags                            = {
+          + "Name" = "mallchain-production-docdb"
+        }
+      + tags_all                        = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-docdb"
+          + "Project"     = "mallchain"
+        }
+      + vpc_security_group_ids          = (known after apply)
+    }
+
+  # module.mongo_replica.aws_docdb_cluster_instance.mongo[0] will be created
+  + resource "aws_docdb_cluster_instance" "mongo" {
+      + apply_immediately               = false
+      + arn                             = (known after apply)
+      + auto_minor_version_upgrade      = true
+      + availability_zone               = (known after apply)
+      + ca_cert_identifier              = (known after apply)
+      + cluster_identifier              = (known after apply)
+      + db_subnet_group_name            = (known after apply)
+      + dbi_resource_id                 = (known after apply)
+      + endpoint                        = (known after apply)
+      + engine                          = "docdb"
+      + engine_version                  = (known after apply)
+      + id                              = (known after apply)
+      + identifier                      = "mallchain-production-docdb-0"
+      + identifier_prefix               = (known after apply)
+      + instance_class                  = "db.r6g.large"
+      + kms_key_id                      = (known after apply)
+      + performance_insights_kms_key_id = (known after apply)
+      + port                            = (known after apply)
+      + preferred_backup_window         = (known after apply)
+      + preferred_maintenance_window    = (known after apply)
+      + promotion_tier                  = 0
+      + publicly_accessible             = (known after apply)
+      + region                          = "eu-west-1"
+      + storage_encrypted               = (known after apply)
+      + tags                            = {
+          + "Name" = "mallchain-production-docdb-0"
+        }
+      + tags_all                        = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-docdb-0"
+          + "Project"     = "mallchain"
+        }
+      + writer                          = (known after apply)
+    }
+
+  # module.mongo_replica.aws_docdb_cluster_instance.mongo[1] will be created
+  + resource "aws_docdb_cluster_instance" "mongo" {
+      + apply_immediately               = false
+      + arn                             = (known after apply)
+      + auto_minor_version_upgrade      = true
+      + availability_zone               = (known after apply)
+      + ca_cert_identifier              = (known after apply)
+      + cluster_identifier              = (known after apply)
+      + db_subnet_group_name            = (known after apply)
+      + dbi_resource_id                 = (known after apply)
+      + endpoint                        = (known after apply)
+      + engine                          = "docdb"
+      + engine_version                  = (known after apply)
+      + id                              = (known after apply)
+      + identifier                      = "mallchain-production-docdb-1"
+      + identifier_prefix               = (known after apply)
+      + instance_class                  = "db.r6g.large"
+      + kms_key_id                      = (known after apply)
+      + performance_insights_kms_key_id = (known after apply)
+      + port                            = (known after apply)
+      + preferred_backup_window         = (known after apply)
+      + preferred_maintenance_window    = (known after apply)
+      + promotion_tier                  = 0
+      + publicly_accessible             = (known after apply)
+      + region                          = "eu-west-1"
+      + storage_encrypted               = (known after apply)
+      + tags                            = {
+          + "Name" = "mallchain-production-docdb-1"
+        }
+      + tags_all                        = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-docdb-1"
+          + "Project"     = "mallchain"
+        }
+      + writer                          = (known after apply)
+    }
+
+  # module.mongo_replica.aws_docdb_cluster_instance.mongo[2] will be created
+  + resource "aws_docdb_cluster_instance" "mongo" {
+      + apply_immediately               = false
+      + arn                             = (known after apply)
+      + auto_minor_version_upgrade      = true
+      + availability_zone               = (known after apply)
+      + ca_cert_identifier              = (known after apply)
+      + cluster_identifier              = (known after apply)
+      + db_subnet_group_name            = (known after apply)
+      + dbi_resource_id                 = (known after apply)
+      + endpoint                        = (known after apply)
+      + engine                          = "docdb"
+      + engine_version                  = (known after apply)
+      + id                              = (known after apply)
+      + identifier                      = "mallchain-production-docdb-2"
+      + identifier_prefix               = (known after apply)
+      + instance_class                  = "db.r6g.large"
+      + kms_key_id                      = (known after apply)
+      + performance_insights_kms_key_id = (known after apply)
+      + port                            = (known after apply)
+      + preferred_backup_window         = (known after apply)
+      + preferred_maintenance_window    = (known after apply)
+      + promotion_tier                  = 0
+      + publicly_accessible             = (known after apply)
+      + region                          = "eu-west-1"
+      + storage_encrypted               = (known after apply)
+      + tags                            = {
+          + "Name" = "mallchain-production-docdb-2"
+        }
+      + tags_all                        = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-docdb-2"
+          + "Project"     = "mallchain"
+        }
+      + writer                          = (known after apply)
+    }
+
+  # module.mongo_replica.aws_docdb_cluster_parameter_group.mongo will be created
+  + resource "aws_docdb_cluster_parameter_group" "mongo" {
+      + arn         = (known after apply)
+      + description = "Managed by Terraform"
+      + family      = "docdb5.0"
+      + id          = (known after apply)
+      + name        = "mallchain-production-docdb"
+      + name_prefix = (known after apply)
+      + region      = "eu-west-1"
+      + tags_all    = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+
+      + parameter {
+          + apply_method = "pending-reboot"
+          + name         = "audit_logs"
+          + value        = "disabled"
+        }
+      + parameter {
+          + apply_method = "pending-reboot"
+          + name         = "tls"
+          + value        = "enabled"
+        }
+    }
+
+  # module.mongo_replica.aws_docdb_subnet_group.mongo will be created
+  + resource "aws_docdb_subnet_group" "mongo" {
+      + arn                     = (known after apply)
+      + description             = "Managed by Terraform"
+      + id                      = (known after apply)
+      + name                    = "mallchain-production-docdb"
+      + name_prefix             = (known after apply)
+      + region                  = "eu-west-1"
+      + subnet_ids              = (known after apply)
+      + supported_network_types = (known after apply)
+      + tags                    = {
+          + "Name" = "mallchain-production-docdb"
+        }
+      + tags_all                = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-docdb"
+          + "Project"     = "mallchain"
+        }
+    }
+
+  # module.mongo_replica.aws_security_group.mongo will be created
+  + resource "aws_security_group" "mongo" {
+      + arn                    = (known after apply)
+      + description            = "DocumentDB security group"
+      + egress                 = [
+          + {
+              + cidr_blocks      = [
+                  + "0.0.0.0/0",
+                ]
+              + description      = "All outbound traffic"
+              + from_port        = 0
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "-1"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 0
+            },
+        ]
+      + id                     = (known after apply)
+      + ingress                = [
+          + {
+              + cidr_blocks      = [
+                  + "10.20.10.0/23",
+                ]
+              + description      = "MongoDB from app subnet"
+              + from_port        = 27017
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "tcp"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 27017
+            },
+        ]
+      + name                   = "mallchain-production-docdb"
+      + name_prefix            = (known after apply)
+      + owner_id               = (known after apply)
+      + region                 = "eu-west-1"
+      + revoke_rules_on_delete = false
+      + tags                   = {
+          + "Name" = "mallchain-production-docdb"
+        }
+      + tags_all               = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-docdb"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                 = (known after apply)
+    }
+
+  # module.mongo_replica.random_password.docdb_master will be created
+  + resource "random_password" "docdb_master" {
+      + bcrypt_hash      = (sensitive value)
+      + id               = (known after apply)
+      + keepers          = {
+          + "cluster_name" = "mallchain"
+          + "environment"  = "production"
+        }
+      + length           = 32
+      + lower            = true
+      + min_lower        = 0
+      + min_numeric      = 0
+      + min_special      = 0
+      + min_upper        = 0
+      + number           = true
+      + numeric          = true
+      + override_special = "_-@%+^#~"
+      + result           = (sensitive value)
+      + special          = true
+      + upper            = true
+    }
+
+  # module.nginx_ingress.data.aws_iam_policy_document.lb_logs will be read during apply
+  # (config refers to values not yet known)
+ <= data "aws_iam_policy_document" "lb_logs" {
+      + id            = (known after apply)
+      + json          = (known after apply)
+      + minified_json = (known after apply)
+
+      + statement {
+          + actions   = [
+              + "s3:PutObject",
+            ]
+          + effect    = "Allow"
+          + resources = [
+              + (known after apply),
+            ]
+
+          + principals {
+              + identifiers = [
+                  + "logdelivery.elasticloadbalancing.amazonaws.com",
+                ]
+              + type        = "Service"
+            }
+        }
+      + statement {
+          + actions   = [
+              + "s3:PutObject",
+            ]
+          + effect    = "Allow"
+          + resources = [
+              + (known after apply),
+            ]
+
+          + condition {
+              + test     = "ArnLike"
+              + values   = [
+                  + (known after apply),
+                ]
+              + variable = "aws:SourceArn"
+            }
+
+          + principals {
+              + identifiers = [
+                  + "arn:aws:iam::054676820928:root",
+                ]
+              + type        = "AWS"
+            }
+        }
+    }
+
+  # module.nginx_ingress.aws_acm_certificate.ingress will be created
+  + resource "aws_acm_certificate" "ingress" {
+      + arn                       = (known after apply)
+      + domain_name               = "mallchain.io"
+      + domain_validation_options = [
+          + {
+              + domain_name           = "api.mallchain.io"
+              + resource_record_name  = (known after apply)
+              + resource_record_type  = (known after apply)
+              + resource_record_value = (known after apply)
+            },
+          + {
+              + domain_name           = "mallchain.io"
+              + resource_record_name  = (known after apply)
+              + resource_record_type  = (known after apply)
+              + resource_record_value = (known after apply)
+            },
+          + {
+              + domain_name           = "sentry.mallchain.io"
+              + resource_record_name  = (known after apply)
+              + resource_record_type  = (known after apply)
+              + resource_record_value = (known after apply)
+            },
+          + {
+              + domain_name           = "www.mallchain.io"
+              + resource_record_name  = (known after apply)
+              + resource_record_type  = (known after apply)
+              + resource_record_value = (known after apply)
+            },
+        ]
+      + id                        = (known after apply)
+      + key_algorithm             = (known after apply)
+      + not_after                 = (known after apply)
+      + not_before                = (known after apply)
+      + pending_renewal           = (known after apply)
+      + region                    = "eu-west-1"
+      + renewal_eligibility       = (known after apply)
+      + renewal_summary           = (known after apply)
+      + status                    = (known after apply)
+      + subject_alternative_names = [
+          + "api.mallchain.io",
+          + "mallchain.io",
+          + "sentry.mallchain.io",
+          + "www.mallchain.io",
+        ]
+      + tags                      = {
+          + "Name" = "mallchain-production-ingress"
+        }
+      + tags_all                  = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-ingress"
+          + "Project"     = "mallchain"
+        }
+      + type                      = (known after apply)
+      + validation_emails         = (known after apply)
+      + validation_method         = "DNS"
+
+      + options (known after apply)
+    }
+
+  # module.nginx_ingress.aws_cloudwatch_metric_alarm.alb_5xx_rate will be created
+  + resource "aws_cloudwatch_metric_alarm" "alb_5xx_rate" {
+      + actions_enabled                       = true
+      + alarm_description                     = "ALB 5xx error rate exceeds 5% of total requests"
+      + alarm_name                            = "mallchain-production-ingress-5xx-rate-high"
+      + arn                                   = (known after apply)
+      + comparison_operator                   = "GreaterThanThreshold"
+      + datapoints_to_alarm                   = 2
+      + dimensions                            = (known after apply)
+      + evaluate_low_sample_count_percentiles = (known after apply)
+      + evaluation_periods                    = 2
+      + id                                    = (known after apply)
+      + metric_name                           = "HTTPCode_ELB_5XX_Count"
+      + namespace                             = "AWS/ApplicationELB"
+      + period                                = 300
+      + region                                = "eu-west-1"
+      + statistic                             = "Sum"
+      + tags                                  = {
+          + "Name" = "mallchain-production-ingress-5xx-rate"
+        }
+      + tags_all                              = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-ingress-5xx-rate"
+          + "Project"     = "mallchain"
+        }
+      + threshold                             = 0
+      + treat_missing_data                    = "notBreaching"
+    }
+
+  # module.nginx_ingress.aws_cloudwatch_metric_alarm.alb_5xx_ratio will be created
+  + resource "aws_cloudwatch_metric_alarm" "alb_5xx_ratio" {
+      + actions_enabled                       = true
+      + alarm_description                     = "ALB 5xx ratio exceeds 5% over 5 min window"
+      + alarm_name                            = "mallchain-production-ingress-5xx-ratio"
+      + arn                                   = (known after apply)
+      + comparison_operator                   = "GreaterThanThreshold"
+      + datapoints_to_alarm                   = 2
+      + evaluate_low_sample_count_percentiles = (known after apply)
+      + evaluation_periods                    = 2
+      + id                                    = (known after apply)
+      + region                                = "eu-west-1"
+      + tags                                  = {
+          + "Name" = "mallchain-production-ingress-5xx-ratio"
+        }
+      + tags_all                              = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-ingress-5xx-ratio"
+          + "Project"     = "mallchain"
+        }
+      + threshold                             = 5
+      + treat_missing_data                    = "notBreaching"
+
+      + metric_query {
+          + id          = "m2"
+          + return_data = false
+            # (3 unchanged attributes hidden)
+
+          + metric {
+              + dimensions  = (known after apply)
+              + metric_name = "HTTPCode_ELB_5XX_Count"
+              + namespace   = "AWS/ApplicationELB"
+              + period      = 300
+              + stat        = "Sum"
+                # (1 unchanged attribute hidden)
+            }
+        }
+      + metric_query {
+          + id          = "m3"
+          + return_data = false
+            # (3 unchanged attributes hidden)
+
+          + metric {
+              + dimensions  = (known after apply)
+              + metric_name = "RequestCount"
+              + namespace   = "AWS/ApplicationELB"
+              + period      = 300
+              + stat        = "Sum"
+                # (1 unchanged attribute hidden)
+            }
+        }
+      + metric_query {
+          + expression  = "IF(m3 > 0, (m2/m3)*100, 0)"
+          + id          = "m1"
+          + label       = "5XXRatePct"
+          + return_data = true
+            # (1 unchanged attribute hidden)
+        }
+    }
+
+  # module.nginx_ingress.aws_lb.ingress will be created
+  + resource "aws_lb" "ingress" {
+      + arn                                                          = (known after apply)
+      + arn_suffix                                                   = (known after apply)
+      + client_keep_alive                                            = 3600
+      + desync_mitigation_mode                                       = "defensive"
+      + dns_name                                                     = (known after apply)
+      + drop_invalid_header_fields                                   = true
+      + enable_deletion_protection                                   = true
+      + enable_http2                                                 = true
+      + enable_prefix_for_ipv6_source_nat                            = (known after apply)
+      + enable_tls_version_and_cipher_suite_headers                  = false
+      + enable_waf_fail_open                                         = false
+      + enable_xff_client_port                                       = false
+      + enable_zonal_shift                                           = false
+      + enforce_security_group_inbound_rules_on_private_link_traffic = (known after apply)
+      + id                                                           = (known after apply)
+      + idle_timeout                                                 = 60
+      + internal                                                     = false
+      + ip_address_type                                              = (known after apply)
+      + load_balancer_type                                           = "application"
+      + name                                                         = "mallchain-production-ingress"
+      + name_prefix                                                  = (known after apply)
+      + preserve_host_header                                         = false
+      + region                                                       = "eu-west-1"
+      + secondary_ips_auto_assigned_per_subnet                       = (known after apply)
+      + security_groups                                              = (known after apply)
+      + subnets                                                      = (known after apply)
+      + tags                                                         = {
+          + "Name" = "mallchain-production-ingress"
+        }
+      + tags_all                                                     = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-ingress"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                                                       = (known after apply)
+      + xff_header_processing_mode                                   = "append"
+      + zone_id                                                      = (known after apply)
+
+      + access_logs {
+          + bucket  = "mallchain-production-ingress-logs"
+          + enabled = true
+          + prefix  = "alb-logs"
+        }
+
+      + subnet_mapping (known after apply)
+    }
+
+  # module.nginx_ingress.aws_lb_listener.http will be created
+  + resource "aws_lb_listener" "http" {
+      + arn                                                                   = (known after apply)
+      + id                                                                    = (known after apply)
+      + load_balancer_arn                                                     = (known after apply)
+      + port                                                                  = 80
+      + protocol                                                              = "HTTP"
+      + region                                                                = "eu-west-1"
+      + routing_http_request_x_amzn_mtls_clientcert_header_name               = (known after apply)
+      + routing_http_request_x_amzn_mtls_clientcert_issuer_header_name        = (known after apply)
+      + routing_http_request_x_amzn_mtls_clientcert_leaf_header_name          = (known after apply)
+      + routing_http_request_x_amzn_mtls_clientcert_serial_number_header_name = (known after apply)
+      + routing_http_request_x_amzn_mtls_clientcert_subject_header_name       = (known after apply)
+      + routing_http_request_x_amzn_mtls_clientcert_validity_header_name      = (known after apply)
+      + routing_http_request_x_amzn_tls_cipher_suite_header_name              = (known after apply)
+      + routing_http_request_x_amzn_tls_version_header_name                   = (known after apply)
+      + routing_http_response_access_control_allow_credentials_header_value   = (known after apply)
+      + routing_http_response_access_control_allow_headers_header_value       = (known after apply)
+      + routing_http_response_access_control_allow_methods_header_value       = (known after apply)
+      + routing_http_response_access_control_allow_origin_header_value        = (known after apply)
+      + routing_http_response_access_control_expose_headers_header_value      = (known after apply)
+      + routing_http_response_access_control_max_age_header_value             = (known after apply)
+      + routing_http_response_content_security_policy_header_value            = (known after apply)
+      + routing_http_response_server_enabled                                  = (known after apply)
+      + routing_http_response_strict_transport_security_header_value          = (known after apply)
+      + routing_http_response_x_content_type_options_header_value             = (known after apply)
+      + routing_http_response_x_frame_options_header_value                    = (known after apply)
+      + ssl_policy                                                            = (known after apply)
+      + tags_all                                                              = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+      + tcp_idle_timeout_seconds                                              = (known after apply)
+
+      + default_action {
+          + order = (known after apply)
+          + type  = "redirect"
+
+          + redirect {
+              + host        = "#{host}"
+              + path        = "/#{path}"
+              + port        = "443"
+              + protocol    = "HTTPS"
+              + query       = "#{query}"
+              + status_code = "HTTP_301"
+            }
+        }
+
+      + mutual_authentication (known after apply)
+    }
+
+  # module.nginx_ingress.aws_lb_listener.https will be created
+  + resource "aws_lb_listener" "https" {
+      + arn                                                                   = (known after apply)
+      + certificate_arn                                                       = (known after apply)
+      + id                                                                    = (known after apply)
+      + load_balancer_arn                                                     = (known after apply)
+      + port                                                                  = 443
+      + protocol                                                              = "HTTPS"
+      + region                                                                = "eu-west-1"
+      + routing_http_request_x_amzn_mtls_clientcert_header_name               = (known after apply)
+      + routing_http_request_x_amzn_mtls_clientcert_issuer_header_name        = (known after apply)
+      + routing_http_request_x_amzn_mtls_clientcert_leaf_header_name          = (known after apply)
+      + routing_http_request_x_amzn_mtls_clientcert_serial_number_header_name = (known after apply)
+      + routing_http_request_x_amzn_mtls_clientcert_subject_header_name       = (known after apply)
+      + routing_http_request_x_amzn_mtls_clientcert_validity_header_name      = (known after apply)
+      + routing_http_request_x_amzn_tls_cipher_suite_header_name              = (known after apply)
+      + routing_http_request_x_amzn_tls_version_header_name                   = (known after apply)
+      + routing_http_response_access_control_allow_credentials_header_value   = (known after apply)
+      + routing_http_response_access_control_allow_headers_header_value       = (known after apply)
+      + routing_http_response_access_control_allow_methods_header_value       = (known after apply)
+      + routing_http_response_access_control_allow_origin_header_value        = (known after apply)
+      + routing_http_response_access_control_expose_headers_header_value      = (known after apply)
+      + routing_http_response_access_control_max_age_header_value             = (known after apply)
+      + routing_http_response_content_security_policy_header_value            = (known after apply)
+      + routing_http_response_server_enabled                                  = (known after apply)
+      + routing_http_response_strict_transport_security_header_value          = (known after apply)
+      + routing_http_response_x_content_type_options_header_value             = (known after apply)
+      + routing_http_response_x_frame_options_header_value                    = (known after apply)
+      + ssl_policy                                                            = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+      + tags_all                                                              = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+      + tcp_idle_timeout_seconds                                              = (known after apply)
+
+      + default_action {
+          + order            = (known after apply)
+          + target_group_arn = (known after apply)
+          + type             = "forward"
+        }
+
+      + mutual_authentication (known after apply)
+    }
+
+  # module.nginx_ingress.aws_lb_target_group.backend will be created
+  + resource "aws_lb_target_group" "backend" {
+      + arn                                = (known after apply)
+      + arn_suffix                         = (known after apply)
+      + connection_termination             = (known after apply)
+      + deregistration_delay               = "300"
+      + id                                 = (known after apply)
+      + ip_address_type                    = (known after apply)
+      + lambda_multi_value_headers_enabled = false
+      + load_balancer_arns                 = (known after apply)
+      + load_balancing_algorithm_type      = (known after apply)
+      + load_balancing_anomaly_mitigation  = (known after apply)
+      + load_balancing_cross_zone_enabled  = (known after apply)
+      + name                               = "mallchain-production-backend"
+      + name_prefix                        = (known after apply)
+      + port                               = 8080
+      + preserve_client_ip                 = (known after apply)
+      + protocol                           = "HTTP"
+      + protocol_version                   = (known after apply)
+      + proxy_protocol_v2                  = false
+      + region                             = "eu-west-1"
+      + slow_start                         = 0
+      + tags                               = {
+          + "Name" = "mallchain-production-backend"
+        }
+      + tags_all                           = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-backend"
+          + "Project"     = "mallchain"
+        }
+      + target_type                        = "instance"
+      + vpc_id                             = (known after apply)
+
+      + health_check {
+          + enabled             = true
+          + healthy_threshold   = 2
+          + interval            = 30
+          + matcher             = "200-399"
+          + path                = "/healthz"
+          + port                = "traffic-port"
+          + protocol            = "HTTP"
+          + timeout             = 5
+          + unhealthy_threshold = 2
+        }
+
+      + stickiness {
+          + cookie_duration = 86400
+          + enabled         = false
+          + type            = "lb_cookie"
+        }
+
+      + target_failover (known after apply)
+
+      + target_group_health (known after apply)
+
+      + target_health_state (known after apply)
+    }
+
+  # module.nginx_ingress.aws_lb_target_group.frontend will be created
+  + resource "aws_lb_target_group" "frontend" {
+      + arn                                = (known after apply)
+      + arn_suffix                         = (known after apply)
+      + connection_termination             = (known after apply)
+      + deregistration_delay               = "300"
+      + id                                 = (known after apply)
+      + ip_address_type                    = (known after apply)
+      + lambda_multi_value_headers_enabled = false
+      + load_balancer_arns                 = (known after apply)
+      + load_balancing_algorithm_type      = (known after apply)
+      + load_balancing_anomaly_mitigation  = (known after apply)
+      + load_balancing_cross_zone_enabled  = (known after apply)
+      + name                               = "mallchain-production-frontend"
+      + name_prefix                        = (known after apply)
+      + port                               = 3000
+      + preserve_client_ip                 = (known after apply)
+      + protocol                           = "HTTP"
+      + protocol_version                   = (known after apply)
+      + proxy_protocol_v2                  = false
+      + region                             = "eu-west-1"
+      + slow_start                         = 0
+      + tags                               = {
+          + "Name" = "mallchain-production-frontend"
+        }
+      + tags_all                           = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-frontend"
+          + "Project"     = "mallchain"
+        }
+      + target_type                        = "instance"
+      + vpc_id                             = (known after apply)
+
+      + health_check {
+          + enabled             = true
+          + healthy_threshold   = 2
+          + interval            = 30
+          + matcher             = "200-399"
+          + path                = "/"
+          + port                = "traffic-port"
+          + protocol            = "HTTP"
+          + timeout             = 5
+          + unhealthy_threshold = 2
+        }
+
+      + stickiness (known after apply)
+
+      + target_failover (known after apply)
+
+      + target_group_health (known after apply)
+
+      + target_health_state (known after apply)
+    }
+
+  # module.nginx_ingress.aws_lb_target_group.sentry will be created
+  + resource "aws_lb_target_group" "sentry" {
+      + arn                                = (known after apply)
+      + arn_suffix                         = (known after apply)
+      + connection_termination             = (known after apply)
+      + deregistration_delay               = "300"
+      + id                                 = (known after apply)
+      + ip_address_type                    = (known after apply)
+      + lambda_multi_value_headers_enabled = false
+      + load_balancer_arns                 = (known after apply)
+      + load_balancing_algorithm_type      = (known after apply)
+      + load_balancing_anomaly_mitigation  = (known after apply)
+      + load_balancing_cross_zone_enabled  = (known after apply)
+      + name                               = "mallchain-production-sentry"
+      + name_prefix                        = (known after apply)
+      + port                               = 9000
+      + preserve_client_ip                 = (known after apply)
+      + protocol                           = "HTTP"
+      + protocol_version                   = (known after apply)
+      + proxy_protocol_v2                  = false
+      + region                             = "eu-west-1"
+      + slow_start                         = 0
+      + tags                               = {
+          + "Name" = "mallchain-production-sentry"
+        }
+      + tags_all                           = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-sentry"
+          + "Project"     = "mallchain"
+        }
+      + target_type                        = "instance"
+      + vpc_id                             = (known after apply)
+
+      + health_check {
+          + enabled             = true
+          + healthy_threshold   = 2
+          + interval            = 30
+          + matcher             = "200-399"
+          + path                = "/_health/"
+          + port                = "traffic-port"
+          + protocol            = "HTTP"
+          + timeout             = 5
+          + unhealthy_threshold = 2
+        }
+
+      + stickiness (known after apply)
+
+      + target_failover (known after apply)
+
+      + target_group_health (known after apply)
+
+      + target_health_state (known after apply)
+    }
+
+  # module.nginx_ingress.aws_s3_bucket.lb_logs will be created
+  + resource "aws_s3_bucket" "lb_logs" {
+      + acceleration_status         = (known after apply)
+      + acl                         = (known after apply)
+      + arn                         = (known after apply)
+      + bucket                      = "mallchain-production-ingress-logs"
+      + bucket_domain_name          = (known after apply)
+      + bucket_namespace            = (known after apply)
+      + bucket_prefix               = (known after apply)
+      + bucket_region               = (known after apply)
+      + bucket_regional_domain_name = (known after apply)
+      + force_destroy               = false
+      + hosted_zone_id              = (known after apply)
+      + id                          = (known after apply)
+      + object_lock_enabled         = (known after apply)
+      + policy                      = (known after apply)
+      + region                      = "eu-west-1"
+      + request_payer               = (known after apply)
+      + tags                        = {
+          + "Name" = "mallchain-production-ingress-logs"
+        }
+      + tags_all                    = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-ingress-logs"
+          + "Project"     = "mallchain"
+        }
+      + website_domain              = (known after apply)
+      + website_endpoint            = (known after apply)
+
+      + cors_rule (known after apply)
+
+      + grant (known after apply)
+
+      + lifecycle_rule (known after apply)
+
+      + logging (known after apply)
+
+      + object_lock_configuration (known after apply)
+
+      + replication_configuration (known after apply)
+
+      + server_side_encryption_configuration (known after apply)
+
+      + versioning (known after apply)
+
+      + website (known after apply)
+    }
+
+  # module.nginx_ingress.aws_s3_bucket_policy.lb_logs will be created
+  + resource "aws_s3_bucket_policy" "lb_logs" {
+      + bucket = (known after apply)
+      + id     = (known after apply)
+      + policy = (known after apply)
+      + region = "eu-west-1"
+    }
+
+  # module.nginx_ingress.aws_s3_bucket_server_side_encryption_configuration.lb_logs will be created
+  + resource "aws_s3_bucket_server_side_encryption_configuration" "lb_logs" {
+      + bucket = (known after apply)
+      + id     = (known after apply)
+      + region = "eu-west-1"
+
+      + rule {
+          + blocked_encryption_types = (known after apply)
+          + bucket_key_enabled       = (known after apply)
+
+          + apply_server_side_encryption_by_default {
+              + kms_master_key_id = (known after apply)
+              + sse_algorithm     = "AES256"
+            }
+        }
+    }
+
+  # module.nginx_ingress.aws_security_group.alb will be created
+  + resource "aws_security_group" "alb" {
+      + arn                    = (known after apply)
+      + description            = "Ingress ALB security group"
+      + egress                 = [
+          + {
+              + cidr_blocks      = [
+                  + "0.0.0.0/0",
+                ]
+              + description      = "All outbound to VPC"
+              + from_port        = 0
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "-1"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 0
+            },
+        ]
+      + id                     = (known after apply)
+      + ingress                = [
+          + {
+              + cidr_blocks      = [
+                  + "0.0.0.0/0",
+                ]
+              + description      = "HTTP redirect from internet"
+              + from_port        = 80
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "tcp"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 80
+            },
+          + {
+              + cidr_blocks      = [
+                  + "0.0.0.0/0",
+                ]
+              + description      = "HTTPS from internet"
+              + from_port        = 443
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "tcp"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 443
+            },
+        ]
+      + name                   = "mallchain-production-ingress-alb"
+      + name_prefix            = (known after apply)
+      + owner_id               = (known after apply)
+      + region                 = "eu-west-1"
+      + revoke_rules_on_delete = false
+      + tags                   = {
+          + "Name" = "mallchain-production-ingress-alb"
+        }
+      + tags_all               = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-ingress-alb"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                 = (known after apply)
+    }
+
+  # module.nginx_ingress.aws_wafv2_web_acl.ingress will be created
+  + resource "aws_wafv2_web_acl" "ingress" {
+      + application_integration_url = (known after apply)
+      + arn                         = (known after apply)
+      + capacity                    = (known after apply)
+      + description                 = "WAF for ingress ALB: common rules + rate limit"
+      + id                          = (known after apply)
+      + lock_token                  = (known after apply)
+      + name                        = "mallchain-production-ingress"
+      + name_prefix                 = (known after apply)
+      + region                      = "eu-west-1"
+      + scope                       = "REGIONAL"
+      + tags                        = {
+          + "Name" = "mallchain-production-ingress-waf"
+        }
+      + tags_all                    = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-ingress-waf"
+          + "Project"     = "mallchain"
+        }
+
+      + default_action {
+          + allow {
+            }
+        }
+
+      + rule {
+          + name     = "RateBased2000Per5Min"
+          + priority = 10
+
+          + action {
+              + block {
+                }
+            }
+
+          + statement {
+              + rate_based_statement {
+                  + aggregate_key_type    = "IP"
+                  + evaluation_window_sec = 300
+                  + limit                 = 2000
+                }
+            }
+
+          + visibility_config {
+              + cloudwatch_metrics_enabled = true
+              + metric_name                = "WAFRateBased"
+              + sampled_requests_enabled   = true
+            }
+        }
+      + rule {
+          + name     = "AWSManagedRulesCommonRuleSet"
+          + priority = 0
+
+          + override_action {
+              + none {}
+            }
+
+          + statement {
+              + managed_rule_group_statement {
+                  + name        = "AWSManagedRulesCommonRuleSet"
+                  + vendor_name = "AWS"
+                    # (1 unchanged attribute hidden)
+                }
+            }
+
+          + visibility_config {
+              + cloudwatch_metrics_enabled = true
+              + metric_name                = "WAFCommonRuleSet"
+              + sampled_requests_enabled   = true
+            }
+        }
+
+      + visibility_config {
+          + cloudwatch_metrics_enabled = true
+          + metric_name                = "WAFIngressALB"
+          + sampled_requests_enabled   = true
+        }
+    }
+
+  # module.nginx_ingress.aws_wafv2_web_acl_association.ingress will be created
+  + resource "aws_wafv2_web_acl_association" "ingress" {
+      + id           = (known after apply)
+      + region       = "eu-west-1"
+      + resource_arn = (known after apply)
+      + web_acl_arn  = (known after apply)
+    }
+
+  # module.postgres_stateful.aws_db_instance.postgres will be created
+  + resource "aws_db_instance" "postgres" {
+      + address                               = (known after apply)
+      + allocated_storage                     = 100
+      + allow_major_version_upgrade           = false
+      + apply_immediately                     = false
+      + arn                                   = (known after apply)
+      + auto_minor_version_upgrade            = true
+      + availability_zone                     = (known after apply)
+      + backup_retention_period               = 35
+      + backup_target                         = (known after apply)
+      + backup_window                         = "02:00-03:00"
+      + ca_cert_identifier                    = (known after apply)
+      + character_set_name                    = (known after apply)
+      + copy_tags_to_snapshot                 = false
+      + database_insights_mode                = (known after apply)
+      + db_name                               = "mallchain"
+      + db_subnet_group_name                  = "mallchain-production-postgres"
+      + dedicated_log_volume                  = false
+      + delete_automated_backups              = true
+      + deletion_protection                   = true
+      + domain_fqdn                           = (known after apply)
+      + enabled_cloudwatch_logs_exports       = [
+          + "postgresql",
+          + "upgrade",
+        ]
+      + endpoint                              = (known after apply)
+      + engine                                = "postgres"
+      + engine_lifecycle_support              = (known after apply)
+      + engine_version                        = "16"
+      + engine_version_actual                 = (known after apply)
+      + final_snapshot_identifier             = "mallchain-production-postgres-final"
+      + hosted_zone_id                        = (known after apply)
+      + id                                    = (known after apply)
+      + identifier                            = "mallchain-production-postgres"
+      + identifier_prefix                     = (known after apply)
+      + instance_class                        = "db.r6g.large"
+      + iops                                  = (known after apply)
+      + kms_key_id                            = (known after apply)
+      + latest_restorable_time                = (known after apply)
+      + license_model                         = (known after apply)
+      + listener_endpoint                     = (known after apply)
+      + maintenance_window                    = "sun:04:00-sun:05:00"
+      + master_user_secret                    = (known after apply)
+      + master_user_secret_kms_key_id         = (known after apply)
+      + max_allocated_storage                 = 500
+      + monitoring_interval                   = 60
+      + monitoring_role_arn                   = (known after apply)
+      + multi_az                              = true
+      + nchar_character_set_name              = (known after apply)
+      + network_type                          = (known after apply)
+      + option_group_name                     = (known after apply)
+      + parameter_group_name                  = (known after apply)
+      + password                              = (sensitive value)
+      + performance_insights_enabled          = true
+      + performance_insights_kms_key_id       = (known after apply)
+      + performance_insights_retention_period = 93
+      + port                                  = (known after apply)
+      + publicly_accessible                   = false
+      + region                                = "eu-west-1"
+      + replica_mode                          = (known after apply)
+      + replicas                              = (known after apply)
+      + resource_id                           = (known after apply)
+      + skip_final_snapshot                   = false
+      + snapshot_identifier                   = (known after apply)
+      + status                                = (known after apply)
+      + storage_encrypted                     = true
+      + storage_throughput                    = (known after apply)
+      + storage_type                          = "gp3"
+      + tags                                  = {
+          + "Name" = "mallchain-production-postgres"
+        }
+      + tags_all                              = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-postgres"
+          + "Project"     = "mallchain"
+        }
+      + timezone                              = (known after apply)
+      + upgrade_rollout_order                 = (known after apply)
+      + username                              = "mallchain_admin"
+      + vpc_security_group_ids                = (known after apply)
+    }
+
+  # module.postgres_stateful.aws_db_subnet_group.postgres will be created
+  + resource "aws_db_subnet_group" "postgres" {
+      + arn                     = (known after apply)
+      + description             = "Managed by Terraform"
+      + id                      = (known after apply)
+      + name                    = "mallchain-production-postgres"
+      + name_prefix             = (known after apply)
+      + region                  = "eu-west-1"
+      + subnet_ids              = (known after apply)
+      + supported_network_types = (known after apply)
+      + tags                    = {
+          + "Name" = "mallchain-production-postgres"
+        }
+      + tags_all                = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-postgres"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                  = (known after apply)
+    }
+
+  # module.postgres_stateful.aws_iam_role.rds_enhanced_monitoring will be created
+  + resource "aws_iam_role" "rds_enhanced_monitoring" {
+      + arn                   = (known after apply)
+      + assume_role_policy    = jsonencode(
+            {
+              + Statement = [
+                  + {
+                      + Action    = "sts:AssumeRole"
+                      + Effect    = "Allow"
+                      + Principal = {
+                          + Service = "monitoring.rds.amazonaws.com"
+                        }
+                    },
+                ]
+              + Version   = "2012-10-17"
+            }
+        )
+      + create_date           = (known after apply)
+      + force_detach_policies = false
+      + id                    = (known after apply)
+      + managed_policy_arns   = (known after apply)
+      + max_session_duration  = 3600
+      + name                  = "mallchain-production-postgres-monitoring"
+      + name_prefix           = (known after apply)
+      + path                  = "/"
+      + tags_all              = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+      + unique_id             = (known after apply)
+
+      + inline_policy (known after apply)
+    }
+
+  # module.postgres_stateful.aws_iam_role_policy_attachment.rds_enhanced_monitoring will be created
+  + resource "aws_iam_role_policy_attachment" "rds_enhanced_monitoring" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+      + role       = "mallchain-production-postgres-monitoring"
+    }
+
+  # module.postgres_stateful.aws_security_group.postgres will be created
+  + resource "aws_security_group" "postgres" {
+      + arn                    = (known after apply)
+      + description            = "PostgreSQL security group"
+      + egress                 = [
+          + {
+              + cidr_blocks      = [
+                  + "0.0.0.0/0",
+                ]
+              + description      = "All outbound traffic"
+              + from_port        = 0
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "-1"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 0
+            },
+        ]
+      + id                     = (known after apply)
+      + ingress                = [
+          + {
+              + cidr_blocks      = [
+                  + "10.20.10.0/23",
+                ]
+              + description      = "PostgreSQL from app subnet"
+              + from_port        = 5432
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "tcp"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 5432
+            },
+        ]
+      + name                   = "mallchain-production-postgres"
+      + name_prefix            = (known after apply)
+      + owner_id               = (known after apply)
+      + region                 = "eu-west-1"
+      + revoke_rules_on_delete = false
+      + tags                   = {
+          + "Name" = "mallchain-production-postgres"
+        }
+      + tags_all               = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-postgres"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                 = (known after apply)
+    }
+
+  # module.postgres_stateful.random_password.postgres_master will be created
+  + resource "random_password" "postgres_master" {
+      + bcrypt_hash = (sensitive value)
+      + id          = (known after apply)
+      + keepers     = {
+          + "cluster_name" = "mallchain"
+          + "environment"  = "production"
+        }
+      + length      = 32
+      + lower       = true
+      + min_lower   = 0
+      + min_numeric = 0
+      + min_special = 0
+      + min_upper   = 0
+      + number      = true
+      + numeric     = true
+      + result      = (sensitive value)
+      + special     = true
+      + upper       = true
+    }
+
+  # module.redis_sentinel.aws_elasticache_parameter_group.redis[0] will be created
+  + resource "aws_elasticache_parameter_group" "redis" {
+      + arn         = (known after apply)
+      + description = "Managed by Terraform"
+      + family      = "redis7.0.x"
+      + id          = (known after apply)
+      + name        = "mallchain-production-redis"
+      + region      = "eu-west-1"
+      + tags_all    = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+
+      + parameter {
+          + name  = "maxmemory-policy"
+          + value = "allkeys-lru"
+        }
+      + parameter {
+          + name  = "notify-keyspace-events"
+          + value = "Kx"
+        }
+    }
+
+  # module.redis_sentinel.aws_elasticache_replication_group.redis will be created
+  + resource "aws_elasticache_replication_group" "redis" {
+      + apply_immediately              = false
+      + arn                            = (known after apply)
+      + at_rest_encryption_enabled     = "true"
+      + auto_minor_version_upgrade     = "true"
+      + automatic_failover_enabled     = true
+      + cluster_enabled                = (known after apply)
+      + cluster_mode                   = (known after apply)
+      + configuration_endpoint_address = (known after apply)
+      + data_tiering_enabled           = (known after apply)
+      + description                    = "mallchain production Redis replication group"
+      + durability                     = (known after apply)
+      + engine                         = "redis"
+      + engine_version                 = "7.0"
+      + engine_version_actual          = (known after apply)
+      + global_replication_group_id    = (known after apply)
+      + id                             = (known after apply)
+      + ip_discovery                   = (known after apply)
+      + kms_key_id                     = (known after apply)
+      + maintenance_window             = "sun:04:00-sun:05:00"
+      + member_clusters                = (known after apply)
+      + multi_az_enabled               = true
+      + network_type                   = (known after apply)
+      + node_type                      = "cache.r6g.large"
+      + num_cache_clusters             = 3
+      + num_node_groups                = (known after apply)
+      + parameter_group_name           = "mallchain-production-redis"
+      + port                           = 6379
+      + primary_endpoint_address       = (known after apply)
+      + reader_endpoint_address        = (known after apply)
+      + region                         = "eu-west-1"
+      + replicas_per_node_group        = (known after apply)
+      + replication_group_id           = "mallchain-production-redis"
+      + security_group_ids             = (known after apply)
+      + security_group_names           = (known after apply)
+      + snapshot_retention_limit       = 35
+      + snapshot_window                = "02:00-03:00"
+      + subnet_group_name              = "mallchain-production-redis"
+      + tags                           = {
+          + "Name" = "mallchain-production-redis"
+        }
+      + tags_all                       = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-redis"
+          + "Project"     = "mallchain"
+        }
+      + transit_encryption_enabled     = true
+      + transit_encryption_mode        = (known after apply)
+
+      + node_group_configuration (known after apply)
+    }
+
+  # module.redis_sentinel.aws_elasticache_subnet_group.redis will be created
+  + resource "aws_elasticache_subnet_group" "redis" {
+      + arn         = (known after apply)
+      + description = "Managed by Terraform"
+      + id          = (known after apply)
+      + name        = "mallchain-production-redis"
+      + region      = "eu-west-1"
+      + subnet_ids  = (known after apply)
+      + tags        = {
+          + "Name" = "mallchain-production-redis"
+        }
+      + tags_all    = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-redis"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id      = (known after apply)
+    }
+
+  # module.redis_sentinel.aws_security_group.redis will be created
+  + resource "aws_security_group" "redis" {
+      + arn                    = (known after apply)
+      + description            = "ElastiCache Redis security group"
+      + egress                 = [
+          + {
+              + cidr_blocks      = [
+                  + "0.0.0.0/0",
+                ]
+              + description      = "All outbound traffic"
+              + from_port        = 0
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "-1"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 0
+            },
+        ]
+      + id                     = (known after apply)
+      + ingress                = [
+          + {
+              + cidr_blocks      = [
+                  + "10.20.10.0/23",
+                ]
+              + description      = "Redis from app subnet"
+              + from_port        = 6379
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "tcp"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 6379
+            },
+        ]
+      + name                   = "mallchain-production-redis"
+      + name_prefix            = (known after apply)
+      + owner_id               = (known after apply)
+      + region                 = "eu-west-1"
+      + revoke_rules_on_delete = false
+      + tags                   = {
+          + "Name" = "mallchain-production-redis"
+        }
+      + tags_all               = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-redis"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                 = (known after apply)
+    }
+
+  # module.vault_server.data.aws_iam_policy_document.vault_kms will be read during apply
+  # (config refers to values not yet known)
+ <= data "aws_iam_policy_document" "vault_kms" {
+      + id            = (known after apply)
+      + json          = (known after apply)
+      + minified_json = (known after apply)
+
+      + statement {
+          + actions   = [
+              + "kms:Decrypt",
+              + "kms:Encrypt",
+            ]
+          + effect    = "Allow"
+          + resources = [
+              + (known after apply),
+            ]
+        }
+    }
+
+  # module.vault_server.aws_ebs_volume.vault_data will be created
+  + resource "aws_ebs_volume" "vault_data" {
+      + arn               = (known after apply)
+      + availability_zone = "eu-west-1a"
+      + create_time       = (known after apply)
+      + encrypted         = true
+      + final_snapshot    = false
+      + id                = (known after apply)
+      + iops              = (known after apply)
+      + kms_key_id        = (known after apply)
+      + region            = "eu-west-1"
+      + size              = 100
+      + snapshot_id       = (known after apply)
+      + tags              = {
+          + "Name" = "mallchain-production-vault-data"
+        }
+      + tags_all          = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-vault-data"
+          + "Project"     = "mallchain"
+        }
+      + throughput        = (known after apply)
+      + type              = "gp3"
+    }
+
+  # module.vault_server.aws_iam_instance_profile.vault_server will be created
+  + resource "aws_iam_instance_profile" "vault_server" {
+      + arn         = (known after apply)
+      + create_date = (known after apply)
+      + id          = (known after apply)
+      + name        = "mallchain-production-vault-server"
+      + name_prefix = (known after apply)
+      + path        = "/"
+      + role        = "mallchain-production-vault-server"
+      + tags_all    = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+      + unique_id   = (known after apply)
+    }
+
+  # module.vault_server.aws_iam_policy.vault_kms will be created
+  + resource "aws_iam_policy" "vault_kms" {
+      + arn              = (known after apply)
+      + attachment_count = (known after apply)
+      + description      = "Allow Vault EC2 to encrypt/decrypt with vault-master-key"
+      + id               = (known after apply)
+      + name             = "mallchain-production-vault-kms"
+      + name_prefix      = (known after apply)
+      + path             = "/"
+      + policy           = (known after apply)
+      + policy_id        = (known after apply)
+      + tags_all         = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+    }
+
+  # module.vault_server.aws_iam_role.vault_server will be created
+  + resource "aws_iam_role" "vault_server" {
+      + arn                   = (known after apply)
+      + assume_role_policy    = jsonencode(
+            {
+              + Statement = [
+                  + {
+                      + Action    = "sts:AssumeRole"
+                      + Effect    = "Allow"
+                      + Principal = {
+                          + Service = "ec2.amazonaws.com"
+                        }
+                    },
+                ]
+              + Version   = "2012-10-17"
+            }
+        )
+      + create_date           = (known after apply)
+      + force_detach_policies = false
+      + id                    = (known after apply)
+      + managed_policy_arns   = (known after apply)
+      + max_session_duration  = 3600
+      + name                  = "mallchain-production-vault-server"
+      + name_prefix           = (known after apply)
+      + path                  = "/"
+      + tags_all              = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+      + unique_id             = (known after apply)
+
+      + inline_policy (known after apply)
+    }
+
+  # module.vault_server.aws_instance.vault will be created
+  + resource "aws_instance" "vault" {
+      + ami                                  = "ami-0dcdd65ae015e416f"
+      + arn                                  = (known after apply)
+      + associate_public_ip_address          = false
+      + availability_zone                    = (known after apply)
+      + disable_api_stop                     = (known after apply)
+      + disable_api_termination              = (known after apply)
+      + ebs_optimized                        = (known after apply)
+      + enable_primary_ipv6                  = (known after apply)
+      + force_destroy                        = false
+      + get_password_data                    = false
+      + host_id                              = (known after apply)
+      + host_resource_group_arn              = (known after apply)
+      + iam_instance_profile                 = "mallchain-production-vault-server"
+      + id                                   = (known after apply)
+      + instance_initiated_shutdown_behavior = (known after apply)
+      + instance_lifecycle                   = (known after apply)
+      + instance_state                       = (known after apply)
+      + instance_type                        = "r6g.large"
+      + ipv6_address_count                   = (known after apply)
+      + ipv6_addresses                       = (known after apply)
+      + key_name                             = (known after apply)
+      + monitoring                           = (known after apply)
+      + outpost_arn                          = (known after apply)
+      + password_data                        = (known after apply)
+      + placement_group                      = (known after apply)
+      + placement_group_id                   = (known after apply)
+      + placement_partition_number           = (known after apply)
+      + primary_network_interface_id         = (known after apply)
+      + private_dns                          = (known after apply)
+      + private_ip                           = (known after apply)
+      + public_dns                           = (known after apply)
+      + public_ip                            = (known after apply)
+      + region                               = "eu-west-1"
+      + secondary_private_ips                = (known after apply)
+      + security_groups                      = (known after apply)
+      + source_dest_check                    = true
+      + spot_instance_request_id             = (known after apply)
+      + subnet_id                            = (known after apply)
+      + tags                                 = {
+          + "Name" = "mallchain-production-vault-server"
+        }
+      + tags_all                             = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-vault-server"
+          + "Project"     = "mallchain"
+        }
+      + tenancy                              = (known after apply)
+      + user_data_base64                     = "H4sIAAAAAAAA/5RWf28aORP+31K+g0Ur5X3fyrvQH+krrluJAG1RA4mySU5V01sZ7wA+vLbPnoXQu373k70kJVzSu/sLZp6Zx+Nn7PH2jUbQyC42Frq0qhVKyx2mlbyB8ic6NbUuudtkrfFoPDw+vZwMeuefWiRY7Aqcl0Z3aSdpH5ADwthu0AG543Zc+xk4NtTClFLPu/T1VOJOQFwc4QZToUxdMmH0TM4PyFhW8JdlnuzGEMvFks+hqG3JMbC4Gnacc8fLPa/vEkoZ5RX/ajSLZGuOYsH4HDRGrNZfpSWu1qIqm+g/CKWUekDKoDbUSgszLlXjXXNrZjPK+DaopEzSwzQCNKU+/eX6+j/J/66v//s0fXJ93UnnhzQFFOnMI5/GJBALQw81YCLt6mWCwha6rngx5YprIfU8ax/St2+bNL/xAlUSFNhJXoLToJJ/ntbYlNloidopymY+P6ELROu7aepAAffgkwX3CymMs4kwVbritcK0k3SOkueNUTRGoaSubwruqqOXyVdpKTM0xco2QcETV4rq7gGUlTStvUuVEVylU6nTpqpFZUr67GYfjIm3PRHcUsFtIa0olBHL7BnYxxNqD46XJWXMbzxCRRlbmAoajZqCIrgApWjMnXHlgX5nqJaldJTZ+ynpirtUyWnjoKmxuJWq5Mi3uzFrTdl5w9XdBv5bEo707b2s7e9CKPrmzeFV7/Lk4pDUkmbNuVfSI2hwtIXCtujvhFJelg68D3Q0o63O89dJO2knne7/n7fbLUIpKl+U0vOpgluab8SjcXwOtOX4DBsiy3GxJdmrNbBoU0Ihy4BGgLVb5BvhVhahgOAOR62bpvsFCFV7BPfDsE6LxK3ui9J0tdz+brXx4FZSQNAnv+ofks+XWuIXMgAvnLQojc5aH8Ip7xtn6VXIaZGBEXUFGnnEb2/Fer1OIql15lcQmEiTlkb4lJzDb7V04DMNuDZuyYxWUkOC3M0BSW+G4B7B+kaXMizzTiqYGBxWFjfZw00mOXKHJ7KSONIIbsVVDiI7au8Ax7XzmL0g5HPe7PwLufTgsuYQv3emttv/Z84gCMyjWplHJ8Wd84OpIHPAy1Dthpw5ueIIF5XNNuBvzQEEfh9dOYjawbFEny0BLBPcetKrphI09rnlU6kkSvBZv3dWjM76xclp/yO5QzbH4b2Rep4DxpD8U35y+p7ei56YCazD2lLBfLvu8AZE3Hz20LWnofvg6PbNeEzWQHIOyvAyi7lLqVQYBHKuuaIfLs/o03FvNDkbDchHqdTYlJBZZwR4Hx15DMzy0fvR5IKcg48FGc3CS1E7uHWFZr0iF7ICU2OOxgbHi/YDbb3f079tdjQmp+9GJ8Ps6NWrF0eNZzwcB+EyqWdSS9yQoV5JZ3Q42lm8QkVvMDjPHryLhHweaY9cqS/kZ64RyuNNFr8TWBikt+c3v+rvTLjHxtuO2N+H+9HL9o+CmmscHqqSQ2U0c7FFexjoOKp2noU7KGq+RfY/Uhg7IH8GAAD//5eiU/YDCQAA"
+      + user_data_replace_on_change          = false
+      + vpc_security_group_ids               = (known after apply)
+
+      + capacity_reservation_specification (known after apply)
+
+      + cpu_options (known after apply)
+
+      + ebs_block_device (known after apply)
+
+      + enclave_options (known after apply)
+
+      + ephemeral_block_device (known after apply)
+
+      + instance_market_options (known after apply)
+
+      + maintenance_options (known after apply)
+
+      + metadata_options (known after apply)
+
+      + network_interface (known after apply)
+
+      + primary_network_interface (known after apply)
+
+      + private_dns_name_options (known after apply)
+
+      + root_block_device {
+          + delete_on_termination = true
+          + device_name           = (known after apply)
+          + encrypted             = true
+          + iops                  = (known after apply)
+          + kms_key_id            = (known after apply)
+          + tags_all              = (known after apply)
+          + throughput            = (known after apply)
+          + volume_id             = (known after apply)
+          + volume_size           = 30
+          + volume_type           = "gp3"
+        }
+
+      + secondary_network_interface (known after apply)
+    }
+
+  # module.vault_server.aws_security_group.vault will be created
+  + resource "aws_security_group" "vault" {
+      + arn                    = (known after apply)
+      + description            = "Vault server security group"
+      + egress                 = [
+          + {
+              + cidr_blocks      = [
+                  + "0.0.0.0/0",
+                ]
+              + description      = "All outbound traffic"
+              + from_port        = 0
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "-1"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 0
+            },
+        ]
+      + id                     = (known after apply)
+      + ingress                = [
+          + {
+              + cidr_blocks      = [
+                  + "10.20.10.0/23",
+                ]
+              + description      = "Vault API from app subnet"
+              + from_port        = 8200
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "tcp"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 8200
+            },
+        ]
+      + name                   = "mallchain-production-vault"
+      + name_prefix            = (known after apply)
+      + owner_id               = (known after apply)
+      + region                 = "eu-west-1"
+      + revoke_rules_on_delete = false
+      + tags                   = {
+          + "Name" = "mallchain-production-vault"
+        }
+      + tags_all               = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-vault"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                 = (known after apply)
+    }
+
+  # module.vault_server.aws_volume_attachment.vault_data will be created
+  + resource "aws_volume_attachment" "vault_data" {
+      + device_name = "/dev/sdh"
+      + id          = (known after apply)
+      + instance_id = (known after apply)
+      + region      = "eu-west-1"
+      + volume_id   = (known after apply)
+    }
+
+  # module.vpc.aws_default_network_acl.this[0] will be created
+  + resource "aws_default_network_acl" "this" {
+      + arn                    = (known after apply)
+      + default_network_acl_id = (known after apply)
+      + id                     = (known after apply)
+      + owner_id               = (known after apply)
+      + region                 = "eu-west-1"
+      + tags                   = {
+          + "Name" = "mallchain-production-default"
+        }
+      + tags_all               = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-default"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                 = (known after apply)
+
+      + egress {
+          + action          = "allow"
+          + from_port       = 0
+          + ipv6_cidr_block = "::/0"
+          + protocol        = "-1"
+          + rule_no         = 101
+          + to_port         = 0
+            # (1 unchanged attribute hidden)
+        }
+      + egress {
+          + action          = "allow"
+          + cidr_block      = "0.0.0.0/0"
+          + from_port       = 0
+          + protocol        = "-1"
+          + rule_no         = 100
+          + to_port         = 0
+            # (1 unchanged attribute hidden)
+        }
+
+      + ingress {
+          + action          = "allow"
+          + from_port       = 0
+          + ipv6_cidr_block = "::/0"
+          + protocol        = "-1"
+          + rule_no         = 101
+          + to_port         = 0
+            # (1 unchanged attribute hidden)
+        }
+      + ingress {
+          + action          = "allow"
+          + cidr_block      = "0.0.0.0/0"
+          + from_port       = 0
+          + protocol        = "-1"
+          + rule_no         = 100
+          + to_port         = 0
+            # (1 unchanged attribute hidden)
+        }
+    }
+
+  # module.vpc.aws_default_route_table.default[0] will be created
+  + resource "aws_default_route_table" "default" {
+      + arn                    = (known after apply)
+      + default_route_table_id = (known after apply)
+      + id                     = (known after apply)
+      + owner_id               = (known after apply)
+      + region                 = "eu-west-1"
+      + route                  = (known after apply)
+      + tags                   = {
+          + "Name" = "mallchain-production-default"
+        }
+      + tags_all               = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-default"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                 = (known after apply)
+
+      + timeouts {
+          + create = "5m"
+          + update = "5m"
+        }
+    }
+
+  # module.vpc.aws_default_security_group.this[0] will be created
+  + resource "aws_default_security_group" "this" {
+      + arn                    = (known after apply)
+      + description            = (known after apply)
+      + egress                 = (known after apply)
+      + id                     = (known after apply)
+      + ingress                = (known after apply)
+      + name                   = (known after apply)
+      + name_prefix            = (known after apply)
+      + owner_id               = (known after apply)
+      + region                 = "eu-west-1"
+      + revoke_rules_on_delete = false
+      + tags                   = {
+          + "Name" = "mallchain-production-default"
+        }
+      + tags_all               = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-default"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                 = (known after apply)
+    }
+
+  # module.vpc.aws_eip.nat[0] will be created
+  + resource "aws_eip" "nat" {
+      + allocation_id        = (known after apply)
+      + arn                  = (known after apply)
+      + association_id       = (known after apply)
+      + carrier_ip           = (known after apply)
+      + customer_owned_ip    = (known after apply)
+      + domain               = "vpc"
+      + id                   = (known after apply)
+      + instance             = (known after apply)
+      + ipam_pool_id         = (known after apply)
+      + network_border_group = (known after apply)
+      + network_interface    = (known after apply)
+      + private_dns          = (known after apply)
+      + private_ip           = (known after apply)
+      + ptr_record           = (known after apply)
+      + public_dns           = (known after apply)
+      + public_ip            = (known after apply)
+      + public_ipv4_pool     = (known after apply)
+      + region               = "eu-west-1"
+      + tags                 = {
+          + "Name" = "mallchain-production-eu-west-1a"
+        }
+      + tags_all             = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-eu-west-1a"
+          + "Project"     = "mallchain"
+        }
+    }
+
+  # module.vpc.aws_eip.nat[1] will be created
+  + resource "aws_eip" "nat" {
+      + allocation_id        = (known after apply)
+      + arn                  = (known after apply)
+      + association_id       = (known after apply)
+      + carrier_ip           = (known after apply)
+      + customer_owned_ip    = (known after apply)
+      + domain               = "vpc"
+      + id                   = (known after apply)
+      + instance             = (known after apply)
+      + ipam_pool_id         = (known after apply)
+      + network_border_group = (known after apply)
+      + network_interface    = (known after apply)
+      + private_dns          = (known after apply)
+      + private_ip           = (known after apply)
+      + ptr_record           = (known after apply)
+      + public_dns           = (known after apply)
+      + public_ip            = (known after apply)
+      + public_ipv4_pool     = (known after apply)
+      + region               = "eu-west-1"
+      + tags                 = {
+          + "Name" = "mallchain-production-eu-west-1b"
+        }
+      + tags_all             = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-eu-west-1b"
+          + "Project"     = "mallchain"
+        }
+    }
+
+  # module.vpc.aws_eip.nat[2] will be created
+  + resource "aws_eip" "nat" {
+      + allocation_id        = (known after apply)
+      + arn                  = (known after apply)
+      + association_id       = (known after apply)
+      + carrier_ip           = (known after apply)
+      + customer_owned_ip    = (known after apply)
+      + domain               = "vpc"
+      + id                   = (known after apply)
+      + instance             = (known after apply)
+      + ipam_pool_id         = (known after apply)
+      + network_border_group = (known after apply)
+      + network_interface    = (known after apply)
+      + private_dns          = (known after apply)
+      + private_ip           = (known after apply)
+      + ptr_record           = (known after apply)
+      + public_dns           = (known after apply)
+      + public_ip            = (known after apply)
+      + public_ipv4_pool     = (known after apply)
+      + region               = "eu-west-1"
+      + tags                 = {
+          + "Name" = "mallchain-production-eu-west-1c"
+        }
+      + tags_all             = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-eu-west-1c"
+          + "Project"     = "mallchain"
+        }
+    }
+
+  # module.vpc.aws_internet_gateway.this[0] will be created
+  + resource "aws_internet_gateway" "this" {
+      + arn      = (known after apply)
+      + id       = (known after apply)
+      + owner_id = (known after apply)
+      + region   = "eu-west-1"
+      + tags     = {
+          + "Name" = "mallchain-production"
+        }
+      + tags_all = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id   = (known after apply)
+    }
+
+  # module.vpc.aws_nat_gateway.this[0] will be created
+  + resource "aws_nat_gateway" "this" {
+      + allocation_id                      = (known after apply)
+      + association_id                     = (known after apply)
+      + auto_provision_zones               = (known after apply)
+      + auto_scaling_ips                   = (known after apply)
+      + availability_mode                  = (known after apply)
+      + connectivity_type                  = "public"
+      + id                                 = (known after apply)
+      + network_interface_id               = (known after apply)
+      + private_ip                         = (known after apply)
+      + public_ip                          = (known after apply)
+      + region                             = "eu-west-1"
+      + regional_nat_gateway_address       = (known after apply)
+      + regional_nat_gateway_auto_mode     = (known after apply)
+      + route_table_id                     = (known after apply)
+      + secondary_allocation_ids           = (known after apply)
+      + secondary_private_ip_address_count = (known after apply)
+      + secondary_private_ip_addresses     = (known after apply)
+      + subnet_id                          = (known after apply)
+      + tags                               = {
+          + "Name" = "mallchain-production-eu-west-1a"
+        }
+      + tags_all                           = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-eu-west-1a"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                             = (known after apply)
+    }
+
+  # module.vpc.aws_nat_gateway.this[1] will be created
+  + resource "aws_nat_gateway" "this" {
+      + allocation_id                      = (known after apply)
+      + association_id                     = (known after apply)
+      + auto_provision_zones               = (known after apply)
+      + auto_scaling_ips                   = (known after apply)
+      + availability_mode                  = (known after apply)
+      + connectivity_type                  = "public"
+      + id                                 = (known after apply)
+      + network_interface_id               = (known after apply)
+      + private_ip                         = (known after apply)
+      + public_ip                          = (known after apply)
+      + region                             = "eu-west-1"
+      + regional_nat_gateway_address       = (known after apply)
+      + regional_nat_gateway_auto_mode     = (known after apply)
+      + route_table_id                     = (known after apply)
+      + secondary_allocation_ids           = (known after apply)
+      + secondary_private_ip_address_count = (known after apply)
+      + secondary_private_ip_addresses     = (known after apply)
+      + subnet_id                          = (known after apply)
+      + tags                               = {
+          + "Name" = "mallchain-production-eu-west-1b"
+        }
+      + tags_all                           = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-eu-west-1b"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                             = (known after apply)
+    }
+
+  # module.vpc.aws_nat_gateway.this[2] will be created
+  + resource "aws_nat_gateway" "this" {
+      + allocation_id                      = (known after apply)
+      + association_id                     = (known after apply)
+      + auto_provision_zones               = (known after apply)
+      + auto_scaling_ips                   = (known after apply)
+      + availability_mode                  = (known after apply)
+      + connectivity_type                  = "public"
+      + id                                 = (known after apply)
+      + network_interface_id               = (known after apply)
+      + private_ip                         = (known after apply)
+      + public_ip                          = (known after apply)
+      + region                             = "eu-west-1"
+      + regional_nat_gateway_address       = (known after apply)
+      + regional_nat_gateway_auto_mode     = (known after apply)
+      + route_table_id                     = (known after apply)
+      + secondary_allocation_ids           = (known after apply)
+      + secondary_private_ip_address_count = (known after apply)
+      + secondary_private_ip_addresses     = (known after apply)
+      + subnet_id                          = (known after apply)
+      + tags                               = {
+          + "Name" = "mallchain-production-eu-west-1c"
+        }
+      + tags_all                           = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-eu-west-1c"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id                             = (known after apply)
+    }
+
+  # module.vpc.aws_route.private_nat_gateway[0] will be created
+  + resource "aws_route" "private_nat_gateway" {
+      + destination_cidr_block = "0.0.0.0/0"
+      + id                     = (known after apply)
+      + instance_id            = (known after apply)
+      + instance_owner_id      = (known after apply)
+      + nat_gateway_id         = (known after apply)
+      + network_interface_id   = (known after apply)
+      + origin                 = (known after apply)
+      + region                 = "eu-west-1"
+      + route_table_id         = (known after apply)
+      + state                  = (known after apply)
+
+      + timeouts {
+          + create = "5m"
+        }
+    }
+
+  # module.vpc.aws_route.private_nat_gateway[1] will be created
+  + resource "aws_route" "private_nat_gateway" {
+      + destination_cidr_block = "0.0.0.0/0"
+      + id                     = (known after apply)
+      + instance_id            = (known after apply)
+      + instance_owner_id      = (known after apply)
+      + nat_gateway_id         = (known after apply)
+      + network_interface_id   = (known after apply)
+      + origin                 = (known after apply)
+      + region                 = "eu-west-1"
+      + route_table_id         = (known after apply)
+      + state                  = (known after apply)
+
+      + timeouts {
+          + create = "5m"
+        }
+    }
+
+  # module.vpc.aws_route.private_nat_gateway[2] will be created
+  + resource "aws_route" "private_nat_gateway" {
+      + destination_cidr_block = "0.0.0.0/0"
+      + id                     = (known after apply)
+      + instance_id            = (known after apply)
+      + instance_owner_id      = (known after apply)
+      + nat_gateway_id         = (known after apply)
+      + network_interface_id   = (known after apply)
+      + origin                 = (known after apply)
+      + region                 = "eu-west-1"
+      + route_table_id         = (known after apply)
+      + state                  = (known after apply)
+
+      + timeouts {
+          + create = "5m"
+        }
+    }
+
+  # module.vpc.aws_route.public_internet_gateway[0] will be created
+  + resource "aws_route" "public_internet_gateway" {
+      + destination_cidr_block = "0.0.0.0/0"
+      + gateway_id             = (known after apply)
+      + id                     = (known after apply)
+      + instance_id            = (known after apply)
+      + instance_owner_id      = (known after apply)
+      + network_interface_id   = (known after apply)
+      + origin                 = (known after apply)
+      + region                 = "eu-west-1"
+      + route_table_id         = (known after apply)
+      + state                  = (known after apply)
+
+      + timeouts {
+          + create = "5m"
+        }
+    }
+
+  # module.vpc.aws_route_table.private[0] will be created
+  + resource "aws_route_table" "private" {
+      + arn              = (known after apply)
+      + id               = (known after apply)
+      + owner_id         = (known after apply)
+      + propagating_vgws = (known after apply)
+      + region           = "eu-west-1"
+      + route            = (known after apply)
+      + tags             = {
+          + "Name" = "mallchain-production-private-eu-west-1a"
+        }
+      + tags_all         = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-private-eu-west-1a"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id           = (known after apply)
+    }
+
+  # module.vpc.aws_route_table.private[1] will be created
+  + resource "aws_route_table" "private" {
+      + arn              = (known after apply)
+      + id               = (known after apply)
+      + owner_id         = (known after apply)
+      + propagating_vgws = (known after apply)
+      + region           = "eu-west-1"
+      + route            = (known after apply)
+      + tags             = {
+          + "Name" = "mallchain-production-private-eu-west-1b"
+        }
+      + tags_all         = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-private-eu-west-1b"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id           = (known after apply)
+    }
+
+  # module.vpc.aws_route_table.private[2] will be created
+  + resource "aws_route_table" "private" {
+      + arn              = (known after apply)
+      + id               = (known after apply)
+      + owner_id         = (known after apply)
+      + propagating_vgws = (known after apply)
+      + region           = "eu-west-1"
+      + route            = (known after apply)
+      + tags             = {
+          + "Name" = "mallchain-production-private-eu-west-1c"
+        }
+      + tags_all         = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-private-eu-west-1c"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id           = (known after apply)
+    }
+
+  # module.vpc.aws_route_table.public[0] will be created
+  + resource "aws_route_table" "public" {
+      + arn              = (known after apply)
+      + id               = (known after apply)
+      + owner_id         = (known after apply)
+      + propagating_vgws = (known after apply)
+      + region           = "eu-west-1"
+      + route            = (known after apply)
+      + tags             = {
+          + "Name" = "mallchain-production-public"
+        }
+      + tags_all         = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production-public"
+          + "Project"     = "mallchain"
+        }
+      + vpc_id           = (known after apply)
+    }
+
+  # module.vpc.aws_route_table_association.private[0] will be created
+  + resource "aws_route_table_association" "private" {
+      + id             = (known after apply)
+      + region         = "eu-west-1"
+      + route_table_id = (known after apply)
+      + subnet_id      = (known after apply)
+    }
+
+  # module.vpc.aws_route_table_association.private[1] will be created
+  + resource "aws_route_table_association" "private" {
+      + id             = (known after apply)
+      + region         = "eu-west-1"
+      + route_table_id = (known after apply)
+      + subnet_id      = (known after apply)
+    }
+
+  # module.vpc.aws_route_table_association.private[2] will be created
+  + resource "aws_route_table_association" "private" {
+      + id             = (known after apply)
+      + region         = "eu-west-1"
+      + route_table_id = (known after apply)
+      + subnet_id      = (known after apply)
+    }
+
+  # module.vpc.aws_route_table_association.public[0] will be created
+  + resource "aws_route_table_association" "public" {
+      + id             = (known after apply)
+      + region         = "eu-west-1"
+      + route_table_id = (known after apply)
+      + subnet_id      = (known after apply)
+    }
+
+  # module.vpc.aws_route_table_association.public[1] will be created
+  + resource "aws_route_table_association" "public" {
+      + id             = (known after apply)
+      + region         = "eu-west-1"
+      + route_table_id = (known after apply)
+      + subnet_id      = (known after apply)
+    }
+
+  # module.vpc.aws_route_table_association.public[2] will be created
+  + resource "aws_route_table_association" "public" {
+      + id             = (known after apply)
+      + region         = "eu-west-1"
+      + route_table_id = (known after apply)
+      + subnet_id      = (known after apply)
+    }
+
+  # module.vpc.aws_subnet.private[0] will be created
+  + resource "aws_subnet" "private" {
+      + arn                                            = (known after apply)
+      + assign_ipv6_address_on_creation                = false
+      + availability_zone                              = "eu-west-1a"
+      + availability_zone_id                           = (known after apply)
+      + cidr_block                                     = "10.20.0.0/24"
+      + enable_dns64                                   = false
+      + enable_resource_name_dns_a_record_on_launch    = false
+      + enable_resource_name_dns_aaaa_record_on_launch = false
+      + id                                             = (known after apply)
+      + ipv6_cidr_block                                = (known after apply)
+      + ipv6_cidr_block_association_id                 = (known after apply)
+      + ipv6_native                                    = false
+      + map_public_ip_on_launch                        = false
+      + owner_id                                       = (known after apply)
+      + private_dns_hostname_type_on_launch            = (known after apply)
+      + region                                         = "eu-west-1"
+      + tags                                           = {
+          + "Name"                            = "mallchain-production-private-eu-west-1a"
+          + "kubernetes.io/role/internal-elb" = "1"
+        }
+      + tags_all                                       = {
+          + "Environment"                     = "production"
+          + "ManagedBy"                       = "terraform"
+          + "Name"                            = "mallchain-production-private-eu-west-1a"
+          + "Project"                         = "mallchain"
+          + "kubernetes.io/role/internal-elb" = "1"
+        }
+      + vpc_id                                         = (known after apply)
+    }
+
+  # module.vpc.aws_subnet.private[1] will be created
+  + resource "aws_subnet" "private" {
+      + arn                                            = (known after apply)
+      + assign_ipv6_address_on_creation                = false
+      + availability_zone                              = "eu-west-1b"
+      + availability_zone_id                           = (known after apply)
+      + cidr_block                                     = "10.20.1.0/24"
+      + enable_dns64                                   = false
+      + enable_resource_name_dns_a_record_on_launch    = false
+      + enable_resource_name_dns_aaaa_record_on_launch = false
+      + id                                             = (known after apply)
+      + ipv6_cidr_block                                = (known after apply)
+      + ipv6_cidr_block_association_id                 = (known after apply)
+      + ipv6_native                                    = false
+      + map_public_ip_on_launch                        = false
+      + owner_id                                       = (known after apply)
+      + private_dns_hostname_type_on_launch            = (known after apply)
+      + region                                         = "eu-west-1"
+      + tags                                           = {
+          + "Name"                            = "mallchain-production-private-eu-west-1b"
+          + "kubernetes.io/role/internal-elb" = "1"
+        }
+      + tags_all                                       = {
+          + "Environment"                     = "production"
+          + "ManagedBy"                       = "terraform"
+          + "Name"                            = "mallchain-production-private-eu-west-1b"
+          + "Project"                         = "mallchain"
+          + "kubernetes.io/role/internal-elb" = "1"
+        }
+      + vpc_id                                         = (known after apply)
+    }
+
+  # module.vpc.aws_subnet.private[2] will be created
+  + resource "aws_subnet" "private" {
+      + arn                                            = (known after apply)
+      + assign_ipv6_address_on_creation                = false
+      + availability_zone                              = "eu-west-1c"
+      + availability_zone_id                           = (known after apply)
+      + cidr_block                                     = "10.20.2.0/24"
+      + enable_dns64                                   = false
+      + enable_resource_name_dns_a_record_on_launch    = false
+      + enable_resource_name_dns_aaaa_record_on_launch = false
+      + id                                             = (known after apply)
+      + ipv6_cidr_block                                = (known after apply)
+      + ipv6_cidr_block_association_id                 = (known after apply)
+      + ipv6_native                                    = false
+      + map_public_ip_on_launch                        = false
+      + owner_id                                       = (known after apply)
+      + private_dns_hostname_type_on_launch            = (known after apply)
+      + region                                         = "eu-west-1"
+      + tags                                           = {
+          + "Name"                            = "mallchain-production-private-eu-west-1c"
+          + "kubernetes.io/role/internal-elb" = "1"
+        }
+      + tags_all                                       = {
+          + "Environment"                     = "production"
+          + "ManagedBy"                       = "terraform"
+          + "Name"                            = "mallchain-production-private-eu-west-1c"
+          + "Project"                         = "mallchain"
+          + "kubernetes.io/role/internal-elb" = "1"
+        }
+      + vpc_id                                         = (known after apply)
+    }
+
+  # module.vpc.aws_subnet.public[0] will be created
+  + resource "aws_subnet" "public" {
+      + arn                                            = (known after apply)
+      + assign_ipv6_address_on_creation                = false
+      + availability_zone                              = "eu-west-1a"
+      + availability_zone_id                           = (known after apply)
+      + cidr_block                                     = "10.20.100.0/24"
+      + enable_dns64                                   = false
+      + enable_resource_name_dns_a_record_on_launch    = false
+      + enable_resource_name_dns_aaaa_record_on_launch = false
+      + id                                             = (known after apply)
+      + ipv6_cidr_block                                = (known after apply)
+      + ipv6_cidr_block_association_id                 = (known after apply)
+      + ipv6_native                                    = false
+      + map_public_ip_on_launch                        = false
+      + owner_id                                       = (known after apply)
+      + private_dns_hostname_type_on_launch            = (known after apply)
+      + region                                         = "eu-west-1"
+      + tags                                           = {
+          + "Name"                   = "mallchain-production-public-eu-west-1a"
+          + "kubernetes.io/role/elb" = "1"
+        }
+      + tags_all                                       = {
+          + "Environment"            = "production"
+          + "ManagedBy"              = "terraform"
+          + "Name"                   = "mallchain-production-public-eu-west-1a"
+          + "Project"                = "mallchain"
+          + "kubernetes.io/role/elb" = "1"
+        }
+      + vpc_id                                         = (known after apply)
+    }
+
+  # module.vpc.aws_subnet.public[1] will be created
+  + resource "aws_subnet" "public" {
+      + arn                                            = (known after apply)
+      + assign_ipv6_address_on_creation                = false
+      + availability_zone                              = "eu-west-1b"
+      + availability_zone_id                           = (known after apply)
+      + cidr_block                                     = "10.20.101.0/24"
+      + enable_dns64                                   = false
+      + enable_resource_name_dns_a_record_on_launch    = false
+      + enable_resource_name_dns_aaaa_record_on_launch = false
+      + id                                             = (known after apply)
+      + ipv6_cidr_block                                = (known after apply)
+      + ipv6_cidr_block_association_id                 = (known after apply)
+      + ipv6_native                                    = false
+      + map_public_ip_on_launch                        = false
+      + owner_id                                       = (known after apply)
+      + private_dns_hostname_type_on_launch            = (known after apply)
+      + region                                         = "eu-west-1"
+      + tags                                           = {
+          + "Name"                   = "mallchain-production-public-eu-west-1b"
+          + "kubernetes.io/role/elb" = "1"
+        }
+      + tags_all                                       = {
+          + "Environment"            = "production"
+          + "ManagedBy"              = "terraform"
+          + "Name"                   = "mallchain-production-public-eu-west-1b"
+          + "Project"                = "mallchain"
+          + "kubernetes.io/role/elb" = "1"
+        }
+      + vpc_id                                         = (known after apply)
+    }
+
+  # module.vpc.aws_subnet.public[2] will be created
+  + resource "aws_subnet" "public" {
+      + arn                                            = (known after apply)
+      + assign_ipv6_address_on_creation                = false
+      + availability_zone                              = "eu-west-1c"
+      + availability_zone_id                           = (known after apply)
+      + cidr_block                                     = "10.20.102.0/24"
+      + enable_dns64                                   = false
+      + enable_resource_name_dns_a_record_on_launch    = false
+      + enable_resource_name_dns_aaaa_record_on_launch = false
+      + id                                             = (known after apply)
+      + ipv6_cidr_block                                = (known after apply)
+      + ipv6_cidr_block_association_id                 = (known after apply)
+      + ipv6_native                                    = false
+      + map_public_ip_on_launch                        = false
+      + owner_id                                       = (known after apply)
+      + private_dns_hostname_type_on_launch            = (known after apply)
+      + region                                         = "eu-west-1"
+      + tags                                           = {
+          + "Name"                   = "mallchain-production-public-eu-west-1c"
+          + "kubernetes.io/role/elb" = "1"
+        }
+      + tags_all                                       = {
+          + "Environment"            = "production"
+          + "ManagedBy"              = "terraform"
+          + "Name"                   = "mallchain-production-public-eu-west-1c"
+          + "Project"                = "mallchain"
+          + "kubernetes.io/role/elb" = "1"
+        }
+      + vpc_id                                         = (known after apply)
+    }
+
+  # module.vpc.aws_vpc.this[0] will be created
+  + resource "aws_vpc" "this" {
+      + arn                                  = (known after apply)
+      + cidr_block                           = "10.20.0.0/16"
+      + default_network_acl_id               = (known after apply)
+      + default_route_table_id               = (known after apply)
+      + default_security_group_id            = (known after apply)
+      + dhcp_options_id                      = (known after apply)
+      + enable_dns_hostnames                 = true
+      + enable_dns_support                   = true
+      + enable_network_address_usage_metrics = (known after apply)
+      + id                                   = (known after apply)
+      + instance_tenancy                     = "default"
+      + ipv6_association_id                  = (known after apply)
+      + ipv6_cidr_block                      = (known after apply)
+      + ipv6_cidr_block_network_border_group = (known after apply)
+      + main_route_table_id                  = (known after apply)
+      + owner_id                             = (known after apply)
+      + region                               = "eu-west-1"
+      + tags                                 = {
+          + "Name" = "mallchain-production"
+        }
+      + tags_all                             = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "mallchain-production"
+          + "Project"     = "mallchain"
+        }
+    }
+
+  # module.eks.module.eks_managed_node_group["default"].aws_eks_node_group.this[0] will be created
+  + resource "aws_eks_node_group" "this" {
+      + ami_type               = "AL2023_x86_64_STANDARD"
+      + arn                    = (known after apply)
+      + capacity_type          = "ON_DEMAND"
+      + cluster_name           = (known after apply)
+      + disk_size              = (known after apply)
+      + id                     = (known after apply)
+      + instance_types         = [
+          + "t3.large",
+        ]
+      + node_group_name        = (known after apply)
+      + node_group_name_prefix = "default-"
+      + node_role_arn          = (known after apply)
+      + region                 = "eu-west-1"
+      + release_version        = "1.31.14-20260917"
+      + resources              = (known after apply)
+      + status                 = (known after apply)
+      + subnet_ids             = (known after apply)
+      + tags                   = {
+          + "Name" = "default"
+        }
+      + tags_all               = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Name"        = "default"
+          + "Project"     = "mallchain"
+        }
+      + version                = "1.31"
+
+      + launch_template {
+          + id      = (known after apply)
+          + name    = (known after apply)
+          + version = (known after apply)
+        }
+
+      + node_repair_config (known after apply)
+
+      + scaling_config {
+          + desired_size = 2
+          + max_size     = 6
+          + min_size     = 2
+        }
+
+      + update_config {
+          + max_unavailable_percentage = 33
+        }
+    }
+
+  # module.eks.module.eks_managed_node_group["default"].aws_iam_role.this[0] will be created
+  + resource "aws_iam_role" "this" {
+      + arn                   = (known after apply)
+      + assume_role_policy    = jsonencode(
+            {
+              + Statement = [
+                  + {
+                      + Action    = "sts:AssumeRole"
+                      + Effect    = "Allow"
+                      + Principal = {
+                          + Service = "ec2.amazonaws.com"
+                        }
+                      + Sid       = "EKSNodeAssumeRole"
+                    },
+                ]
+              + Version   = "2012-10-17"
+            }
+        )
+      + create_date           = (known after apply)
+      + description           = "EKS managed node group IAM role"
+      + force_detach_policies = true
+      + id                    = (known after apply)
+      + managed_policy_arns   = (known after apply)
+      + max_session_duration  = 3600
+      + name                  = (known after apply)
+      + name_prefix           = "default-eks-node-group-"
+      + path                  = "/"
+      + tags_all              = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+      + unique_id             = (known after apply)
+
+      + inline_policy (known after apply)
+    }
+
+  # module.eks.module.eks_managed_node_group["default"].aws_iam_role_policy_attachment.this["AmazonEC2ContainerRegistryReadOnly"] will be created
+  + resource "aws_iam_role_policy_attachment" "this" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+      + role       = (known after apply)
+    }
+
+  # module.eks.module.eks_managed_node_group["default"].aws_iam_role_policy_attachment.this["AmazonEKSWorkerNodePolicy"] will be created
+  + resource "aws_iam_role_policy_attachment" "this" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+      + role       = (known after apply)
+    }
+
+  # module.eks.module.eks_managed_node_group["default"].aws_iam_role_policy_attachment.this["AmazonEKS_CNI_Policy"] will be created
+  + resource "aws_iam_role_policy_attachment" "this" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+      + role       = (known after apply)
+    }
+
+  # module.eks.module.eks_managed_node_group["default"].aws_launch_template.this[0] will be created
+  + resource "aws_launch_template" "this" {
+      + arn                    = (known after apply)
+      + default_version        = (known after apply)
+      + description            = "Custom launch template for default EKS managed node group"
+      + id                     = (known after apply)
+      + latest_version         = (known after apply)
+      + name                   = (known after apply)
+      + name_prefix            = "default-"
+      + region                 = "eu-west-1"
+      + tags_all               = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+      + update_default_version = true
+      + vpc_security_group_ids = (known after apply)
+        # (2 unchanged attributes hidden)
+
+      + metadata_options {
+          + http_endpoint               = "enabled"
+          + http_protocol_ipv6          = (known after apply)
+          + http_put_response_hop_limit = 1
+          + http_tokens                 = "required"
+          + instance_metadata_tags      = (known after apply)
+        }
+
+      + tag_specifications {
+          + resource_type = "instance"
+          + tags          = {
+              + "Name" = "default"
+            }
+        }
+      + tag_specifications {
+          + resource_type = "network-interface"
+          + tags          = {
+              + "Name" = "default"
+            }
+        }
+      + tag_specifications {
+          + resource_type = "volume"
+          + tags          = {
+              + "Name" = "default"
+            }
+        }
+    }
+
+  # module.eks.module.kms.data.aws_iam_policy_document.this[0] will be read during apply
+  # (config refers to values not yet known)
+ <= data "aws_iam_policy_document" "this" {
+      + id                        = (known after apply)
+      + json                      = (known after apply)
+      + minified_json             = (known after apply)
+      + override_policy_documents = []
+      + source_policy_documents   = []
+
+      + statement {
+          + actions   = [
+              + "kms:*",
+            ]
+          + resources = [
+              + "*",
+            ]
+          + sid       = "Default"
+
+          + principals {
+              + identifiers = [
+                  + "arn:aws:iam::097079438076:root",
+                ]
+              + type        = "AWS"
+            }
+        }
+      + statement {
+          + actions   = [
+              + "kms:CancelKeyDeletion",
+              + "kms:Create*",
+              + "kms:Delete*",
+              + "kms:Describe*",
+              + "kms:Disable*",
+              + "kms:Enable*",
+              + "kms:Get*",
+              + "kms:ImportKeyMaterial",
+              + "kms:List*",
+              + "kms:Put*",
+              + "kms:ReplicateKey",
+              + "kms:Revoke*",
+              + "kms:ScheduleKeyDeletion",
+              + "kms:TagResource",
+              + "kms:UntagResource",
+              + "kms:Update*",
+            ]
+          + resources = [
+              + "*",
+            ]
+          + sid       = "KeyAdministration"
+
+          + principals {
+              + identifiers = [
+                  + "arn:aws:iam::097079438076:user/Mallchain_Admin",
+                ]
+              + type        = "AWS"
+            }
+        }
+      + statement {
+          + actions   = [
+              + "kms:Decrypt",
+              + "kms:DescribeKey",
+              + "kms:Encrypt",
+              + "kms:GenerateDataKey*",
+              + "kms:ReEncrypt*",
+            ]
+          + resources = [
+              + "*",
+            ]
+          + sid       = "KeyUsage"
+
+          + principals {
+              + identifiers = [
+                  + (known after apply),
+                ]
+              + type        = "AWS"
+            }
+        }
+    }
+
+  # module.eks.module.kms.aws_kms_alias.this["cluster"] will be created
+  + resource "aws_kms_alias" "this" {
+      + arn            = (known after apply)
+      + id             = (known after apply)
+      + name           = "alias/eks/mallchain-production"
+      + name_prefix    = (known after apply)
+      + region         = "eu-west-1"
+      + target_key_arn = (known after apply)
+      + target_key_id  = (known after apply)
+    }
+
+  # module.eks.module.kms.aws_kms_key.this[0] will be created
+  + resource "aws_kms_key" "this" {
+      + arn                                = (known after apply)
+      + bypass_policy_lockout_safety_check = false
+      + customer_master_key_spec           = "SYMMETRIC_DEFAULT"
+      + description                        = "mallchain-production cluster encryption key"
+      + enable_key_rotation                = true
+      + id                                 = (known after apply)
+      + is_enabled                         = true
+      + key_id                             = (known after apply)
+      + key_usage                          = "ENCRYPT_DECRYPT"
+      + multi_region                       = false
+      + policy                             = (known after apply)
+      + region                             = "eu-west-1"
+      + rotation_period_in_days            = (known after apply)
+      + tags_all                           = {
+          + "Environment" = "production"
+          + "ManagedBy"   = "terraform"
+          + "Project"     = "mallchain"
+        }
+    }
+
+  # module.eks.module.eks_managed_node_group["default"].module.user_data.null_resource.validate_cluster_service_cidr will be created
+  + resource "null_resource" "validate_cluster_service_cidr" {
+      + id = (known after apply)
+    }
+
+Plan: 115 to add, 0 to change, 0 to destroy.
+
+Changes to Outputs:
+  + github_actions_deploy_role_arn         = (known after apply)
+  + ingress_acm_certificate_arn            = (known after apply)
+  + ingress_alb_dns_name                   = (known after apply)
+  + ingress_alb_zone_id                    = (known after apply)
+  + ingress_connection_secret_arn_pattern  = "arn:aws:ssm:eu-west-1::parameter/mallchain-production/ingress/tls-cert"
+  + ingress_domain_validation_options      = [
+      + {
+          + domain_name           = "api.mallchain.io"
+          + resource_record_name  = (known after apply)
+          + resource_record_type  = (known after apply)
+          + resource_record_value = (known after apply)
+        },
+      + {
+          + domain_name           = "mallchain.io"
+          + resource_record_name  = (known after apply)
+          + resource_record_type  = (known after apply)
+          + resource_record_value = (known after apply)
+        },
+      + {
+          + domain_name           = "sentry.mallchain.io"
+          + resource_record_name  = (known after apply)
+          + resource_record_type  = (known after apply)
+          + resource_record_value = (known after apply)
+        },
+      + {
+          + domain_name           = "www.mallchain.io"
+          + resource_record_name  = (known after apply)
+          + resource_record_type  = (known after apply)
+          + resource_record_value = (known after apply)
+        },
+    ]
+  + ingress_endpoint_url                   = (known after apply)
+  + ingress_security_group_id              = (known after apply)
+  + ingress_target_group_backend_arn       = (known after apply)
+  + ingress_target_group_frontend_arn      = (known after apply)
+  + ingress_target_group_sentry_arn        = (known after apply)
+  + ingress_waf_web_acl_arn                = (known after apply)
+  + kms_data_services_key_arn              = (known after apply)
+  + kms_vault_master_key_arn               = (known after apply)
+  + mongo_connection_secret_arn_pattern    = "arn:aws:secretsmanager:eu-west-1::secret:mallchain-production/docdb/credentials"
+  + mongo_endpoint_address                 = (known after apply)
+  + mongo_endpoint_url                     = (known after apply)
+  + mongo_master_password                  = (sensitive value)
+  + mongo_master_username                  = (sensitive value)
+  + mongo_reader_endpoint_address          = (known after apply)
+  + mongo_reader_endpoint_url              = (known after apply)
+  + mongo_security_group_id                = (known after apply)
+  + postgres_connection_secret_arn_pattern = "arn:aws:secretsmanager:eu-west-1::secret:mallchain-production/postgres/credentials"
+  + postgres_endpoint_address              = (known after apply)
+  + postgres_endpoint_url                  = (known after apply)
+  + postgres_master_password               = (sensitive value)
+  + postgres_master_username               = (sensitive value)
+  + postgres_security_group_id             = (known after apply)
+  + redis_connection_secret_arn_pattern    = "arn:aws:secretsmanager:eu-west-1::secret:mallchain-production/redis/credentials"
+  + redis_endpoint_url                     = (known after apply)
+  + redis_primary_endpoint_address         = (known after apply)
+  + redis_reader_endpoint_address          = (known after apply)
+  + redis_security_group_id                = (known after apply)
+  + vault_connection_secret_arn_pattern    = "arn:aws:ssm:eu-west-1::parameter/mallchain-production/vault/token"
+  + vault_endpoint_url                     = (known after apply)
+  + vault_instance_private_ip              = (known after apply)
+  + vault_security_group_id                = (known after apply)

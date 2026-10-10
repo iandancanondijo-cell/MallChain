@@ -1,0 +1,207 @@
+/**
+ * Social Accounts Linking Component Styles
+ * Grid-based layout for social platform integration
+ */
+
+.social-accounts {
+  width: 100%;
+}
+
+.social-accounts .sec-title {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}
+
+.social-accounts .sec-title h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+}
+
+.social-accounts .sec-title .tiny {
+  color: var(--txt-3);
+  font-size: var(--text-sm);
+}
+
+/* Grid layout for social cards */
+.social-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4);
+  width: 100%;
+}
+
+/* Individual social card */
+.social-card {
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-xl);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  transition: all var(--duration-300) var(--ease);
+}
+
+.social-card:hover {
+  border-color: var(--line-2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* Social card header with icon */
+.social-header {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.social-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.social-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.social-name {
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  color: var(--txt-1);
+}
+
+.social-status {
+  font-size: var(--text-xs);
+  color: var(--txt-3);
+}
+
+.connected-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: rgba(74, 222, 128, 0.1);
+  color: var(--success);
+  border-radius: var(--radius-md);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-xs);
+}
+
+.disconnected-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  background: rgba(160, 169, 184, 0.1);
+  color: var(--txt-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+}
+
+/* Social handle display */
+.social-handle {
+  padding: var(--space-2) var(--space-3);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-1);
+}
+
+.social-handle .tiny {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--txt-3);
+  margin-bottom: var(--space-1);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.handle-value {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--txt-1);
+  word-break: break-all;
+  font-family: var(--font-mono);
+}
+
+/* Social actions */
+.social-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.social-actions .btn {
+  width: 100%;
+  justify-content: center;
+  font-size: var(--text-sm);
+}
+
+/* Edit mode for handle input */
+.edit-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.edit-mode .input-sm {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.action-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.action-buttons .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Loading state */
+.loading {
+  text-align: center;
+  padding: var(--space-6);
+  color: var(--txt-3);
+  font-size: var(--text-sm);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .social-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .action-buttons {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Animations */
+.social-card {
+  animation: slide-up var(--duration-300) var(--ease) forwards;
+  opacity: 0;
+  animation-delay: calc(var(--index, 0) * 50ms);
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

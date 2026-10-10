@@ -190,17 +190,14 @@ async function sendEmailNotification(user, category, payload) {
       return { success: false, error: 'No email address' };
     }
 
+    const { complianceFooter } = require('./emailService');
     const subject = `[Mallchain] ${payload.title}`;
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #06b6d4;">${payload.title}</h2>
         <p>${payload.message}</p>
         ${payload.data?.actionUrl ? `<p><a href="${payload.data.actionUrl}" style="background: #06b6d4; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Details</a></p>` : ''}
-        <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
-        <p style="font-size: 12px; color: #666;">
-          You received this email because you have notifications enabled for ${category}.
-          <a href="https://mallchain.network/settings/notifications">Manage preferences</a>
-        </p>
+        ${complianceFooter()}
       </div>
     `;
 

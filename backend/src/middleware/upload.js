@@ -96,8 +96,32 @@ const uploadEduResource = multer({
   },
 });
 
+const BADGE_UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'badges');
+fs.mkdirSync(BADGE_UPLOAD_DIR, { recursive: true });
+
+const BADGE_ALLOWED_MIME_TYPES = ['image/png', 'image/svg+xml'];
+
+const badgeStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, BADGE_UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    cb(null, `badge-${Date.now()}-${sanitizeFilename(file.originalname)}`);
+  },
+});
+
+const uploadBadgeImage = multer({
+  storage: badgeStorage,
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!BADGE_ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      return cb(new Error('Only PNG or SVG files are accepted for badge images'));
+    }
+    cb(null, true);
+  },
+});
+
 module.exports = {
   uploadKycDocument, KYC_UPLOAD_DIR,
   uploadAmlDocument, AML_UPLOAD_DIR,
   uploadEduResource, EDU_UPLOAD_DIR,
+  uploadBadgeImage, BADGE_UPLOAD_DIR,
 };

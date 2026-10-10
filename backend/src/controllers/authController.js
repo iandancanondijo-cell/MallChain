@@ -126,10 +126,14 @@ function signToken(user) {
 const AUTH_COOKIE_NAME = 'auth_token';
 
 function authCookieOptions(maxAgeMs) {
+  // Cross-site cookies (frontend on mallchain.network, API on tunnel URL) require
+  // sameSite: 'none' and secure: true. The secure flag requires HTTPS, which both
+  // the production frontend and Quick Tunnel provide.
+  const isCrossSite = process.env.NODE_ENV === 'production' || process.env.FORCE_CROSS_SITE_COOKIES === 'true';
   return {
     httpOnly: true,
-    secure: config.isProduction,
-    sameSite: 'lax',
+    secure: isCrossSite,
+    sameSite: isCrossSite ? 'none' : 'lax',
     path: '/',
     ...(maxAgeMs !== undefined ? { maxAge: maxAgeMs } : {}),
     ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),

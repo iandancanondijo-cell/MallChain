@@ -1,0 +1,1 @@
+var e={listeners:new Set};function t(){return new Promise(t=>{if(e.listeners.size===0){t(null);return}e.listeners.forEach(e=>e({resolve:t}))})}export{t as n,e as t};

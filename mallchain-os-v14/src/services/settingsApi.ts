@@ -105,6 +105,20 @@ class SettingsApi {
   async optOutWhatsApp(): Promise<ApiResult<{ whatsappOptIn: boolean }>> {
     return unwrap(api.post('/api/settings/contact/whatsapp/opt-out', {}));
   }
+
+  // ── Social accounts ──
+
+  async getSocialAccounts(): Promise<ApiResult<Array<{ platform: string; handle?: string; connected: boolean; url?: string; lastConnected?: string }>>> {
+    return unwrap(api.get('/api/settings/social'));
+  }
+
+  async updateSocialAccount(platform: string, handle: string): Promise<ApiResult<{ platform: string; handle: string; connected: boolean }>> {
+    return unwrap(api.post(`/api/settings/social/${platform}`, { handle }));
+  }
+
+  async removeSocialAccount(platform: string): Promise<ApiResult<{ removed: boolean }>> {
+    return unwrap(api.delete(`/api/settings/social/${platform}`));
+  }
 }
 
 export const settingsApi = new SettingsApi();

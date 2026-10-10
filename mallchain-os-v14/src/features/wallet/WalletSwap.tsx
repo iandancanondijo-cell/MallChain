@@ -153,13 +153,13 @@ export default function WalletSwap() {
         store.applyTx({
           type: 'swap', amount: amountDisplay + feeNum, asset: assetIn, kind: 'debit', fee: feeNum,
           note: `Swapped ${amountDisplay} ${assetIn} for ${amountOutDisplay.toFixed(6)} ${assetOut || denomOut} on pool #${pool.id}`,
-          notifTitle: `Swapped ${amountDisplay} ${assetIn || denomIn}`, notifKind: 'tx',
+          notifTitle: `Swapped ${amountDisplay} ${assetIn || denomIn}`, notifKind: 'tx', notifCategory: 'transactions',
           activityText: `Swapped ${amountDisplay} ${assetIn || denomIn} → ${amountOutDisplay.toFixed(6)} ${assetOut || denomOut}`,
           status: 'pending',
         });
       }
       if (assetOut && amountOutDisplay > 0) {
-        store.applyTx({ type: 'swap', amount: amountOutDisplay, asset: assetOut, kind: 'credit', note: `Received from swap on pool #${pool.id}`, status: 'pending' });
+        store.applyTx({ type: 'swap', amount: amountOutDisplay, asset: assetOut, kind: 'credit', note: `Received from swap on pool #${pool.id}`, notifCategory: 'transactions', status: 'pending' });
       }
 
       setTxHash(result.txHash);

@@ -4,28 +4,6 @@
 # Deployment model: Blue-Green with GitOps (ArgoCD)
 # HA architecture with auto-scaling
 
-terraform {
-  required_version = ">= 1.0"
-  required_providers {
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.25"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.12"
-    }
-  }
-
-  backend "s3" {
-    bucket         = "mallchain-terraform-state"
-    key            = "prod/terraform.tfstate"
-    region         = "us-west-2"
-    encrypt        = true
-    dynamodb_table = "terraform-locks"
-  }
-}
-
 provider "kubernetes" {
   host                   = var.k8s_cluster_endpoint
   cluster_ca_certificate = base64decode(var.k8s_cluster_ca)

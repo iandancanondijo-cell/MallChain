@@ -13,7 +13,8 @@
  * obligation, not gate consent under ePrivacy Article 5(3)'s
  * strictly-necessary exemption.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { store } from '../store/store';
 
 const ACK_KEY = 'mallchain_cookie_notice_ack_v1';
 
@@ -37,8 +38,21 @@ function acknowledge() {
 export function CookieConsentBanner() {
   const [dismissed, setDismissed] = useState(hasAcknowledged);
   const [expanded, setExpanded] = useState(false);
+  const isAuthenticated = store.state.user.authed;
 
-  if (dismissed) return null;
+  // Auto-dismiss for authenticated users after 3 seconds
+  useEffect(() => {
+    if (!dismissed && isAuthenticated) {
+      const timer = setTimeout(() => {
+        acknowledge();
+        setDismissed(true);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [dismissed, isAuthenticated]);
+
+  // Don't show to authenticated users at all (they've already seen it)
+  if (isAuthenticated || dismissed) return null;
 
   return (
     <div className="cookie-notice" role="region" aria-label="Cookie and storage notice">

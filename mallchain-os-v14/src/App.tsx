@@ -4,7 +4,7 @@
  */
 import { useEffect, useState, Suspense, lazy } from 'react';
 import Sidebar from './components/Sidebar';
-import AdminSidebar from './components/AdminSidebar';
+import AdminSidebar, { type AdminTab } from './components/AdminSidebar';
 import AnimatedBackground from './components/AnimatedBackground';
 const Admin = lazy(() => import('./features/admin/Admin'));
 import TopBar from './components/TopBar';
@@ -36,6 +36,7 @@ import './styles/wallet-data.css';
 import './styles/wallet-ops.css';
 import './styles/explorer.css';
 import './styles/animated-background.css';
+import './styles/landing-aesthetic.css';
 
 /** Maps a route path to a section ID for per-section ambient theming via [data-section] in global.css. */
 function getSectionId(path: string): string {
@@ -67,7 +68,7 @@ export default function App() {
   const [authInitialized, setAuthInitialized] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [expandedBanner, setExpandedBanner] = useState<'maintenance' | 'frozen' | null>(null);
-  const [adminTab, setAdminTab] = useState<'dashboard' | 'users' | 'kyc' | 'aml' | 'validators' | 'mining' | 'badges' | 'liquidity' | 'reconciliation' | 'withdrawals' | 'treasury' | 'audit' | 'local'>('dashboard');
+  const [adminTab, setAdminTab] = useState<AdminTab>('overview');
   const maintenance = useMaintenanceStatus();
   
   // Compliance state
@@ -206,10 +207,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, st.wallet.mnemonic, st.wallet.pinHash]);
 
-  // Auth guard: redirect unauthenticated users to landing, and authenticated
+  // Auth guard: redirect unauthenticated users to login, and authenticated
   // users away from landing. This is a cosmetic hash-correctness effect only —
   // matchRoute() (router.tsx) independently recomputes auth and substitutes
-  // Landing for protected content regardless of what the hash says, so it
+  // AuthFlow for protected content regardless of what the hash says, so it
   // remains the actual authorization boundary no matter what this effect does.
   useEffect(() => {
     if (!authInitialized) return;
@@ -227,9 +228,9 @@ export default function App() {
     const isPublicRoute = cleanPath === '/landing' || cleanPath === '/auth';
 
     if (!isAuthenticated && !isPublicRoute) {
-      // Unauthenticated user on protected route → redirect to landing
-      console.log('[App] Auth required for route:', path, '→ redirecting to landing');
-      navigate('/landing');
+      // Unauthenticated user on protected route → redirect to login
+      console.log('[App] Auth required for route:', path, '→ redirecting to login');
+      navigate('/auth?mode=login');
     } else if (isAuthenticated && cleanPath === '/landing') {
       // Authenticated user on landing → redirect to dashboard
       console.log('[App] User authenticated, redirecting from landing to dashboard');
@@ -253,27 +254,48 @@ export default function App() {
   useEffect(() => {
     if (!authInitialized || !st.user.authed) return;
 
+    // Skip compliance gates on the auth route — the KYC wizard (step 1)
+    // already handles terms acceptance inline, and the age/TOS/privacy
+    // modals would overlay the wizard mid-flow right after registration
+    // sets user.authed = true at step 1.
+    if (path.startsWith('/auth') || path.startsWith('/landing')) {
+      setShowAgeVerification(false);
+      setShowTOSAcceptance(false);
+      setShowPrivacyAcceptance(false);
+      return;
+    }
+
     // Check if user is from restricted country
     if (complianceStatus.geographicRestriction) {
       toastKind(`Service unavailable in your region: ${complianceStatus.restrictedReason || 'Geographic restriction'}`, 'warning');
-      // Optionally block access or show modal
       return;
     }
 
     // Compliance sequence: age → TOS → privacy
+    // Only show ONE modal at a time, closing previous ones as we progress
     if (!complianceStatus.ageVerified) {
       setComplianceSequence('age');
       setShowAgeVerification(true);
+      setShowTOSAcceptance(false);
+      setShowPrivacyAcceptance(false);
     } else if (!complianceStatus.tosAccepted) {
       setComplianceSequence('tos');
+      setShowAgeVerification(false);
       setShowTOSAcceptance(true);
+      setShowPrivacyAcceptance(false);
     } else if (!complianceStatus.privacyAccepted) {
       setComplianceSequence('privacy');
+      setShowAgeVerification(false);
+      setShowTOSAcceptance(false);
       setShowPrivacyAcceptance(true);
     } else {
+      // All compliance requirements met
       setComplianceSequence('complete');
+      setShowAgeVerification(false);
+      setShowTOSAcceptance(false);
+      setShowPrivacyAcceptance(false);
     }
-  }, [authInitialized, st.user.authed, complianceStatus]);
+  }, [authInitialized, st.user.authed, complianceStatus, path]);
 
   const isAuthenticated = st.user.authed;
   const route = matchRoute(path, isAuthenticated, st.user.role);

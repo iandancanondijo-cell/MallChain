@@ -138,9 +138,9 @@ async function processMpesaCallback(data) {
   if (resultCode === 0) {
     const metadata = {};
     callbackMetadata.forEach((item) => { metadata[item.Name] = item.Value; });
-    purchase.status = 'confirmed';
+    purchase.status = 'awaiting_admin';
     purchase.mpesaRef = metadata.MpesaReceiptNumber || purchase.mpesaRef;
-    purchase.reason = 'Safaricom payment confirmed.';
+    purchase.reason = 'Payment confirmed — awaiting admin approval for badge issuance.';
   } else {
     purchase.status = 'failed';
     purchase.reason = 'User cancelled or payment failed';
@@ -217,84 +217,29 @@ router.post('/mpesa/callback', verifyWebhookToken, validate(schemas.mpesaCallbac
   }
 });
 
-// Client-triggered final step, once /mpesa/callback has flipped the
-// purchase to 'confirmed'. Same atomic confirmed->processing guard as
-// buy.js's handleReservedCredit, for the same reason: this must only ever
-// run once per purchase even if the client retries the request.
+// After admin-gated flow: the client calls this once payment is confirmed to
+// acknowledge. The actual on-chain issuance is done by the admin via
+// POST /api/admin/badges/approve. This endpoint now just returns current status.
 router.post('/issue', validate(schemas.badgeIssue), async (req, res) => {
   try {
-    const { quoteId, walletAddress } = req.validatedBody;
+    const { quoteId } = req.validatedBody;
 
-    const current = await BadgePurchase.findOne({ quoteId });
-    if (!current) return res.status(404).json({ error: 'Purchase not found' });
+    const purchase = await BadgePurchase.findOne({ quoteId });
+    if (!purchase) return res.status(404).json({ error: 'Purchase not found' });
 
-    if (walletAddress && walletAddress !== current.walletAddress) {
-      return res.status(400).json({ error: 'The requested wallet address does not match the reserved purchase', code: 'wallet_address_mismatch' });
+    if (purchase.status === 'issued') {
+      return res.json({ ok: true, success: true, message: 'Already issued', txHash: purchase.badgeTxHash });
     }
 
-    if (current.status === 'issued') {
-      return res.json({ ok: true, success: true, message: 'Already issued', txHash: current.badgeTxHash });
+    if (purchase.status === 'awaiting_admin') {
+      return res.json({ ok: true, success: false, message: 'Payment confirmed — awaiting admin approval', status: 'awaiting_admin' });
     }
 
-    if (current.status !== 'confirmed') {
-      return res.status(400).json({ error: 'The purchase has not been confirmed by the payment provider yet', code: 'payment_not_confirmed', status: current.status });
+    if (purchase.status === 'rejected') {
+      return res.json({ ok: true, success: false, message: purchase.reason || 'Purchase was rejected by admin', status: 'rejected' });
     }
 
-    const purchase = await BadgePurchase.findOneAndUpdate(
-      { quoteId, status: 'confirmed' },
-      { $set: { status: 'processing' } },
-      { new: true }
-    );
-    if (!purchase) return res.status(409).json({ error: 'Purchase is already being processed' });
-
-    const operatorMnemonic = process.env.OPERATOR_MNEMONIC;
-    if (!operatorMnemonic) {
-      purchase.status = 'confirmed'; // roll back so a later retry (once configured) can proceed
-      await purchase.save();
-      return res.status(503).json({ error: 'Badge issuance is not configured yet' });
-    }
-
-    try {
-      const result = await issueBadgeFromMnemonic({
-        mnemonic: operatorMnemonic,
-        recipient: purchase.walletAddress,
-        badgeType: 'gold',
-      });
-
-      purchase.status = 'issued';
-      purchase.badgeTxHash = result.txHash;
-      await purchase.save();
-
-      const user = await User.findOne({ walletAddress_blind: blindIndex(purchase.walletAddress) }).lean();
-      if (user) {
-        await BadgeIssuance.create({
-          userId: user._id,
-          walletAddress: purchase.walletAddress,
-          method: 'purchase',
-          badgeType: 'gold',
-          txHash: result.txHash,
-        });
-        await notifyUser(user, {
-          kind: 'badge',
-          title: 'Badge purchased!',
-          body: 'You can now convert Mallpoints to Mallcoin every month on the 15th.',
-        });
-      } else {
-        await BadgeIssuance.create({
-          walletAddress: purchase.walletAddress,
-          method: 'purchase',
-          badgeType: 'gold',
-          txHash: result.txHash,
-        });
-      }
-
-      return res.json({ ok: true, success: true, txHash: result.txHash });
-    } catch (issueErr) {
-      purchase.status = 'confirmed'; // roll back — payment already succeeded, allow retry
-      purchase.reason = issueErr.message;
-      await purchase.save();
-      throw issueErr;
-    }
+    return res.json({ ok: true, success: false, message: 'Payment is still being processed', status: purchase.status });
   } catch (e) {
     logger.error('badge', { route: req.originalUrl, error: e.message || String(e) });
     res.status(500).json({ error: 'internal error' });

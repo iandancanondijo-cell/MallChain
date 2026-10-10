@@ -123,8 +123,9 @@ class Api {
   private async performRequest<T>(path: string, base: string, init?: RequestInit, isCsrfRetry = false): Promise<ApiResult<T>> {
     try {
       const method = (init?.method || 'GET').toUpperCase();
+      const isFormData = init?.body instanceof FormData;
       const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
         ...(init?.headers ? Object.fromEntries(Object.entries(init.headers)) : {}),
       };
 
@@ -272,6 +273,10 @@ class Api {
    */
   post<T = unknown>(path: string, body?: unknown, headers?: Record<string, string>): Promise<ApiResult<T>> {
     return this.request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}), headers });
+  }
+
+  upload<T = unknown>(path: string, formData: FormData): Promise<ApiResult<T>> {
+    return this.request<T>(path, { method: 'POST', body: formData });
   }
 
   /** PUT request helper — same contract as post(), for REST endpoints that expect PUT (e.g. admin user/role updates). */

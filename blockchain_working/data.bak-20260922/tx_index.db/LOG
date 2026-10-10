@@ -1,0 +1,40 @@
+=============== Sep 21, 2026 (EAT) ===============
+22:33:52.333328 log@legend F·NumFile S·FileSize N·Entry C·BadEntry B·BadBlock Ke·KeyError D·DroppedEntry L·Level Q·SeqNum T·TimeElapsed
+22:33:52.472152 db@open opening
+22:33:52.473155 version@stat F·[] S·0B[] Sc·[]
+22:33:52.533155 db@janitor F·2 G·0
+22:33:52.533194 db@open done T·60.997297ms
+=============== Sep 22, 2026 (EAT) ===============
+00:17:56.792434 memdb@flush N·58293 S·3MiB
+00:17:59.118879 memdb@flush created L0@3 N·58293 S·782KiB "blo..\x00\x01\x81,v1":"blo..\xe0J\x95,v58256"
+00:17:59.140858 version@stat F·[1] S·782KiB[782KiB] Sc·[0.25]
+00:17:59.252526 memdb@flush committed F·1 T·2.338323458s
+00:17:59.310279 journal@remove removed @1
+=============== Sep 22, 2026 (EAT) ===============
+16:30:33.098509 log@legend F·NumFile S·FileSize N·Entry C·BadEntry B·BadBlock Ke·KeyError D·DroppedEntry L·Level Q·SeqNum T·TimeElapsed
+16:30:33.119164 version@stat F·[1] S·782KiB[782KiB] Sc·[0.25]
+16:30:33.119191 db@open opening
+16:30:33.119264 journal@recovery F·1
+16:30:33.119389 journal@recovery recovering @2
+16:30:33.300198 memdb@flush created L0@4 N·9051 S·126KiB "blo..\x01\xc4U,v58294":"blo..\xe0V$,v67307"
+16:30:33.300408 version@stat F·[2] S·909KiB[909KiB] Sc·[0.50]
+16:30:33.444096 db@janitor F·4 G·0
+16:30:33.444158 db@open done T·324.957602ms
+18:12:55.618607 memdb@flush N·58281 S·3MiB
+18:12:55.752316 memdb@flush created L0@8 N·58281 S·785KiB "blo..\x01\xc5\x03,v67346":"blo..\xe0Jb,v125589"
+18:12:55.752366 version@stat F·[3] S·1MiB[1MiB] Sc·[0.75]
+18:12:55.802094 memdb@flush committed F·1 T·171.981071ms
+18:12:55.831883 journal@remove removed @5
+20:03:20.816491 memdb@flush N·58719 S·3MiB
+20:03:20.939391 memdb@flush created L0@10 N·58719 S·821KiB "blo..\x01\xc9c,v125627":"blo..\xe0\x94B,v184313"
+20:03:20.939423 version@stat F·[4] S·2MiB[2MiB] Sc·[1.00]
+20:03:21.031227 memdb@flush committed F·1 T·204.578842ms
+20:03:21.044517 journal@remove removed @7
+20:03:21.060826 table@compaction L0·4 -> L1·0 S·2MiB Q·184392
+20:03:21.253875 table@build created L1@11 N·150114 S·2MiB "blo..\x00\x01\x81,v1":"blo..\xe0$\x13,v95594"
+20:03:21.357073 table@build created L1@12 N·34230 S·441KiB "blo..\xe0$$,v95646":"blo..\xe0\x94B,v184313"
+20:03:21.357124 version@stat F·[0 2] S·2MiB[0B 2MiB] Sc·[0.00 0.02]
+20:03:21.390521 table@compaction committed F-2 S-5KiB Ke·0 D·0 T·329.645812ms
+20:03:21.390773 table@remove removed @10
+20:03:21.390906 table@remove removed @8
+20:03:21.391015 table@remove removed @3

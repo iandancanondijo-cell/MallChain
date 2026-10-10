@@ -296,9 +296,10 @@ export function useComplianceStatus(): ComplianceStatus {
   });
 
   useEffect(() => {
+    let isMounted = true;
     const checkCompliance = async () => {
       try {
-        // Check age verification
+        // Check age verification from localStorage (only runs once on mount)
         const ageVerified = localStorage.getItem('mallchain_age_verified');
         const tosAccepted = localStorage.getItem('mallchain_tos_accepted');
         const privacyAccepted = localStorage.getItem('mallchain_privacy_accepted');
@@ -306,17 +307,19 @@ export function useComplianceStatus(): ComplianceStatus {
         // Fetch KYC/AML status from backend
         const complianceRes = await api.get<ComplianceStatus>('/api/auth/compliance-status');
 
-        setStatus({
-          ageVerified: !!ageVerified,
-          tosAccepted: !!tosAccepted,
-          privacyAccepted: !!privacyAccepted,
-          kycLevel: store.state.user.kycLevel || 0,
-          kycStatus: complianceRes.data?.kycStatus || 'pending',
-          amlStatus: complianceRes.data?.amlStatus || 'clear',
-          geographicRestriction: complianceRes.data?.geographicRestriction || false,
-          restrictedReason: complianceRes.data?.restrictedReason,
-          lastVerified: Date.now(),
-        });
+        if (isMounted) {
+          setStatus({
+            ageVerified: !!ageVerified,
+            tosAccepted: !!tosAccepted,
+            privacyAccepted: !!privacyAccepted,
+            kycLevel: store.state.user.kycLevel || 0,
+            kycStatus: complianceRes.data?.kycStatus || 'pending',
+            amlStatus: complianceRes.data?.amlStatus || 'clear',
+            geographicRestriction: complianceRes.data?.geographicRestriction || false,
+            restrictedReason: complianceRes.data?.restrictedReason,
+            lastVerified: Date.now(),
+          });
+        }
       } catch (error) {
         console.error('Compliance check failed:', error);
       }
@@ -325,6 +328,10 @@ export function useComplianceStatus(): ComplianceStatus {
     if (store.state.user.authed) {
       checkCompliance();
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [store.state.user.authed]);
 
   return status;

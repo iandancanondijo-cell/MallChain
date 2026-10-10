@@ -5,6 +5,7 @@ const Tx = require('../../models/transaction')
 const register = require('../monitoring/prometheus')
 const logger = require('../../utils/logger')
 const { broadcastTransaction } = require('../../services/transactionService')
+const { emitTransactionEvent } = require('../../services/activityEvents')
 
 const CHAIN_REST = process.env.CHAIN_REST || 'http://127.0.0.1:1317'
 const txJobCounter = register.txJobCounter
@@ -121,6 +122,24 @@ async function handleBroadcast(job) {
         txHash: tx.txHash,
         height: tx.blockHeight
       })
+    }
+
+    if (tx.status === 'confirmed' && tx.userId) {
+      try {
+        await emitTransactionEvent(tx.userId, {
+          type: 'send',
+          amount: tx.amount,
+          denom: tx.denom,
+          counterparty: tx.to,
+          txHash: tx.txHash,
+          status: 'confirmed',
+        })
+      } catch (notifError) {
+        logger.warn('transactionWorker', 'Failed to emit transaction notification', {
+          txId: tx._id,
+          error: notifError.message,
+        })
+      }
     }
 
     txJobCounter.inc({ status: 'completed' })

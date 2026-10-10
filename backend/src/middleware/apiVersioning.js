@@ -79,7 +79,7 @@ function apiVersionMiddleware(req, res, next) {
   if (versionInfo.deprecated) {
     res.set('Deprecation', 'true');
     res.set('Sunset', new Date(versionInfo.sunset).toUTCString());
-    res.set('Link', `<https://docs.mallchain.io/api/migration>; rel="succession-type"`);
+    res.set('Link', `<https://docs.mallchain.network/api/migration>; rel="succession-type"`);
 
     logger.warn('Deprecated API version used', {
       version,

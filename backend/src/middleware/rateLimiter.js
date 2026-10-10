@@ -7,11 +7,18 @@ function safeIpKeyGenerator(req) {
   return req.ip || ''
 }
 
+function skipAdmin(req) {
+  if (req.user?.role === 'admin' || req.user?.role === 'superadmin') return true
+  if (req.path?.startsWith('/admin/') || req.path?.startsWith('/api/admin/')) return true
+  return false
+}
+
 function createLimiter(opts = {}){
   return rateLimit(Object.assign({
     windowMs: opts.windowMs || 60 * 1000,
     max: opts.max || 60,
     keyGenerator: safeIpKeyGenerator,
+    skip: skipAdmin,
     standardHeaders: true,
     legacyHeaders: false,
     validate: { keyGeneratorIpFallback: false }
@@ -90,6 +97,7 @@ function createUserLimiter(opts = {}) {
     windowMs: opts.windowMs || 60 * 1000,
     max: opts.max || 30,
     keyGenerator: accountKeyGenerator,
+    skip: skipAdmin,
     standardHeaders: true,
     legacyHeaders: false,
     validate: { keyGeneratorIpFallback: false },

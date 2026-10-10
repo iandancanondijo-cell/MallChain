@@ -134,7 +134,9 @@ export default function Sidebar({ path, mobileOpen, onClose }: { path: string; m
   return (
     <aside className={'sidebar' + (mobileOpen ? ' open' : '')}>
       <a href="#/" className="side-logo" onClick={() => onClose?.()}>
-        <span className="hex" aria-hidden="true"><img src="/favicon.svg" alt="" width={28} height={28} /></span>
+        <span className="hex" aria-hidden="true">
+          <img src="/mallchain.svg" alt="" width={28} height={28} />
+        </span>
         <span className="txt">Mallchain</span>
       </a>
       <nav aria-label="Main navigation">

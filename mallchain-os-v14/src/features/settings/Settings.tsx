@@ -14,6 +14,7 @@ import { LoginActivityComponent } from './components/LoginActivity';
 import { EmailManagement } from './components/EmailManagement';
 import { NotificationEnhancements } from './components/NotificationEnhancements';
 import { APIKeyManager } from './components/APIKeyManager';
+import { SocialAccounts } from './components/SocialAccounts';
 
 /** Profile & Settings — one page combining real username/phone (backend/src/routes/mines.js),
  *  real 2FA / preferences / notifications / privacy (backend/src/routes/settings.js),
@@ -367,6 +368,10 @@ export default function Settings() {
           <NotificationEnhancements />
 
           <APIKeyManager />
+
+          <div className="card mb">
+            <SocialAccounts onUpdate={load} />
+          </div>
 
           <div className="card mb">
             <div className="sec-title"><h2>Preferences</h2></div>
@@ -727,7 +732,7 @@ export default function Settings() {
   );
 }
 
-type BuyBadgeStep = 'form' | 'awaiting_payment' | 'issuing' | 'done';
+type BuyBadgeStep = 'form' | 'awaiting_payment' | 'awaiting_admin' | 'done' | 'rejected';
 
 function BuyBadgeModal({
   walletAddress,
@@ -746,22 +751,10 @@ function BuyBadgeModal({
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<BuyBadgeStep>('form');
   const [quote, setQuote] = useState<BadgeQuote | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
-
-  const finishIssue = async (quoteId: string) => {
-    setStep('issuing');
-    const issueRes = await badgeApi.issue({ quoteId, walletAddress });
-    setBusy(false);
-    if (issueRes.ok && issueRes.data) {
-      setStep('done');
-      onIssued();
-    } else {
-      toast(issueRes.error || 'Badge issuance failed', false);
-      setStep('form');
-    }
-  };
 
   const pollStatus = (quoteId: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -769,16 +762,25 @@ function BuyBadgeModal({
       const res = await badgeApi.getStatus(quoteId);
       if (!res.ok || !res.data) return;
       setQuote(res.data);
-      if (res.data.status === 'confirmed') {
+      if (res.data.status === 'awaiting_admin') {
+        setStep('awaiting_admin');
+      } else if (res.data.status === 'issued') {
         clearInterval(pollRef.current);
-        finishIssue(quoteId);
+        setStep('done');
+        setBusy(false);
+        onIssued();
+      } else if (res.data.status === 'rejected') {
+        clearInterval(pollRef.current);
+        setRejectReason(res.data.reason || 'Purchase was rejected by admin');
+        setStep('rejected');
+        setBusy(false);
       } else if (res.data.status === 'failed') {
         clearInterval(pollRef.current);
-        toast(res.data.reason || 'Payment failed', false);
-        setStep('form');
+        setRejectReason(res.data.reason || 'Payment failed');
+        setStep('rejected');
         setBusy(false);
       }
-    }, 3000);
+    }, 4000);
   };
 
   const submit = async () => {
@@ -820,8 +822,8 @@ function BuyBadgeModal({
       {step === 'form' && (
         <>
           <p className="tiny" style={{ marginBottom: 12 }}>
-            KSh {priceKes} via M-Pesa — issues a gold Mallchain badge to your wallet on-chain, unlocking the monthly
-            Mallpoints → Mallcoin conversion window.
+            KSh {priceKes} via M-Pesa — after payment, an admin reviews and issues your badge on-chain to your wallet,
+            unlocking the monthly Mallpoints → Mallcoin conversion window.
           </p>
           <div className="field">
             <label>M-Pesa phone number</label>
@@ -850,11 +852,15 @@ function BuyBadgeModal({
         </div>
       )}
 
-      {step === 'issuing' && (
+      {step === 'awaiting_admin' && (
         <div style={{ textAlign: 'center', padding: 20 }}>
           <div className="spin" style={{ margin: '0 auto 12px' }} />
           <h2 style={{ margin: '8px 0' }}>Payment confirmed</h2>
-          <div className="muted">Issuing your badge on-chain…</div>
+          <div className="muted">Your payment has been received. An admin will review and issue your badge shortly.</div>
+          {quote && <div className="mono" style={{ fontSize: 11, marginTop: 12, opacity: 0.6 }}>Quote {quote.quoteId}</div>}
+          <div style={{ marginTop: 16, fontSize: 12, color: 'var(--muted)', opacity: 0.7 }}>
+            This window will update automatically…
+          </div>
         </div>
       )}
 
@@ -862,8 +868,21 @@ function BuyBadgeModal({
         <div style={{ textAlign: 'center', padding: 20 }}>
           <div style={{ fontSize: 40 }}>✓</div>
           <h2 style={{ margin: '8px 0' }}>Badge issued!</h2>
+          <div className="muted">Your badge has been issued on-chain. It now appears next to your username.</div>
           <div className="modal-actions" style={{ justifyContent: 'center' }}>
             <button className="btn btn-primary" onClick={onClose}>Done</button>
+          </div>
+        </div>
+      )}
+
+      {step === 'rejected' && (
+        <div style={{ textAlign: 'center', padding: 20 }}>
+          <div style={{ fontSize: 40, opacity: 0.7 }}>✕</div>
+          <h2 style={{ margin: '8px 0' }}>Badge not issued</h2>
+          <div className="muted">{rejectReason}</div>
+          <div className="modal-actions" style={{ justifyContent: 'center', marginTop: 16 }}>
+            <button className="btn btn-primary" onClick={() => { setStep('form'); setRejectReason(''); }}>Try again</button>
+            <button className="btn" onClick={onClose}>Close</button>
           </div>
         </div>
       )}

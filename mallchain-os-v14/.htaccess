@@ -1,0 +1,57 @@
+# Redirect HTTP to HTTPS
+RewriteEngine On
+RewriteCond %{HTTPS} off
+RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Canonical host (apex only — drop www, no content lives there)
+RewriteCond %{HTTP_HOST} ^www\.mallchain\.network$ [NC]
+RewriteRule ^(.*)$ https://mallchain.network/$1 [L,R=301]
+
+# Handle SPA routing - serve index.html for all routes.
+# v14 uses a hash router so the server-side part is always "/" or an asset;
+# this fallback only kicks in if a `#` gets lost in transit (some old share
+# links, email clients that strip fragments, etc.).
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.html [L]
+
+# MIME type for Vite-produced ESM bundles (.js is already covered)
+<IfModule mod_mime.c>
+    AddType application/javascript .js
+    AddType text/css .css
+    AddType image/svg+xml .svg
+    AddType application/font-woff2 .woff2
+</IfModule>
+
+# Security headers
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+    # HSTS — Namecheap already serves HTTPS at the edge, but this hardens
+    # against any TLS-strip on first hit. 1 year, include subdomains.
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    # Cache the security-sensitive headers off (mod_header can otherwise
+    # cache 200 OK with stale headers across deploys).
+    Header unset ETag
+</IfModule>
+
+# Cache static assets
+<IfModule mod_expires.c>
+    ExpiresActive On
+    # Vite hashes every JS/CSS file in `assets/` — safe to cache forever.
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType image/svg+xml "access plus 1 year"
+    ExpiresByType application/font-woff2 "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType image/jpeg "access plus 1 year"
+    # index.html itself must NOT be cached aggressively — Vite swaps the
+    # hashed bundle filename on every deploy, but a stale index.html still
+    # points at the old JS. 5 min is the conventional SPA value.
+    ExpiresByType text/html "access plus 5 minutes"
+</IfModule>
+
+# Disable directory browsing and server signature
+Options -Indexes -ServerSignature

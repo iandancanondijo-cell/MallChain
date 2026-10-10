@@ -5,7 +5,7 @@
 global:
   resolve_timeout: 5m
   smtp_smarthost: 'smtp.mailtrap.io:2525'
-  smtp_from: 'alertmanager@mallchain.io'
+  smtp_from: 'alertmanager@mallchain.network'
   smtp_auth_username: 'your_mailtrap_username'
   smtp_auth_password: 'your_mailtrap_password'
   smtp_require_tls: true
@@ -62,7 +62,7 @@ inhibit_rules:
 receivers:
   - name: 'default-email'
     email_configs:
-      - to: 'ops-team@mallchain.io'
+      - to: 'ops-team@mallchain.network'
         send_resolved: true
         headers:
           Subject: '[Mallchain] {{ .GroupLabels.alertname }} ({{ .GroupLabels.job }})'

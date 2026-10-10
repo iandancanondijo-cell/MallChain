@@ -23,11 +23,14 @@ const Campaign = require('../models/Campaign');
 const WalletTransaction = require('../models/WalletTransaction');
 const BadgePurchase = require('../models/BadgePurchase');
 const BadgeIssuance = require('../models/BadgeIssuance');
+const BadgeDesign = require('../models/BadgeDesign');
 const { getUserBadgeInfo } = require('../services/badgeService');
 const { issueBadgeFromMnemonic } = require('../services/badgeTxBuilder');
 const { notifyUser } = require('../services/notify');
 const { limiters } = require('../middleware/rateLimiter');
 const { blindIndex, decryptField } = require('../utils/fieldEncryption');
+const { uploadBadgeImage, BADGE_UPLOAD_DIR } = require('../middleware/upload');
+const path = require('path');
 
 const MAINTENANCE_SCOPES = ['send', 'withdraw', 'buy', 'payment', 'marketplace', 'staking', 'vault', 'key-vault', 'badge', 'dex'];
 
@@ -1042,6 +1045,318 @@ router.post('/badges/purchases/:quoteId/void', limiters.strict, async (req, res)
 
     await auditLog('badge_purchase_void', req.user, { quoteId: req.params.quoteId, reason });
     return res.json({ ok: true, purchase: purchase.toObject() });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Admin approves a paid purchase and issues the badge on-chain to the chosen wallet.
+// The walletAddress can differ from the purchase's original walletAddress — this lets
+// the buyer choose which of their wallets receives the badge at approval time.
+router.post('/badges/approve', limiters.strict, async (req, res) => {
+  try {
+    const { quoteId, walletAddress } = req.body || {};
+    if (!quoteId || !walletAddress) {
+      return res.status(400).json({ ok: false, error: 'quoteId and walletAddress are required' });
+    }
+
+    const purchase = await BadgePurchase.findOne({ quoteId });
+    if (!purchase) return res.status(404).json({ ok: false, error: 'Purchase not found' });
+
+    if (purchase.status === 'issued') {
+      return res.status(409).json({ ok: false, error: 'Badge already issued for this purchase' });
+    }
+    if (purchase.status !== 'awaiting_admin') {
+      return res.status(400).json({ ok: false, error: `Purchase is not awaiting admin approval (current status: ${purchase.status})` });
+    }
+
+    const existing = await getUserBadgeInfo(walletAddress);
+    if (existing.exists) {
+      return res.status(409).json({ ok: false, error: 'This wallet already has a badge' });
+    }
+
+    const operatorMnemonic = process.env.OPERATOR_MNEMONIC;
+    if (!operatorMnemonic) {
+      return res.status(503).json({ ok: false, error: 'Badge issuance is not configured yet' });
+    }
+
+    purchase.status = 'processing';
+    await purchase.save();
+
+    try {
+      const result = await issueBadgeFromMnemonic({
+        mnemonic: operatorMnemonic,
+        recipient: walletAddress,
+        badgeType: 'gold',
+      });
+
+      purchase.status = 'issued';
+      purchase.walletAddress = walletAddress;
+      purchase.badgeTxHash = result.txHash;
+      await purchase.save();
+
+      const user = await User.findOne({ walletAddress_blind: blindIndex(walletAddress) }).lean();
+      await BadgeIssuance.create({
+        userId: user?._id,
+        walletAddress,
+        method: 'purchase',
+        badgeType: 'gold',
+        txHash: result.txHash,
+      });
+
+      if (user) {
+        await notifyUser(user, {
+          kind: 'badge',
+          title: 'Badge approved and issued!',
+          body: 'Your Mallchain badge has been approved and issued on-chain. You can now convert Mallpoints to Mallcoin every month on the 15th.',
+        });
+      }
+
+      await auditLog('badge_admin_approve', req.user, { quoteId, walletAddress, txHash: result.txHash });
+      return res.json({ ok: true, txHash: result.txHash });
+    } catch (issueErr) {
+      purchase.status = 'awaiting_admin';
+      purchase.reason = issueErr.message;
+      await purchase.save();
+      throw issueErr;
+    }
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Admin rejects a paid purchase — marks it as rejected without issuing a badge.
+router.post('/badges/reject', limiters.strict, async (req, res) => {
+  try {
+    const { quoteId, reason } = req.body || {};
+    if (!quoteId) return res.status(400).json({ ok: false, error: 'quoteId is required' });
+
+    const purchase = await BadgePurchase.findOne({ quoteId });
+    if (!purchase) return res.status(404).json({ ok: false, error: 'Purchase not found' });
+
+    if (purchase.status === 'issued') {
+      return res.status(400).json({ ok: false, error: 'Cannot reject — badge already issued' });
+    }
+    if (purchase.status !== 'awaiting_admin') {
+      return res.status(400).json({ ok: false, error: `Purchase is not awaiting admin approval (current status: ${purchase.status})` });
+    }
+
+    purchase.status = 'rejected';
+    purchase.reason = reason || 'Rejected by admin';
+    await purchase.save();
+
+    const user = await User.findOne({ walletAddress_blind: blindIndex(purchase.walletAddress) }).lean();
+    if (user) {
+      await notifyUser(user, {
+        kind: 'badge',
+        title: 'Badge purchase update',
+        body: reason || 'Your badge purchase was not approved. Please contact support for details.',
+      });
+    }
+
+    await auditLog('badge_admin_reject', req.user, { quoteId, reason });
+    return res.json({ ok: true, purchase: purchase.toObject() });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Upload a new badge design image. Deactivates previous active designs.
+router.post('/badges/design', limiters.strict, uploadBadgeImage.single('image'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: 'No image file provided' });
+
+    const now = new Date();
+    await BadgeDesign.updateMany({ active: true }, { $set: { active: false } });
+
+    const design = await BadgeDesign.create({
+      imageUrl: `/uploads/badges/${req.file.filename}`,
+      originalName: req.file.originalname,
+      month: now.getMonth() + 1,
+      year: now.getFullYear(),
+      uploadedBy: req.user?.id || req.user?._id,
+      active: true,
+    });
+
+    await auditLog('badge_design_upload', req.user, { designId: design._id, filename: req.file.filename });
+    return res.json({ ok: true, design });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Get current active badge design
+router.get('/badges/design', async (_req, res) => {
+  try {
+    const design = await BadgeDesign.findOne({ active: true }).sort({ createdAt: -1 }).lean();
+    return res.json({ ok: true, design });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Serve badge images statically
+router.get('/badges/design/image', async (_req, res) => {
+  try {
+    const design = await BadgeDesign.findOne({ active: true }).sort({ createdAt: -1 }).lean();
+    if (!design) return res.status(404).json({ ok: false, error: 'No badge design uploaded yet' });
+    const filePath = path.join(__dirname, '..', '..', design.imageUrl.replace(/^\//, ''));
+    return res.sendFile(filePath);
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// ============ CHAIN MONITORING ============
+router.get('/chain/status', async (_req, res) => {
+  try {
+    const axios = require('axios');
+    const chainRest = process.env.CHAIN_REST || 'http://localhost:1317';
+    const timeout = 5000;
+
+    const [nodeInfo, block, netInfo, txCount] = await Promise.all([
+      axios.get(`${chainRest}/cosmos/base/tendermint/v1beta1/node_info`, { timeout }).catch(() => null),
+      axios.get(`${chainRest}/cosmos/base/tendermint/v1beta1/blocks/latest`, { timeout }).catch(() => null),
+      axios.get(`${chainRest}/cosmos/base/tendermint/v1beta1/node_info`, { timeout }).catch(() => null),
+      axios.get(`${chainRest}/cosmos/tx/v1beta1/txs?events=tx.height=${block?.data?.block?.header?.height || 0}&pagination.limit=100`, { timeout }).catch(() => null),
+    ]);
+
+    const header = block?.data?.block?.header;
+    const blockTime = header?.time;
+    const height = header ? parseInt(header.height, 10) : 0;
+
+    let peerCount = 0;
+    try {
+      const netRes = await axios.get(`${chainRest}/cosmos/base/tendermint/v1beta1/node_info`, { timeout });
+      peerCount = netRes.data?.default_node_info?.listeners?.length || 0;
+    } catch { /* ignore */ }
+
+    const status = {
+      blockHeight: height,
+      blockTime: blockTime || null,
+      chainId: nodeInfo?.data?.default_node_info?.network || 'unknown',
+      nodeVersion: nodeInfo?.data?.default_node_info?.version || 'unknown',
+      moniker: nodeInfo?.data?.default_node_info?.moniker || 'unknown',
+      syncing: nodeInfo?.data?.sync_info?.catching_up || false,
+      latestBlockHash: block?.data?.block_id?.hash || null,
+      peerCount,
+      txCountInBlock: txCount?.data?.tx_responses?.length || 0,
+    };
+
+    return res.json({ ok: true, status });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+router.get('/chain/blocks', async (req, res) => {
+  try {
+    const axios = require('axios');
+    const chainRest = process.env.CHAIN_REST || 'http://localhost:1317';
+    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
+
+    const latestRes = await axios.get(`${chainRest}/cosmos/base/tendermint/v1beta1/blocks/latest`, { timeout: 5000 }).catch(() => null);
+    if (!latestRes?.data?.block?.header) {
+      return res.json({ ok: true, blocks: [] });
+    }
+
+    const latestHeight = parseInt(latestRes.data.block.header.height, 10);
+    const blocks = [];
+
+    for (let i = 0; i < limit; i++) {
+      const h = latestHeight - i;
+      if (h <= 0) break;
+      try {
+        const blockRes = await axios.get(`${chainRest}/cosmos/base/tendermint/v1beta1/blocks/${h}`, { timeout: 3000 });
+        const b = blockRes.data;
+        blocks.push({
+          height: h,
+          hash: b.block_id?.hash || '',
+          proposer: b.block?.header?.proposer_address || '',
+          time: b.block?.header?.time || '',
+          txCount: b.block?.data?.txs?.length || 0,
+        });
+      } catch { break; }
+    }
+
+    return res.json({ ok: true, blocks });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+router.get('/chain/validators', async (_req, res) => {
+  try {
+    const axios = require('axios');
+    const chainRest = process.env.CHAIN_REST || 'http://localhost:1317';
+
+    const [valsRes, poolRes] = await Promise.all([
+      axios.get(`${chainRest}/cosmos/staking/v1beta1/validators?pagination.limit=100`, { timeout: 5000 }).catch(() => null),
+      axios.get(`${chainRest}/cosmos/staking/v1beta1/pool`, { timeout: 5000 }).catch(() => null),
+    ]);
+
+    const validators = (valsRes?.data?.validators || []).map((v) => ({
+      moniker: v.description?.moniker || 'Unknown',
+      operatorAddress: v.operator_address,
+      consensusAddress: v.consensus_pubkey?.key || '',
+      status: v.status,
+      tokens: v.tokens,
+      commission: v.commission?.commission_rates?.rate || '0',
+      jailed: v.jailed,
+    }));
+
+    return res.json({
+      ok: true,
+      validators,
+      bondedTokens: poolRes?.data?.pool?.bonded_tokens || '0',
+    });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// ============ BROADCAST NOTIFICATIONS ============
+router.post('/notifications/broadcast', requireSuperAdmin, limiters.strict, async (req, res) => {
+  try {
+    const { title, message, type, channels } = req.body || {};
+    if (!title || !message) {
+      return res.status(400).json({ ok: false, error: 'title and message are required' });
+    }
+
+    const Notification = require('../models/Notification');
+    const validTypes = ['transaction', 'security', 'governance', 'campaign', 'badge', 'marketing', 'system'];
+    const notifType = validTypes.includes(type) ? type : 'system';
+
+    const users = await User.find({ banned: { $ne: true } }).select('_id').lean();
+    const notifications = users.map((u) => ({
+      userId: u._id,
+      type: notifType,
+      title,
+      message,
+      channels: {
+        email: channels?.email || false,
+        sms: channels?.sms || false,
+        whatsapp: channels?.whatsapp || false,
+        inApp: channels?.inApp !== false,
+      },
+    }));
+
+    if (notifications.length > 0) {
+      await Notification.insertMany(notifications);
+    }
+
+    await auditLog('notification_broadcast', req.user, { title, recipientCount: notifications.length, type: notifType });
+
+    return res.json({ ok: true, recipientCount: notifications.length });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });

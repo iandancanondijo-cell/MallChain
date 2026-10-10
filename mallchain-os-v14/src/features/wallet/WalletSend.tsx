@@ -91,7 +91,7 @@ export default function WalletSend() {
       store.applyTx({
         type: 'send', amount: parseFloat(amount), asset: 'MALL', kind: 'debit', to: addr, fee,
         note: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
-        notifTitle: `Sent ${amount} MALL`, notifKind: 'tx',
+        notifTitle: `Sent ${amount} MALL`, notifKind: 'tx', notifCategory: 'transactions',
         activityText: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
       });
       setTxHash(result.txHash);

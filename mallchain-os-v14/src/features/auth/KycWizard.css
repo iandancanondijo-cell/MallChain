@@ -1,0 +1,524 @@
+/* KYC Wizard Styles — Mallchain OS v14
+ * Matches the KYC verification flow HTML prototype
+ * Clean, modern design with sidebar stepper
+ */
+
+.kyc-wizard {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  min-height: 100vh;
+  background: var(--bg-0);
+  color: var(--txt-1);
+  font-family: var(--font-ui);
+}
+
+/* Sidebar */
+.kyc-sidebar {
+  background: var(--brand, #0F4C45);
+  color: var(--on-brand, #fff);
+  padding: 40px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.kyc-logo {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.kyc-sidebar > p {
+  margin: 0;
+  opacity: 0.85;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.kyc-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kyc-steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  font-size: 15px;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.kyc-steps li.on {
+  opacity: 1;
+  font-weight: 600;
+}
+
+.kyc-steps li.done {
+  opacity: 0.95;
+}
+
+.kyc-step-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  flex: none;
+  font-weight: 600;
+}
+
+.kyc-steps li.on .kyc-step-dot {
+  background: var(--on-brand, #fff);
+  color: var(--brand, #0F4C45);
+  border-color: var(--on-brand, #fff);
+}
+
+.kyc-steps li.done .kyc-step-dot {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: var(--gold-ink, #1b1305);
+}
+
+/* Main content */
+.kyc-main {
+  padding: 56px 24px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.kyc-panel {
+  width: 100%;
+  max-width: 560px;
+}
+
+/* Step content */
+.kyc-step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.kyc-step-title {
+  font-size: 34px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  color: var(--txt-1);
+}
+
+.kyc-step-lead {
+  color: var(--txt-3);
+  margin: 0 0 28px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* Form layout */
+.kyc-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.kyc-field {
+  margin-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kyc-field label {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--txt-1);
+}
+
+.kyc-field input,
+.kyc-field select {
+  width: 100%;
+  font: inherit;
+  color: var(--txt-1);
+  background: var(--bg-1);
+  border: 1.5px solid var(--line-1);
+  border-radius: 8px;
+  padding: 11px 12px;
+  min-height: 46px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+/* Override browser autofill styling */
+.kyc-field input:-webkit-autofill,
+.kyc-field input:-webkit-autofill:hover,
+.kyc-field input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-1) inset !important;
+  -webkit-text-fill-color: var(--txt-1) !important;
+  border-color: var(--line-1) !important;
+  background-color: var(--bg-1) !important;
+}
+
+.kyc-field input:-webkit-autofill {
+  -webkit-box-shadow: inset 0 0 0 1000px var(--bg-1), inset 0 0 0 1px var(--line-1) !important;
+}
+
+.kyc-field input:focus,
+.kyc-field select:focus {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+  border-color: var(--gold);
+}
+
+.kyc-field input[aria-invalid="true"],
+.kyc-field select[aria-invalid="true"] {
+  border-color: var(--red);
+}
+
+/* ID type selector */
+.kyc-id-types {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.kyc-id-type {
+  border: 1.5px solid var(--line-1);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--bg-1);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  display: block;
+  margin: 0;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.kyc-id-type:hover {
+  border-color: var(--line-2);
+}
+
+.kyc-id-type.selected {
+  border-color: var(--brand, #0F4C45);
+  background: var(--soft, rgba(15, 76, 69, 0.1));
+  color: var(--brand, #0F4C45);
+}
+
+/* File upload */
+.kyc-upload-field {
+  margin-bottom: 18px;
+}
+
+.kyc-upload-label {
+  display: block;
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 6px;
+  color: var(--txt-1);
+}
+
+.kyc-drop-zone {
+  display: block;
+  position: relative;
+  border: 2px dashed var(--line-1);
+  border-radius: 10px;
+  background: var(--bg-1);
+  cursor: pointer;
+  margin: 0;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.kyc-drop-zone:hover {
+  border-color: var(--gold);
+}
+
+.kyc-drop-zone.has-file {
+  border-style: solid;
+  border-color: var(--green);
+}
+
+.kyc-upload-frame {
+  aspect-ratio: 1.586;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 16px;
+  color: var(--txt-3);
+  font-weight: 400;
+  font-size: 14px;
+  position: relative;
+}
+
+.kyc-upload-frame.selfie {
+  aspect-ratio: 1;
+}
+
+.kyc-upload-frame b {
+  display: block;
+  color: var(--txt-1);
+  font-size: 15px;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.kyc-upload-frame::before,
+.kyc-upload-frame::after {
+  content: "";
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border: 3px solid var(--gold);
+  pointer-events: none;
+}
+
+.kyc-upload-frame::before {
+  top: 12px;
+  left: 12px;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.kyc-upload-frame::after {
+  bottom: 12px;
+  right: 12px;
+  border-left: 0;
+  border-top: 0;
+}
+
+.kyc-upload-frame img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.kyc-file-name {
+  font-size: 13px;
+  color: var(--txt-3);
+  margin: 6px 0 0;
+}
+
+/* Tips */
+.kyc-tips {
+  margin: 0 0 22px;
+  padding-left: 20px;
+  color: var(--txt-3);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.kyc-tips li {
+  margin-bottom: 4px;
+}
+
+/* Summary */
+.kyc-summary {
+  margin: 0 0 8px;
+  border-top: 1px solid var(--line-1);
+}
+
+.kyc-sum-row {
+  display: grid;
+  grid-template-columns: 150px 1fr auto;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-1);
+  font-size: 15px;
+  align-items: start;
+}
+
+.kyc-sum-row dt {
+  color: var(--txt-3);
+  font-weight: 500;
+}
+
+.kyc-sum-row dd {
+  margin: 0;
+  word-break: break-word;
+  color: var(--txt-1);
+}
+
+.kyc-edit-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  min-height: 0;
+  color: var(--brand, #0F4C45);
+  text-decoration: underline;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.kyc-edit-btn:hover {
+  color: var(--gold);
+}
+
+/* Thumbnails */
+.kyc-thumbs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.kyc-thumb-img {
+  width: 96px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--line-1);
+}
+
+.kyc-thumb-pdf {
+  width: 96px;
+  height: 64px;
+  border-radius: 6px;
+  border: 1px solid var(--line-1);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: var(--txt-3);
+  background: var(--bg-2);
+}
+
+/* Checkbox */
+.kyc-checkbox {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 14px;
+  margin-top: 6px;
+  padding: 16px;
+  background: var(--bg-1);
+  border-radius: 12px;
+  border: 1px solid var(--line-1);
+  cursor: pointer;
+}
+
+.kyc-checkbox input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  accent-color: var(--gold);
+}
+
+.kyc-checkbox span {
+  color: var(--txt-2);
+  line-height: 1.5;
+}
+
+/* Error */
+.kyc-error {
+  color: var(--red);
+  font-size: 13px;
+  padding: 12px;
+  margin-bottom: 20px;
+  background: var(--red-dim, rgba(232, 65, 47, 0.1));
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Navigation */
+.kyc-nav {
+  display: flex;
+  gap: 12px;
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line-1);
+  flex-wrap: wrap;
+}
+
+.kyc-btn {
+  font: inherit;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 12px 22px;
+  min-height: 46px;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: all 0.2s;
+  flex: 1;
+  min-width: 140px;
+}
+
+.kyc-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.kyc-btn-primary {
+  background: var(--brand, #0F4C45);
+  color: var(--on-brand, #fff);
+}
+
+.kyc-btn-primary:hover:not(:disabled) {
+  background: var(--gold);
+  color: var(--gold-ink, #1b1305);
+}
+
+.kyc-btn-ghost {
+  background: transparent;
+  color: var(--txt-1);
+  border-color: var(--line-1);
+}
+
+.kyc-btn-ghost:hover:not(:disabled) {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+/* Mobile responsive */
+@media (max-width: 820px) {
+  .kyc-wizard {
+    grid-template-columns: 1fr;
+  }
+
+  .kyc-sidebar {
+    display: none;
+  }
+
+  .kyc-main {
+    padding: 28px 18px 48px;
+  }
+
+  .kyc-step-title {
+    font-size: 28px;
+  }
+
+  .kyc-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .kyc-sum-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .kyc-sum-row dt {
+    grid-column: 1 / -1;
+  }
+
+  .kyc-id-types {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}

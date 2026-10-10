@@ -188,14 +188,14 @@ export function StatusChip({ status }: { status: string | null | undefined }) {
 }
 
 /* ---------------- BadgeCheckmark ---------------- */
-/** Gold checkmark shown next to a username — earned via the 7-day activity streak or bought for KSh 17. */
+/** Cyan checkmark shown next to a username — earned via the 7-day activity streak or bought for KSh 17. */
 export function BadgeCheckmark({ size = 14 }: { size?: number }) {
   return (
     <span
       style={{ display: 'inline-block', verticalAlign: 'middle', marginLeft: 4, lineHeight: 0 }}
       title="Mallchain badge — earned via a 7-day activity streak or purchase"
     >
-      <BadgeCheck size={size} color="var(--gold)" />
+      <BadgeCheck size={size} color="var(--cyan)" />
     </span>
   );
 }

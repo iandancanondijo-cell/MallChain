@@ -57,7 +57,7 @@ class EventPersistence {
     try {
       // Create consumer group if it doesn't exist
       try {
-        await this.redis.xgroupCreate(STREAM_NAME, CONSUMER_GROUP, '0', 'MKSTREAM');
+        await this.redis.xgroup('CREATE', STREAM_NAME, CONSUMER_GROUP, '0', 'MKSTREAM');
         logger.info('events', 'Created Redis Stream consumer group', {
           stream: STREAM_NAME,
           group: CONSUMER_GROUP,
@@ -69,8 +69,9 @@ class EventPersistence {
         // Group already exists
       }
 
-      // Start processing
-      await this.startProcessing();
+      // Start processing (fire-and-forget — the processing loop runs
+      // indefinitely and must not block initialization)
+      this.startProcessing();
       logger.info('events', 'Event persistence initialized');
     } catch (err) {
       logger.error('events', 'Failed to initialize event persistence', err);

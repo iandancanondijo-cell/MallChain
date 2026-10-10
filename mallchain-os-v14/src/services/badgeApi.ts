@@ -42,6 +42,7 @@ export interface BadgeIssueResult {
   success: boolean;
   txHash?: string;
   message?: string;
+  status?: string;
 }
 
 class BadgeApi {

@@ -1,57 +1,84 @@
 /**
- * SMS sending via Africa's Talking's REST API — plain axios call, matching
- * this codebase's existing pattern for external providers (see buy.js's
- * Safaricom calls) rather than pulling in another SDK. Best-effort: if
- * unconfigured, sendSms no-ops with a warning rather than throwing.
+ * SMS notification service using Twilio API.
+ *
+ * Environment variables:
+ *   TWILIO_ACCOUNT_SID    - Twilio account SID
+ *   TWILIO_AUTH_TOKEN     - Twilio auth token
+ *   TWILIO_PHONE_NUMBER   - Twilio phone number (e.g., +1234567890)
+ *
+ * If TWILIO_ACCOUNT_SID is not set, SMS messages are logged but not sent (dev mode).
  */
-const axios = require('axios');
-const { config } = require('../config');
+
 const logger = require('../utils/logger');
 
-function isConfigured() {
-  const { apiKey, username } = config.sms.africastalking;
-  return Boolean(apiKey && username);
-}
+const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01';
 
-let warnedOnce = false;
+/**
+ * Send an SMS message.
+ *
+ * @param {string} to - Recipient phone number in international format (e.g., +254712345678)
+ * @param {string} message - SMS body (max 1600 characters)
+ * @returns {Promise<{success: boolean, sid?: string, error?: string}>}
+ */
+async function sendSMS(to, message) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_PHONE_NUMBER;
 
-/** Returns true if the SMS was actually sent, false if skipped (never throws). */
-async function sendSms(phone, message) {
-  if (!phone || !message) return false;
-
-  if (!isConfigured()) {
-    if (!warnedOnce) {
-      warnedOnce = true;
-      logger.warn('smsService', 'Africa\'s Talking not configured — SMS notifications disabled (development mode)');
-    }
-    return false;
+  if (!accountSid || !authToken || !fromNumber) {
+    logger.warn('smsService', 'Twilio not configured — SMS logged but not sent', {
+      to,
+      message: message.substring(0, 100),
+    });
+    return { success: false, error: 'Twilio not configured' };
   }
 
-  const { apiKey, username, senderId, apiBaseUrl } = config.sms.africastalking;
+  if (!to || !message) {
+    return { success: false, error: 'Missing required fields: to, message' };
+  }
+
+  if (message.length > 1600) {
+    return { success: false, error: 'SMS message exceeds 1600 character limit' };
+  }
+
+  const url = `${TWILIO_API_BASE}/Accounts/${accountSid}/Messages.json`;
+
+  const params = new URLSearchParams();
+  params.append('To', to);
+  params.append('From', fromNumber);
+  params.append('Body', message);
+
+  const authString = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
 
   try {
-    const body = new URLSearchParams({ username, to: phone, message });
-    if (senderId) body.set('from', senderId);
-
-    const res = await axios.post(`${apiBaseUrl.replace(/\/$/, '')}/version1/messaging`, body.toString(), {
+    const response = await fetch(url, {
+      method: 'POST',
       headers: {
-        apiKey,
+        'Authorization': `Basic ${authString}`,
         'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
       },
-      timeout: 10000,
+      body: params.toString(),
     });
 
-    const recipients = res.data?.SMSMessageData?.Recipients || [];
-    const ok = recipients.some((r) => String(r.status || '').toLowerCase().includes('success'));
-    if (!ok) {
-      logger.warn('smsService', 'Africa\'s Talking accepted the request but reported no successful recipient', { phone, recipients });
+    if (!response.ok) {
+      const errorData = await response.json();
+      logger.error('smsService', 'Twilio API error', {
+        status: response.status,
+        error: errorData,
+        to,
+      });
+      return { success: false, error: `Twilio error: ${errorData.message || response.status}` };
     }
-    return ok;
-  } catch (err) {
-    logger.error('smsService', 'failed to send SMS', err, { phone });
-    return false;
+
+    const data = await response.json();
+    logger.info('smsService', 'SMS sent', { to, sid: data.sid, status: data.status });
+    return { success: true, sid: data.sid };
+  } catch (error) {
+    logger.error('smsService', 'Failed to send SMS', { error: error.message, to });
+    return { success: false, error: error.message };
   }
 }
 
-module.exports = { sendSms, isConfigured };
+module.exports = {
+  sendSMS,
+};

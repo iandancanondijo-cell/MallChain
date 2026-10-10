@@ -4,6 +4,7 @@ if (process.env.DOTENVX_LOADED) {
 }
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
 const cookieParser = require('cookie-parser');
 const mongoose = require('mongoose');
 const morgan = require('morgan');
@@ -75,11 +76,10 @@ const { Server } = require('socket.io')
 const { csrfProtection } = require('./middleware/csrf')
 
 // Real-time services
-const { startBlockListener } = require('../services/blockListener');
-const { priceEngine } = require('../services/priceEngine');
-const { marketFeed } = require('../services/marketActivityFeed');
-const { walletSyncService } = require('../services/walletSync');
-const { notificationManager } = require('../services/notificationManager');
+const { priceEngine } = require('./services/priceEngine');
+const { marketFeed } = require('./services/marketActivityFeed');
+const { walletSyncService } = require('./services/walletSync');
+const { notificationManager } = require('./services/notificationManager');
 const { initializeDefaultBurnPolicies, initializeDefaultDynamicThresholds } = require('./services/burnCalculator');
 
 const app = express();
@@ -458,7 +458,35 @@ app.get('/api', (req, res) => res.json({
   routes: ['/api/auth', '/api/vault', '/api/tx', '/api/market', '/api/send', '/api/blockchain', '/api/blockchain/tx', '/api/mallwallet', '/metrics'],
 }));
 
+app.use('/uploads/badges', express.static(path.join(__dirname, '..', 'uploads', 'badges')));
+
 app.use('/api/auth', authRoutes);
+
+// Proxy /rpc and /rest to local blockchain node for static-frontend deployments
+function proxyToNode(targetPort, pathPrefix) {
+  return (req, res) => {
+    const targetPath = req.originalUrl.replace(new RegExp(`^${pathPrefix}`), '') || '/';
+    const opts = {
+      hostname: '127.0.0.1',
+      port: targetPort,
+      path: targetPath,
+      method: req.method,
+      headers: { ...req.headers, host: '127.0.0.1' },
+    };
+    const proxy = http.request(opts, (upstream) => {
+      res.writeHead(upstream.statusCode, upstream.headers);
+      upstream.pipe(res);
+    });
+    proxy.on('error', (err) => {
+      logger.error('proxy', `Blockchain node proxy error (port ${targetPort})`, err);
+      res.status(502).json({ error: 'blockchain node unreachable' });
+    });
+    req.pipe(proxy);
+  };
+}
+app.use('/rpc', proxyToNode(26657, '/rpc'));
+app.use('/rest', proxyToNode(1317, '/rest'));
+
 const flagsRoutes = require('./routes/flags');
 app.use('/api/flags', flagsRoutes);
 app.use('/api/gdpr', gdprRoutes);
@@ -1220,7 +1248,7 @@ io.on('connection', socket => {
     startBackgroundWorkers().catch(err => logger.error('Background workers failed', { error: err }));
     
     // Start blockchain event listener (pulls from RPC)
-    const stopBlockListener = startBlockListener();
+    const stopBlockListener = startBlockchainListener();
 
     // Daily volume reset
     setInterval(() => {

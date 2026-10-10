@@ -120,6 +120,15 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
       st.marketplace.cart = [];
       store.commit();
       toast(`Escrow locked for ${newOrders.length} order(s) — funds held until delivery confirmed`);
+      
+      // Send notification through all channels
+      store.pushNotification(
+        'Order Confirmed',
+        `${newOrders.length} order(s) placed with escrow protection`,
+        'tx',
+        'transactions'
+      );
+      
       setCartOpen(false);
     } catch (e) {
       const msg = e instanceof MarketplaceTxError ? e.message : 'Checkout failed';
@@ -150,6 +159,15 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
         o.status = SHIP_FLOW[i + 1];
         o.releaseTxHash = txHash;
         store.commit();
+        
+        // Send notification through all channels
+        store.pushNotification(
+          'Delivery Confirmed',
+          'Escrow released to seller — order complete',
+          'tx',
+          'transactions'
+        );
+        
         toast('Delivery confirmed — escrow released to seller');
       } catch (e) {
         toast(e instanceof MarketplaceTxError ? e.message : 'Failed to release escrow funds');
@@ -177,6 +195,15 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
       await openDispute({ mnemonic, buyer: st.wallet.address, escrowId: o.escrowId });
       o.status = 'disputed';
       store.commit();
+      
+      // Send notification through all channels
+      store.pushNotification(
+        'Dispute Filed',
+        'Dispute opened on-chain — awaiting resolution',
+        'tx',
+        'transactions'
+      );
+      
       toast('Dispute filed on-chain — the seller must agree to a refund, or funds release automatically once the dispute window passes');
     } catch (e) {
       toast(e instanceof MarketplaceTxError ? e.message : 'Failed to open dispute');

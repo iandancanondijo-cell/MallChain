@@ -301,7 +301,7 @@ function emptyState(): AppState {
     settings: { theme: 'dark', network: config.network },
     wallet: { address: '', accountId: '', chainId: '', mnemonic: '', createdAt: 0, requests: [], pinHash: '', pinEncryptedMnemonic: '' },
     marketplace: { cart: [], wishlist: [], orders: [] },
-    staking: { delegated: 0, apy: 12.4, pendingUnstake: 0, cooldownEnds: null, history: [] },
+    staking: { delegated: 0, apy: 0, pendingUnstake: 0, cooldownEnds: null, history: [] },
     governance: { proposals: [] },
     mines: {
       campaigns: [],
@@ -311,12 +311,12 @@ function emptyState(): AppState {
       hist: [],
       created: [],
       campAnalytics: {},
-      pendCount: 324,
+      pendCount: 0,
     },
     validators: emptyValidators(),
     explorer: { blocks: [], txs: [] },
     messaging: { conversations: [] },
-    referrals: { code: 'MALL-KE-' + Math.random().toString(36).slice(2, 8).toUpperCase(), earned: 0, count: 0, claimed: 0 },
+    referrals: { code: '', earned: 0, count: 0, claimed: 0 },
     admin: { flags: {}, announcements: [] },
     notifs: [],
     contracts: [],
@@ -521,6 +521,7 @@ class Store {
     note?: string;
     notifTitle?: string;
     notifKind?: Notification['kind'];
+    notifCategory?: 'transactions' | 'campaigns' | 'governance' | 'security' | 'marketing' | 'badgeAlerts';
     activityText?: string;
     status?: Tx['status'];
   }): { ok: boolean; error?: string; tx?: Tx } {
@@ -544,9 +545,18 @@ class Store {
     };
     this.state.txs.unshift(tx);
     if (this.state.txs.length > 200) this.state.txs.length = 200;
+    
+    // Send notification through real API with multi-channel support
     if (opts.notifTitle) {
-      this.pushNotification(opts.notifTitle, opts.note || '', opts.notifKind || 'tx');
+      this.sendNotificationAsync(
+        opts.notifTitle,
+        opts.note || '',
+        opts.notifKind || 'tx',
+        opts.notifCategory || 'transactions',
+        tx.id
+      );
     }
+    
     if (opts.activityText) {
       this.state.activity.unshift({ id: 'act' + Date.now().toString(36), text: opts.activityText, ts: Date.now() });
       if (this.state.activity.length > 60) this.state.activity.length = 60;
@@ -563,9 +573,53 @@ class Store {
     return this.applyTx({ type, amount, asset, kind: 'debit', note });
   }
 
-  pushNotification(title: string, body = '', kind: Notification['kind'] = 'system') {
+  pushNotification(title: string, body = '', kind: Notification['kind'] = 'system', category: 'transactions' | 'campaigns' | 'governance' | 'security' | 'marketing' | 'badgeAlerts' = 'security') {
+    // Add to local state for immediate UI display
     this.state.notifications.unshift({ id: 'n' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), kind, title, body, read: false, ts: Date.now() });
     if (this.state.notifications.length > 80) this.state.notifications.length = 80;
+    
+    // Send through real API asynchronously
+    this.sendNotificationAsync(title, body, kind, category, undefined);
+  }
+
+  /**
+   * Send notification through real backend API with multi-channel support
+   * Non-blocking async operation that respects user preferences
+   */
+  private sendNotificationAsync(
+    title: string,
+    body: string,
+    kind: Notification['kind'] = 'system',
+    category: 'transactions' | 'campaigns' | 'governance' | 'security' | 'marketing' | 'badgeAlerts' = 'security',
+    metadata?: unknown
+  ) {
+    // Only send if user is authenticated
+    if (!this.state.user.authed) return;
+
+    // Send notification async without blocking user flow
+    // Using setTimeout to avoid circular import issues
+    setTimeout(() => {
+      import('../services/notificationsApi').then(({ notificationsApi }) => {
+        notificationsApi.send({
+          title,
+          body,
+          kind,
+          category,
+          channels: {
+            email: true,
+            sms: true,
+            whatsapp: true,
+            inApp: true,
+          },
+          metadata: metadata ? { metadata } : undefined,
+        }).catch((err: unknown) => {
+          // Log errors but don't interrupt user flow
+          console.error('Failed to send notification:', err);
+        });
+      }).catch((err: unknown) => {
+        console.error('Failed to import notificationsApi:', err);
+      });
+    }, 0);
   }
 
   /** Durable-tier wizard/flow progress — see hooks/useWizard.ts. */

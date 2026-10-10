@@ -13,6 +13,7 @@ import { walletService } from '../services/walletService';
 import { sendMallcoinTransfer, MallcoinTxError, getNetworkFeeEstimate } from '../services/mallcoinTx';
 import { buyApi, type BuyConfig, type BuyQuote } from '../services/buyApi';
 import { requestCache } from '../services/requestCache';
+import { apiUrl } from '../config/apiBase';
 import QRCode from 'qrcode';
 import type { MallchainWallet } from '../wallet/MallchainWallet';
 
@@ -498,6 +499,7 @@ export function MallchainDashboard({ onOpenCreateWallet }: { onOpenCreateWallet?
           chainId={mallchainClient.getNetwork().chainId}
           wallet={state.wallet}
           recentTxCount={state.transactions.length}
+          recentTransactions={state.transactions}
         />
 
         {/* Main Content */}
@@ -770,6 +772,7 @@ interface DashboardHeaderProps {
   chainId: string;
   wallet: MallchainWallet | null;
   recentTxCount: number;
+  recentTransactions: DashboardState['transactions'];
 }
 
 function DashboardHeader({
@@ -785,6 +788,7 @@ function DashboardHeader({
   chainId,
   wallet,
   recentTxCount,
+  recentTransactions,
 }: DashboardHeaderProps) {
   const statusColor = 
     networkStatus === 'CONNECTED' ? '#22c55e' : 
@@ -847,8 +851,21 @@ function DashboardHeader({
           </button>
           {notificationOpen && (
             <div className="dropdown-menu" style={{ right: 0, top: '45px' }}>
-              <button className="dropdown-item">System upgrade v2.1.0</button>
-              <button className="dropdown-item">Validator online</button>
+              {/* Live on-chain transactions for this wallet — no fabricated notices */}
+              {recentTransactions.length === 0 ? (
+                <button className="dropdown-item" style={{ color: '#6b7280', cursor: 'default' }}>
+                  No activity yet — notifications appear as transactions confirm
+                </button>
+              ) : (
+                recentTransactions.slice(0, 5).map((tx) => (
+                  <button key={tx.hash} className="dropdown-item" title={tx.detail} style={{ cursor: 'default' }}>
+                    {tx.type} · {tx.detail}
+                    <span style={{ display: 'block', fontSize: 10, color: '#6b7280', marginTop: 2 }}>
+                      {tx.when}
+                    </span>
+                  </button>
+                ))
+              )}
             </div>
           )}
         </div>
@@ -1330,7 +1347,7 @@ function SendPage({
     let isMounted = true;
     const load = async () => {
       try {
-        const res = await fetch(`/api/send/mlcns/balance/${wallet.address}`);
+        const res = await fetch(apiUrl(`/api/send/mlcns/balance/${wallet.address}`));
         const data = await res.json();
         if (isMounted && res.ok && data.success) {
           const available =
@@ -1408,7 +1425,7 @@ function SendPage({
     if (!wallet.address) return;
     setGettingGas(true);
     try {
-      const res = await fetch('/api/faucet/fund-gas', {
+      const res = await fetch(apiUrl('/api/faucet/fund-gas'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: wallet.address }),
@@ -1874,8 +1891,11 @@ function BuyPage({
   const [quote, setQuote] = useState<BuyQuote | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const FALLBACK_KES_PER_MLCNS = 0.62;
-  const buyRateKes = config?.rates?.buyPriceKes || FALLBACK_KES_PER_MLCNS;
+  // No client-side fallback rate — the live KES/MLCNS rate comes from the buy
+  // config API (fiat-pegged oracle). Until it loads, show a loading state rather
+  // than a fabricated number; the server computes the authoritative quote at
+  // reserve time anyway.
+  const buyRateKes = config?.rates?.buyPriceKes ?? 0;
   const directBuyLocked = config?.directBuy?.locked ?? false;
 
   // Load config on mount
@@ -1885,7 +1905,7 @@ function BuyPage({
         setConfig(r.data);
         const n = parseFloat(amount);
         if (Number.isFinite(n)) {
-          setFiat(String(Math.round(n * (r.data.rates?.buyPriceKes || FALLBACK_KES_PER_MLCNS))));
+          setFiat(String(Math.round(n * (r.data.rates?.buyPriceKes || 0))));
         }
       }
     });
@@ -2114,7 +2134,7 @@ function BuyPage({
               disabled={busy}
             />
             <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
-              Rate ≈ {buyRateKes.toFixed(2)} KES / MLCNS
+              {buyRateKes > 0 ? `Rate ≈ ${buyRateKes.toFixed(2)} KES / MLCNS` : 'Fetching live rate…'}
             </div>
           </div>
           <div className="form-group">
@@ -2145,7 +2165,7 @@ function BuyPage({
             </div>
             <div style={{ borderTop: '1px solid #374151', paddingTop: 8, display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
               <span style={{ color: '#9ca3af' }}>Rate</span>
-              <span>{buyRateKes.toFixed(2)} KES / MLCNS</span>
+              <span>{buyRateKes > 0 ? `${buyRateKes.toFixed(2)} KES / MLCNS` : '—'}</span>
             </div>
           </div>
 
@@ -2244,7 +2264,7 @@ function MarketplacePage() {
     let isMounted = true;
     const load = async () => {
       try {
-        const res = await fetch('/api/marketplace/escrow', { headers: { Accept: 'application/json' } });
+        const res = await fetch(apiUrl('/api/marketplace/escrow'), { headers: { Accept: 'application/json' } });
         const data = await res.json();
         if (isMounted) {
           if (res.ok) setEscrows(Array.isArray(data) ? data : data.escrows || []);
@@ -2309,7 +2329,7 @@ function GovernancePage({ showToast }: { showToast: (msg: string) => void }) {
     let isMounted = true;
     const load = async () => {
       try {
-        const res = await fetch('/api/governance/proposals', { headers: { Accept: 'application/json' } });
+        const res = await fetch(apiUrl('/api/governance/proposals'), { headers: { Accept: 'application/json' } });
         const data = await res.json();
         if (isMounted) {
           if (res.ok) setProposals(Array.isArray(data) ? data : data.proposals || []);

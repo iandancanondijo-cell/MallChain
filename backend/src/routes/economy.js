@@ -106,7 +106,7 @@ router.get('/state', async (req, res) => {
     } catch (e) { /* chain query unavailable — fallback used */ }
 
     const marketPrice = await getMarketPrice()
-    const mlcnsPriceKes = Number(marketPrice?.midPriceKes || 0.62)
+    const mlcnsPriceKes = Number(marketPrice?.buyPriceKes || 0.62)
 
     const monthlyEmission = getMonthlyEmission(currentMonth)
     const dailyEmission = monthlyEmission / 30
@@ -222,7 +222,7 @@ router.get('/user/:address', async (req, res) => {
     const monthlyEmission = getMonthlyEmission(currentMonth)
 
     const marketPrice = await getMarketPrice()
-    const mlcnsPriceKes = Number(marketPrice?.midPriceKes || 0.62)
+    const mlcnsPriceKes = Number(marketPrice?.buyPriceKes || 0.62)
 
     const mpRes = await axios.get(`${CHAIN_REST.replace(/\/$/, '')}/tmp/marketplace/mallpoints/v1/user_points/${address}`, { timeout: 3000 }).catch(() => ({}))
     const mallpoints = Number(mpRes.data?.user_points?.points || mpRes.data?.userPoints?.Points || 0)
@@ -296,7 +296,7 @@ router.get('/track', async (req, res) => {
 
     // 3. Market price for liquidity valuation
     const marketPrice = await getMarketPrice()
-    const mlcnsPriceKes = Number(marketPrice?.midPriceKes || 0.62)
+    const mlcnsPriceKes = Number(marketPrice?.buyPriceKes || 0.62)
 
     // 4. Liquidity pool fiat (KES) — try internal /api/liquidity/pools first, then chain directly
     let liquidityPoolKes = 0
