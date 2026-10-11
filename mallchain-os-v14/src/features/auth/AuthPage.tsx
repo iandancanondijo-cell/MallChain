@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import Particles from "./Particles";
 import Ring from "./Ring";
 import { authApi } from "./authApi";
@@ -7,12 +7,56 @@ import "./auth.css";
 type Mode = "login" | "register";
 type Errors = Record<string, string>;
 type Status = { text: string; bad: boolean } | null;
+type PwStrength = "weak" | "medium" | "strong";
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function readMode(): Mode {
   const q = window.location.hash.split("?")[1] ?? "";
   return new URLSearchParams(q).get("mode") === "register" ? "register" : "login";
+}
+
+function calcPwStrength(pw: string): PwStrength | null {
+  if (!pw) return null;
+  let score = 0;
+  if (pw.length >= 8) score++;
+  if (pw.length >= 12) score++;
+  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
+  if (/\d/.test(pw)) score++;
+  if (/[^A-Za-z0-9]/.test(pw)) score++;
+  if (score <= 2) return "weak";
+  if (score <= 3) return "medium";
+  return "strong";
+}
+
+const pwLabels: Record<PwStrength, string> = { weak: "Weak", medium: "Fair", strong: "Strong" };
+
+/* ---------- icons ---------- */
+function EmailIcon() {
+  return (
+    <svg className="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="16" rx="3" />
+      <path d="M22 7l-10 6L2 7" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg className="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="3" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
+
+function TagIcon() {
+  return (
+    <svg className="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+      <circle cx="7" cy="7" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  );
 }
 
 /* ---------- small field component ---------- */
@@ -24,9 +68,11 @@ type FieldProps = {
   placeholder?: string;
   autoComplete?: string;
   error?: string;
+  icon?: ReactNode;
+  footer?: ReactNode;
 };
 
-function Field({ label, value, onChange, type = "text", placeholder, autoComplete, error }: FieldProps) {
+function Field({ label, value, onChange, type = "text", placeholder, autoComplete, error, icon, footer }: FieldProps) {
   const id = useId();
   const [show, setShow] = useState(false);
   const isPass = type === "password";
@@ -35,8 +81,10 @@ function Field({ label, value, onChange, type = "text", placeholder, autoComplet
     <div className="field">
       <label htmlFor={id}>{label}</label>
       <div className="box">
+        {icon}
         <input
           id={id}
+          className={icon ? "with-icon" : undefined}
           type={isPass && show ? "text" : type}
           value={value}
           placeholder={placeholder}
@@ -55,6 +103,7 @@ function Field({ label, value, onChange, type = "text", placeholder, autoComplet
           </button>
         )}
       </div>
+      {footer}
       {error && (
         <p className="err" role="alert">
           {error}
@@ -184,6 +233,7 @@ export default function AuthPage() {
   }
 
   const isLogin = mode === "login";
+  const pwStrength = useMemo(() => calcPwStrength(upPass), [upPass]);
 
   return (
     <div className="auth-root">
@@ -193,8 +243,8 @@ export default function AuthPage() {
       <Ring />
       <div className="vignette" />
 
-      <a className="logo" href="#/">
-        <i />
+      <a className="logo" href="#/landing">
+        <img src="/mallchain.svg" alt="" width={28} height={28} />
         Mallchain
       </a>
 
@@ -222,11 +272,34 @@ export default function AuthPage() {
 
       <main className="card">
         <div className="switch" role="tablist" aria-label="Account">
-          <button type="button" role="tab" aria-selected={isLogin} onClick={() => go("login")}>
-            Sign in
+          <button
+            type="button"
+            role="tab"
+            aria-selected={isLogin}
+            className={`switch-icon switch-login ${isLogin ? 'active' : ''}`}
+            onClick={() => go("login")}
+            aria-label="Sign in"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+              <polyline points="10 17 15 12 10 7"/>
+              <line x1="15" y1="12" x2="3" y2="12"/>
+            </svg>
           </button>
-          <button type="button" role="tab" aria-selected={!isLogin} onClick={() => go("register")}>
-            Create account
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!isLogin}
+            className={`switch-icon switch-signup ${!isLogin ? 'active' : ''}`}
+            onClick={() => go("register")}
+            aria-label="Create account"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="8.5" cy="7" r="4"/>
+              <line x1="20" y1="8" x2="20" y2="14"/>
+              <line x1="23" y1="11" x2="17" y2="11"/>
+            </svg>
           </button>
         </div>
 
@@ -242,6 +315,7 @@ export default function AuthPage() {
               placeholder="you@example.com"
               autoComplete="email"
               error={errors.email}
+              icon={<EmailIcon />}
             />
 
             <Field
@@ -252,6 +326,7 @@ export default function AuthPage() {
               placeholder="Your password"
               autoComplete="current-password"
               error={errors.password}
+              icon={<LockIcon />}
             />
 
             <div className="row">
@@ -302,6 +377,7 @@ export default function AuthPage() {
               placeholder="you@example.com"
               autoComplete="email"
               error={errors.email}
+              icon={<EmailIcon />}
             />
 
             <Field
@@ -312,6 +388,17 @@ export default function AuthPage() {
               placeholder="Min 8 characters"
               autoComplete="new-password"
               error={errors.password}
+              icon={<LockIcon />}
+              footer={pwStrength && (
+                <>
+                  <div className="pw-strength">
+                    <div className={`pw-bar ${pwStrength}`} />
+                    <div className={`pw-bar ${pwStrength === "medium" || pwStrength === "strong" ? pwStrength : ""}`} />
+                    <div className={`pw-bar ${pwStrength}`} />
+                  </div>
+                  <div className={`pw-label ${pwStrength}`}>{pwLabels[pwStrength]}</div>
+                </>
+              )}
             />
 
             <Field
@@ -322,6 +409,7 @@ export default function AuthPage() {
               placeholder="Repeat your password"
               autoComplete="new-password"
               error={errors.confirm}
+              icon={<LockIcon />}
             />
 
             <Field
@@ -330,6 +418,7 @@ export default function AuthPage() {
               onChange={setReferral}
               placeholder="MALL-XXXXXXXX"
               autoComplete="off"
+              icon={<TagIcon />}
             />
 
             <div className="field">

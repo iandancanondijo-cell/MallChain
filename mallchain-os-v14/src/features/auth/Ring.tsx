@@ -5,7 +5,7 @@ export default function Ring() {
         <defs>
           <path
             id="auth-tp"
-            d="M200,200 m-182,0 a182,182 0 1,1 364,0 a182,182 0 1,1 -364,0"
+            d="M200,200 m0,-182 a182,182 0 1,1 0,364 a182,182 0 1,1 0,-364"
           />
         </defs>
         <g className="s5">

@@ -154,7 +154,7 @@ export function useTransactionData(options: UseTransactionDataOptions) {
    * Handle real-time transaction updates from Socket.IO
    * Task 13.11-13.12: Auto-update on new tx events
    */
-  const handleTransactionUpdate = useCallback((data: any) => {
+  const handleTransactionUpdate = useCallback((data: { address?: string }) => {
     // If it's for this wallet, reload the list
     if (data.address === walletAddress && page === 1) {
       fetchTransactions(0);

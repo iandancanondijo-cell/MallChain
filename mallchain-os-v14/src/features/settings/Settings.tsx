@@ -15,6 +15,7 @@ import { EmailManagement } from './components/EmailManagement';
 import { NotificationEnhancements } from './components/NotificationEnhancements';
 import { APIKeyManager } from './components/APIKeyManager';
 import { SocialAccounts } from './components/SocialAccounts';
+import { AvatarUpload } from './AvatarUpload';
 
 /** Profile & Settings — one page combining real username/phone (backend/src/routes/mines.js),
  *  real 2FA / preferences / notifications / privacy (backend/src/routes/settings.js),
@@ -22,6 +23,7 @@ import { SocialAccounts } from './components/SocialAccounts';
 
 const STATUS_LABEL: Record<KycStatusResponse['status'], string> = {
   not_submitted: 'Not submitted',
+  draft: 'Draft — not submitted',
   pending: 'Under review',
   review: 'Under review',
   approved: 'Verified',
@@ -29,6 +31,7 @@ const STATUS_LABEL: Record<KycStatusResponse['status'], string> = {
 };
 const STATUS_COLOR: Record<KycStatusResponse['status'], string> = {
   not_submitted: 'var(--txt-3)',
+  draft: 'var(--gold)',
   pending: 'var(--gold)',
   review: 'var(--gold)',
   approved: 'var(--green)',
@@ -283,10 +286,10 @@ export default function Settings() {
 
   return (
     <div>
-      <div className="view-head"><h1>Profile &amp; Settings</h1><span className="sub">your identity, security, and preferences</span></div>
+      <div className="view-head"><h1 className="text-gradient">Profile &amp; Settings</h1><span className="sub">your identity, security, and preferences</span></div>
 
       {/* Verification checklist — quick glance at what's actually confirmed vs not */}
-      <div className="card mb">
+      <div className="card mb card-glow bg-gradient-card card-hover">
         <div className="sec-title"><h2>Verification status</h2></div>
         <div className="row" style={{ gap: 20, flexWrap: 'wrap' }}>
           <div className="flag-row" style={{ flex: '1 1 200px' }}>
@@ -323,7 +326,7 @@ export default function Settings() {
 
       <div className="grid-2">
         <div>
-          <div className="card mb">
+          <div className="card mb card-glow bg-gradient-card">
             <div className="sec-title"><h2>Edit profile</h2></div>
             <div className="row mb">
               <div className="avatar" style={{ width: 56, height: 56, fontSize: 24 }}>{st.user.avatarInitial}</div>
@@ -332,6 +335,23 @@ export default function Settings() {
                 <div className="tiny">{profile?.email}</div>
               </div>
             </div>
+
+            {/* Avatar Upload */}
+            <div style={{ marginBottom: 20, padding: 16, backgroundColor: 'var(--surface-alt)', borderRadius: 8 }}>
+              <AvatarUpload
+                currentAvatar={profile?.avatarUrl}
+                onAvatarChange={async (url) => {
+                  toast('Avatar updated successfully! 🎉');
+                  // Reload profile to get updated data
+                  const res = await minesApi.getProfile();
+                  if (res.ok && res.data) {
+                    setProfile(res.data);
+                  }
+                }}
+                userName={profile?.username || st.user.name || 'User'}
+              />
+            </div>
+
             <div className="field">
               <label>Username</label>
               <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} disabled={loading} />
@@ -341,7 +361,7 @@ export default function Settings() {
             <button className="btn btn-primary btn-block" onClick={save} disabled={saving || loading}>{saving && <span className="spin" />} Save changes</button>
           </div>
 
-          <div className="card mb">
+          <div className="card mb card-glow bg-gradient-card">
             <div className="sec-title"><h2>Account</h2></div>
             <div className="flag-row"><div className="desc"><div className="t">KYC level</div><div className="m">identity verification</div></div><span className="chip green">Level {st.user.kycLevel}</span></div>
             <div className="flag-row"><div className="desc"><div className="t">Wallet</div><div className="m">your Mallchain address</div></div><span className="chip mono" style={{ fontSize: 11 }}>{st.wallet.address ? `${st.wallet.address.slice(0, 10)}…` : '—'}</span></div>
@@ -349,7 +369,7 @@ export default function Settings() {
             <div className="flag-row"><div className="desc"><div className="t">Mallpoints balance</div></div><span className="chip">{profile?.mlpts_balance ?? '—'}</span></div>
           </div>
 
-          <div className="card mb">
+          <div className="card mb card-glow bg-gradient-card">
             <div className="sec-title"><h2>Security</h2></div>
             <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
               <button className="btn btn-ghost btn-sm" onClick={() => (twoFactorEnabled ? setShowDisable2fa(true) : startEnable2fa())}>
@@ -369,11 +389,11 @@ export default function Settings() {
 
           <APIKeyManager />
 
-          <div className="card mb">
+          <div className="card mb card-glow bg-gradient-card">
             <SocialAccounts onUpdate={load} />
           </div>
 
-          <div className="card mb">
+          <div className="card mb card-glow bg-gradient-card">
             <div className="sec-title"><h2>Preferences</h2></div>
             <div className="field">
               <label>Theme accent</label>
@@ -415,7 +435,7 @@ export default function Settings() {
           </div>
 
           {!loading && settings && (
-            <div className="card mb">
+            <div className="card mb card-glow bg-gradient-card">
               <div className="sec-title"><h2>Privacy</h2></div>
               <div className="flag-row">
                 <div className="desc"><div className="t">Show my balance to others</div></div>
@@ -434,7 +454,7 @@ export default function Settings() {
         </div>
 
         <div>
-          <div className="card mb">
+          <div className="card mb card-glow bg-gradient-card card-hover">
             <div className="sec-title">
               <h2>Identity verification (KYC)</h2>
               <span className="chip" style={{ marginLeft: 'auto', color: STATUS_COLOR[kyc?.status || 'not_submitted'], borderColor: STATUS_COLOR[kyc?.status || 'not_submitted'] }}>
@@ -497,7 +517,7 @@ export default function Settings() {
 
           {!loading && settings && (
             <>
-              <div className="card mb">
+              <div className="card mb card-glow bg-gradient-card">
                 <div className="sec-title"><h2>Notifications</h2></div>
                 <div className="flag-row" style={{ marginBottom: 8 }}>
                   <div className="desc"><div className="t">Category</div></div>
@@ -517,7 +537,7 @@ export default function Settings() {
                 ))}
               </div>
 
-              <div className="card mb">
+              <div className="card mb card-glow bg-gradient-card">
                 <div className="sec-title"><h2>Notification Channels</h2><span className="sub">Connect WhatsApp &amp; verify phone for SMS/WhatsApp alerts</span></div>
 
                 {/* Phone number section */}
@@ -633,7 +653,7 @@ export default function Settings() {
             </>
           )}
 
-          <div className="card">
+          <div className="card card-glow bg-gradient-card">
             <div className="sec-title"><h2>App</h2></div>
             <div className="flag-row">
               <div className="desc"><div className="t">Network</div></div>

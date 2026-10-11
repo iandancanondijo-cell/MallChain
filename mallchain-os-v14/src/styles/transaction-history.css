@@ -1,6 +1,6 @@
 /**
  * Transaction History Page Styles - Section 14
- * Dark theme with gold accents (#f3ba2f)
+ * Dark theme with gold accents (var(--accent))
  * Responsive design for mobile and desktop
  */
 
@@ -71,8 +71,8 @@
 /* Filter indicator */
 .filter-indicator {
   padding: 8px 12px;
-  background-color: rgba(243, 186, 47, 0.08);
-  border: 1px solid rgba(243, 186, 47, 0.2);
+  background-color: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: 4px;
   font-size: 12px;
   color: var(--gold);
@@ -81,7 +81,7 @@
 .filter-indicator .badge {
   display: inline-block;
   padding: 4px 8px;
-  background-color: rgba(243, 186, 47, 0.15);
+  background-color: color-mix(in srgb, var(--accent) 15%, transparent);
   border-radius: 3px;
   font-size: 11px;
 }
@@ -218,8 +218,8 @@
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
-  background-color: rgba(243, 186, 47, 0.1);
-  border: 1px solid rgba(243, 186, 47, 0.3);
+  background-color: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: 3px;
   color: var(--gold);
   text-decoration: none;
@@ -229,9 +229,9 @@
 }
 
 .hash-link:hover {
-  background-color: rgba(243, 186, 47, 0.2);
+  background-color: color-mix(in srgb, var(--accent) 20%, transparent);
   border-color: var(--gold);
-  box-shadow: 0 0 8px rgba(243, 186, 47, 0.3);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .link-icon {
@@ -474,8 +474,8 @@
 .input:focus {
   outline: none;
   border-color: var(--gold);
-  background-color: rgba(243, 186, 47, 0.05);
-  box-shadow: 0 0 8px rgba(243, 186, 47, 0.2);
+  background-color: color-mix(in srgb, var(--accent) 5%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .input::placeholder {

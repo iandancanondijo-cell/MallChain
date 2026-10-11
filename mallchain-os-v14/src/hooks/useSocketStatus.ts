@@ -42,7 +42,6 @@ export function useSocketStatus(): SocketStatus {
     // Listen for connection events
     if (socketManager.socket) {
       const handleConnect = () => {
-        console.log('[Hook] Socket connected');
         setStatus({
           connected: true,
           status: 'connected',
@@ -52,7 +51,6 @@ export function useSocketStatus(): SocketStatus {
       };
 
       const handleDisconnect = (reason: string) => {
-        console.log('[Hook] Socket disconnected:', reason);
         setStatus({
           connected: false,
           status: 'disconnected',
@@ -61,8 +59,7 @@ export function useSocketStatus(): SocketStatus {
         });
       };
 
-      const handleConnectError = (error: any) => {
-        console.log('[Hook] Socket error:', error);
+      const handleConnectError = (_error: unknown) => {
         setStatus((prev) => ({
           ...prev,
           status: 'disconnected',
@@ -71,7 +68,6 @@ export function useSocketStatus(): SocketStatus {
       };
 
       const handleReconnecting = () => {
-        console.log('[Hook] Socket reconnecting');
         setStatus((prev) => ({
           ...prev,
           status: 'reconnecting',

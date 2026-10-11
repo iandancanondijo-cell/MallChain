@@ -3,6 +3,7 @@ import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, StatusChip, toast } from '../../components/ui';
 import { useTransactionData } from '../../hooks/useTransactionData';
 import { TransactionDetailModal } from './TransactionDetailModal';
+import { LoadingState } from '../../components/LoadingState';
 
 /**
  * Task 13.5-13.12: Real transaction history with pagination, filtering, and real-time updates
@@ -77,32 +78,10 @@ export default function WalletHistory() {
     toast('Transaction history exported as CSV');
   }, [transactions]);
 
-  /**
-   * Task 13.13: Loading skeleton for transactions
-   */
-  const TransactionSkeleton = () => (
-    <div className="list-row" style={{ opacity: 0.5 }}>
-      <span style={{ fontSize: 15 }}>⋯</span>
-      <div className="grow">
-        <div style={{ backgroundColor: 'var(--bg-2)', height: '16px', borderRadius: '4px', width: '200px' }} />
-        <div
-          style={{
-            backgroundColor: 'var(--bg-2)',
-            height: '12px',
-            borderRadius: '4px',
-            width: '150px',
-            marginTop: '8px',
-          }}
-        />
-      </div>
-      <div style={{ backgroundColor: 'var(--bg-2)', height: '20px', borderRadius: '4px', width: '80px' }} />
-    </div>
-  );
-
   return (
     <div>
       <div className="view-head">
-        <h1>Transaction history</h1>
+        <h1 className="text-gradient">Transaction history</h1>
         <span className="sub">{total} transactions</span>
         <button className="btn btn-ghost btn-sm" onClick={exportCsv} disabled={transactions.length === 0}>
           ⬇ Export CSV
@@ -111,7 +90,7 @@ export default function WalletHistory() {
 
       {/* Task 13.13: Error message */}
       {error && (
-        <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: '16px', marginBottom: '16px' }}>
+        <div className="card card-glow bg-gradient-card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: '16px', marginBottom: '16px' }}>
           <div style={{ color: 'var(--red)', fontSize: '13px' }}>⚠ {error}</div>
         </div>
       )}
@@ -172,13 +151,9 @@ export default function WalletHistory() {
         )}
       </div>
 
-      <div className="card" aria-busy={loading && transactions.length === 0} aria-label={loading && transactions.length === 0 ? 'Loading transactions' : undefined}>
+      <div className="card card-glow bg-gradient-card stagger" aria-busy={loading && transactions.length === 0} aria-label={loading && transactions.length === 0 ? 'Loading transactions' : undefined}>
         {loading && transactions.length === 0 ? (
-          <>
-            {[1, 2, 3, 4, 5].map((i) => (
-              <TransactionSkeleton key={i} />
-            ))}
-          </>
+          <LoadingState fill />
         ) : transactions.length === 0 ? (
           <div className="empty" style={{ color: 'var(--txt-3)', padding: 26, textAlign: 'center' }}>
             No transactions yet — send or receive MALL to get started.
@@ -215,7 +190,7 @@ export default function WalletHistory() {
 
       {/* Task 13.7: Pagination controls */}
       {totalPages > 1 && (
-        <div className="card" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '16px' }}>
+        <div className="card card-glow bg-gradient-card" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '16px' }}>
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => setPage(Math.max(1, page - 1))}

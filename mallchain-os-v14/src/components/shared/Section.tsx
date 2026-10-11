@@ -1,9 +1,3 @@
-/**
- * Section Component — Shared component library
- * 
- * Semantic section wrapper with title and optional description.
- */
-
 import React from 'react';
 import './Section.css';
 import { Heading, Text } from './Typography';
@@ -15,14 +9,6 @@ export interface SectionProps extends Omit<React.HTMLAttributes<HTMLElement>, 't
   className?: string;
 }
 
-/**
- * Section component with semantic structure
- * 
- * @example
- * <Section title="Features" description="What we offer">
- *   <div>Feature list</div>
- * </Section>
- */
 export const Section = React.forwardRef<HTMLElement, SectionProps>(
   (
     {

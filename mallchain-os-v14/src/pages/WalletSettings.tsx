@@ -72,13 +72,13 @@ export function WalletSettings() {
 
   return (
     <div className="wallet-settings">
-      <h1>Wallet Settings</h1>
+      <h1 className="text-gradient">Wallet Settings</h1>
 
       {/* Task 7.2: Active Wallet Display */}
       {walletAddress && (
         <div className="active-wallet-section">
           <h2>Active Wallet</h2>
-          <div className="wallet-card">
+          <div className="wallet-card card-glow bg-gradient-card">
             <div className="wallet-header">
               <h3>Primary Wallet</h3>
               <span className="badge-active">Active</span>
@@ -187,15 +187,15 @@ export function WalletSettings() {
       <div className="advanced-options-section">
         <h2>Advanced Options</h2>
         <div className="options-list">
-          <button className="option-item" onClick={goToSecurity}>
+          <button className="option-item card-hover" onClick={goToSecurity}>
             <span>Export Private Key</span>
             <span className="arrow">→</span>
           </button>
-          <button className="option-item" onClick={goToSecurity}>
+          <button className="option-item card-hover" onClick={goToSecurity}>
             <span>Security Settings</span>
             <span className="arrow">→</span>
           </button>
-          <button className="option-item" onClick={goToSecurity}>
+          <button className="option-item card-hover" onClick={goToSecurity}>
             <span>View Activity Log</span>
             <span className="arrow">→</span>
           </button>

@@ -109,7 +109,7 @@ export function PinChallengeHost() {
         <p style={{ fontSize: 13, color: 'var(--txt-3)', margin: 0 }}>
           This transaction needs your wallet PIN to sign.
         </p>
-        <PINInput value={pin} onChange={setPin} error={!!error} />
+        <PINInput value={pin} onChange={setPin} error={!!error} autoFocus={true} />
         {error && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--red)', fontSize: 13 }}>
             <AlertTriangle size={15} />

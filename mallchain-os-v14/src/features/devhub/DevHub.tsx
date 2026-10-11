@@ -72,7 +72,7 @@ export default function DevHub() {
 
   return (
     <div>
-      <div className="view-head"><h1>Developer Hub</h1><span className="sub">build on Mallchain</span></div>
+      <div className="view-head"><h1 className="text-gradient">Developer Hub</h1><span className="sub">build on Mallchain</span></div>
 
       {error && (
         <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
@@ -80,8 +80,8 @@ export default function DevHub() {
         </div>
       )}
 
-      <div className="grid-2">
-        <div className="card">
+      <div className="grid-2 stagger">
+        <div className="card card-glow bg-gradient-card">
           <div className="sec-title"><h2>SDKs</h2></div>
           <div className="row">
             <span className="chip gold">JavaScript · npm i @mallchain/sdk</span>
@@ -93,7 +93,7 @@ export default function DevHub() {
           </div>
         </div>
 
-        <div className="card">
+        <div className="card card-glow bg-gradient-card">
           <div className="sec-title"><h2>API keys</h2></div>
           {!loading && keys?.length === 0 && <div className="tiny" style={{ padding: 12 }}>No API keys yet.</div>}
           {(keys || []).map((k) => (
@@ -112,7 +112,7 @@ export default function DevHub() {
         </div>
       </div>
 
-      <div className="card mt">
+      <div className="card mt card-glow bg-gradient-card">
         <div className="sec-title"><h2>Code examples</h2></div>
         {snippets.map((s) => (
           <div key={s.lang} className="code-block">

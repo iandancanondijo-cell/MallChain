@@ -225,7 +225,9 @@ ${labels}
     }
     animId = requestAnimationFrame(frame);
 
-    const blocks: any[] = [];
+    interface BlockTx { index: number; hash: string; from: string; to: string; val: number; }
+    interface Block { num: number; hash: string; time: string; txCount: number; txs: BlockTx[]; }
+    const blocks: Block[] = [];
     let head = -1;
     const short = (h: string, n = 6) => (h ? h.slice(0, n + 2) + '...' + h.slice(-4) : '--');
 
@@ -244,7 +246,7 @@ ${labels}
         hash: block.hash || '',
         time: block.blockTime?.iso || block.time || new Date().toISOString(),
         txCount: block.txCount ?? block.numTxs ?? 0,
-        txs: (block.transactions || []).map((tx: any, i: number) => ({
+        txs: (block.transactions || []).map((tx: unknown, i: number) => ({
           index: i,
           hash: `TX${i}-${block.height}`,
           from: '',
@@ -256,16 +258,19 @@ ${labels}
 
     async function getRecentBlocks(limit = 13) {
       const data = await apiGet(`/blocks?limit=${limit}`);
-      return (data.blocks || []).map((b: any) => ({
-        num: b.height || 0,
-        hash: b.hash || '',
-        time: b.time || new Date().toISOString(),
-        txCount: b.numTxs || 0,
-        txs: [],
-      }));
+      return (data.blocks || []).map((b: unknown) => {
+        const block = b as Record<string, unknown>;
+        return {
+          num: (block.height as number) || 0,
+          hash: (block.hash as string) || '',
+          time: (block.time as string) || new Date().toISOString(),
+          txCount: (block.numTxs as number) || 0,
+          txs: [],
+        };
+      });
     }
 
-    function add(b: any, fresh: boolean) {
+    function add(b: Block, fresh: boolean) {
       blocks.unshift(b);
       blocks.length = Math.min(blocks.length, 13);
       show();
@@ -278,7 +283,7 @@ ${labels}
         (svg!.querySelector('#pulses-bl') as SVGGElement).appendChild(p);
         setTimeout(() => p.remove(), 4000);
 
-        b.txs.slice(0, 14).forEach((t: any, i: number) =>
+        b.txs.slice(0, 14).forEach((t: BlockTx, i: number) =>
           setTimeout(() => {
             const j = Math.floor(Math.random() * 6);
             const k2 = Math.random() < 0.5 ? j : (j + 5) % 6;
@@ -311,7 +316,7 @@ ${labels}
         const n = latestBlock.num;
         if (head < 0) {
           const recentBlocks = await getRecentBlocks(13);
-          recentBlocks.forEach((b: any) => add(b, false));
+          recentBlocks.forEach((b: Block) => add(b, false));
           head = n;
         } else if (n > head) {
           for (let i = head + 1; i <= n; i++) {

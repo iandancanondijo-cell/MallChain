@@ -12,7 +12,7 @@
  * - QR code display (optional)
  */
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { decryptMnemonic, encryptMnemonic } from '../services/security';
 import { derivePrivateKeyFromMnemonic } from '../services/wallet';

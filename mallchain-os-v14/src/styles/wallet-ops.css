@@ -50,6 +50,35 @@
   pointer-events: none;
 }
 
+.wo-hero::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.015) 45%,
+    rgba(255, 255, 255, 0.03) 50%,
+    rgba(255, 255, 255, 0.015) 55%,
+    transparent 70%
+  );
+  pointer-events: none;
+  animation: wo-hero-shimmer 10s ease-in-out infinite;
+}
+
+@keyframes wo-hero-shimmer {
+  0%, 100% { left: -100%; }
+  50% { left: 140%; }
+}
+
+.wo-hero > * {
+  position: relative;
+  z-index: 1;
+}
+
 .wo-hero-icon {
   width: 48px;
   height: 48px;
@@ -168,12 +197,14 @@
   border: 1px solid var(--glass-border);
   border-radius: var(--radius);
   padding: 20px;
-  transition: border-color var(--duration-normal) var(--ease);
+  transition: border-color var(--duration-normal) var(--ease),
+              box-shadow var(--duration-normal) var(--ease);
 }
 
 .wo-card:hover {
   border-color: var(--glass-border-hover);
-  box-shadow: 0 0 24px rgba(var(--section-accent-rgb), 0.04);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15),
+              0 0 24px rgba(var(--section-accent-rgb), 0.04);
 }
 
 .wo-card--accent {
@@ -328,7 +359,7 @@
 .wo-status-icon--success {
   background: rgba(34, 197, 94, 0.12);
   color: var(--green);
-  animation: wo-pop 0.4s var(--ease-bounce);
+  animation: wo-pop 0.4s var(--ease-spring);
 }
 
 .wo-status-icon--pending {
@@ -767,7 +798,7 @@
 .wo-step:nth-child(5) { animation-delay: 0.32s; }
 
 .wo-status-icon {
-  animation: wo-scale-in 0.4s var(--ease-bounce) both;
+  animation: wo-scale-in 0.4s var(--ease-spring) both;
 }
 
 .wo-points-stat {
@@ -786,6 +817,10 @@
     gap: 12px;
   }
 
+  .wo-hero h1 {
+    font-size: 20px;
+  }
+
   .wo-steps {
     overflow-x: auto;
     padding-bottom: 4px;
@@ -793,6 +828,11 @@
 
   .wo-step span {
     display: none;
+  }
+
+  .wo-card {
+    padding: 16px;
+    border-radius: 18px;
   }
 
   .wo-points-grid {
@@ -807,6 +847,11 @@
     flex-direction: column;
   }
 
+  .wo-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
   .wo-swap-direction {
     flex-direction: column;
     gap: 8px;
@@ -819,10 +864,37 @@
   .wo-swap-arrow:hover {
     transform: rotate(270deg);
   }
+
+  .wo-qr-section {
+    padding: 16px;
+  }
+
+  .wo-form-section {
+    padding: 16px;
+  }
 }
 
 @media (min-width: 640px) and (max-width: 1023px) {
   .wo-points-grid {
     grid-template-columns: repeat(3, 1fr);
+  }
+  .wo-card {
+    padding: 20px;
+  }
+}
+
+/* ── reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .wo-hero::after { animation: none; }
+  .wo-card { animation: none; }
+  .wo-step { animation: none; }
+  .wo-pulse-ring { animation: none; }
+  .wo-spin { animation: none; }
+  .wo-pop { animation: none; }
+  .wo-hero-shimmer { animation: none; }
+  [class*="wo-"] {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -1,9 +1,3 @@
-/**
- * Container Component — Shared component library
- * 
- * Layout wrapper that manages max-width, padding, and responsive behavior.
- */
-
 import React from 'react';
 import './Container.css';
 
@@ -14,15 +8,6 @@ export interface ContainerProps extends React.HTMLAttributes<HTMLDivElement> {
   className?: string;
 }
 
-/**
- * Container component for content layout
- * 
- * @example
- * <Container size="lg" padding="md">
- *   <h1>Page Title</h1>
- *   <p>Content goes here</p>
- * </Container>
- */
 export const Container = React.forwardRef<HTMLDivElement, ContainerProps>(
   (
     {

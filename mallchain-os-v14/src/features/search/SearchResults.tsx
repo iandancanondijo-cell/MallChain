@@ -46,7 +46,7 @@ export default function SearchResults({ navigate }: { navigate: (p: string) => v
   return (
     <div>
       <div className="view-head">
-        <h1>Search</h1>
+        <h1 className="text-gradient">Search</h1>
         <span className="sub">{q ? `Results for "${q}"` : 'Enter a query to search'}</span>
       </div>
 
@@ -75,7 +75,7 @@ export default function SearchResults({ navigate }: { navigate: (p: string) => v
       )}
 
       {q && !loading && !error && data && data.blocks.length > 0 && (
-        <div className="card mb" style={{ padding: 16 }}>
+        <div className="card mb card-glow bg-gradient-card card-hover" style={{ padding: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 10 }}>Blocks</div>
           {data.blocks.map((b) => (
             <div key={b.block.height} className="row-item" style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: '1px solid var(--line-1)' }}>
@@ -90,7 +90,7 @@ export default function SearchResults({ navigate }: { navigate: (p: string) => v
       )}
 
       {q && !loading && !error && data && data.txs.length > 0 && (
-        <div className="card mb" style={{ padding: 16 }}>
+        <div className="card mb card-glow bg-gradient-card card-hover" style={{ padding: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 10 }}>Transactions</div>
           {data.txs.map((t) => (
             <div key={t.transaction.txHash} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: '1px solid var(--line-1)' }}>
@@ -107,7 +107,7 @@ export default function SearchResults({ navigate }: { navigate: (p: string) => v
       )}
 
       {q && !loading && !error && data && data.validators.length > 0 && (
-        <div className="card mb" style={{ padding: 16 }}>
+        <div className="card mb card-glow bg-gradient-card card-hover" style={{ padding: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 10 }}>Validators</div>
           {data.validators.map((v) => (
             <div key={v.operatorAddress} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: '1px solid var(--line-1)' }}>
@@ -122,7 +122,7 @@ export default function SearchResults({ navigate }: { navigate: (p: string) => v
       )}
 
       {q && !loading && !error && data && data.campaigns.length > 0 && (
-        <div className="card" style={{ padding: 16 }}>
+        <div className="card card-glow bg-gradient-card card-hover" style={{ padding: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 10 }}>Mines campaigns</div>
           {data.campaigns.map((c) => (
             <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--line-1)' }}>

@@ -54,12 +54,12 @@
 
 .pin-display:hover {
   border-color: var(--gold);
-  box-shadow: 0 0 20px rgba(243, 186, 47, 0.2);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .pin-display:focus-within {
   border-color: var(--gold-2);
-  box-shadow: 0 0 20px rgba(243, 186, 47, 0.3);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* PIN Status Messages */
@@ -133,12 +133,12 @@
   background-color: var(--bg-3);
   border-color: var(--gold-2);
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(243, 186, 47, 0.3);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .numpad-btn:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 2px 6px rgba(243, 186, 47, 0.2);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .numpad-btn:disabled {
@@ -186,7 +186,7 @@
 
 .numpad-confirm:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(243, 186, 47, 0.3);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .numpad-confirm:active:not(:disabled) {

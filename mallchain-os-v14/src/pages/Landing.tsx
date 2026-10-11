@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Menu, X } from 'lucide-react';
-import { store } from '../store/store';
 import { useStoreVersion } from '../components/ui';
 import '../styles/landing.css';
 
@@ -10,16 +8,34 @@ interface LandingProps {
 
 const NS = 'http://www.w3.org/2000/svg';
 
-const IC: Record<string, string[]> = {
+type IconSpec = { d: string; c: string; label?: string };
+
+const BAND = ['#FFC83D', '#7d95ff', '#5CF2C0', '#FF4A3D', '#3D63FF'];
+
+const bandSet = (paths: string[]): IconSpec[] =>
+  paths.map((d, i) => ({ d, c: BAND[i % BAND.length] }));
+
+// Platform order, labels and colors mirror backend/src/config/socialRewardRates.js
+const IC: Record<string, IconSpec[]> = {
   create: [
-    '<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.5 6.5h.01"/>',
-    '<rect x="2" y="5" width="20" height="14" rx="4"/><path d="M10 9l5 3-5 3z"/>',
-    '<path d="M14 3v11.5a3.5 3.5 0 11-3.5-3.5M14 3c.5 3 2.5 4.5 5 4.5"/>',
-    '<path d="M14 8h3V4h-3a4 4 0 00-4 4v3H7v4h3v6h4v-6h3l1-4h-4V8"/>',
-    '<path d="M5 4l14 16M19 4L5 20"/>',
-    '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 10h8"/>',
+    { d: '<path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.88 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9a6.33 6.33 0 00-.79-.05A6.34 6.34 0 003.15 15.3a6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V9.05a8.28 8.28 0 004.76 1.5V7.1a4.83 4.83 0 01-1-.41z"/>', c: '#FE2C55', label: 'TikTok' },
+    { d: '<rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="5"/><circle cx="17.5" cy="6.5" r="1.5"/>', c: '#E4405F', label: 'Instagram' },
+    { d: '<rect x="2" y="4" width="20" height="16" rx="4"/><path d="M10 8.5v7l6-3.5z" fill="currentColor"/>', c: '#FF0000', label: 'YouTube' },
+    { d: '<path d="M21 12a9 9 0 01-13.4 7.8L3 21l1.2-4.6A9 9 0 1121 12z"/><path transform="translate(4.2 4.2) scale(0.65)" d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>', c: '#25D366', label: 'WhatsApp' },
+    { d: '<path d="M21.5 4.5L2.5 12.5l6.5 2 2 6.5 10.5-16.5z"/><path d="M9 14.5l4-4"/>', c: '#229ED9', label: 'Telegram' },
+    { d: '<path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/>', c: '#1877F2', label: 'Facebook' },
+    { d: '<text x="12" y="17.5" text-anchor="middle" font-family="system-ui, sans-serif" font-size="17" font-weight="700" fill="currentColor" stroke="none">@</text>', c: '#000000', label: 'Threads' },
+    { d: '<path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231z"/>', c: '#000000', label: 'X' },
+    { d: '<path d="M12 3c3 0 5 2.3 5 5.2 0 .8 0 1.5.1 2 .5-.2 1.1-.4 1.5-.1.5.4.2 1-.4 1.4-.5.3-1.4.6-1.4 1.1 0 .9 1.7 2.6 3.2 3-.5.7-1.7.9-2.6 1-.1.5-.2 1.1-.5 1.2-.4.2-1.2-.1-2-.1-1 0-1.6.9-2.9.9s-1.9-.9-2.9-.9c-.8 0-1.6.3-2 .1-.3-.1-.4-.7-.5-1.2-.9-.1-2.1-.3-2.6-1 1.5-.4 3.2-2.1 3.2-3 0-.5-.9-.8-1.4-1.1-.6-.4-.9-1-.4-1.4.4-.3 1-.1 1.5.1.1-.5.1-1.2.1-2C7 5.3 9 3 12 3z"/>', c: '#FFFC00', label: 'Snapchat' },
+    { d: '<circle cx="12" cy="12" r="10"/><circle cx="9" cy="10" r="1.5"/><circle cx="15" cy="10" r="1.5"/><path d="M8 14c1 2 2.5 3 4 3s3-1 4-3"/>', c: '#FF4500', label: 'Reddit' },
+    { d: '<path d="M18.9 6.3A13.6 13.6 0 0015.6 5l-.4.9a12.4 12.4 0 00-6.4 0L8.4 5A13.6 13.6 0 005.1 6.3C3 9.5 2.4 12.6 2.7 15.7A13.5 13.5 0 006.8 18l.9-1.4c-.5-.2-1-.4-1.4-.7l.3-.3a9.6 9.6 0 0010.8 0l.3.3c-.4.3-.9.5-1.4.7l.9 1.4a13.5 13.5 0 004.1-2.3c.4-3.6-.6-6.7-2.4-9.4z"/><ellipse cx="9.3" cy="12.2" rx="1.3" ry="1.5"/><ellipse cx="14.7" cy="12.2" rx="1.3" ry="1.5"/>', c: '#5865F2', label: 'Discord' },
+    { d: '<path d="M20 2H4a2 2 0 00-2 2v16a2 2 0 002 2h16a2 2 0 002-2V4a2 2 0 00-2-2zM8 17H5v-9h3zm-1.5-10.5A1.5 1.5 0 118 5a1.5 1.5 0 01-1.5 1.5zM19 17h-3v-4.74c0-1.42-.5-2.38-1.9-2.38-.96 0-1.6.65-1.85 1.27-.1.24-.12.57-.12.91V17h-3v-9h3v1.2a3.85 3.85 0 012.85-1.36c2.07 0 3.57 1.36 3.57 4.28z"/>', c: '#0A66C2', label: 'LinkedIn' },
+    { d: '<circle cx="12" cy="12" r="9.5"/><path d="M9.2 20.2l2.1-7.6M10.4 8.7A2.9 2.9 0 0112.9 7c1.8 0 3.1 1.3 3.1 3 0 2.2-1.6 4.1-3.6 4.1-1 0-1.9-.5-2.2-1.4"/>', c: '#E60023', label: 'Pinterest' },
+    { d: '<path d="M4.3 3L3 6.4v14.2h4.7V23h2.6l2.5-2.4h3.9l5.3-5.3V3H4.3z"/><path d="M17.4 13.9l-3 3h-3.9l-2.5 2.4v-2.4H7V5h10.4v8.9z"/><path d="M14.8 8.1v4.3M10.7 8.1v4.3"/>', c: '#9146FF', label: 'Twitch' },
+    { d: '<circle cx="12" cy="12" r="10"/><path d="M7.5 10.3c2.9-.9 6.2-.5 8.7 1M7.9 13.1c2.3-.7 5-.4 7 .8M8.4 15.7c1.8-.5 3.9-.3 5.5.6"/>', c: '#1DB954', label: 'Spotify' },
+    { d: '<ellipse cx="6.8" cy="12" rx="4.8" ry="7.2"/><ellipse cx="16" cy="12" rx="2.4" ry="6.6"/><ellipse cx="21.2" cy="12" rx="1" ry="5.8"/>', c: '#000000', label: 'Medium / Blog' },
   ],
-  build: [
+  build: bandSet([
     '<path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 5l-4 14"/>',
     '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 10l3 2-3 2M12 15h5"/>',
     '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10a6 6 0 01-6 6H8"/>',
@@ -27,8 +43,8 @@ const IC: Record<string, string[]> = {
     '<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="10" y="10" width="4" height="4"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/>',
     '<path d="M9 7a3 3 0 016 0v1H9zM7 11h10v4a5 5 0 01-10 0zM12 11v9M3 12h4M17 12h4M4 6l3 2M20 6l-3 2M4 20l3-2M20 20l-3-2"/>',
     '<path d="M8 4c-2 0-3 1-3 3v3c0 1-1 2-2 2 1 0 2 1 2 2v3c0 2 1 3 3 3M16 4c2 0 3 1 3 3v3c0 1 1 2 2 2-1 0-2 1-2 2v3c0 2-1 3-3 3"/>',
-  ],
-  trade: [
+  ]),
+  trade: bandSet([
     '<path d="M3 4h2l2.4 11h10.2l2-8H6.2"/><circle cx="9" cy="19" r="1.5"/><circle cx="17" cy="19" r="1.5"/>',
     '<path d="M3 9l1.5-5h15L21 9M3 9a3 3 0 006 0 3 3 0 006 0 3 3 0 006 0M5 12v8h14v-8M10 20v-5h4v5"/>',
     '<path d="M2 6h11v10H2zM13 9h4l3 3v4h-7"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
@@ -40,22 +56,22 @@ const IC: Record<string, string[]> = {
     '<path d="M5 9h10M10 9V5M7 5h6M15 9a3 3 0 013 3v1M18 16c-1 1.5-1.5 2.2-1.5 3a1.5 1.5 0 003 0c0-.8-.5-1.5-1.5-3z"/>',
     '<path d="M3 7l9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10"/>',
     '<path d="M3 12V4h8l10 10-8 8zM7.5 8.5h.01"/>',
-  ],
-  study: [
+  ]),
+  study: bandSet([
     '<path d="M12 6c-2-1.5-5-2-9-2v14c4 0 7 .5 9 2 2-1.5 5-2 9-2V4c-4 0-7 .5-9 2zM12 6v14"/>',
     '<path d="M4 4h12v16H6a2 2 0 01-2-2zM16 8h4v10a2 2 0 01-2 2h-2M7 8h6M7 12h6M7 16h3"/>',
     '<path d="M5 5h14v10H5zM2 19h20l-2-4H4z"/>',
     '<path d="M6 3h8l5 5v13H6zM14 3v5h5M9 13h6M9 17h6"/>',
     '<path d="M2 9l10-5 10 5-10 5zM6 11v5c0 1.5 3 3 6 3s6-1.5 6-3v-5M22 9v6"/>',
     '<path d="M4 20l1-4L16 5l3 3L8 19zM14 7l3 3"/>',
-  ],
-  validate: [
+  ]),
+  validate: bandSet([
     '<path d="M12 3l8 3v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6zM8.5 12l2.5 2.5 4.5-5"/>',
     '<circle cx="12" cy="5" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><circle cx="12" cy="13" r="1.4"/><path d="M12 7l-6 9M12 7l6 9M7 18h10M12 7v5"/>',
     '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9"/>',
     '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
     '<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
-  ],
+  ]),
 };
 
 const PATHS = [
@@ -90,9 +106,21 @@ const ICON_SETS: { set: string; label: string }[] = [
   { set: 'validate', label: 'Validate' },
 ];
 
+// Auto-contrast glyph color for a chip background (WCAG relative luminance)
+function iconFg(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  const lin = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  const l = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+  return l > 0.5 ? '#06070F' : '#FFFFFF';
+}
+
 function CyclingIcon({ setName, reducedMotion }: { setName: string; reducedMotion: boolean }) {
   const ref = useRef<HTMLAnchorElement>(null);
   const idxRef = useRef(0);
+  const setLabel = ICON_SETS.find((i) => i.set === setName)?.label;
 
   useEffect(() => {
     const el = ref.current;
@@ -100,12 +128,26 @@ function CyclingIcon({ setName, reducedMotion }: { setName: string; reducedMotio
     const set = IC[setName];
     if (!set) return;
 
-    const svg = document.createElementNS(NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('class', 'in');
-    svg.innerHTML = set[0];
-    el.appendChild(svg);
+    const apply = (spec: IconSpec) => {
+      el.style.setProperty('--chip', spec.c);
+      el.style.color = iconFg(spec.c);
+      const label = spec.label || setLabel;
+      if (label) {
+        el.setAttribute('aria-label', label);
+        el.setAttribute('title', label);
+      }
+    };
+    const make = (spec: IconSpec, cls: string) => {
+      const svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.setAttribute('class', cls);
+      svg.innerHTML = spec.d;
+      return svg;
+    };
+
+    apply(set[0]);
+    el.appendChild(make(set[0], 'in'));
 
     if (reducedMotion) return;
 
@@ -115,28 +157,79 @@ function CyclingIcon({ setName, reducedMotion }: { setName: string; reducedMotio
       if (current) current.setAttribute('class', 'out');
       setTimeout(() => {
         idxRef.current = (idxRef.current + 1) % set.length;
-        const next = document.createElementNS(NS, 'svg');
-        next.setAttribute('viewBox', '0 0 24 24');
-        next.setAttribute('aria-hidden', 'true');
-        next.setAttribute('class', 'in');
-        next.innerHTML = set[idxRef.current];
-        el.replaceChildren(next);
+        const spec = set[idxRef.current];
+        apply(spec);
+        el.replaceChildren(make(spec, 'in'));
       }, 260);
     }, baseDelay);
 
     return () => {
       clearInterval(id);
     };
-  }, [setName, reducedMotion]);
+  }, [setName, reducedMotion, setLabel]);
 
-  return <a ref={ref} className="ico" aria-label={ICON_SETS.find((i) => i.set === setName)?.label} title={ICON_SETS.find((i) => i.set === setName)?.label} />;
+  return <a ref={ref} className="ico" aria-label={setLabel} title={setLabel} />;
+}
+
+// Renders text as per-letter spans (word-wrapped) for the type-in effect; `from` continues the index into a following element
+function Lettered({ text, from = 0 }: { text: string; from?: number }) {
+  const words = text.split(' ');
+  let n = from;
+  return (
+    <>
+      {words.map((word, wi) => (
+        <React.Fragment key={wi}>
+          <span className="wd">
+            {[...word].map((ch) => {
+              const i = n++;
+              return (
+                <span key={i} className="ltr" style={{ '--i': i } as React.CSSProperties}>
+                  {ch}
+                </span>
+              );
+            })}
+          </span>
+          {wi < words.length - 1 ? ' ' : null}
+        </React.Fragment>
+      ))}
+    </>
+  );
+}
+
+// Types the hero tagline letter by letter with human-irregular pauses and a
+// blinking caret that disappears once the final full stop is revealed.
+function Typewriter({ text }: { text: string }) {
+  const [n, setN] = useState(0);
+  const done = n >= text.length;
+
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setN(text.length);
+      return;
+    }
+    if (done) return;
+    const prev = text[n - 1];
+    let d = n === 0 ? 700 : 34 + Math.random() * 58;
+    if (prev === ',') d += 190;
+    if (Math.random() < 0.08) d += 260;
+    const t = window.setTimeout(() => setN(n + 1), d);
+    return () => clearTimeout(t);
+  }, [n, text, done]);
+
+  return (
+    <span className="tw">
+      <span className="vh">{text}</span>
+      <span aria-hidden="true">{text.slice(0, n)}</span>
+      {!done && <span className="tw-caret" aria-hidden="true" />}
+    </span>
+  );
 }
 
 export default function Landing({ navigate }: LandingProps) {
   useStoreVersion();
 
-  const [menuOpen, setMenuOpen] = useState(false);
   const [activeBand, setActiveBand] = useState(-1);
+  const [doorOpen, setDoorOpen] = useState(false);
 
   const ringRef = useRef<HTMLDivElement>(null);
   const pupilRef = useRef<SVGGElement>(null);
@@ -148,32 +241,16 @@ export default function Landing({ navigate }: LandingProps) {
     : false;
 
   const goTo = useCallback((path: string) => {
-    setMenuOpen(false);
     navigate(path);
   }, [navigate]);
 
   const goSignup = useCallback(() => {
-    setMenuOpen(false);
-    if (store.state.user.authed) {
-      navigate('/');
-    } else {
-      navigate('/auth?mode=register');
-    }
+    navigate('/auth?mode=register');
   }, [navigate]);
 
   const goLogin = useCallback(() => {
-    setMenuOpen(false);
-    if (store.state.user.authed) {
-      navigate('/');
-    } else {
-      navigate('/auth?mode=login');
-    }
+    navigate('/auth?mode=login');
   }, [navigate]);
-
-  const goLogout = useCallback(() => {
-    setMenuOpen(false);
-    // Handle logout if needed
-  }, []);
 
   const handlePathClick = useCallback((band: number) => {
     setActiveBand(band);
@@ -194,8 +271,32 @@ export default function Landing({ navigate }: LandingProps) {
       },
       { threshold: 0.1 },
     );
-    document.querySelectorAll('.landing-page .rv').forEach((el) => io.observe(el));
+    // roles tiles have their own staged observers so they appear one after another
+    document.querySelectorAll('.landing-page .rv').forEach((el) => {
+      if (!el.closest('.roles')) io.observe(el);
+    });
     return () => io.disconnect();
+  }, []);
+
+  // Roles tiles reveal sequentially: each tile triggers a step higher up the viewport
+  useEffect(() => {
+    const tiles = Array.from(document.querySelectorAll('.landing-page .roles .tile'));
+    const observers = tiles.map((el, i) => {
+      const io = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((e) => {
+            if (e.isIntersecting) {
+              e.target.classList.add('in');
+              io.unobserve(e.target);
+            }
+          });
+        },
+        { threshold: 0.1, rootMargin: `0px 0px -${8 + i * 5}% 0px` },
+      );
+      io.observe(el);
+      return io;
+    });
+    return () => observers.forEach((io) => io.disconnect());
   }, []);
 
   // Ring parallax + pupil pointer tracking
@@ -212,32 +313,36 @@ export default function Landing({ navigate }: LandingProps) {
     let px = 0;
     let py = 0;
     let vl = 0;
+    let pop = 0;
 
     function updatePupil() {
       pupil!.style.transform = `translate(${px * 16}px, ${py * 16 + vl}px)`;
+      pupil!.style.opacity = pop.toFixed(2);
     }
 
     function tick() {
       const y = window.scrollY;
       const h = Math.max(1, document.body.scrollHeight - window.innerHeight);
-      const p = y / h;
       cur += (y - cur) * 0.07;
+      const pc = Math.min(1, cur / h);
       vl = Math.max(-26, Math.min(26, (y - cur) * 0.5));
+      // pupil hides while the hero tagline overlaps the eye (scrollY < ~160)
+      pop = Math.min(1, Math.max(0, (y - 60) / 100));
 
       scs.forEach((g) => {
         const k = parseFloat(g.dataset.k || '0');
         g.style.transform = `rotate(${(cur * k * 0.1).toFixed(2)}deg)`;
       });
 
-      ring!.style.transform = `translate(-50%, -50%) scale(${(1 + p * 1.6).toFixed(3)})`;
-      ring!.style.opacity = Math.max(0.16, 0.62 - p * 1.1).toFixed(2);
+      const size = ring!.offsetHeight;
+      // 0.476 mirrors .landing-ring's CSS top (hero tagline center); center-anchored
+      const rise = window.innerHeight * (0.5 - 0.476);
+      ring!.style.transform = `translate(-50%, ${(-size / 2 + rise * pc).toFixed(1)}px) scale(${(1 + pc * 1.2).toFixed(3)})`;
+      ring!.style.opacity = (0.62 - pc * 0.17).toFixed(2);
       updatePupil();
 
       raf = Math.abs(y - cur) > 0.2 ? requestAnimationFrame(tick) : 0;
     }
-
-    ring.style.opacity = '0.62';
-    ring.style.transform = 'translate(-50%, -50%)';
 
     const onScroll = () => {
       if (!raf) raf = requestAnimationFrame(tick);
@@ -251,6 +356,7 @@ export default function Landing({ navigate }: LandingProps) {
 
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('pointermove', onPointer, { passive: true });
+    updatePupil();
 
     return () => {
       window.removeEventListener('scroll', onScroll);
@@ -288,7 +394,7 @@ export default function Landing({ navigate }: LandingProps) {
       <div className="landing-ring" ref={ringRef} aria-hidden="true">
         <svg viewBox="0 0 400 400">
           <defs>
-            <path id="l-tp" d="M200,200 m-182,0 a182,182 0 1,1 364,0 a182,182 0 1,1 -364,0" />
+            <path id="l-tp" d="M200,200 m0,-182 a182,182 0 1,1 0,364 a182,182 0 1,1 0,-364" />
           </defs>
           <g className="sc" data-k="0.5" ref={setScrollRef(0)}>
             <g className="s5">
@@ -332,47 +438,20 @@ export default function Landing({ navigate }: LandingProps) {
             <img src="/mallchain.svg" alt="Mallchain" className="landing-logo-mark" />
             Mallchain
           </div>
-
-          <div className="landing-nav-links">
-            <a href="#paths" onClick={() => setMenuOpen(false)}>Paths</a>
-            <a href="#build" onClick={() => setMenuOpen(false)}>Roles</a>
-            <a href="#study" onClick={() => setMenuOpen(false)}>Technology</a>
-            <a href="#validate" onClick={() => setMenuOpen(false)}>Review</a>
-          </div>
-
-          <div className="landing-nav-actions">
-            <button className="bt g" onClick={goLogin}>Login</button>
-            <button className="bt" onClick={goSignup}>Get started</button>
-          </div>
-
-          <button className="landing-nav-toggle" aria-label="Toggle menu" onClick={() => setMenuOpen((v) => !v)}>
-            {menuOpen ? <X size={22} /> : <Menu size={22} />}
-          </button>
         </div>
       </nav>
-
-      {/* Mobile menu */}
-      {menuOpen && (
-        <div className="landing-mobile-menu">
-          <a href="#paths" onClick={() => setMenuOpen(false)}>Paths</a>
-          <a href="#build" onClick={() => setMenuOpen(false)}>Roles</a>
-          <a href="#study" onClick={() => setMenuOpen(false)}>Technology</a>
-          <a href="#validate" onClick={() => setMenuOpen(false)}>Review</a>
-          <button className="bt g" onClick={goLogin}>Login</button>
-          <button className="bt" onClick={goSignup}>Get started</button>
-        </div>
-      )}
 
       <main>
         {/* Hero */}
         <header className="hero">
           <h1 className="vh">Mallchain</h1>
-          <p className="sub">An open network you can use, create on, and learn from.</p>
-          <div className="cta">
-            <button className="bt" onClick={goSignup}>Create my wallet</button>
-            <button className="bt g" onClick={goLogin}>Login</button>
+          <p className="sub"><Typewriter text="An open network you can use, create on, and learn from." /></p>
+          <div className="cue">
+            <svg width="16" height="24" viewBox="0 0 16 24" fill="none" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="8" y1="0" x2="8" y2="20" stroke="rgba(180,180,180,0.4)" strokeWidth="1" />
+              <path d="M3 16l5 5 5-5" stroke="rgba(180,180,180,0.4)" strokeWidth="1" fill="none" />
+            </svg>
           </div>
-          <div className="cue">SCROLL</div>
         </header>
 
         {/* Paths */}
@@ -408,11 +487,11 @@ export default function Landing({ navigate }: LandingProps) {
             <h2 className="rv">Everyone has a seat.</h2>
             <p className="lead rv">A network stays useful when more people create, build and review on it. Pick a role.</p>
             <div className="roles">
-              {ROLES.map((r) => (
+              {ROLES.map((r, idx) => (
                 <a
                   key={r.title}
                   className="tile rv"
-                  style={{ '--c': r.color } as React.CSSProperties}
+                  style={{ '--c': r.color, '--rv-delay': `${idx * 0.05}s` } as React.CSSProperties}
                   onClick={(e) => { e.preventDefault(); goSignup(); }}
                 >
                   <em />
@@ -430,11 +509,21 @@ export default function Landing({ navigate }: LandingProps) {
             <h2 className="rv">Open parts. Open to study.</h2>
             <p className="lead rv">Every layer uses widely adopted, open technology, so what you learn here carries to other projects.</p>
             <div className="three">
-              {TECH.map((t) => (
-                <div key={t.title} className="t rv" style={{ '--c': t.color } as React.CSSProperties}>
+              {TECH.map((t, idx) => (
+                <div
+                  key={t.title}
+                  className="t rv"
+                  style={
+                    {
+                      '--c': t.color,
+                      '--rv-delay': `${idx * 0.22}s`,
+                      '--rv-tx': idx === 0 ? '-64px' : idx === 2 ? '64px' : '0px',
+                    } as React.CSSProperties
+                  }
+                >
                   <em />
-                  <h3>{t.title}</h3>
-                  <p>{t.body}</p>
+                  <h3><Lettered text={t.title} /></h3>
+                  <p><Lettered text={t.body} from={t.title.length} /></p>
                 </div>
               ))}
             </div>
@@ -480,14 +569,32 @@ export default function Landing({ navigate }: LandingProps) {
           </div>
         </section>
 
-        {/* CTA footer */}
-        <div className="fin" id="join">
-          <h2 className="rv">Join the network.</h2>
-          <button className="bt rv" onClick={goSignup}>Create my wallet</button>
-        </div>
-
         <footer>Mallchain. Built on Cosmos SDK and CometBFT.</footer>
       </main>
+
+      {/* Interactive door */}
+      <div
+        className={`landing-door ${doorOpen ? 'open' : ''}`}
+        onClick={() => setDoorOpen((v) => !v)}
+        role="button"
+        tabIndex={0}
+        aria-label={doorOpen ? 'Close door' : 'Open door to enter'}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDoorOpen((v) => !v); } }}
+      >
+        <div className="door-frame">
+          <div className="door-panel">
+            <div className="door-handle" />
+            <div className="door-plate">
+              <span className="door-plate-icon">&#9670;</span>
+              <span className="door-plate-text">Enter</span>
+            </div>
+          </div>
+          <div className="door-interior">
+            <button className="bt" onClick={(e) => { e.stopPropagation(); goSignup(); }}>Sign up</button>
+            <button className="bt g" onClick={(e) => { e.stopPropagation(); goLogin(); }}>Login</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

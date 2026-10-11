@@ -234,7 +234,7 @@ export function AddressBook() {
   return (
     <div className="address-book">
       <div className="page-header">
-        <h1>Address Book</h1>
+        <h1 className="text-gradient">Address Book</h1>
         <p>Manage and organize your frequently used wallet addresses</p>
       </div>
 
@@ -257,7 +257,7 @@ export function AddressBook() {
 
       {/* Task 9.2: Address list display */}
       {state.addresses.length > 0 ? (
-        <table className="address-table">
+        <table className="address-table card-glow bg-gradient-card">
           <thead>
             <tr>
               <th>Label</th>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CreditCard, Phone, Coins, CheckCircle2, Loader2, Smartphone, ShoppingBag, ArrowRight } from 'lucide-react';
+import { CreditCard, Phone, Coins, CheckCircle2, Loader2, Smartphone, ShoppingBag, ArrowRight, Wallet } from 'lucide-react';
 import { api } from '../services/api';
 import { useStoreVersion, toast } from '../components/ui';
 
@@ -24,7 +24,7 @@ const STEP_META: { label: string; icon: typeof CreditCard }[] = [
 const STEP_INDEX: Record<Step, number> = { form: 0, awaiting_payment: 1, crediting: 2, done: 3 };
 
 /** Purchase Mallpoints (MLPTS) with real money via M-Pesa STK push. */
-export default function MallpointsPurchase() {
+export default function MallpointsPurchase({ navigate }: { navigate: (p: string) => void }) {
   useStoreVersion();
 
   const [amount, setAmount] = useState(50);
@@ -36,6 +36,7 @@ export default function MallpointsPurchase() {
   const [walletAddress, setWalletAddress] = useState('');
   const [credited, setCredited] = useState(0);
   const [newBalance, setNewBalance] = useState(0);
+  const [balLoaded, setBalLoaded] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const pollTicksRef = useRef(0);
 
@@ -44,6 +45,7 @@ export default function MallpointsPurchase() {
     if (res.ok && res.data) {
       setBalance(res.data.mlpts_balance || 0);
       setWalletAddress(res.data.walletAddress || '');
+      setBalLoaded(true);
     }
   }, []);
 
@@ -53,6 +55,36 @@ export default function MallpointsPurchase() {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [loadBalance]);
+
+  if (balLoaded && !walletAddress) {
+    return (
+      <div>
+        <div className="wo-hero">
+          <div className="wo-hero-icon" style={{ background: 'rgba(34, 211, 238, 0.1)', color: 'var(--cyan)' }}>
+            <Wallet size={22} />
+          </div>
+          <div className="wo-hero-body">
+            <div className="wo-hero-title">Purchase Mallpoints</div>
+            <div className="wo-hero-sub">Connect a wallet to buy MLPTS</div>
+          </div>
+        </div>
+        <div className="wo-card" style={{ maxWidth: 520 }}>
+          <div style={{ textAlign: 'center', padding: '32px 16px' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(34, 211, 238, 0.08)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <Wallet size={24} style={{ color: 'var(--cyan)', opacity: 0.5 }} />
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>No wallet connected</div>
+            <div style={{ fontSize: 13, color: 'var(--txt-3)', lineHeight: 1.6, maxWidth: 360, margin: '0 auto' }}>
+              Mallpoints are credited to a Mallchain wallet. Connect one first — purchases without a wallet can't be credited to you.
+            </div>
+            <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={() => navigate('/auth')}>
+              Connect a wallet
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const totalKes = Math.max(0, amount) * MALLPOINT_PRICE_KES;
 
@@ -145,7 +177,7 @@ export default function MallpointsPurchase() {
     <div>
       {/* ── hero ── */}
       <div className="wo-hero">
-        <div className="wo-hero-icon" style={{ background: 'rgba(243, 186, 47, 0.1)', color: 'var(--gold)' }}>
+        <div className="wo-hero-icon" style={{ background: 'color-mix(in srgb, var(--section-accent) 10%, transparent)', color: 'var(--section-accent)' }}>
           <ShoppingBag size={22} />
         </div>
         <div className="wo-hero-body">
@@ -170,7 +202,7 @@ export default function MallpointsPurchase() {
       </div>
 
       {/* ── main card ── */}
-      <div className="wo-card" style={{ maxWidth: 520 }}>
+      <div className="wo-card card-glow bg-gradient-card" style={{ maxWidth: 520 }}>
         {step === 'form' && (
           <>
             <div className="field mb">

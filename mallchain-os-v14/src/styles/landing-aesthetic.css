@@ -39,7 +39,7 @@
   width: 45vmax;
   height: 45vmax;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(243, 186, 47, 0.06), transparent);
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 6%, transparent), transparent);
   filter: blur(100px);
   pointer-events: none;
   z-index: -1;
@@ -76,14 +76,14 @@
 }
 
 .card-featured {
-  background: linear-gradient(135deg, rgba(243, 186, 47, 0.12), rgba(13, 17, 27, 0.55));
-  border-color: rgba(243, 186, 47, 0.25);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, transparent), rgba(13, 17, 27, 0.55));
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .card-featured:hover {
-  border-color: rgba(243, 186, 47, 0.35);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
   box-shadow:
-    0 12px 48px rgba(243, 186, 47, 0.15),
+    0 12px 48px color-mix(in srgb, var(--accent) 15%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
@@ -116,18 +116,18 @@
 .btn-primary {
   background: linear-gradient(135deg, var(--gold), #f59e0b);
   color: #1a1100;
-  box-shadow: 0 0 30px rgba(243, 186, 47, 0.4);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--accent) 40%, transparent);
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .btn-primary:hover {
-  box-shadow: 0 0 50px rgba(243, 186, 47, 0.6), 0 0 80px rgba(245, 158, 11, 0.4);
+  box-shadow: 0 0 50px color-mix(in srgb, var(--accent) 60%, transparent), 0 0 80px rgba(245, 158, 11, 0.4);
   transform: translateY(-2px);
 }
 
 .btn-primary:active {
   transform: translateY(0);
-  box-shadow: 0 0 20px rgba(243, 186, 47, 0.3);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .btn-ghost {
@@ -137,10 +137,10 @@
 }
 
 .btn-ghost:hover {
-  border-color: rgba(243, 186, 47, 0.3);
-  background: rgba(243, 186, 47, 0.08);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   color: var(--gold);
-  box-shadow: 0 0 20px rgba(243, 186, 47, 0.1);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .btn-outline {
@@ -178,8 +178,8 @@
   border-color: var(--accent);
   background: rgba(13, 17, 27, 0.6);
   box-shadow: 
-    0 0 0 3px rgba(243, 186, 47, 0.1),
-    inset 0 0 20px rgba(243, 186, 47, 0.05);
+    0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent),
+    inset 0 0 20px color-mix(in srgb, var(--accent) 5%, transparent);
   outline: none;
 }
 
@@ -193,8 +193,8 @@
    ============================================================ */
 
 .badge {
-  background: rgba(243, 186, 47, 0.12);
-  border: 1px solid rgba(243, 186, 47, 0.25);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   color: var(--gold);
@@ -224,7 +224,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .view-head h1 {
-  background: linear-gradient(135deg, var(--txt-1), rgba(243, 186, 47, 0.8));
+  background: linear-gradient(135deg, var(--txt-1), color-mix(in srgb, var(--accent) 80%, transparent));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -307,14 +307,14 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(243, 186, 47, 0.3);
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: 4px;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(243, 186, 47, 0.6);
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 /* ============================================================

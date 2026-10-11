@@ -38,7 +38,7 @@ export default function MinesDiscover({ navigate }: { navigate: (p: string) => v
   return (
     <div>
       <div className="view-head">
-        <h1>Discover Campaigns</h1>
+        <h1 className="text-gradient">Discover Campaigns</h1>
         <span className="sub">{list.length} active campaigns</span>
         <button className="btn btn-ghost btn-sm" onClick={() => navigate('/mines/validator-queue')}>🛂 Reviewer queue</button>
       </div>
@@ -60,11 +60,11 @@ export default function MinesDiscover({ navigate }: { navigate: (p: string) => v
         <div className="empty-state"><div className="es-ico">🧭</div><div className="es-t">No active campaigns right now</div><div className="es-m">Check back soon — new campaigns appear here as they go live.</div></div>
       )}
 
-      <div className="c-grid">
+      <div className="c-grid stagger">
         {list.map((c) => {
           const mySub = submissionFor(c._id);
           return (
-            <div key={c._id} className="c-card">
+            <div key={c._id} className="c-card card-glow bg-gradient-card card-hover">
               <div className="c-banner">
                 <span className="pl-ico">{c.platform ? <PlatformIcon platform={c.platform} /> : '🎯'}</span>
                 <div><div className="nm">{c.title}</div></div>

@@ -52,8 +52,10 @@ const KYCSchema = new Schema({
     raw: { type: Schema.Types.Mixed, default: null }
   },
   
-  // Status
-  status: { type: String, enum: ['pending', 'approved', 'rejected', 'review'], default: 'pending' },
+  // Status — 'draft' marks a record that only holds saved wizard progress
+  // (saveDraft upserts one) and has NOT been submitted for review yet; every
+  // status gate that means "awaiting a human decision" must exclude it.
+  status: { type: String, enum: ['draft', 'pending', 'approved', 'rejected', 'review'], default: 'pending' },
   
   // Timestamps
   submittedAt: { type: Date, default: Date.now },

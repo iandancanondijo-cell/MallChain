@@ -43,7 +43,7 @@ export default function MinesAnalytics() {
 
   return (
     <div>
-      <div className="view-head"><h1>Your Mining Performance</h1><span className="sub">Lifetime stats as a Campaign Participant</span></div>
+      <div className="view-head"><h1 className="text-gradient">Your Mining Performance</h1><span className="sub">Lifetime stats as a Campaign Participant</span></div>
 
       {error && (
         <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
@@ -51,15 +51,15 @@ export default function MinesAnalytics() {
         </div>
       )}
 
-      <div className="mc-stats-grid">
-        <div className="card"><div className="lbl">Lifetime MLPTS</div><div className="num">{loading ? '—' : fmtNum(lifetime)}</div></div>
-        <div className="card"><div className="lbl">Submissions</div><div className="num">{submissions.length}</div></div>
-        <div className="card"><div className="lbl">Approval rate</div><div className="num">{acc.toFixed(1)}<small>%</small></div></div>
-        <div className="card"><div className="lbl">Avg reward/task</div><div className="num">{fmtNum(avgReward)}<small>MLPTS</small></div></div>
+      <div className="mc-stats-grid stagger">
+        <div className="card card-hover"><div className="lbl">Lifetime MLPTS</div><div className="num">{loading ? '—' : fmtNum(lifetime)}</div></div>
+        <div className="card card-hover"><div className="lbl">Submissions</div><div className="num">{submissions.length}</div></div>
+        <div className="card card-hover"><div className="lbl">Approval rate</div><div className="num">{acc.toFixed(1)}<small>%</small></div></div>
+        <div className="card card-hover"><div className="lbl">Avg reward/task</div><div className="num">{fmtNum(avgReward)}<small>MLPTS</small></div></div>
       </div>
       <div className="grid-2">
-        <div className="card"><div className="sec-title"><h2>Earnings by day</h2></div>{weekData.length === 0 ? <div className="tiny" style={{ padding: 16 }}>No earnings yet</div> : <BarChart data={weekData} labels={weekLabels} height={150} />}</div>
-        <div className="card"><div className="sec-title"><h2>Reviewer outcome</h2></div>{approved + rejected === 0 ? <div className="tiny" style={{ padding: 16 }}>No reviewed submissions yet</div> : <BarChart data={[acc, 100 - acc]} labels={['Approved %', 'Rejected %']} height={150} color="var(--gold)" />}</div>
+        <div className="card card-glow bg-gradient-card"><div className="sec-title"><h2>Earnings by day</h2></div>{weekData.length === 0 ? <div className="tiny" style={{ padding: 16 }}>No earnings yet</div> : <BarChart data={weekData} labels={weekLabels} height={150} />}</div>
+        <div className="card card-glow bg-gradient-card"><div className="sec-title"><h2>Reviewer outcome</h2></div>{approved + rejected === 0 ? <div className="tiny" style={{ padding: 16 }}>No reviewed submissions yet</div> : <BarChart data={[acc, 100 - acc]} labels={['Approved %', 'Rejected %']} height={150} color="var(--gold)" />}</div>
       </div>
     </div>
   );

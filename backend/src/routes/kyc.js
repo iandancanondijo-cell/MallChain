@@ -51,7 +51,11 @@ router.get('/status', auth, kycCtrl.getKYCStatus);
 // PATCH saves partial data, GET retrieves it, DELETE clears it (called
 // after successful submit so a completed user doesn't see a stale resume
 // prompt on next login).
-router.patch('/draft', auth, limiters.strict, kycCtrl.saveDraft);
+// PATCH is on `standard`, not `strict`: the wizard autosaves progress on a
+// short debounce while the user types, and strict's 10-per-15-minutes would
+// exhaust the same budget POST /submit needs before the user ever reaches
+// the final step. The endpoint is auth'd and only writes a small blob.
+router.patch('/draft', auth, limiters.standard, kycCtrl.saveDraft);
 router.get('/draft', auth, kycCtrl.getDraft);
 router.delete('/draft', auth, kycCtrl.clearDraft);
 

@@ -31,6 +31,7 @@ const { requireApprovedAmlReview, checkAndFlagStructuring, AML_WITHDRAWAL_THRESH
 const { holdForLiquidity } = require('../services/withdrawalLiquidityQueueService');
 const { executeSellSettlement } = require('../services/sellExecutionService');
 const verifyWebhookToken = require('../middleware/verifyWebhookToken');
+const requireAuth = require('../middleware/requireAuth');
 const { limiters } = require('../middleware/rateLimiter');
 const idempotency = require('../middleware/idempotency');
 const {
@@ -463,7 +464,7 @@ async function handleReservedCredit({ quoteId, walletAddress, creditMlcns }) {
 // A client retry (timeout, double-tap) previously meant a second
 // MallcoinPurchase record reserved for the same intent — same failure
 // mode withdraw.js's /mpesa already guards against with an Idempotency-Key.
-router.post('/reserve', limiters.financial, idempotency({ required: true }), requireDirectBuyUnlocked(), validate(schemas.buyReserve), async (req, res) => {
+router.post('/reserve', limiters.financial, requireAuth(), idempotency({ required: true }), requireDirectBuyUnlocked(), validate(schemas.buyReserve), async (req, res) => {
   try {
     // Check if liquidity pool cap has been reached
     const capReached = await isPoolCapReached();
@@ -482,6 +483,14 @@ router.post('/reserve', limiters.financial, idempotency({ required: true }), req
     }
 
     const { amount, fiat, currency, walletAddress, phone } = req.validatedBody;
+
+    // Wallet-first (Gate 61.1): credit only lands when the address maps to a
+    // User — a quote for an unlinked address means real M-Pesa money paid
+    // into a wallet nobody can ever see.
+    const owner = await User.findOne({ walletAddress_blind: blindIndex(walletAddress) }).select('_id').lean();
+    if (!owner || String(owner._id) !== String(req.user._id)) {
+      return res.status(403).json({ error: 'wallet address is not linked to your account' });
+    }
 
     const quoteId = crypto.randomBytes(12).toString('hex');
     const mpesaRef = 'MLCNS' + Date.now();

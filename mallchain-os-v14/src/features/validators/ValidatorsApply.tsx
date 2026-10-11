@@ -49,9 +49,9 @@ export default function ValidatorsApply({ navigate }: { navigate: (p: string) =>
 
   return (
     <div>
-      <div className="view-head"><h1>Apply to become a Validator</h1><span className="sub">Submitted for admin review — see My Application for status</span></div>
+      <div className="view-head"><h1 className="text-gradient">Apply to become a Validator</h1><span className="sub">Submitted for admin review — see My Application for status</span></div>
 
-      <div className="card" style={{ maxWidth: 620 }}>
+      <div className="card card-glow bg-gradient-card" style={{ maxWidth: 620 }}>
         <div className="sec-title"><h2>Application form</h2></div>
         {!address && <div className="tiny red" style={{ marginBottom: 10 }}>Connect a wallet before applying.</div>}
 

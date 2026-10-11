@@ -85,7 +85,7 @@
   border-color: var(--gold);
   background-color: var(--bg-2);
   transform: translateY(-2px);
-  box-shadow: 0 2px 8px rgba(243, 186, 47, 0.2);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .word-number {
@@ -180,7 +180,7 @@
 .form-group input[type="password"]:focus {
   outline: none;
   border-color: var(--gold);
-  box-shadow: 0 0 0 3px rgba(243, 186, 47, 0.1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .form-group input[type="password"]:disabled {
@@ -219,7 +219,7 @@
 .btn-primary:hover:not(:disabled) {
   background-color: var(--gold-2);
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(243, 186, 47, 0.3);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .btn-primary:disabled {

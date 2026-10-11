@@ -231,7 +231,7 @@ export default function WalletWithdraw() {
             <Building2 size={22} />
           </div>
           <div className="wo-hero-body">
-            <div className="wo-hero-title">Withdraw</div>
+            <div className="wo-hero-title text-gradient">Withdraw</div>
             <div className="wo-hero-sub">Sell MLCNS on-chain — paid out via M-Pesa</div>
           </div>
         </div>
@@ -256,7 +256,7 @@ export default function WalletWithdraw() {
           <Building2 size={22} />
         </div>
         <div className="wo-hero-body">
-          <div className="wo-hero-title">Withdraw</div>
+          <div className="wo-hero-title text-gradient">Withdraw</div>
           <div className="wo-hero-sub">Sell MLCNS on-chain — paid out via M-Pesa to your phone</div>
         </div>
       </div>
@@ -289,7 +289,7 @@ export default function WalletWithdraw() {
       )}
 
       {/* ── main card ── */}
-      <div className="wo-card" style={{ maxWidth: 520 }}>
+      <div className="wo-card card-glow bg-gradient-card" style={{ maxWidth: 520 }}>
         {/* ── Step: form ── */}
         {step === 'form' && (
           <>
@@ -494,10 +494,10 @@ export default function WalletWithdraw() {
           <div style={{ textAlign: 'center', padding: '24px 16px' }}>
             <div style={{
               width: 56, height: 56, borderRadius: '50%',
-              background: status?.overallStatus === 'resign_required' ? 'rgba(243, 186, 47, 0.1)' : status?.payoutStatus === 'succeeded' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(167, 139, 250, 0.1)',
+              background: status?.overallStatus === 'resign_required' ? 'rgba(251, 191, 36, 0.1)' : status?.payoutStatus === 'succeeded' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(167, 139, 250, 0.1)',
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16,
             }}>
-              {status?.overallStatus === 'resign_required' ? <AlertTriangle size={24} style={{ color: 'var(--gold)' }} /> :
+              {status?.overallStatus === 'resign_required' ? <AlertTriangle size={24} style={{ color: 'var(--warning)' }} /> :
                status?.payoutStatus === 'succeeded' ? <CheckCircle2 size={24} style={{ color: 'var(--green)' }} /> :
                <Loader2 size={24} style={{ color: 'var(--purple)' }} />}
             </div>

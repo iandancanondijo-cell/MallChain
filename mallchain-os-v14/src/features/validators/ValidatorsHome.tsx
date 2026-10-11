@@ -32,7 +32,7 @@ export default function ValidatorsHome({ navigate }: { navigate: (p: string) => 
   return (
     <div>
       <div className="mc-hero">
-        <h1>Mallchain Validators</h1>
+        <h1 className="text-gradient">Mallchain Validators</h1>
         <p>
           Validators run the Cosmos consensus that produces Mallchain's blocks — they bond stake and are
           slashed for downtime or double-signing. This is separate from Mines Proof Reviewers, who vote on
@@ -54,8 +54,8 @@ export default function ValidatorsHome({ navigate }: { navigate: (p: string) => 
       )}
 
       {/* Stat cards */}
-      <div className="mc-stats-grid" style={error ? { opacity: 0.65 } : undefined}>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+      <div className="mc-stats-grid stagger" style={error ? { opacity: 0.65 } : undefined}>
+        <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--section-accent-rgb),0.12)', color: 'rgb(var(--section-accent-rgb))' }}>
             <Server size={20} />
           </div>
@@ -67,7 +67,7 @@ export default function ValidatorsHome({ navigate }: { navigate: (p: string) => 
             {error && <div className="tiny muted" style={{ marginTop: 4 }}>service unavailable</div>}
           </div>
         </div>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+        <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--section-accent-rgb),0.08)', color: 'rgb(var(--section-accent-rgb))' }}>
             <Lock size={20} />
           </div>
@@ -81,7 +81,7 @@ export default function ValidatorsHome({ navigate }: { navigate: (p: string) => 
         </div>
       </div>
 
-      <div className="card">
+      <div className="card card-glow bg-gradient-card">
         <div className="sec-title">
           <h2>Active validator set</h2>
           {error && <span className="sub" style={{ color: 'var(--gold-2)' }}>⚠ partial data</span>}

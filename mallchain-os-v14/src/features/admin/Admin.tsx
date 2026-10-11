@@ -102,7 +102,7 @@ export default function Admin({ activeTab = 'overview', onTabChange = () => {} }
   return (
     <div className="adm-main">
       <div className="adm-top">
-        <h1>{TAB_TITLES[activeTab] || 'Admin'}</h1>
+        <h1 className="text-gradient">{TAB_TITLES[activeTab] || 'Admin'}</h1>
         <span style={{ color: 'var(--adm-muted)', fontSize: 13 }}>signed in as {me.email} · {me.role}</span>
       </div>
 
@@ -143,23 +143,23 @@ function OverviewTab() {
 
   return (
     <div>
-      <div className="adm-kpis">
-        <div className="adm-kpi">
+      <div className="adm-kpis stagger">
+        <div className="adm-kpi card-glow bg-gradient-card card-hover">
           <small>Total users</small>
           <b>{stats ? fmtNum(stats.users.total) : '—'}</b>
           <small>{stats?.users.admins ?? '—'} admins · {stats?.users.banned ?? '—'} banned</small>
         </div>
-        <div className="adm-kpi">
+        <div className="adm-kpi card-glow bg-gradient-card card-hover">
           <small>Block height</small>
           <b style={{ color: 'var(--adm-gold)' }}>{chainStatus ? fmtNum(chainStatus.blockHeight) : '—'}</b>
           <small>{chainStatus?.syncing ? 'Syncing…' : 'In sync'}</small>
         </div>
-        <div className="adm-kpi">
+        <div className="adm-kpi card-glow bg-gradient-card card-hover">
           <small>Validators</small>
           <b>{chainStatus ? chainStatus.peerCount : '—'}</b>
           <small>peers connected</small>
         </div>
-        <div className="adm-kpi">
+        <div className="adm-kpi card-glow bg-gradient-card card-hover">
           <small>Pending mining</small>
           <b>{stats?.mining.pendingSubmissions ?? '—'}</b>
           <small>{stats?.mining.totalCampaigns ?? '—'} campaigns</small>
@@ -167,7 +167,7 @@ function OverviewTab() {
       </div>
 
       <div className="adm-two" style={{ marginTop: 20 }}>
-        <div className="adm-card">
+        <div className="adm-card card-glow bg-gradient-card">
           <h3>Recently joined</h3>
           <div className="adm-list">
           {(stats?.recentUsers || []).length === 0 && <div style={{ color: 'var(--adm-muted)', padding: 12 }}>No recent users</div>}
@@ -182,7 +182,7 @@ function OverviewTab() {
           ))}
           </div>
         </div>
-        <div className="adm-card">
+        <div className="adm-card card-glow bg-gradient-card">
           <h3>Node status</h3>
           {chainStatus ? (
             <div className="adm-list">

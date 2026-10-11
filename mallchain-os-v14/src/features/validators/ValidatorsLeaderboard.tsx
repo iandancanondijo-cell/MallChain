@@ -28,7 +28,7 @@ export default function ValidatorsLeaderboard() {
 
   return (
     <div>
-      <div className="view-head"><h1>Validators Leaderboard</h1><span className="sub">Ranked by uptime, stake share &amp; commission</span></div>
+      <div className="view-head"><h1 className="text-gradient">Validators Leaderboard</h1><span className="sub">Ranked by uptime, stake share &amp; commission</span></div>
 
       {error && (
         <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
@@ -39,7 +39,7 @@ export default function ValidatorsLeaderboard() {
         </div>
       )}
 
-      <div className="card" style={error ? { opacity: 0.65 } : undefined}>
+      <div className="card card-glow bg-gradient-card stagger" style={error ? { opacity: 0.65 } : undefined}>
         {loading && !rows && <div className="tiny">Loading…</div>}
         {error && !loading && (
           <div className="empty-state">

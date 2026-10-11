@@ -33,7 +33,7 @@ export default function MinesLeaderboard() {
   return (
     <div>
       <div className="view-head">
-        <h1>Leaderboard</h1>
+        <h1 className="text-gradient">Leaderboard</h1>
         <span className="sub">Top Campaign Participants by lifetime Mallpoints</span>
         {myRank > 0 && <span className="chip gold">Your rank: #{myRank}</span>}
       </div>
@@ -48,7 +48,7 @@ export default function MinesLeaderboard() {
         <div className="empty-state"><div className="es-ico">🏆</div><div className="es-t">No participants yet</div><div className="es-m">Complete campaigns to climb the leaderboard.</div></div>
       )}
 
-      <div className="card">
+      <div className="card card-glow bg-gradient-card">
         {sorted.map((r, i) => (
           <div key={r.id} className={'lb-row' + (profile?.id === r.id ? ' mine' : '')}>
             <span className="lb-rank">{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}</span>
@@ -64,7 +64,7 @@ export default function MinesLeaderboard() {
       </div>
 
       {profile && (
-        <div className="card mt">
+        <div className="card card-glow bg-gradient-card mt">
           <div className="sec-title"><h2>Your standing</h2></div>
           <div className="row">
             <ScoreRing pct={maxEarned ? Math.round((myEarned / maxEarned) * 100) : 0} size={84} label="Share of top earner" />

@@ -1,10 +1,3 @@
-/**
- * Button Component — Shared component library
- * 
- * Reusable button that applies design tokens from design-system.css
- * Supports multiple variants, sizes, and states.
- */
-
 import React from 'react';
 import './Button.css';
 
@@ -18,14 +11,6 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   icon?: React.ReactNode;
 }
 
-/**
- * Button component with design tokens applied
- * 
- * @example
- * <Button variant="primary" size="md">Click me</Button>
- * <Button variant="ghost" size="sm" disabled>Disabled</Button>
- * <Button loading>Loading...</Button>
- */
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (
     {

@@ -81,7 +81,7 @@ export default function Messaging() {
   return (
     <div>
       <div className="view-head">
-        <h1>Messaging</h1>
+        <h1 className="text-gradient">Messaging</h1>
         <span className="sub">{totalUnread} unread</span>
         <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setShowNew((v) => !v)}>
           <Plus size={14} /> New conversation
@@ -95,7 +95,7 @@ export default function Messaging() {
         </div>
       )}
 
-      <div className="card msg-layout" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="card msg-layout card-glow bg-gradient-card" style={{ padding: 0, overflow: 'hidden' }}>
         <div className="conv-list" style={{ borderRight: '1px solid var(--border)' }}>
           {conversations.length === 0 && (
             <div style={{ padding: 24, textAlign: 'center', color: 'var(--txt-3)' }}>

@@ -118,14 +118,27 @@ exports.submitKYC = asyncHandler(async (req, res) => {
 
   let kyc;
   try {
-    // Create KYC record
-    kyc = await KYC.create({
-      userId,
-      ...kycData,
-      riskLevel,
-      amlChecks: checks,
-      status
-    });
+    // If the user saved wizard progress before submitting, promote that
+    // draft record in place rather than creating a second record for the
+    // same userId (the pre-save PII encryption hook runs on this path too,
+    // which findOneAndUpdate would bypass). .set() marks every submitted
+    // field modified so encryption covers them.
+    const draftRecord = await KYC.findOne({ userId, status: 'draft' });
+    if (draftRecord) {
+      draftRecord.set({ ...kycData, riskLevel, amlChecks: checks, status });
+      draftRecord.draft = undefined;
+      draftRecord.submittedAt = new Date();
+      await draftRecord.save();
+      kyc = draftRecord;
+    } else {
+      kyc = await KYC.create({
+        userId,
+        ...kycData,
+        riskLevel,
+        amlChecks: checks,
+        status
+      });
+    }
 
     // A real name only exists here (KYC firstName/lastName) — the account
     // record has no name field of its own. Populate it as a display
@@ -280,7 +293,11 @@ exports.saveDraft = asyncHandler(async (req, res) => {
   // Upsert a draft record — if the user has no KYC record yet (hasn't
   // submitted), create one with status 'draft' so we have somewhere to
   // attach the progress. If they already have a pending/approved/rejected
-  // record, just update its draft field.
+  // record, just update its draft field. Without $setOnInsert, a fresh
+  // upsert would inherit the schema default status 'pending' and
+  // submittedAt Date.now — making an in-progress user look like they had
+  // already submitted (and tripping submitKYC's "already in progress"
+  // guard against their own draft).
   const kyc = await KYC.findOneAndUpdate(
     { userId },
     {
@@ -288,6 +305,10 @@ exports.saveDraft = asyncHandler(async (req, res) => {
         'draft.step': step,
         'draft.data': data,
         'draft.updatedAt': new Date(),
+      },
+      $setOnInsert: {
+        status: 'draft',
+        submittedAt: null,
       },
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }

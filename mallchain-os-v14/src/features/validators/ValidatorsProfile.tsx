@@ -100,8 +100,8 @@ export default function ValidatorsProfile() {
   if (!address) {
     return (
       <div>
-        <div className="view-head"><h1>My Application</h1></div>
-        <div className="card"><div className="empty" style={{ color: 'var(--txt-3)', padding: 24, textAlign: 'center' }}>Connect a wallet to view your validator application.</div></div>
+        <div className="view-head"><h1 className="text-gradient">My Application</h1></div>
+        <div className="card card-glow bg-gradient-card"><div className="empty" style={{ color: 'var(--txt-3)', padding: 24, textAlign: 'center' }}>Connect a wallet to view your validator application.</div></div>
       </div>
     );
   }
@@ -110,7 +110,7 @@ export default function ValidatorsProfile() {
 
   return (
     <div>
-      <div className="view-head"><h1>My Application</h1><span className="sub">{address}</span></div>
+      <div className="view-head"><h1 className="text-gradient">My Application</h1><span className="sub">{address}</span></div>
 
       {error && (
         <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
@@ -118,7 +118,7 @@ export default function ValidatorsProfile() {
         </div>
       )}
 
-      <div className="card" style={error ? { opacity: 0.65 } : undefined}>
+      <div className="card card-glow bg-gradient-card" style={error ? { opacity: 0.65 } : undefined}>
         {loading && application === undefined && <div className="tiny">Loading…</div>}
         {error && !loading && (
           <div className="empty-state">

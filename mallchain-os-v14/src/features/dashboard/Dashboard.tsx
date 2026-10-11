@@ -168,10 +168,10 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
   return (
     <div>
       {/* ── hero ── */}
-      <div className="dash-hero">
+      <div className="dash-hero bg-gradient-hero">
         <div className="dash-hero-left">
           <div className="dash-hero-greeting">
-            <h1>Mallchain Network</h1>
+            <h1 className="text-gradient">Mallchain Network</h1>
             {st.user.frozen && <span className="frozen-badge">❄ Frozen</span>}
           </div>
           <p className="dash-hero-sub">Welcome back, {st.user.name ? st.user.name.split(' ')[0] : 'Guest'}</p>
@@ -210,9 +210,9 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
       )}
 
       {/* ── stat cards ── */}
-      <div className="stat-grid dash-stats">
-        <div className="card card-hover dash-stat-card">
-          <div className="dash-stat-icon" style={{ background: 'rgba(243, 186, 47, 0.12)', color: 'var(--gold)' }}>
+      <div className="stat-grid dash-stats stagger">
+        <div className="card card-hover card-glow dash-stat-card">
+          <div className="dash-stat-icon" style={{ background: 'color-mix(in srgb, var(--accent) 12%, transparent)', color: 'var(--accent)' }}>
             <TrendingUp size={16} />
           </div>
           <div className="dash-stat-body">
@@ -221,7 +221,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
             <div className="card-sub">{mallValueDisplay}</div>
           </div>
         </div>
-        <div className="card card-hover dash-stat-card">
+        <div className="card card-hover card-glow dash-stat-card">
           <div className="dash-stat-icon" style={{ background: 'rgba(167, 139, 250, 0.12)', color: 'var(--purple)' }}>
             <Zap size={16} />
           </div>
@@ -231,7 +231,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
             <div className="card-sub">from campaign participation</div>
           </div>
         </div>
-        <div className="card card-hover dash-stat-card">
+        <div className="card card-hover card-glow dash-stat-card">
           <div className="dash-stat-icon" style={{ background: 'rgba(34, 197, 94, 0.12)', color: 'var(--green-2)' }}>
             <Shield size={16} />
           </div>
@@ -241,7 +241,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
             <div className="card-sub">reputation {reviewer?.mining_reputation ?? '—'}</div>
           </div>
         </div>
-        <div className="card card-hover dash-stat-card">
+        <div className="card card-hover card-glow dash-stat-card">
           <div className="dash-stat-icon" style={{ background: 'rgba(34, 211, 238, 0.12)', color: 'var(--cyan)' }}>
             <Sparkles size={16} />
           </div>
@@ -255,7 +255,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
 
       {/* ── main grid: chart + transactions ── */}
       <div className="grid-2" style={{ marginTop: 14 }}>
-        <div className="card">
+        <div className="card card-glow bg-gradient-card">
           <div className="sec-title">
             <h2>Portfolio trend</h2>
             <span className="sub">earnings in MLPTS</span>
@@ -270,7 +270,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
             </div>
           )}
         </div>
-        <div className="card">
+        <div className="card card-glow bg-gradient-card">
           <div className="sec-title">
             <h2>Recent transactions</h2>
             <button className="sec-link-btn" onClick={() => navigate('/wallet/history')}>View all</button>
@@ -299,24 +299,24 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
       {/* ── quick actions ── */}
       <div className="dash-quick-actions">
         <div className="sec-title"><h2>Quick actions</h2></div>
-        <div className="dash-action-grid">
-          <button className="dash-action-card" onClick={() => navigate('/wallet/send')}>
+        <div className="dash-action-grid stagger">
+          <button className="dash-action-card card-glow card-glow" onClick={() => navigate('/wallet/send')}>
             <ArrowUpRight size={18} />
             <span>Send MALL</span>
           </button>
-          <button className="dash-action-card" onClick={() => navigate('/wallet/receive')}>
+          <button className="dash-action-card card-glow" onClick={() => navigate('/wallet/receive')}>
             <ArrowDownLeft size={18} />
             <span>Receive</span>
           </button>
-          <button className="dash-action-card" onClick={() => navigate('/mines/discover')}>
+          <button className="dash-action-card card-glow" onClick={() => navigate('/mines/discover')}>
             <Sparkles size={18} />
             <span>Discover campaigns</span>
           </button>
-          <button className="dash-action-card" onClick={() => navigate('/mines/validator-queue')}>
+          <button className="dash-action-card card-glow" onClick={() => navigate('/mines/validator-queue')}>
             <Shield size={18} />
             <span>Reviewer queue</span>
           </button>
-          <button className="dash-action-card" onClick={() => navigate('/governance')}>
+          <button className="dash-action-card card-glow" onClick={() => navigate('/governance')}>
             <Zap size={18} />
             <span>Vote</span>
           </button>
@@ -325,7 +325,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
 
       {/* ── snapshots + activity ── */}
       <div className="grid-2" style={{ marginTop: 14 }}>
-        <div className="card">
+        <div className="card card-glow bg-gradient-card">
           <div className="sec-title"><h2>Network snapshots</h2></div>
           <div className="dash-snap-list">
             <button className="dash-snap-row" onClick={() => navigate('/mines')}>
@@ -351,7 +351,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
             </button>
           </div>
         </div>
-        <div className="card">
+        <div className="card card-glow bg-gradient-card">
           <div className="sec-title">
             <h2>Live activity</h2>
             <span className="chip green" style={{ fontSize: 10 }}>● live</span>

@@ -95,7 +95,7 @@
 
 .compliance-modal__detail {
   background-color: #f5f5f5;
-  border-left: 4px solid #f3ba2f;
+  border-left: 4px solid var(--accent);
   padding: 12px;
   margin: 16px 0;
   border-radius: 4px;
@@ -170,13 +170,13 @@
 }
 
 .age-verify__field select:hover {
-  border-color: #f3ba2f;
+  border-color: var(--accent);
 }
 
 .age-verify__field select:focus {
   outline: none;
-  border-color: #f3ba2f;
-  box-shadow: 0 0 0 3px rgba(243, 186, 47, 0.1);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 /* Terms/Privacy sections */
@@ -206,16 +206,20 @@
   line-height: 1.6;
 }
 
-/* Compliance alerts */
+/* Compliance alerts — dark glass so the banner sits cleanly on the dark app
+   shell instead of a light cream block clashing with the theme. */
 .compliance-alert {
-  background-color: #fffbeb;
-  border: 1px solid #fcd34d;
-  border-radius: 8px;
+  background: var(--glass-bg, rgba(13, 17, 27, 0.65));
+  backdrop-filter: blur(var(--glass-blur, 16px));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 16px));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 12px;
   padding: 16px;
   display: flex;
   gap: 12px;
-  align-items: flex-start;
+  align-items: center;
   margin-bottom: 16px;
+  color: #e8e6df;
 }
 
 .compliance-alert__icon {
@@ -231,13 +235,13 @@
   margin: 0 0 4px 0;
   font-size: 14px;
   font-weight: 600;
-  color: #1a1a1a;
+  color: #f5f3ec;
 }
 
 .compliance-alert__content p {
   margin: 0;
   font-size: 13px;
-  color: #666;
+  color: rgba(232, 230, 223, 0.72);
 }
 
 .compliance-alert .btn {
@@ -245,8 +249,18 @@
 }
 
 .compliance-alert--kyc {
-  background-color: #fef3c7;
-  border-color: #fbbf24;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.compliance-alert .btn--secondary {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.compliance-alert .btn--secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 /* Geographic restriction alert */
@@ -286,7 +300,7 @@
 }
 
 .btn--primary {
-  background-color: #f3ba2f;
+  background-color: var(--accent);
   color: #1a1a1a;
 }
 
@@ -378,7 +392,7 @@
   }
 
   .age-verify__field select:hover {
-    border-color: #f3ba2f;
+    border-color: var(--accent);
   }
 
   .tos-section {
@@ -391,15 +405,6 @@
 
   .tos-section p {
     color: #a0a0a0;
-  }
-
-  .compliance-alert {
-    background-color: #3a2a0a;
-    border-color: #664d1a;
-  }
-
-  .compliance-alert__content h4 {
-    color: #ffffff;
   }
 
   .compliance-modal__scroll-content::-webkit-scrollbar-track {

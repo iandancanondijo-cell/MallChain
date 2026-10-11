@@ -113,6 +113,7 @@ export interface MinesProfile {
   streak_count: number;
   tasks_completed: number;
   rank_points: number;
+  avatarUrl?: string;
 }
 
 export interface WalletTx {

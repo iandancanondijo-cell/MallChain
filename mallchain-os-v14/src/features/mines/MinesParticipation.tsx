@@ -36,7 +36,7 @@ export default function MinesParticipation({ navigate }: { navigate: (p: string)
 
   return (
     <div>
-      <div className="view-head"><h1>My Submissions</h1><span className="sub">{submissions?.length ?? 0} submissions</span></div>
+      <div className="view-head"><h1 className="text-gradient">My Submissions</h1><span className="sub">{submissions?.length ?? 0} submissions</span></div>
 
       {error && (
         <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
@@ -54,7 +54,7 @@ export default function MinesParticipation({ navigate }: { navigate: (p: string)
       )}
 
       {(submissions || []).map((s) => (
-        <div key={s._id} className="card mb">
+        <div key={s._id} className="card card-glow bg-gradient-card mb">
           <div className="row">
             <div className="grow"><b>{s.title || `Submission ${s._id}`}</b> <span className="muted">· {new Date(s.created_at).toLocaleString()}</span></div>
             <StatusChip status={STATUS_MAP[s.status] || s.status} />

@@ -1,7 +1,7 @@
 export default function Dmca() {
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', padding: '2rem 1.5rem', lineHeight: 1.7 }}>
-      <h1>DMCA Copyright Policy</h1>
+    <div className="card-glow bg-gradient-card" style={{ maxWidth: 720, margin: '0 auto', padding: '2rem 1.5rem', lineHeight: 1.7 }}>
+      <h1 className="text-gradient">DMCA Copyright Policy</h1>
       <p>Last updated: 2026-10-08</p>
 
       <h2>Designated Agent</h2>

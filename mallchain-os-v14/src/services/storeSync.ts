@@ -54,8 +54,6 @@ export class StoreSync {
       return;
     }
 
-    console.log('[StoreSync] Initializing cross-tab store synchronization');
-
     // Read session marker from localStorage on app startup
     this.syncAuthStateFromSession();
 
@@ -93,7 +91,6 @@ export class StoreSync {
 
       if (isAuth) {
         if (!store.state.user.authed) {
-          console.log('[StoreSync] Session found and valid, updating auth state');
           store.state.user.authed = true;
           store.commit();
         }
@@ -106,7 +103,6 @@ export class StoreSync {
         }
       } else {
         if (store.state.user.authed) {
-          console.log('[StoreSync] Session missing or invalid, clearing auth state');
           store.state.user.authed = false;
           store.commit();
         }
@@ -127,7 +123,6 @@ export class StoreSync {
   private syncStoreFromOsKey = (newValue: string | null): void => {
     if (newValue == null) {
       // Another tab called store.reset() — mirror that locally.
-      console.log('[StoreSync] OS_KEY cleared in another tab, resetting local store');
       store.reset();
       return;
     }
@@ -135,7 +130,6 @@ export class StoreSync {
     try {
       const parsed = JSON.parse(newValue) as AppState;
       if (parsed && parsed.version === 14) {
-        console.log('[StoreSync] OS_KEY changed in another tab, applying snapshot');
         store.applyExternalState(parsed);
       }
     } catch (error) {
@@ -154,7 +148,6 @@ export class StoreSync {
     // localStorage.clear() fires a single event with key === null — treat it as
     // both a token clear and an OS_KEY clear.
     if (event.key === null) {
-      console.log('[StoreSync] localStorage.clear() detected, resetting local store');
       store.reset();
       return;
     }
@@ -165,7 +158,6 @@ export class StoreSync {
     }
 
     if (event.key === SESSION_KEY) {
-      console.log('[StoreSync] Session marker changed in external window/tab, syncing auth state');
       this.syncAuthStateFromSession();
     }
   };
@@ -185,8 +177,6 @@ export class StoreSync {
     this.syncIntervalId = window.setInterval(() => {
       this.syncAuthStateFromSession();
     }, SYNC_INTERVAL_MS);
-
-    console.log(`[StoreSync] Periodic sync started (every ${SYNC_INTERVAL_MS}ms)`);
   }
 
   /**
@@ -196,7 +186,6 @@ export class StoreSync {
     if (this.syncIntervalId !== null) {
       window.clearInterval(this.syncIntervalId);
       this.syncIntervalId = null;
-      console.log('[StoreSync] Periodic sync stopped');
     }
   }
 

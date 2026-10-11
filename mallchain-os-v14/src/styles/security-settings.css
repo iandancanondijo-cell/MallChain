@@ -146,7 +146,7 @@
 }
 
 .status-badge.status-warning {
-  background-color: rgba(var(--gold-2),0.12);
+  background-color: var(--gold-dim);
   color: var(--gold-2);
   border: 1px solid var(--gold-2);
 }
@@ -260,7 +260,7 @@
 .form-group input:focus {
   outline: none;
   border-color: var(--gold);
-  box-shadow: 0 0 0 3px rgba(243, 186, 47, 0.1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .form-group input:disabled {
@@ -288,7 +288,7 @@
 
 /* Warning Text */
 .warning-text {
-  background-color: rgba(var(--gold-2),0.12);
+  background-color: var(--gold-dim);
   border-left: 3px solid var(--gold-2);
   color: var(--gold-2);
   padding: 1rem;
@@ -348,7 +348,7 @@
 .btn-primary:hover:not(:disabled) {
   background-color: var(--gold-2);
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(243, 186, 47, 0.3);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .btn-primary:disabled {

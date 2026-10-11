@@ -103,7 +103,7 @@ export default function MinesHome({ navigate }: { navigate: (p: string) => void 
   return (
     <div>
       <div className="mc-hero">
-        <h1>Mines Command Center</h1>
+        <h1 className="text-gradient">Mines Command Center</h1>
         <p>
           <b>Users are not miners.</b> Users are <b style={{ color: 'rgb(var(--section-accent-rgb))' }}>Campaign Participants</b> — completing real marketing
           tasks for Mallpoints. <b style={{ color: 'rgb(var(--section-accent-rgb))' }}>Proof Reviewers</b> are the trust layer that randomly votes on
@@ -131,11 +131,11 @@ export default function MinesHome({ navigate }: { navigate: (p: string) => void 
           {loading ? 'loading…' : failedModules.length > 0 ? `${failedModules.length} module(s) unavailable — partial data` : 'live from your account'}
         </span>
       </div>
-      <div className="mc-stats-grid">
+      <div className="mc-stats-grid stagger">
         {cards.map((c) => (
           <div
             key={c.label}
-            className="card card-hover"
+            className="card card-hover card-glow bg-gradient-card"
             style={{
               cursor: 'pointer',
               opacity: c.degraded ? 0.65 : 1,
@@ -166,7 +166,7 @@ export default function MinesHome({ navigate }: { navigate: (p: string) => void 
         ))}
       </div>
 
-      <div className="card">
+      <div className="card card-glow bg-gradient-card">
         <div className="sec-title"><h2>Recent submissions</h2></div>
         {failedModules.includes('Submissions') ? (
           <div className="empty-state" style={{ padding: 22 }}>

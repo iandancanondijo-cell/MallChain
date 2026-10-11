@@ -29,7 +29,8 @@ import {
   GeographicRestrictionAlert,
   KYCStatusAlert
 } from './components/ComplianceGates';
-import { SkeletonFallback } from './components/Skeleton';
+import { KYCGate } from './components/KYCGate';
+import { LoadingState } from './components/LoadingState';
 import { updateSEO, getSEOForRoute, generateCanonicalUrl } from './utils/seo';
 import './styles/auth.css';
 import './styles/wallet-data.css';
@@ -53,6 +54,7 @@ function getSectionId(path: string): string {
   if (p.startsWith('/economy')) return 'economy';
   if (p.startsWith('/messaging')) return 'messaging';
   if (p.startsWith('/settings')) return 'settings';
+  if (p === '/kyc') return 'settings';
   if (p.startsWith('/referrals')) return 'referrals';
   if (p.startsWith('/admin')) return 'admin';
   if (p.startsWith('/help') || p.startsWith('/edu')) return 'help';
@@ -160,9 +162,11 @@ export default function App() {
 
   // Apply saved accent
     const map: Record<string, string> = { gold: '#f3ba2f', cyan: '#22d3ee', purple: '#a78bfa', emerald: '#34d399' };
+    const rgb: Record<string, string> = { gold: '243, 186, 47', cyan: '34, 211, 238', purple: '167, 139, 250', emerald: '52, 211, 153' };
     const a = map[st.prefs.accent] || '#f3ba2f';
     document.documentElement.style.setProperty('--accent', a);
     document.documentElement.style.setProperty('--accent-2', a === '#22d3ee' ? '#0ea5e9' : a === '#a78bfa' ? '#8b5cf6' : a === '#34d399' ? '#10b981' : '#f59e0b');
+    document.documentElement.style.setProperty('--accent-rgb', rgb[st.prefs.accent] || '243, 186, 47');
 
     // Apply saved language to the document's lang attribute (screen readers
     // and browser translation tools use it, not just the in-app t() calls).
@@ -207,8 +211,9 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, st.wallet.mnemonic, st.wallet.pinHash]);
 
-  // Auth guard: redirect unauthenticated users to login, and authenticated
-  // users away from landing. This is a cosmetic hash-correctness effect only —
+  // Auth guard: redirect unauthenticated users to landing page first, then
+  // they can navigate to auth from there. Authenticated users on landing
+  // go directly to dashboard. This is a cosmetic hash-correctness effect only —
   // matchRoute() (router.tsx) independently recomputes auth and substitutes
   // AuthFlow for protected content regardless of what the hash says, so it
   // remains the actual authorization boundary no matter what this effect does.
@@ -228,12 +233,11 @@ export default function App() {
     const isPublicRoute = cleanPath === '/landing' || cleanPath === '/auth';
 
     if (!isAuthenticated && !isPublicRoute) {
-      // Unauthenticated user on protected route → redirect to login
-      console.log('[App] Auth required for route:', path, '→ redirecting to login');
-      navigate('/auth?mode=login');
+      // Unauthenticated user on protected route → redirect to landing page first
+      // (user can then choose to login or signup from the landing page)
+      navigate('/landing');
     } else if (isAuthenticated && cleanPath === '/landing') {
       // Authenticated user on landing → redirect to dashboard
-      console.log('[App] User authenticated, redirecting from landing to dashboard');
       navigate('/');
     }
   }, [authInitialized, st.user.authed, path, navigate]);
@@ -413,11 +417,18 @@ export default function App() {
           </div>
         )}
 
+        {/* KYC Status Alert — must stay INSIDE .main: as a direct flex child of
+            .app-shell it becomes an in-flow flex item beside .main and squeezes
+            the whole page content into a narrow column. */}
+        {authInitialized && st.user.authed && complianceSequence === 'complete' && !hiddenNav && (
+          <KYCStatusAlert />
+        )}
+
         <ErrorBoundary resetKey={path}>
-          <Suspense fallback={<SkeletonFallback type="page" />}>
+          <Suspense fallback={<LoadingState page />}>
             {isAdminRoute
               ? <Admin activeTab={adminTab} onTabChange={setAdminTab} />
-              : route.render(navigate)}
+              : <div key={path} className="page-enter">{route.render(navigate)}</div>}
           </Suspense>
         </ErrorBoundary>
       </main>
@@ -425,6 +436,15 @@ export default function App() {
       <ToastHost />
       <PinChallengeHost />
       <CookieConsentBanner />
+      
+      {/* KYC Gate - Blocks all features if KYC not completed (never over the /kyc wizard itself) */}
+      {authInitialized && st.user.authed && !hiddenNav && st.user.kycLevel === 1 && path.split('?')[0] !== '/kyc' && (
+        <KYCGate 
+          kycLevel={st.user.kycLevel} 
+          userId={st.user.id} 
+          onStartKYC={() => navigate('/kyc')}
+        />
+      )}
       
       {/* Compliance Gates */}
       {authInitialized && st.user.authed && complianceSequence !== 'complete' && (
@@ -462,11 +482,6 @@ export default function App() {
             />
           )}
         </>
-      )}
-      
-      {/* KYC Status Alert */}
-      {authInitialized && st.user.authed && complianceSequence === 'complete' && !hiddenNav && (
-        <KYCStatusAlert />
       )}
       
       {/* Geographic Restriction */}

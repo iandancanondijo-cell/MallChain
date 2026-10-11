@@ -55,18 +55,18 @@
 .numpad-key:hover:not(:disabled) {
   border-color: var(--gold);
   background: var(--bg-3);
-  box-shadow: 0 4px 12px rgba(243, 186, 47, 0.15);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 15%, transparent);
   transform: translateY(-1px);
 }
 
 .numpad-key:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 2px 6px rgba(243, 186, 47, 0.1);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .numpad-key:focus-visible {
   border-color: var(--gold);
-  box-shadow: 0 0 0 3px rgba(243, 186, 47, 0.15);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
 /* Disabled state */
@@ -136,12 +136,12 @@
 .numpad-confirm:hover:not(:disabled) {
   background: var(--gold-2);
   border-color: var(--gold-2);
-  box-shadow: 0 4px 16px rgba(243, 186, 47, 0.25);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .numpad-confirm:active:not(:disabled) {
   background: var(--gold);
-  box-shadow: 0 2px 8px rgba(243, 186, 47, 0.15);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
 .numpad-confirm:disabled {

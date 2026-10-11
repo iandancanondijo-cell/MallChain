@@ -458,7 +458,13 @@ app.get('/api', (req, res) => res.json({
   routes: ['/api/auth', '/api/vault', '/api/tx', '/api/market', '/api/send', '/api/blockchain', '/api/blockchain/tx', '/api/mallwallet', '/metrics'],
 }));
 
+// Serve static uploaded files
 app.use('/uploads/badges', express.static(path.join(__dirname, '..', 'uploads', 'badges')));
+app.use('/uploads/avatars', express.static(path.join(__dirname, '..', 'uploads', 'avatars')));
+app.use('/uploads/products', express.static(path.join(__dirname, '..', 'uploads', 'products')));
+app.use('/uploads/store', express.static(path.join(__dirname, '..', 'uploads', 'store')));
+app.use('/uploads/courses', express.static(path.join(__dirname, '..', 'uploads', 'courses')));
+app.use('/uploads/documents', express.static(path.join(__dirname, '..', 'uploads', 'documents')));
 
 app.use('/api/auth', authRoutes);
 
@@ -571,6 +577,8 @@ app.use('/api/mallwallet', mallwalletRoutes);
 // Mallwallet integrations (moved from separate project)
 const mallwalletTreasury = require('./mallwallet/routes/treasury');
 app.use('/api/mallwallet/treasury', mallwalletTreasury);
+const uploadRoutes = require('./routes/upload');
+app.use('/api/upload', uploadRoutes);
 
 // Transaction routes and explorer
 const transactionsRoutes = require('./routes/transactions')

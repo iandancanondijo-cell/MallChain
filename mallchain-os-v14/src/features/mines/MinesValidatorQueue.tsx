@@ -51,22 +51,22 @@ export default function MinesValidatorQueue() {
   return (
     <div>
       <div className="view-head">
-        <h1>Proof Reviewer Queue</h1>
+        <h1 className="text-gradient">Proof Reviewer Queue</h1>
         <span className="sub">Randomly assigned submissions — vote is weighted by your reputation</span>
         <span className="chip gold">{tasks?.length ?? 0} assigned</span>
       </div>
 
       {profile && (
-        <div className="mc-stats-grid" style={{ marginBottom: 16 }}>
-          <div className="card"><div className="lbl">Stake status</div><div className="num" style={{ fontSize: 14 }}>{profile.stakeStatus}</div></div>
-          <div className="card"><div className="lbl">Staked</div><div className="num">{fmtNum(profile.stakedAmount)} MLPTS</div></div>
-          <div className="card"><div className="lbl">Reputation</div><div className="num">{profile.mining_reputation}</div></div>
-          <div className="card"><div className="lbl">Earnings</div><div className="num">{fmtNum(profile.total_earnings)} MLPTS</div></div>
+        <div className="mc-stats-grid stagger" style={{ marginBottom: 16 }}>
+          <div className="card card-hover"><div className="lbl">Stake status</div><div className="num" style={{ fontSize: 14 }}>{profile.stakeStatus}</div></div>
+          <div className="card card-hover"><div className="lbl">Staked</div><div className="num">{fmtNum(profile.stakedAmount)} MLPTS</div></div>
+          <div className="card card-hover"><div className="lbl">Reputation</div><div className="num">{profile.mining_reputation}</div></div>
+          <div className="card card-hover"><div className="lbl">Earnings</div><div className="num">{fmtNum(profile.total_earnings)} MLPTS</div></div>
         </div>
       )}
 
       {!eligible && (
-        <div className="card mb" style={{ borderColor: 'rgba(243,186,47,.35)' }}>
+        <div className="card card-glow bg-gradient-card mb" style={{ borderColor: 'rgba(var(--section-accent-rgb),.35)' }}>
           <div className="t" style={{ fontWeight: 700 }}>You need an active reviewer stake to be assigned submissions</div>
           <div className="m" style={{ color: 'var(--txt-2)', marginTop: 4 }}>
             Minimum stake: {profile ? fmtNum(profile.minRequiredStake) : '—'} MLPTS.{' '}
@@ -84,7 +84,7 @@ export default function MinesValidatorQueue() {
         </div>
       )}
 
-      <div className="card">
+      <div className="card card-glow bg-gradient-card">
         {loading && !tasks && <div className="tiny">Loading…</div>}
         {tasks?.length === 0 && (
           <div className="empty-state"><div className="es-ico">🛂</div><div className="es-t">Queue empty — nothing assigned to you right now</div><div className="es-m">New submissions are randomly assigned to eligible reviewers as they arrive.</div></div>

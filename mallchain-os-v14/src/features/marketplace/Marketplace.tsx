@@ -215,7 +215,7 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
   return (
     <div>
       <div className="view-head">
-        <h1>Marketplace</h1>
+        <h1 className="text-gradient">Marketplace</h1>
         <span className="sub">Escrow-protected commerce on Mallchain</span>
         <button className="btn btn-ghost btn-sm" onClick={() => setOrdersOpen(true)}>📦 Orders ({st.marketplace.orders.length})</button>
         <button className="btn btn-primary btn-sm" onClick={() => setCartOpen(true)}>🛒 Cart ({st.marketplace.cart.reduce((a, c) => a + c.qty, 0)})</button>
@@ -229,9 +229,9 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
       </div>
 
       {list.length === 0 && <div className="empty-state"><div className="es-ico">🛍</div><div className="es-t">No products match</div><div className="es-m">Try a different search or category.</div></div>}
-      <div className="c-grid">
+      <div className="c-grid stagger">
         {list.map((p) => (
-          <div key={p.id} className="c-card">
+          <div key={p.id} className="c-card card-hover card-glow bg-gradient-card">
             <div className="c-banner">
               <span style={{ fontSize: 26 }}>{p.img}</span>
               <div><div className="nm">{p.name}</div><div className="cr">by {p.seller} · ★ {p.rating}</div></div>
@@ -301,7 +301,7 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
             const step = SHIP_FLOW.indexOf(o.status as (typeof SHIP_FLOW)[number]) + (o.status === 'delivered' ? 1 : 0);
             const busy = busyOrderId === o.id;
             return (
-              <div key={o.id} className="card mb" style={{ background: 'var(--bg-2)' }}>
+              <div key={o.id} className="card card-glow bg-gradient-card mb" style={{ background: 'var(--bg-2)' }}>
                 <div className="row">
                   <div className="grow"><b>{o.id}</b> <span className="muted">· {new Date(o.ts).toLocaleDateString()}</span></div>
                   <StatusChip status={o.status} />

@@ -28,8 +28,8 @@
   --adm-line: #1F2836;
   --adm-text: #EAEDF3;
   --adm-muted: #8D97A9;
-  --adm-gold: #F6B21B;
-  --adm-goldtx: #F3CB6A;
+  --adm-gold: var(--accent);
+  --adm-goldtx: color-mix(in srgb, var(--accent) 72%, white);
   --adm-ok: #3DDC97;
   --adm-bad: #FF7A70;
   --adm-warn: #F6B21B;

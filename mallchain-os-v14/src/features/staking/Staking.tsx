@@ -90,8 +90,8 @@ export default function Staking() {
   if (!address) {
     return (
       <div>
-        <div className="view-head"><h1>Staking</h1></div>
-        <div className="card">
+        <div className="view-head"><h1 className="text-gradient">Staking</h1></div>
+        <div className="card card-glow bg-gradient-card">
           <div className="empty-state">
             <div className="es-ico"><Lock size={28} /></div>
             <div className="es-t">No wallet connected</div>
@@ -109,7 +109,7 @@ export default function Staking() {
   return (
     <div>
       <div className="view-head">
-        <h1>Staking</h1>
+        <h1 className="text-gradient">Staking</h1>
         <span className="sub">Stake MLCNS on-chain — unstaking pays out principal + rewards in one transaction</span>
       </div>
 
@@ -146,8 +146,8 @@ export default function Staking() {
       </div>
 
       {/* Stat cards */}
-      <div className="stat-grid" style={{ opacity: error ? 0.65 : 1 }}>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+      <div className="stat-grid stagger" style={{ opacity: error ? 0.65 : 1 }}>
+        <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--section-accent-rgb),0.12)', color: 'rgb(var(--section-accent-rgb))' }}>
             <Coins size={20} />
           </div>
@@ -156,7 +156,7 @@ export default function Staking() {
             <div className="card-value">{loading ? '—' : error ? 'N/A' : <>{fmtNum(totalStaked)} <span className="unit">MLCNS</span></>}</div>
           </div>
         </div>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+        <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(34,197,94,0.12)', color: 'var(--green-2)' }}>
             <TrendingUp size={20} />
           </div>
@@ -165,7 +165,7 @@ export default function Staking() {
             <div className="card-value up">{loading ? '—' : error ? 'N/A' : <>{fmtNum(totalRewards)} <span className="unit">MLCNS</span></>}</div>
           </div>
         </div>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+        <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--section-accent-rgb),0.08)', color: 'rgb(var(--section-accent-rgb))' }}>
             <Lock size={20} />
           </div>
@@ -178,7 +178,7 @@ export default function Staking() {
 
       {/* Stake form + Active stakes */}
       <div className="grid-2">
-        <div className="card">
+        <div className="card card-glow bg-gradient-card">
           <div className="sec-title"><h2>Stake MLCNS</h2></div>
           <div className="field">
             <label>
@@ -198,7 +198,7 @@ export default function Staking() {
           </div>
         </div>
 
-        <div className="card" style={{ opacity: error ? 0.65 : 1 }}>
+        <div className="card card-glow bg-gradient-card" style={{ opacity: error ? 0.65 : 1 }}>
           <div className="sec-title">
             <h2>Active stakes</h2>
             {error && <span className="sub" style={{ color: 'var(--gold-2)' }}>⚠ unavailable</span>}
@@ -232,7 +232,7 @@ export default function Staking() {
       </div>
 
       {/* History */}
-      <div className="card mt" style={{ opacity: error ? 0.65 : 1 }}>
+      <div className="card card-glow bg-gradient-card mt" style={{ opacity: error ? 0.65 : 1 }}>
         <div className="sec-title">
           <h2><History size={16} style={{ marginRight: 8, verticalAlign: -2 }} />History</h2>
           {error && <span className="sub" style={{ color: 'var(--gold-2)' }}>⚠ unavailable</span>}

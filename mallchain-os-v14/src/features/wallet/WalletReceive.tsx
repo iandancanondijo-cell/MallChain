@@ -82,7 +82,7 @@ export default function WalletReceive() {
             <ArrowDownLeft size={22} />
           </div>
           <div className="wo-hero-body">
-            <div className="wo-hero-title">Receive MALL</div>
+            <div className="wo-hero-title text-gradient">Receive MALL</div>
             <div className="wo-hero-sub">Share your address or QR code to receive Mallcoins</div>
           </div>
         </div>
@@ -107,13 +107,13 @@ export default function WalletReceive() {
           <ArrowDownLeft size={22} />
         </div>
         <div className="wo-hero-body">
-          <div className="wo-hero-title">Receive MALL</div>
+          <div className="wo-hero-title text-gradient">Receive MALL</div>
           <div className="wo-hero-sub">Share your address or QR code — payments arrive in real time</div>
         </div>
       </div>
 
       {/* ── QR + address card ── */}
-      <div className="wo-qr-section" style={{ maxWidth: 560 }}>
+      <div className="wo-qr-section card-glow bg-gradient-card" style={{ maxWidth: 560 }}>
         <div className="wo-qr-frame">
           {qrDataUrl ? (
             <img src={qrDataUrl} alt="Wallet address QR code" width={160} height={160} style={{ borderRadius: 8 }} />

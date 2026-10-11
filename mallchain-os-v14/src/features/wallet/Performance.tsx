@@ -21,18 +21,18 @@ export default function Performance() {
   return (
     <div>
       <div className="view-head">
-        <h1>Performance</h1>
+        <h1 className="text-gradient">Performance</h1>
         <span className="sub">Real inflow/outflow, computed from your on-chain transaction history</span>
       </div>
 
       {!address ? (
-        <div className="card">
+        <div className="card card-glow bg-gradient-card">
           <div className="empty-state"><div className="es-ico">🔗</div><div className="es-t">No wallet connected</div><div className="es-m">Connect a wallet to view performance.</div></div>
         </div>
       ) : (
         <>
           {error && (
-            <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
+            <div className="card card-glow bg-gradient-card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
               <div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div>
             </div>
           )}
@@ -51,14 +51,14 @@ export default function Performance() {
             ))}
           </div>
 
-          <div className="mc-stats-grid">
-            <div className="card"><div className="lbl">Total inflow</div><div className="num">{loading ? '—' : fmtNum(totalInflow)}</div></div>
-            <div className="card"><div className="lbl">Total outflow</div><div className="num">{loading ? '—' : fmtNum(totalOutflow)}</div></div>
-            <div className="card"><div className="lbl">Net ({days}d)</div><div className="num">{loading ? '—' : fmtNum(netTotal)}</div></div>
-            <div className="card"><div className="lbl">Cumulative net</div><div className="num">{loading ? '—' : fmtNum(currentCumulative)}</div></div>
+          <div className="mc-stats-grid stagger">
+            <div className="card card-glow bg-gradient-card"><div className="lbl">Total inflow</div><div className="num">{loading ? '—' : fmtNum(totalInflow)}</div></div>
+            <div className="card card-glow bg-gradient-card"><div className="lbl">Total outflow</div><div className="num">{loading ? '—' : fmtNum(totalOutflow)}</div></div>
+            <div className="card card-glow bg-gradient-card"><div className="lbl">Net ({days}d)</div><div className="num">{loading ? '—' : fmtNum(netTotal)}</div></div>
+            <div className="card card-glow bg-gradient-card"><div className="lbl">Cumulative net</div><div className="num">{loading ? '—' : fmtNum(currentCumulative)}</div></div>
           </div>
 
-          <div className="card">
+          <div className="card card-glow bg-gradient-card">
             <div className="sec-title"><h2>Cumulative net over time</h2></div>
             {series.length === 0 ? (
               <div className="tiny" style={{ padding: 16 }}>{loading ? 'Loading…' : 'No transactions in this period yet'}</div>
@@ -68,7 +68,7 @@ export default function Performance() {
           </div>
 
           {series.length > 0 && (
-            <div className="card" style={{ marginTop: 16 }}>
+            <div className="card card-glow bg-gradient-card" style={{ marginTop: 16 }}>
               <div className="sec-title"><h2>Daily breakdown</h2></div>
               <div style={{ maxHeight: 320, overflowY: 'auto' }}>
                 <table className="tbl">

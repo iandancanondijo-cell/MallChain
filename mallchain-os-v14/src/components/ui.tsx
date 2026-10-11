@@ -20,8 +20,16 @@ export function Modal({ title, onClose, wide, children }: { title: string; onClo
     // keyboard/screen-reader user would otherwise be silently dropped into.
     const trigger = document.activeElement as HTMLElement | null;
 
-    const first = dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-    (first || dialogRef.current)?.focus();
+    // Don't auto-focus the close button - let the first input (PIN) get focus
+    // Look for form inputs first (PIN input, text fields, etc)
+    const firstInput = dialogRef.current?.querySelector<HTMLElement>('input:not([type="hidden"]), textarea, [role="textbox"]');
+    const firstFocusable = firstInput || dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+    
+    if (firstFocusable) {
+      setTimeout(() => {
+        firstFocusable.focus();
+      }, 0);
+    }
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { onClose(); return; }
@@ -65,7 +73,7 @@ export function Modal({ title, onClose, wide, children }: { title: string; onClo
       >
         <div className="modal-head">
           <h2 id={titleId}>{title}</h2>
-          <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>✕</button>
+          <button type="button" className="modal-close" aria-label="Close" onClick={onClose} tabIndex={0}>✕</button>
         </div>
         {children}
       </div>

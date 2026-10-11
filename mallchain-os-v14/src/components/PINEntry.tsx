@@ -12,7 +12,7 @@
  * - Accessibility compliant
  */
 
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import '../styles/pin-entry.css';
 
 interface PINEntryProps {

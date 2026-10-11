@@ -173,12 +173,10 @@ class SocketManager {
     const socketUrl = url || config.apiBaseUrl || 'http://localhost:4000';
     
     if (this.socket?.connected) {
-      console.log('[Socket] Already connected');
       return;
     }
 
     if (this.isConnecting) {
-      console.log('[Socket] Connection already in progress');
       return;
     }
 
@@ -201,7 +199,6 @@ class SocketManager {
 
       // Task 5.1: Socket lifecycle management - connection
       this.socket.on('connect', () => {
-        console.log('[Socket] Connected:', this.socket?.id);
         this.isConnecting = false;
         this.reconnectAttempt = 0;
         this.emit('system', { message: 'Connected to real-time updates' });
@@ -217,7 +214,6 @@ class SocketManager {
 
       // Task 5.1: Socket lifecycle management - disconnection
       this.socket.on('disconnect', (reason) => {
-        console.log('[Socket] Disconnected:', reason);
         this.emit('system', { message: 'Real-time updates unavailable', reason });
       });
 
@@ -243,43 +239,36 @@ class SocketManager {
 
     // Task 5.6: Wallet update events
     this.socket.on('wallet:update', (data: WalletData) => {
-      console.log('[Socket] Wallet update received:', data);
       this.emit('wallet:update', data);
     });
 
     // Task 5.6: Block events
     this.socket.on('block:new', (data: BlockData) => {
-      console.log('[Socket] New block:', data);
       this.emit('block:new', data);
     });
 
     // Task 5.6: Market feed events
     this.socket.on('market:feed', (events: MarketEvent[]) => {
-      console.log('[Socket] Market feed received:', events);
       this.emit('market:feed', events);
     });
 
     // Task 5.6: Price update events
     this.socket.on('price:current', (data: PriceData) => {
-      console.log('[Socket] Price update received:', data);
       this.emit('price:current', data);
     });
 
     // System events
     this.socket.on('system', (data: { message: string; timestamp?: number }) => {
-      console.log('[Socket] System message:', data.message);
       this.emit('system', data);
     });
 
     // Live notification push (see backend services/notify.js)
     this.socket.on('notification', (data: NotificationData) => {
-      console.log('[Socket] Notification received:', data);
       this.emit('notification', data);
     });
 
     // Live chat message push (see backend routes/messaging.js)
     this.socket.on('message:new', (data: MessageData) => {
-      console.log('[Socket] Message received:', data);
       this.emit('message:new', data);
     });
   }
@@ -355,11 +344,9 @@ class SocketManager {
 
     const room = `wallet:${address}`;
     if (this.subscriptions.has(room)) {
-      console.log('[Socket] Already subscribed to', room);
       return;
     }
 
-    console.log('[Socket] Subscribing to wallet:', address);
     this.subscriptions.add(room);
     if (this.socket?.connected) this.socket.emit('subscribe:wallet', address);
   }
@@ -375,11 +362,9 @@ class SocketManager {
 
     const room = `wallet:${address}`;
     if (!this.subscriptions.delete(room)) {
-      console.log('[Socket] Not subscribed to', room);
       return;
     }
 
-    console.log('[Socket] Unsubscribing from wallet:', address);
     if (this.socket?.connected) this.socket.emit('unsubscribe:wallet', address);
   }
 
@@ -390,11 +375,9 @@ class SocketManager {
   subscribeMarket(): void {
     const room = 'market:feed';
     if (this.subscriptions.has(room)) {
-      console.log('[Socket] Already subscribed to market feed');
       return;
     }
 
-    console.log('[Socket] Subscribing to market feed');
     this.subscriptions.add(room);
     if (this.socket?.connected) this.socket.emit('subscribe:market');
   }
@@ -406,11 +389,9 @@ class SocketManager {
   subscribePrice(): void {
     const room = 'price:updates';
     if (this.subscriptions.has(room)) {
-      console.log('[Socket] Already subscribed to price updates');
       return;
     }
 
-    console.log('[Socket] Subscribing to price updates');
     this.subscriptions.add(room);
     if (this.socket?.connected) this.socket.emit('subscribe:price');
   }
@@ -422,11 +403,9 @@ class SocketManager {
   subscribeBlocks(): void {
     const room = 'blocks:live';
     if (this.subscriptions.has(room)) {
-      console.log('[Socket] Already subscribed to live blocks');
       return;
     }
 
-    console.log('[Socket] Subscribing to live blocks');
     this.subscriptions.add(room);
     if (this.socket?.connected) this.socket.emit('subscribe:blocks');
   }
@@ -436,7 +415,6 @@ class SocketManager {
    */
   private resubscribeAll(): void {
     const subscriptions = Array.from(this.subscriptions);
-    console.log('[Socket] Re-subscribing to', subscriptions.length, 'rooms');
 
     for (const room of subscriptions) {
       if (room.startsWith('wallet:')) {
@@ -528,7 +506,6 @@ class SocketManager {
    */
   disconnect(): void {
     if (this.socket) {
-      console.log('[Socket] Disconnecting');
       this.socket.disconnect();
       this.socket = null;
     }

@@ -53,7 +53,7 @@ export default function Economy() {
   return (
     <div>
       <div className="view-head">
-        <h1>Economy</h1>
+        <h1 className="text-gradient">Economy</h1>
         <span className="sub">Mallchain's real emission schedule, supply, and treasury — live from the chain</span>
       </div>
 
@@ -95,8 +95,8 @@ export default function Economy() {
           </div>
 
           {/* Stat cards */}
-          <div className="stat-grid">
-            <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+          <div className="stat-grid stagger">
+            <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
               <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--section-accent-rgb),0.12)', color: 'rgb(var(--section-accent-rgb))' }}>
                 <Coins size={20} />
               </div>
@@ -106,7 +106,7 @@ export default function Economy() {
                 <div className="tiny mt">{fmtNum(data.emission.totalAvailable)} available</div>
               </div>
             </div>
-            <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+            <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
               <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--section-accent-rgb),0.08)', color: 'rgb(var(--section-accent-rgb))' }}>
                 <TrendingUp size={20} />
               </div>
@@ -116,7 +116,7 @@ export default function Economy() {
                 <div className="tiny mt">{fmtNum(data.emission.remainingInSchedule)} remaining</div>
               </div>
             </div>
-            <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+            <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
               <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(220,38,38,0.10)', color: 'var(--red-2)' }}>
                 <Flame size={20} />
               </div>
@@ -129,7 +129,7 @@ export default function Economy() {
           </div>
 
           <div className="grid-2 mb">
-            <div className="card">
+            <div className="card card-glow bg-gradient-card">
               <div className="sec-title"><h2>Emission — Phase {data.emission.phase}</h2></div>
               <table className="tbl">
                 <tbody>
@@ -142,7 +142,7 @@ export default function Economy() {
               <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>Emission halves every 36 months across 5 phases, from 3,000,000 MLCNS/month down to 187,500 MLCNS/month.</div>
             </div>
 
-            <div className="card">
+            <div className="card card-glow bg-gradient-card">
               <div className="sec-title"><h2>Mallpoints → MLCNS conversion</h2></div>
               <table className="tbl">
                 <tbody>
@@ -156,7 +156,7 @@ export default function Economy() {
             </div>
           </div>
 
-          <div className="card mb">
+          <div className="card card-glow bg-gradient-card mb">
             <div className="sec-title"><h2>Emission schedule — all phases</h2></div>
             <table className="tbl">
               <thead>
@@ -176,7 +176,7 @@ export default function Economy() {
           </div>
 
           {data.wallets && (
-            <div className="card mb">
+            <div className="card card-glow bg-gradient-card mb">
               <div className="sec-title"><h2>Treasury wallets</h2><span className="sub">On-chain balances, for transparency</span></div>
               <table className="tbl">
                 <thead>
@@ -211,7 +211,7 @@ export default function Economy() {
           )}
 
           {/* ── Track Economics ── */}
-          <div className="card mb" style={{ overflow: 'hidden' }}>
+          <div className="card card-glow bg-gradient-card mb" style={{ overflow: 'hidden' }}>
             <button
               onClick={toggleTrack}
               style={{
@@ -283,17 +283,15 @@ export default function Economy() {
                     </div>
 
                     {/* Stat tiles */}
-                    <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-                      {/* Total Mallcoins */}
-                      <div className="card" style={{ padding: 16, textAlign: 'center' }}>
+                    <div className="stat-grid stagger" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+                      <div className="card card-glow bg-gradient-card" style={{ padding: 16, textAlign: 'center' }}>
                         <Coins size={20} style={{ color: 'rgb(var(--section-accent-rgb))', marginBottom: 6 }} />
                         <div className="card-label">Total Mallcoins</div>
                         <div className="card-value" style={{ fontSize: '1.15em' }}>{fmtNum(track.totalSupply)}</div>
                         <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>MLCNS</div>
                       </div>
 
-                      {/* Held by wallets — red glow */}
-                      <div className="card" style={{
+                      <div className="card card-glow bg-gradient-card" style={{
                         padding: 16, textAlign: 'center',
                         borderColor: 'rgba(220,38,38,0.2)',
                         boxShadow: '0 0 20px rgba(220,38,38,0.08), inset 0 0 12px rgba(220,38,38,0.03)'
@@ -311,8 +309,7 @@ export default function Economy() {
                         <div className="tiny mt" style={{ color: 'var(--red-2)', opacity: 0.7 }}>{track.heldPercent}% of supply — gone</div>
                       </div>
 
-                      {/* Unclaimed on chain — green glow */}
-                      <div className="card" style={{
+                      <div className="card card-glow bg-gradient-card" style={{
                         padding: 16, textAlign: 'center',
                         borderColor: 'rgba(34,197,94,0.2)',
                         boxShadow: '0 0 20px rgba(34,197,94,0.08), inset 0 0 12px rgba(34,197,94,0.03)'
@@ -330,8 +327,7 @@ export default function Economy() {
                         <div className="tiny mt" style={{ color: 'var(--green-2)', opacity: 0.7 }}>{track.unclaimedPercent}% — available to own</div>
                       </div>
 
-                      {/* Wallets created */}
-                      <div className="card" style={{ padding: 16, textAlign: 'center' }}>
+                      <div className="card card-glow bg-gradient-card" style={{ padding: 16, textAlign: 'center' }}>
                         <div style={{
                           width: 36, height: 36, borderRadius: 10, margin: '0 auto 6px',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -344,8 +340,7 @@ export default function Economy() {
                         <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>ever on Mallchain</div>
                       </div>
 
-                      {/* Liquidity pool fiat */}
-                      <div className="card" style={{ padding: 16, textAlign: 'center' }}>
+                      <div className="card card-glow bg-gradient-card" style={{ padding: 16, textAlign: 'center' }}>
                         <div style={{
                           width: 36, height: 36, borderRadius: 10, margin: '0 auto 6px',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -362,8 +357,7 @@ export default function Economy() {
                         </div>
                       </div>
 
-                      {/* Burned */}
-                      <div className="card" style={{ padding: 16, textAlign: 'center' }}>
+                      <div className="card card-glow bg-gradient-card" style={{ padding: 16, textAlign: 'center' }}>
                         <div style={{
                           width: 36, height: 36, borderRadius: 10, margin: '0 auto 6px',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -402,7 +396,7 @@ export default function Economy() {
             )}
           </div>
 
-          <div className="card">
+          <div className="card card-glow bg-gradient-card">
             <div className="sec-title"><h2><Wallet size={16} style={{ marginRight: 8, verticalAlign: -2 }} />Your holdings</h2></div>
             {!walletAddress ? (
               <div className="muted" style={{ padding: 12 }}>Connect a wallet to see your personal holdings here.</div>

@@ -56,7 +56,7 @@ export default function Referrals() {
   return (
     <div>
       <div className="view-head">
-        <h1>Referrals</h1>
+        <h1 className="text-gradient">Referrals</h1>
         <span className="sub">Earn 10 MLPTS for every friend who signs up with your code</span>
       </div>
 
@@ -95,8 +95,8 @@ export default function Referrals() {
       </div>
 
       {/* Stat cards */}
-      <div className="stat-grid">
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+      <div className="stat-grid stagger">
+        <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--section-accent-rgb),0.12)', color: 'rgb(var(--section-accent-rgb))' }}>
             <Users size={20} />
           </div>
@@ -106,7 +106,7 @@ export default function Referrals() {
             <div className="card-sub">signups via your code</div>
           </div>
         </div>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+        <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(34,197,94,0.12)', color: 'var(--green-2)' }}>
             <TrendingUp size={20} />
           </div>
@@ -116,7 +116,7 @@ export default function Referrals() {
             <div className="card-sub">lifetime commission</div>
           </div>
         </div>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+        <div className="card card-glow bg-gradient-card card-hover" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--section-accent-rgb),0.10)', color: 'rgb(var(--section-accent-rgb))' }}>
             <Sparkles size={20} />
           </div>
@@ -132,7 +132,7 @@ export default function Referrals() {
         </div>
       </div>
 
-      <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Gift size={18} style={{ color: 'rgb(var(--section-accent-rgb))', flexShrink: 0 }} />
         <div className="tiny" style={{ color: 'var(--txt-2)' }}>
           10 MLPTS is credited to your account the moment someone signs up using your referral link. Claim moves it into your spendable Mallpoints balance.

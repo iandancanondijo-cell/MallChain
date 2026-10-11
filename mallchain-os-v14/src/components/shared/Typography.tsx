@@ -1,9 +1,3 @@
-/**
- * Typography Components — Shared component library
- * 
- * Semantic heading and text components that apply design tokens.
- */
-
 import React from 'react';
 
 export interface HeadingProps extends React.HTMLAttributes<HTMLHeadingElement> {
@@ -20,13 +14,6 @@ export interface TextProps extends React.HTMLAttributes<HTMLParagraphElement> {
   className?: string;
 }
 
-/**
- * Heading component — semantic HTML with design tokens
- * 
- * @example
- * <Heading level={1}>Page Title</Heading>
- * <Heading level={2}>Section Title</Heading>
- */
 export const Heading = React.forwardRef<HTMLHeadingElement, HeadingProps>(
   (
     {
@@ -55,13 +42,6 @@ export const Heading = React.forwardRef<HTMLHeadingElement, HeadingProps>(
 
 Heading.displayName = 'Heading';
 
-/**
- * Text component — semantic paragraph with design tokens
- * 
- * @example
- * <Text size="lg" weight="semibold">Large, bold text</Text>
- * <Text color="secondary">Secondary text color</Text>
- */
 export const Text = React.forwardRef<HTMLParagraphElement, TextProps>(
   (
     {
@@ -93,9 +73,6 @@ export const Text = React.forwardRef<HTMLParagraphElement, TextProps>(
 
 Text.displayName = 'Text';
 
-/**
- * Semantic heading aliases
- */
 export const H1 = (props: Omit<HeadingProps, 'level'>) => <Heading level={1} {...props} />;
 export const H2 = (props: Omit<HeadingProps, 'level'>) => <Heading level={2} {...props} />;
 export const H3 = (props: Omit<HeadingProps, 'level'>) => <Heading level={3} {...props} />;

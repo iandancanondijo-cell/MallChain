@@ -87,8 +87,6 @@ export default function BlockchainExplorer() {
 
     // Listen for new block events
     const unsubscribe = socketManager.onBlockUpdate((data: SocketBlockData) => {
-      console.log('[BlockchainExplorer] Received new block from socket:', data);
-
       // Update stats height only (socket data is limited)
       setStats(prev => prev ? { ...prev, height: data.height } : null);
 
@@ -106,7 +104,6 @@ export default function BlockchainExplorer() {
       // Fetch full block data from API to get all fields
       getLatestBlock()
         .then(block => {
-          console.log('[BlockchainExplorer] Fetched full block data from API:', block);
           applyBlock(block);
         })
         .catch(err => {
@@ -167,7 +164,7 @@ export default function BlockchainExplorer() {
     return (
       <div className="page-explorer">
         <div className="view-head">
-          <h1>🔗 Blockchain Explorer</h1>
+          <h1 className="text-gradient">🔗 Blockchain Explorer</h1>
         </div>
         <div style={{ textAlign: 'center', padding: '40px', color: 'var(--txt-3)' }}>
           Loading blockchain data...
@@ -181,7 +178,7 @@ export default function BlockchainExplorer() {
       {/* Header */}
       <div className="view-head">
         <div>
-          <h1>🔗 Blockchain Explorer</h1>
+          <h1 className="text-gradient">🔗 Blockchain Explorer</h1>
           <span className="sub">Real-time blockchain statistics and data</span>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -209,7 +206,7 @@ export default function BlockchainExplorer() {
 
       {/* Stats Overview */}
       {stats && (
-        <div className="stats-grid">
+        <div className="stats-grid stagger">
           <div className="stat-card">
             <div className="stat-label">Current Block Height</div>
             <div className="stat-value">{stats.height ? stats.height.toLocaleString() : '—'}</div>
@@ -262,7 +259,7 @@ export default function BlockchainExplorer() {
 
       {/* Overview Tab */}
       {activeTab === 'overview' && latestBlock && (
-        <div className="card">
+        <div className="card card-glow bg-gradient-card">
           <div className="card-title">Latest Block</div>
           <div className="block-info">
             <div className="info-row">
@@ -315,7 +312,7 @@ export default function BlockchainExplorer() {
           </div>
 
           {selectedBlock && (
-            <div className="card">
+            <div className="card card-glow bg-gradient-card">
               <div className="card-title">Block #{selectedBlock.height}</div>
               <div className="block-info">
                 <div className="info-row">
@@ -342,7 +339,7 @@ export default function BlockchainExplorer() {
             </div>
           )}
 
-          <div className="card">
+          <div className="card card-glow bg-gradient-card">
             <div className="card-title">Recent Blocks</div>
             <div className="tx-list">
               {recentBlocks.length === 0 ? (
@@ -353,7 +350,7 @@ export default function BlockchainExplorer() {
                 recentBlocks.map((block) => (
                   <div
                     key={block.height}
-                    className="tx-item"
+                    className="tx-item card-hover"
                     onClick={() => {
                       setSelectedBlock(block);
                       setBlockSearch(String(block.height));
@@ -405,7 +402,7 @@ export default function BlockchainExplorer() {
           </div>
 
           {selectedTx && (
-            <div className="card" style={{ marginBottom: '16px' }}>
+            <div className="card card-glow bg-gradient-card" style={{ marginBottom: '16px' }}>
               <div className="card-title">Transaction Details</div>
               <div className="block-info">
                 <div className="info-row">
@@ -458,7 +455,7 @@ export default function BlockchainExplorer() {
             </div>
           )}
 
-          <div className="card">
+          <div className="card card-glow bg-gradient-card">
             <div className="card-title">Recent Transactions</div>
             <div className="tx-list">
               {recentTxs.length === 0 ? (
@@ -469,7 +466,7 @@ export default function BlockchainExplorer() {
                 recentTxs.map((tx) => (
                   <div
                     key={tx.hash}
-                    className="tx-item"
+                    className="tx-item card-hover"
                     onClick={() => setSelectedTx(tx)}
                     style={{ cursor: 'pointer', padding: '12px', borderBottom: '1px solid var(--bg-2)' }}
                   >

@@ -215,10 +215,10 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
           {!showWizard && st.user.authed && contact && !contact.phoneVerified && !contact.emailVerified && (
             <div style={{
               padding: '10px 14px', borderBottom: '1px solid var(--line-1)',
-              background: 'linear-gradient(135deg, rgba(243,186,47,0.06), rgba(243,186,47,0.02))',
+              background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent) 6%, transparent), color-mix(in srgb, var(--accent) 2%, transparent))',
               display: 'flex', alignItems: 'center', gap: 10,
             }}>
-              <Bell size={15} style={{ color: 'var(--accent, #f3ba2f)', flex: 'none' }} />
+              <Bell size={15} style={{ color: 'var(--accent)', flex: 'none' }} />
               <div style={{ flex: 1, fontSize: 11.5, color: 'var(--txt-2)', lineHeight: 1.4 }}>
                 {t('Enable notifications for real-time updates')}
               </div>

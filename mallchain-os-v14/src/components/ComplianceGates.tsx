@@ -270,8 +270,8 @@ export function KYCStatusAlert() {
       <button
         className="btn btn--sm btn--secondary"
         onClick={() => {
-          // Navigate to KYC verification
-          window.location.hash = '/settings?tab=kyc';
+          // Navigate to the KYC verification session
+          window.location.hash = '/kyc';
         }}
       >
         Complete Now

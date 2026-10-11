@@ -60,7 +60,7 @@ export default function MinesReviewerStake() {
 
   return (
     <div>
-      <div className="view-head"><h1>Stake to Review</h1><span className="sub">Reviewer-specific MLPTS deposit — required to be randomly assigned Mines submissions</span></div>
+      <div className="view-head"><h1 className="text-gradient">Stake to Review</h1><span className="sub">Reviewer-specific MLPTS deposit — required to be randomly assigned Mines submissions</span></div>
 
       {error && (
         <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
@@ -68,13 +68,13 @@ export default function MinesReviewerStake() {
         </div>
       )}
 
-      <div className="mc-stats-grid" style={{ marginBottom: 16 }}>
-        <div className="card"><div className="lbl">Current stake</div><div className="num">{loading ? '—' : fmtNum(profile?.stakedAmount ?? 0)} MLPTS</div></div>
-        <div className="card"><div className="lbl">Minimum required</div><div className="num">{loading ? '—' : fmtNum(profile?.minRequiredStake ?? 0)} MLPTS</div></div>
-        <div className="card"><div className="lbl">Status</div><div className="num" style={{ fontSize: 14 }}>{loading ? '—' : profile?.stakeStatus ?? 'unstaked'}</div></div>
+      <div className="mc-stats-grid stagger" style={{ marginBottom: 16 }}>
+        <div className="card card-hover"><div className="lbl">Current stake</div><div className="num">{loading ? '—' : fmtNum(profile?.stakedAmount ?? 0)} MLPTS</div></div>
+        <div className="card card-hover"><div className="lbl">Minimum required</div><div className="num">{loading ? '—' : fmtNum(profile?.minRequiredStake ?? 0)} MLPTS</div></div>
+        <div className="card card-hover"><div className="lbl">Status</div><div className="num" style={{ fontSize: 14 }}>{loading ? '—' : profile?.stakeStatus ?? 'unstaked'}</div></div>
       </div>
 
-      <div className="card" style={{ maxWidth: 480 }}>
+      <div className="card card-glow bg-gradient-card" style={{ maxWidth: 480 }}>
         <div className="sec-title"><h2>Manage stake</h2></div>
         <div className="field">
           <label>Amount (MLPTS)</label>

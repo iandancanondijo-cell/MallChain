@@ -18,7 +18,7 @@ const STEP_META: { label: string; icon: typeof CreditCard }[] = [
 const STEP_INDEX: Record<Step, number> = { form: 0, awaiting_payment: 1, crediting: 2, done: 3 };
 
 /** Buy Mallcoin with real money via M-Pesa STK push (real API: reserve -> STK -> poll -> on-chain credit). */
-export default function WalletBuy() {
+export default function WalletBuy({ navigate }: { navigate: (p: string) => void }) {
   useStoreVersion();
   const st = store.state;
   const address = st.wallet.address;
@@ -160,21 +160,24 @@ export default function WalletBuy() {
     return (
       <div>
         <div className="wo-hero">
-          <div className="wo-hero-icon" style={{ background: 'rgba(243, 186, 47, 0.1)', color: 'var(--gold)' }}>
+          <div className="wo-hero-icon" style={{ background: 'color-mix(in srgb, var(--section-accent) 10%, transparent)', color: 'var(--section-accent)' }}>
             <CreditCard size={22} />
           </div>
           <div className="wo-hero-body">
-            <div className="wo-hero-title">Buy Mallcoin</div>
+            <div className="wo-hero-title text-gradient">Buy Mallcoin</div>
             <div className="wo-hero-sub">Pay with M-Pesa — Mallcoin credited on-chain</div>
           </div>
         </div>
         <div className="wo-card" style={{ maxWidth: 520 }}>
           <div style={{ textAlign: 'center', padding: '32px 16px' }}>
-            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(243, 186, 47, 0.08)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-              <Coins size={24} style={{ color: 'var(--gold)', opacity: 0.5 }} />
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'color-mix(in srgb, var(--section-accent) 8%, transparent)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <Coins size={24} style={{ color: 'var(--section-accent)', opacity: 0.5 }} />
             </div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>No wallet connected</div>
             <div style={{ fontSize: 13, color: 'var(--txt-3)' }}>Connect a wallet to buy Mallcoin with M-Pesa.</div>
+            <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={() => navigate('/auth')}>
+              Connect a wallet
+            </button>
           </div>
         </div>
       </div>
@@ -189,7 +192,7 @@ export default function WalletBuy() {
             <Lock size={22} />
           </div>
           <div className="wo-hero-body">
-            <div className="wo-hero-title">Buy Mallcoin</div>
+            <div className="wo-hero-title text-gradient">Buy Mallcoin</div>
             <div className="wo-hero-sub">Direct purchases are currently closed</div>
           </div>
         </div>
@@ -212,11 +215,11 @@ export default function WalletBuy() {
     <div>
       {/* ── hero ── */}
       <div className="wo-hero">
-        <div className="wo-hero-icon" style={{ background: 'rgba(243, 186, 47, 0.1)', color: 'var(--gold)' }}>
+        <div className="wo-hero-icon" style={{ background: 'color-mix(in srgb, var(--section-accent) 10%, transparent)', color: 'var(--section-accent)' }}>
           <CreditCard size={22} />
         </div>
         <div className="wo-hero-body">
-          <div className="wo-hero-title">Buy Mallcoin</div>
+          <div className="wo-hero-title text-gradient">Buy Mallcoin</div>
           <div className="wo-hero-sub">Pay with M-Pesa — Mallcoin credited to your wallet on-chain</div>
         </div>
       </div>
@@ -249,7 +252,7 @@ export default function WalletBuy() {
       )}
 
       {/* ── main card ── */}
-      <div className="wo-card" style={{ maxWidth: 520 }}>
+      <div className="wo-card card-glow bg-gradient-card" style={{ maxWidth: 520 }}>
         {step === 'form' && (
           <>
             <div className="field mb">
@@ -343,10 +346,10 @@ export default function WalletBuy() {
           <div style={{ textAlign: 'center', padding: '24px 16px' }}>
             <div style={{
               width: 56, height: 56, borderRadius: '50%',
-              background: quote.status === 'credited' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(243, 186, 47, 0.1)',
+              background: quote.status === 'credited' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(251, 191, 36, 0.1)',
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16,
             }}>
-              <CheckCircle2 size={24} style={{ color: quote.status === 'credited' ? 'var(--green)' : 'var(--gold)' }} />
+              <CheckCircle2 size={24} style={{ color: quote.status === 'credited' ? 'var(--green)' : 'var(--warning)' }} />
             </div>
             <div className="wo-status-title" style={{ color: quote.status === 'credited' ? 'var(--green)' : undefined }}>
               {quote.status === 'credited' ? 'Mallcoin credited' : `Status: ${quote.status}`}

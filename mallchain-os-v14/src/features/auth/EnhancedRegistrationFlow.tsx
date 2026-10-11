@@ -19,7 +19,7 @@
  * - Mobile-optimized layout
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ComponentType, type CSSProperties } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
@@ -68,7 +68,7 @@ interface ComplianceConsent {
 }
 
 // Step configuration
-const STEPS: Record<RegistrationStep, { index: number; title: string; icon: any; description: string }> = {
+const STEPS: Record<RegistrationStep, { index: number; title: string; icon: ComponentType<{ size?: number; className?: string; style?: CSSProperties }>; description: string }> = {
   welcome: { index: 1, title: 'Welcome', icon: Sparkles, description: 'Let\'s get started' },
   account: { index: 2, title: 'Account', icon: Mail, description: 'Create your account' },
   'email-verify': { index: 3, title: 'Verify Email', icon: CheckCircle, description: 'Confirm your email' },

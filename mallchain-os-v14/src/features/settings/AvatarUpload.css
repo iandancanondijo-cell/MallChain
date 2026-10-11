@@ -1,0 +1,199 @@
+.avatar-upload-container {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  padding: 24px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0%, rgba(245, 245, 245, 0.6) 100%);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  border: 1px solid rgba(124, 58, 237, 0.1);
+}
+
+.avatar-display {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.avatar-image,
+.avatar-initials {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid #7c3aed;
+  box-shadow: 0 8px 24px rgba(124, 58, 237, 0.2);
+  animation: slideIn 0.4s ease;
+}
+
+.avatar-initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+  color: white;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.avatar-upload-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.avatar-upload-section h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.avatar-hint {
+  margin: 0;
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.avatar-upload {
+  /* Inherits from FileUpload component */
+}
+
+.avatar-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #dc2626;
+  font-size: 14px;
+  animation: slideIn 0.3s ease;
+}
+
+.avatar-error span {
+  flex: 1;
+}
+
+.avatar-tips {
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.05) 0%, rgba(109, 40, 217, 0.05) 100%);
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  border-radius: 8px;
+  margin-top: 8px;
+}
+
+.tips-title {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #7c3aed;
+}
+
+.avatar-tips ul {
+  margin: 0;
+  padding-left: 20px;
+  list-style: none;
+}
+
+.avatar-tips li {
+  margin: 4px 0;
+  padding-left: 16px;
+  position: relative;
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.avatar-tips li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: #10b981;
+  font-weight: 700;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .avatar-upload-container {
+    padding: 16px;
+    gap: 24px;
+  }
+
+  .avatar-image,
+  .avatar-initials {
+    width: 100px;
+    height: 100px;
+  }
+
+  .avatar-initials {
+    font-size: 40px;
+  }
+
+  .avatar-upload-section h3 {
+    font-size: 16px;
+  }
+
+  .avatar-hint {
+    font-size: 13px;
+  }
+
+  .avatar-tips {
+    padding: 12px;
+  }
+
+  .tips-title {
+    font-size: 12px;
+  }
+
+  .avatar-tips li {
+    font-size: 12px;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .avatar-upload-container {
+    background: linear-gradient(135deg, rgba(30, 30, 30, 0.6) 0%, rgba(40, 40, 40, 0.6) 100%);
+    border-color: rgba(124, 58, 237, 0.2);
+  }
+
+  .avatar-upload-section h3 {
+    color: #f3f4f6;
+  }
+
+  .avatar-hint {
+    color: #9ca3af;
+  }
+
+  .avatar-error {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+  }
+
+  .avatar-tips {
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(109, 40, 217, 0.1) 100%);
+    border-color: rgba(124, 58, 237, 0.3);
+  }
+
+  .tips-title {
+    color: #a78bfa;
+  }
+
+  .avatar-tips li {
+    color: #9ca3af;
+  }
+}

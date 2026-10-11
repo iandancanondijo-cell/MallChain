@@ -40,7 +40,7 @@ export default function MinesHistory() {
 
   return (
     <div>
-      <div className="view-head"><h1>History</h1><span className="sub">Your campaign timeline</span></div>
+      <div className="view-head"><h1 className="text-gradient">History</h1><span className="sub">Your campaign timeline</span></div>
 
       {error && (
         <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
@@ -56,7 +56,7 @@ export default function MinesHistory() {
       )}
 
       {groups.map((g) => (
-        <div key={g.day} className="card mb">
+        <div key={g.day} className="card card-glow bg-gradient-card mb">
           <div className="sec-title"><h2>{g.day}</h2></div>
           {g.items.map((t) => (
             <div key={t._id} className="list-row">

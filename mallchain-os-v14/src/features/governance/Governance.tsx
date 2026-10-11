@@ -12,7 +12,7 @@ const VOTE_OPTIONS: { label: string; value: VoteOption; color: string }[] = [
   { label: 'Yes', value: 'VOTE_OPTION_YES', color: 'var(--green-2)' },
   { label: 'No', value: 'VOTE_OPTION_NO', color: 'var(--red-2)' },
   { label: 'Abstain', value: 'VOTE_OPTION_ABSTAIN', color: 'var(--txt-3)' },
-  { label: 'No with veto', value: 'VOTE_OPTION_NO_WITH_VETO', color: 'var(--gold)' },
+  { label: 'No with veto', value: 'VOTE_OPTION_NO_WITH_VETO', color: 'var(--red)' },
 ];
 
 const STAKE_DECIMALS = 6;
@@ -170,7 +170,7 @@ export default function Governance() {
   return (
     <div>
       <div className="view-head">
-        <h1>Governance</h1>
+        <h1 className="text-gradient">Governance</h1>
         <span className="sub">On-chain proposals — shape the protocol's future</span>
         {address && (
           <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={() => setNewProposalOpen(true)}>
@@ -212,8 +212,8 @@ export default function Governance() {
       </div>
 
       {/* Stat cards */}
-      <div className="stat-grid" style={{ opacity: error ? 0.65 : 1 }}>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+      <div className="stat-grid stagger" style={{ opacity: error ? 0.65 : 1 }}>
+        <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--section-accent-rgb),0.12)', color: 'rgb(var(--section-accent-rgb))' }}>
             <Vote size={20} />
           </div>
@@ -223,7 +223,7 @@ export default function Governance() {
             <div className="card-sub">{!error ? 'active now' : 'service unavailable'}</div>
           </div>
         </div>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+        <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--section-accent-rgb),0.08)', color: 'rgb(var(--section-accent-rgb))' }}>
             <FileText size={20} />
           </div>
@@ -232,7 +232,7 @@ export default function Governance() {
             <div className="card-value">{loading ? '—' : error ? 'N/A' : stats?.total ?? 0}</div>
           </div>
         </div>
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
+        <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--section-accent-rgb),0.08)', color: 'rgb(var(--section-accent-rgb))' }}>
             <Shield size={20} />
           </div>
@@ -256,7 +256,7 @@ export default function Governance() {
       </div>
 
       {address && (votingPower === 0 || votingPower === null) && (
-        <div className="card" style={{ padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className="card card-glow bg-gradient-card" style={{ padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
           <Users size={18} style={{ color: 'rgb(var(--section-accent-rgb))', flexShrink: 0 }} />
           <div className="grow" style={{ fontSize: 13 }}>
             Real governance voting power comes from bonded stake (x/staking), not your MLCNS balance. Delegate some STAKE to gain real voting weight.
@@ -267,7 +267,7 @@ export default function Governance() {
 
       <div className="sec-title">
         <h2>Proposals</h2>
-        {error && <span className="sub" style={{ color: 'var(--gold-2)' }}>⚠ service unavailable — showing stale data</span>}
+        {error && <span className="sub" style={{ color: 'var(--warning)' }}>⚠ service unavailable — showing stale data</span>}
       </div>
 
       {!loading && error && (proposals?.length ?? 0) === 0 && (
@@ -282,9 +282,9 @@ export default function Governance() {
         <div className="empty-state"><div className="es-ico"><Scale size={28} /></div><div className="es-t">No proposals yet</div></div>
       )}
 
-      <div className="vgrid" style={{ display: 'grid', gap: 12 }}>
+      <div className="vgrid stagger" style={{ display: 'grid', gap: 12 }}>
         {((!error && proposals) || []).map((p) => (
-          <div key={p.id} className="card card-hover" style={{ cursor: 'pointer' }} onClick={() => openProposal(p)}>
+          <div key={p.id} className="card card-hover card-glow bg-gradient-card" style={{ cursor: 'pointer' }} onClick={() => openProposal(p)}>
             <div className="row" style={{ alignItems: 'center' }}>
               <span className="chip" style={{ background: 'rgba(var(--section-accent-rgb),0.12)', color: 'rgb(var(--section-accent-rgb))', fontWeight: 700 }}>#{p.id}</span>
               <div className="grow"><b>{p.title}</b></div>
@@ -331,7 +331,7 @@ export default function Governance() {
           ) : (
             <div className="row mb" style={{ gap: 8 }}>
               {VOTE_OPTIONS.map((o) => (
-                <button key={o.value} className="btn btn-ghost" disabled={!address || voting !== null} onClick={() => vote(o.value)} style={{ borderColor: `rgba(${o.color === 'var(--green-2)' ? '34,197,94' : o.color === 'var(--red-2)' ? '220,38,38' : o.color === 'var(--gold)' ? '243,186,47' : '148,163,184'},0.3)` }}>
+                <button key={o.value} className="btn btn-ghost" disabled={!address || voting !== null} onClick={() => vote(o.value)} style={{ borderColor: `rgba(${o.color === 'var(--green-2)' ? '34,197,94' : o.color === 'var(--red-2)' ? '220,38,38' : o.color === 'var(--red)' ? '239,68,68' : '148,163,184'},0.3)` }}>
                   {voting === o.value && <span className="spin" />} {o.label}
                 </button>
               ))}

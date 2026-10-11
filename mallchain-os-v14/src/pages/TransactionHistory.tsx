@@ -16,6 +16,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { store } from '../store/store';
 import { useStoreVersion, fmtNum, StatusChip, toast } from '../components/ui';
 import { useTransactionData } from '../hooks/useTransactionData';
+import { LoadingState } from '../components/LoadingState';
 import { TransactionDetailModal } from '../features/wallet/TransactionDetailModal';
 import { type Transaction } from '../services/walletApi';
 import '../styles/transaction-history.css';
@@ -159,8 +160,8 @@ export default function TransactionHistory() {
     if (!sortColumn) return filteredByDate;
 
     const sorted = [...filteredByDate].sort((a, b) => {
-      let aVal: any;
-      let bVal: any;
+      let aVal: string | number = '';
+      let bVal: string | number = '';
 
       if (sortColumn === 'amount') {
         aVal = a.amount;
@@ -232,34 +233,12 @@ export default function TransactionHistory() {
     return `#/explorer?tx=${txHash}`;
   };
 
-  /**
-   * Loading skeleton component
-   */
-  const TransactionSkeleton = () => (
-    <div className="tx-row" style={{ opacity: 0.5 }}>
-      <span style={{ fontSize: 15 }}>⋯</span>
-      <div className="tx-info">
-        <div style={{ backgroundColor: 'var(--bg-2)', height: '16px', borderRadius: '4px', width: '200px' }} />
-        <div
-          style={{
-            backgroundColor: 'var(--bg-2)',
-            height: '12px',
-            borderRadius: '4px',
-            width: '150px',
-            marginTop: '8px',
-          }}
-        />
-      </div>
-      <div style={{ backgroundColor: 'var(--bg-2)', height: '20px', borderRadius: '4px', width: '80px' }} />
-    </div>
-  );
-
   return (
     <div className="page-transaction-history">
       {/* Task 14.1: Page header with title and subtitle */}
       <div className="view-head">
         <div>
-          <h1>Transaction History</h1>
+          <h1 className="text-gradient">Transaction History</h1>
           <span className="sub">
             {sortedTransactions.length} of {total} transactions
             {searchQuery && ` (searching: "${searchQuery}")`}
@@ -385,13 +364,9 @@ export default function TransactionHistory() {
       </div>
 
       {/* Transaction list card */}
-      <div className="card transaction-list-card">
+      <div className="card transaction-list-card card-glow bg-gradient-card">
         {loading && sortedTransactions.length === 0 ? (
-          <>
-            {[1, 2, 3, 4, 5].map((i) => (
-              <TransactionSkeleton key={i} />
-            ))}
-          </>
+          <LoadingState fill />
         ) : sortedTransactions.length === 0 ? (
           <div className="empty" style={{ color: 'var(--txt-3)', padding: 26, textAlign: 'center' }}>
             {searchQuery ? 'No transactions match your search.' : 'No transactions found. Send or receive MALL to get started.'}

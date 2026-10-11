@@ -17,7 +17,8 @@ export interface UploadDocumentResponse {
 }
 
 export interface KycStatusResponse {
-  status: 'not_submitted' | 'pending' | 'approved' | 'rejected' | 'review';
+  /** 'draft' = only wizard progress saved via PATCH /kyc/draft, nothing submitted yet */
+  status: 'not_submitted' | 'draft' | 'pending' | 'approved' | 'rejected' | 'review';
   kycId?: string;
   riskLevel?: 'low' | 'medium' | 'high';
   submittedAt?: string;

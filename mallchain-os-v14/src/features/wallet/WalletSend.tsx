@@ -133,7 +133,7 @@ export default function WalletSend() {
             <CheckCircle2 size={24} style={{ color: 'var(--green)' }} />
           </div>
           <div className="wo-hero-body">
-            <h1 className="wo-hero-title">Transaction Broadcast</h1>
+            <h1 className="wo-hero-title text-gradient">Transaction Broadcast</h1>
             <div className="wo-hero-sub">Your transfer is pending confirmation on-chain</div>
           </div>
         </div>
@@ -174,7 +174,7 @@ export default function WalletSend() {
           <ArrowUpRight size={24} style={{ color: 'var(--green-2)' }} />
         </div>
         <div className="wo-hero-body">
-          <h1 className="wo-hero-title">Send MALL</h1>
+          <h1 className="wo-hero-title text-gradient">Send MALL</h1>
           <div className="wo-hero-sub">Transfer Mallcoins to any bech32 address</div>
         </div>
       </div>
@@ -202,7 +202,7 @@ export default function WalletSend() {
       </div>
 
       {/* Step Content */}
-      <div className="wo-card">
+      <div className="wo-card card-glow bg-gradient-card">
         {step === 'recipient' && (
           <>
             <div className="field">

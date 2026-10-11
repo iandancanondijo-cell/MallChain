@@ -7,7 +7,7 @@ import { buyApi } from '../../services/buyApi';
 import { requestMnemonic } from '../../services/mnemonicAccess';
 
 /** Mallpoints balance + convert-to-Mallcoin (real API, gated by the on-chain conversion window). */
-export default function WalletPoints() {
+export default function WalletPoints({ navigate }: { navigate: (p: string) => void }) {
   useStoreVersion();
   const st = store.state;
   const address = st.wallet.address;
@@ -70,7 +70,7 @@ export default function WalletPoints() {
             <Sparkles size={22} />
           </div>
           <div className="wo-hero-body">
-            <div className="wo-hero-title">Mallpoints</div>
+            <div className="wo-hero-title text-gradient">Mallpoints</div>
             <div className="wo-hero-sub">Earned from marketplace interactions · convert to Mallcoin</div>
           </div>
         </div>
@@ -81,6 +81,9 @@ export default function WalletPoints() {
             </div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>No wallet connected</div>
             <div style={{ fontSize: 13, color: 'var(--txt-3)' }}>Connect a wallet to view your Mallpoints.</div>
+            <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={() => navigate('/auth')}>
+              Connect a wallet
+            </button>
           </div>
         </div>
       </div>
@@ -97,7 +100,7 @@ export default function WalletPoints() {
           <Sparkles size={22} />
         </div>
         <div className="wo-hero-body">
-          <div className="wo-hero-title">Mallpoints</div>
+          <div className="wo-hero-title text-gradient">Mallpoints</div>
           <div className="wo-hero-sub">Earned from marketplace interactions · convert to Mallcoin on the eligible window</div>
         </div>
       </div>
@@ -115,7 +118,7 @@ export default function WalletPoints() {
 
       {/* ── stat cards ── */}
       <div className="wo-points-grid" style={{ marginBottom: 16, maxWidth: 560 }}>
-        <div className="wo-points-stat">
+        <div className="wo-points-stat card-hover">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
             <Sparkles size={13} style={{ color: 'var(--cyan)' }} />
             <span className="wo-points-stat-label">Total</span>
@@ -124,7 +127,7 @@ export default function WalletPoints() {
           <div className="wo-points-stat-sub">{data ? `≈ ${data.pointPrice} KES / point` : ''}</div>
         </div>
 
-        <div className="wo-points-stat">
+        <div className="wo-points-stat card-hover">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
             <CheckCircle2 size={13} style={{ color: 'var(--green)' }} />
             <span className="wo-points-stat-label">On-chain</span>
@@ -133,7 +136,7 @@ export default function WalletPoints() {
           <div className="wo-points-stat-sub">confirmed on Mallchain</div>
         </div>
 
-        <div className="wo-points-stat">
+        <div className="wo-points-stat card-hover">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
             <Loader2 size={13} style={{ color: 'var(--gold)' }} />
             <span className="wo-points-stat-label">Pending</span>
@@ -144,10 +147,10 @@ export default function WalletPoints() {
       </div>
 
       {/* ── Convert section ── */}
-      <div className="wo-card" style={{ maxWidth: 560 }}>
+      <div className="wo-card card-glow bg-gradient-card" style={{ maxWidth: 560 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(243, 186, 47, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Coins size={15} style={{ color: 'var(--gold)' }} />
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'color-mix(in srgb, var(--section-accent) 10%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Coins size={15} style={{ color: 'var(--section-accent)' }} />
           </div>
           <div>
             <div style={{ fontSize: 15, fontWeight: 700 }}>Convert to Mallcoin</div>

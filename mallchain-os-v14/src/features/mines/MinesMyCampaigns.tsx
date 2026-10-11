@@ -53,7 +53,7 @@ export default function MinesMyCampaigns() {
   return (
     <div>
       <div className="view-head">
-        <h1>My Campaigns</h1>
+        <h1 className="text-gradient">My Campaigns</h1>
         <span className="sub">Bring a content link, set your budget, and let the network circulate it</span>
       </div>
 
@@ -76,7 +76,7 @@ export default function MinesMyCampaigns() {
       )}
 
       {(campaigns || []).map((c) => (
-        <div key={c._id} className="card mb">
+        <div key={c._id} className="card card-glow bg-gradient-card mb">
           <div className="row" style={{ alignItems: 'center', gap: 8 }}>
             {c.platform && <PlatformIcon platform={c.platform} />}
             <div className="grow"><b>{c.title}</b> <StatusChip status={c.status} /></div>
@@ -111,7 +111,7 @@ function CreateCampaignWizard({
   // Step 1: platform picker.
   if (!platform) {
     return (
-      <div className="card mb">
+      <div className="card card-glow bg-gradient-card mb">
         <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: 'var(--txt-3)', textTransform: 'uppercase', marginBottom: 12 }}>Step 1 · Choose a platform</div>
         <div
           style={{
@@ -234,7 +234,7 @@ function CampaignDetailsStep({
 
   return (
     <div className="grid-2 mb">
-      <div className="card">
+      <div className="card card-glow bg-gradient-card">
         <div className="row" style={{ alignItems: 'center', gap: 10, marginBottom: 16 }}>
           <PlatformBadge platform={platform} size={36} />
           <div className="grow">
@@ -302,7 +302,7 @@ function CampaignDetailsStep({
       </div>
 
       <div>
-        <div className="card mb">
+        <div className="card card-glow bg-gradient-card mb">
           <div className="sec-title"><h2>Outcome</h2></div>
           <div style={{ fontSize: 22, fontWeight: 800 }}>
             <span className="gold">{fmtNum(previewRate)}</span> <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--txt-3)' }}>MLPTS / completion</span>
@@ -338,7 +338,7 @@ function CampaignDetailsStep({
           )}
         </div>
 
-        <div className="card">
+        <div className="card card-glow bg-gradient-card">
           <div className="sec-title"><h2>What participants will see</h2></div>
           <div className="row" style={{ alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <PlatformBadge platform={platform} size={28} />

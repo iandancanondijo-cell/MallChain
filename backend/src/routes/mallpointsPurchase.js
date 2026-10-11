@@ -96,13 +96,22 @@ async function getDarajaToken() {
 }
 
 // POST /api/mallpoints/purchase/reserve - create a purchase quote
-router.post('/reserve', createLimiter({ windowMs: 60*1000, max: 20 }), async (req, res) => {
+router.post('/reserve', requireAuth(), createLimiter({ windowMs: 60*1000, max: 20 }), async (req, res) => {
   try {
     const { amount_kes, address } = req.body || {}
 
     if (!address) return res.status(400).json({ error: 'missing wallet address' })
     if (!amount_kes || amount_kes < 10) {
       return res.status(400).json({ error: 'minimum purchase is KSH 10' })
+    }
+
+    // Wallet-first (Gate 61.1): credit only lands on a user's balance when the
+    // address maps to a User — a quote for an unlinked address means real
+    // M-Pesa money paid into an account nobody can ever see.
+    const User = require('../models/user')
+    const owner = await User.findOne({ walletAddress_blind: blindIndex(address) }).select('_id').lean()
+    if (!owner || String(owner._id) !== String(req.user._id)) {
+      return res.status(403).json({ error: 'wallet address is not linked to your account' })
     }
 
     const mallpointsAmount = amount_kes / MALLPOINT_PRICE_KES

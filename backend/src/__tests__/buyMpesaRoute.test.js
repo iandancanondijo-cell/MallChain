@@ -70,11 +70,32 @@ jest.mock('../config', () => ({
       },
     },
     chain: { broadcastMode: 'BROADCAST_MODE_SYNC' },
+    // /reserve now verifies the wallet belongs to the authenticated user via
+    // fieldEncryption.blindIndex, which needs 32-byte hex keys.
+    secrets: {
+      fieldEncryptionKey: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      fieldBlindIndexKey: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+    },
   },
+}));
+// /reserve now sits behind requireAuth + a wallet-ownership check. These
+// tests exercise idempotency and the STK double-submit guard, not auth —
+// a permissive middleware plus a User stub whose wallet maps to the same
+// _id keeps that out of scope (the ownership rejection has its own test).
+jest.mock('../middleware/requireAuth', () => () => (req, _res, next) => {
+  req.user = { _id: 'user-1' };
+  next();
+});
+jest.mock('../models/user', () => ({
+  findOne: jest.fn().mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue({ _id: 'user-1' }),
+  }),
 }));
 
 const MallcoinPurchase = require('../models/MallcoinPurchase');
 const IdempotencyKey = require('../models/IdempotencyKey');
+const User = require('../models/user');
 const { processMpesaCallback } = require('../services/mpesaCallbackService');
 const { enqueueFailedCallback } = require('../mallwallet/queue/paymentCallbackQueue');
 const buyRoutes = require('../routes/buy');
@@ -237,6 +258,22 @@ describe('POST /api/buy/reserve idempotency', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.idempotent).toBe(true);
+    expect(MallcoinPurchase.create).not.toHaveBeenCalled();
+  });
+
+  test('rejects a quote reserved for a wallet not linked to the authenticated account', async () => {
+    IdempotencyKey.findOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
+    User.findOne.mockReturnValueOnce({
+      select: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue(null),
+    });
+
+    const res = await request(buildApp())
+      .post('/api/buy/reserve')
+      .set('Idempotency-Key', 'reserve-key-owner')
+      .send(reserveBody);
+
+    expect(res.status).toBe(403);
     expect(MallcoinPurchase.create).not.toHaveBeenCalled();
   });
 });

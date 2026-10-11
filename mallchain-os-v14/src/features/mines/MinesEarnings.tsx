@@ -47,7 +47,7 @@ export default function MinesEarnings() {
 
   return (
     <div>
-      <div className="view-head"><h1>Earnings</h1><span className="sub">Your Mallpoints from validated campaigns</span></div>
+      <div className="view-head"><h1 className="text-gradient">Earnings</h1><span className="sub">Your Mallpoints from validated campaigns</span></div>
 
       {error && (
         <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
@@ -58,13 +58,13 @@ export default function MinesEarnings() {
         </div>
       )}
 
-      <div className="mc-stats-grid">
-        <div className="card"><div className="lbl">Total earned</div><div className="num">{loading ? '—' : fmtNum(total)} <small>MLPTS</small></div></div>
-        <div className="card"><div className="lbl">This week</div><div className="num">{loading ? '—' : fmtNum(thisWeek)} <small>MLPTS</small></div></div>
-        <div className="card"><div className="lbl">Approved submissions</div><div className="num">{approved} <small>tasks</small></div></div>
-        <div className="card"><div className="lbl">Rejected</div><div className="num" style={{ color: 'var(--red-2)' }}>{rejected} <small>tasks</small></div></div>
+      <div className="mc-stats-grid stagger">
+        <div className="card card-hover"><div className="lbl">Total earned</div><div className="num">{loading ? '—' : fmtNum(total)} <small>MLPTS</small></div></div>
+        <div className="card card-hover"><div className="lbl">This week</div><div className="num">{loading ? '—' : fmtNum(thisWeek)} <small>MLPTS</small></div></div>
+        <div className="card card-hover"><div className="lbl">Approved submissions</div><div className="num">{approved} <small>tasks</small></div></div>
+        <div className="card card-hover"><div className="lbl">Rejected</div><div className="num" style={{ color: 'var(--red-2)' }}>{rejected} <small>tasks</small></div></div>
       </div>
-      <div className="card">
+      <div className="card card-glow bg-gradient-card">
         <div className="sec-title"><h2>Earnings over time</h2></div>
         {!loading && credits.length === 0 ? (
           <div className="empty" style={{ color: 'var(--txt-3)', padding: 30, textAlign: 'center' }}>No earnings yet — join a campaign to start earning Mallpoints.</div>

@@ -25,6 +25,7 @@ const Dmca = lazy(() => import('./pages/Dmca'));
 import Dashboard from './features/dashboard/Dashboard';
 import AuthPage from './features/auth/AuthPage';
 import EnhancedRegistrationFlow from './features/auth/EnhancedRegistrationFlow';
+const KycSession = lazy(() => import('./features/kyc/KycSession'));
 const WalletHub = lazy(() => import('./features/wallet/WalletHub'));
 const WalletSend = lazy(() => import('./features/wallet/WalletSend'));
 const WalletReceive = lazy(() => import('./features/wallet/WalletReceive'));
@@ -67,7 +68,7 @@ const Learning = lazy(() => import('./features/misc/MiscViews').then(m => ({ def
 const SocialTasks = lazy(() => import('./features/misc/MiscViews').then(m => ({ default: m.SocialTasks })));
 const NotificationsView = lazy(() => import('./features/misc/MiscViews').then(m => ({ default: m.NotificationsView })));
 const AnalyticsView = lazy(() => import('./features/misc/MiscViews').then(m => ({ default: m.AnalyticsView })));
-const Help = lazy(() => import('./features/misc/MiscViews').then(m => ({ default: m.Help })));
+const Help = lazy(() => import('./features/help/HelpCenter'));
 
 /* routes: specific-before-generic */
 export interface RouteDef {
@@ -85,6 +86,8 @@ export const ROUTES: RouteDef[] = [
   { path: '/login', title: 'Sign in', render: (n) => <AuthPage /> },
   /* new enhanced signup flow (gradual rollout) */
   { path: '/signup-v2', title: 'Create Account', render: (n) => <EnhancedRegistrationFlow navigate={n} /> },
+  /* identity verification wizard (opened by the KYC gate) */
+  { path: '/kyc', title: 'Identity Verification', render: (n) => <KycSession navigate={n} /> },
   /* wallet */
   { path: '/wallet/settings', title: 'Wallet Settings', render: () => <WalletSettings /> },
   { path: '/wallet/address-book', title: 'Address Book', render: () => <AddressBook /> },
@@ -94,9 +97,9 @@ export const ROUTES: RouteDef[] = [
   { path: '/wallet/receive', title: 'Receive', render: () => <WalletReceive /> },
   { path: '/wallet/swap', title: 'Swap', render: () => <WalletSwap /> },
   { path: '/wallet/history', title: 'Wallet History', render: () => <WalletHistory /> },
-  { path: '/wallet/buy', title: 'Buy Mallcoin', render: () => <WalletBuy /> },
+  { path: '/wallet/buy', title: 'Buy Mallcoin', render: (n) => <WalletBuy navigate={n} /> },
   { path: '/wallet/withdraw', title: 'Withdraw', render: () => <WalletWithdraw /> },
-  { path: '/wallet/points', title: 'Mallpoints', render: () => <WalletPoints /> },
+  { path: '/wallet/points', title: 'Mallpoints', render: (n) => <WalletPoints navigate={n} /> },
   { path: '/wallet/performance', title: 'Performance', render: () => <Performance /> },
   { path: '/wallet', title: 'Wallet', render: (n) => <WalletHub navigate={n} /> },
   /* marketplace / staking / governance */
@@ -116,7 +119,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/mines/reviewer/stake', title: 'Reviewer Stake', render: () => <MinesReviewerStake /> },
   { path: '/mines', title: 'Mines', render: (n) => <MinesHome navigate={n} /> },
   /* creator space (spend MLPTS) — campaigns are managed on the Mines My Campaigns page (/mines/my-campaigns); purchase is the only dedicated route */
-  { path: '/mallpoints-purchase', title: 'Purchase Mallpoints', render: () => <MallpointsPurchase /> },
+  { path: '/mallpoints-purchase', title: 'Purchase Mallpoints', render: (n) => <MallpointsPurchase navigate={n} /> },
   /* validators — real Cosmos x/staking validators (see /mines/validator-queue for Proof Reviewers) */
   { path: '/validators/leaderboard', title: 'Validators Leaderboard', render: () => <ValidatorsLeaderboard /> },
   { path: '/validators/apply', title: 'Become a Validator', render: (n) => <ValidatorsApply navigate={n} /> },

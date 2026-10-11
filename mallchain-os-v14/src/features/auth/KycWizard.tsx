@@ -235,11 +235,11 @@ export function KycWizard({ stepIndex, data, setData, error, onNext, onBack, onS
               onChange={(e) => setData({ otp: e.target.value })}
               placeholder="000000"
               maxLength={6}
-              style={{ fontSize: 24, letterSpacing: 8, textAlign: 'center', fontWeight: 700 }}
+              className="kyc-otp-input"
             />
           </div>
-          <p style={{ fontSize: 13, color: 'var(--txt-3)', textAlign: 'center' }}>
-            Didn't receive a code? <button type="button" className="kyc-edit-btn" style={{ display: 'inline' }}>Resend</button>
+          <p className="kyc-otp-hint">
+            Didn't receive a code? <button type="button" className="kyc-edit-btn">Resend</button>
           </p>
         </div>
       );
@@ -585,17 +585,25 @@ export function KycWizard({ stepIndex, data, setData, error, onNext, onBack, onS
       transition={{ duration: 0.3 }}
       className="kyc-wizard"
     >
+      <div className="kyc-bg-a" />
+      <div className="kyc-bg-b" />
+      <div className="kyc-vignette" />
+
+      <div className="kyc-shell">
       {/* Sidebar stepper */}
       <aside className="kyc-sidebar">
-        <div className="kyc-logo">Mallchain</div>
-        <p>Verifying your identity takes about five minutes. You will need a valid government ID and a camera or photo of yourself.</p>
-        <ol className="kyc-steps">
+        <a className="kyc-logo-link" href="#/landing">
+          <img src="/mallchain.svg" alt="" width={26} height={26} />
+          Mallchain
+        </a>
+        <p className="kyc-sidebar-desc">Verifying your identity takes about five minutes. You will need a valid government ID and a camera or photo of yourself.</p>
+        <ol className="kyc-stepper">
           {STEPS.map((step, i) => {
             const isCompleted = i + 1 < stepIndex;
             const isCurrent = i + 1 === stepIndex;
             return (
               <li key={i} className={isCurrent ? 'on' : isCompleted ? 'done' : ''}>
-                <span className="kyc-step-dot">{isCompleted || stepIndex > 7 ? '✓' : step.icon}</span>
+                <span className="kyc-dot">{isCompleted || stepIndex > 7 ? '✓' : step.icon}</span>
                 <span>{step.title}</span>
               </li>
             );
@@ -664,6 +672,7 @@ export function KycWizard({ stepIndex, data, setData, error, onNext, onBack, onS
           </div>
         </div>
       </main>
+      </div>
     </motion.div>
   );
 }

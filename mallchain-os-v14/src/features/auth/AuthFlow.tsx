@@ -14,7 +14,7 @@ import WalletFlow from '../wallet/WalletFlow';
 import { KycWizard, type KycData } from './KycWizard';
 import BlockchainLogo from './BlockchainLogo';
 import './AuthFlow.css';
-import { Mail, Lock, Eye, EyeOff, ArrowRight, AlertTriangle, Sparkles, Shield, Zap, Globe, AlertCircle } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ArrowRight, AlertTriangle, Sparkles, Shield, Zap, Globe, AlertCircle, LogIn, UserPlus } from 'lucide-react';
 
 /**
  * KYC wizard steps. 'inactive' means the flow hasn't started — kept as
@@ -84,7 +84,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
   // defaulting to sign-in and having to notice/click "Create account".
   const [mode, setMode] = useState<'login' | 'signup'>(() => {
     const match = /[?&]mode=([^&]+)/.exec(window.location.hash);
-    return match && match[1] === 'signup' ? 'signup' : 'login';
+    return match && (match[1] === 'signup' || match[1] === 'register') ? 'signup' : 'login';
   });
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
@@ -171,7 +171,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
   useEffect(() => {
     const syncModeFromHash = () => {
       const match = /[?&]mode=([^&]+)/.exec(window.location.hash);
-      const nextMode = match?.[1] === 'signup' ? 'signup' : 'login';
+      const nextMode = match?.[1] === 'signup' || match?.[1] === 'register' ? 'signup' : 'login';
       setMode(nextMode);
 
       if (nextMode === 'signup' && kyc.stepIndex === 0) {
@@ -537,16 +537,18 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
             className={`auth-tab${mode === 'login' ? ' active' : ''}`}
             role="tab"
             aria-selected={mode === 'login'}
+            aria-label="Sign in"
           >
-            Sign in
+            <LogIn size={20} />
           </button>
           <button
             onClick={() => { setMode('signup'); setErr(''); kyc.goTo('create'); }}
             className={`auth-tab${mode === 'signup' ? ' active' : ''}`}
             role="tab"
             aria-selected={mode === 'signup'}
+            aria-label="Create account"
           >
-            Create account
+            <UserPlus size={20} />
           </button>
         </div>
 
@@ -565,7 +567,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 <div className="auth-header">
                   <BlockchainLogo />
                   <h1 className="auth-title">
-                    Welcome back.
+                    Welcome <em>back.</em>
                   </h1>
                   <p className="auth-subtitle">
                     Sign in to your commerce hub.
@@ -736,18 +738,25 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 transition={{ duration: 0.2 }}
               >
                 {/* Header */}
-                <div style={{ marginBottom: 28, textAlign: 'center' }}>
-                  <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 12, color: 'var(--txt-1)', fontFamily: 'monospace' }}>
-                    Create your account.
+                <div className="auth-header">
+                  <BlockchainLogo />
+                  <h1 className="auth-title">
+                    Create your <em>account.</em>
                   </h1>
-                  <p style={{ fontSize: 14, color: 'var(--txt-3)', margin: 0 }}>
+                  <p className="auth-subtitle">
                     Start your journey on the decentralized web.
                   </p>
                 </div>
 
-                {/* Step indicator */}
-                <div style={{ fontSize: 12, color: 'var(--txt-3)', marginBottom: 24, textAlign: 'center' }}>
-                  Step 1 of 7. Verifying your identity takes about five minutes. You will need a valid government ID and a camera or photo of yourself.
+                {/* Step indicator dots */}
+                <div className="auth-steps" aria-label="Step 1 of 7">
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+                  <span />
                 </div>
 
                 {/* Error */}
@@ -784,27 +793,49 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 {/* Password */}
                 <div className="kyc-field">
                   <label htmlFor="auth-password-signup">Password</label>
-                  <input
-                    id="auth-password-signup"
-                    type={showPass ? 'text' : 'password'}
-                    value={kycData.password}
-                    onChange={(e) => kyc.setData({ password: e.target.value })}
-                    placeholder="Min 8 characters"
-                    autoComplete="new-password"
-                  />
+                  <div className="auth-input-wrap">
+                    <input
+                      id="auth-password-signup"
+                      className="kyc-pass-input"
+                      type={showPass ? 'text' : 'password'}
+                      value={kycData.password}
+                      onChange={(e) => kyc.setData({ password: e.target.value })}
+                      placeholder="Min 8 characters"
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      className="auth-pass-toggle"
+                      aria-label={showPass ? 'Hide password' : 'Show password'}
+                      onClick={() => setShowPass((visible) => !visible)}
+                    >
+                      {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Confirm password */}
                 <div className="kyc-field">
                   <label htmlFor="auth-confirm-signup">Confirm password</label>
-                  <input
-                    id="auth-confirm-signup"
-                    type={showPass ? 'text' : 'password'}
-                    value={kycData.confirmPassword}
-                    onChange={(e) => kyc.setData({ confirmPassword: e.target.value })}
-                    placeholder="Repeat your password"
-                    autoComplete="new-password"
-                  />
+                  <div className="auth-input-wrap">
+                    <input
+                      id="auth-confirm-signup"
+                      className="kyc-pass-input"
+                      type={showPass ? 'text' : 'password'}
+                      value={kycData.confirmPassword}
+                      onChange={(e) => kyc.setData({ confirmPassword: e.target.value })}
+                      placeholder="Repeat your password"
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      className="auth-pass-toggle"
+                      aria-label={showPass ? 'Hide password' : 'Show password'}
+                      onClick={() => setShowPass((visible) => !visible)}
+                    >
+                      {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Referral code */}
@@ -882,8 +913,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                     }
                   }}
                   disabled={busy}
-                  className="kyc-btn kyc-btn-primary"
-                  style={{ width: '100%', marginBottom: 16 }}
+                  className="auth-submit"
                 >
                   {busy ? 'Creating account...' : 'Continue'}
                 </button>
@@ -893,22 +923,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   onClick={() => {
                     window.location.href = `${config.apiBaseUrl}/api/auth/google`;
                   }}
-                  style={{
-                    width: '100%',
-                    padding: 12,
-                    background: 'var(--bg-1)',
-                    border: '1.5px solid var(--line-1)',
-                    borderRadius: 8,
-                    color: 'var(--txt-1)',
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                    marginBottom: 20
-                  }}
+                  className="auth-social-btn"
                 >
                   <Globe size={16} style={{ color: '#4285F4' }} />
                   Continue with Google
@@ -921,9 +936,110 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
     );
   };
 
+  // Dust particle animation
+  const dustRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = dustRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const particles: { x: number; y: number; vx: number; vy: number; r: number }[] = [];
+    const count = 60;
+    let animId = 0;
+
+    function resize() {
+      canvas!.width = window.innerWidth;
+      canvas!.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    for (let i = 0; i < count; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        r: Math.random() * 1.5 + 0.5,
+      });
+    }
+
+    function draw() {
+      ctx!.clearRect(0, 0, canvas!.width, canvas!.height);
+      particles.forEach((p) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0) p.x = canvas!.width;
+        if (p.x > canvas!.width) p.x = 0;
+        if (p.y < 0) p.y = canvas!.height;
+        if (p.y > canvas!.height) p.y = 0;
+
+        ctx!.beginPath();
+        ctx!.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx!.fillStyle = 'rgba(243, 241, 234, 0.4)';
+        ctx!.fill();
+      });
+
+      // Draw connections
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 120) {
+            ctx!.beginPath();
+            ctx!.moveTo(particles[i].x, particles[i].y);
+            ctx!.lineTo(particles[j].x, particles[j].y);
+            ctx!.strokeStyle = `rgba(243, 241, 234, ${0.15 * (1 - dist / 120)})`;
+            ctx!.lineWidth = 0.5;
+            ctx!.stroke();
+          }
+        }
+      }
+
+      animId = requestAnimationFrame(draw);
+    }
+    draw();
+
+    return () => {
+      cancelAnimationFrame(animId);
+      window.removeEventListener('resize', resize);
+    };
+  }, []);
+
   // Reached only when step === 0 && kycStep === 'inactive'
   return (
     <div className="auth-page">
+      <canvas ref={dustRef} className="auth-dust" aria-hidden="true" />
+      <div className="auth-ring" aria-hidden="true">
+        <svg viewBox="0 0 400 400">
+          <defs>
+            <path id="auth-tp" d="M200,200 m-182,0 a182,182 0 1,1 364,0 a182,182 0 1,1 -364,0" />
+          </defs>
+          <g className="s5">
+            <text>
+              <textPath href="#auth-tp">BUY IT · SELL IT · BUILD IT · STUDY IT · BUY IT · SELL IT · BUILD IT · STUDY IT · BUY IT · SELL IT · BUILD IT · STUDY IT ·</textPath>
+            </text>
+          </g>
+          <g className="s1">
+            <circle cx="200" cy="200" r="152" fill="none" stroke="#FFC83D" strokeWidth="22" strokeDasharray="64 10 16 10" />
+          </g>
+          <g className="s2">
+            <circle cx="200" cy="200" r="126" fill="none" stroke="#FF4A3D" strokeWidth="17" strokeDasharray="34 14 9 14" />
+          </g>
+          <g className="s3">
+            <circle cx="200" cy="200" r="104" fill="none" stroke="#3D63FF" strokeWidth="15" strokeDasharray="22 8" />
+          </g>
+          <g className="s4">
+            <circle cx="200" cy="200" r="84" fill="none" stroke="#5CF2C0" strokeWidth="10" strokeDasharray="10 7 3 7" />
+          </g>
+          <circle cx="200" cy="200" r="66" fill="#04050D" stroke="#F3F1EA" strokeWidth="3" opacity="0.9" />
+          <circle cx="200" cy="200" r="15" fill="#F3F1EA" />
+          <circle cx="222" cy="222" r="5" fill="#3D63FF" />
+        </svg>
+      </div>
+      <div className="auth-vignette" />
       <AnimatePresence mode="wait">
         {renderAuthForm()}
       </AnimatePresence>

@@ -146,8 +146,8 @@ export default function Contracts() {
   if (!address) {
     return (
       <div>
-        <div className="view-head"><h1>Smart Contracts</h1></div>
-        <div className="card">
+        <div className="view-head"><h1 className="text-gradient">Smart Contracts</h1></div>
+        <div className="card card-glow bg-gradient-card">
           <div className="empty-state">
             <div className="es-ico">📜</div>
             <div className="es-t">No wallet connected</div>
@@ -161,7 +161,7 @@ export default function Contracts() {
   return (
     <div>
       <div className="view-head">
-        <h1>Smart Contracts</h1>
+        <h1 className="text-gradient">Smart Contracts</h1>
         <span className="sub">Deploy and execute CosmWasm contracts on-chain</span>
         <div className="row" style={{ marginLeft: 'auto' }}>
           <button className="btn btn-ghost btn-sm" onClick={() => setOpen('deploy')}>Deploy contract</button>
@@ -184,7 +184,7 @@ export default function Contracts() {
       )}
 
       {(contracts || []).map((c) => (
-        <div key={c._id} className="card mb">
+        <div key={c._id} className="card mb card-glow bg-gradient-card card-hover">
           <div className="row">
             <div className="grow">
               <b>{c.name}</b>

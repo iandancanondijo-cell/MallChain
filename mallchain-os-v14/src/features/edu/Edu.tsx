@@ -158,7 +158,7 @@ export default function Edu() {
   return (
     <div>
       <div className="view-head">
-        <h1>EDU</h1>
+        <h1 className="text-gradient">EDU</h1>
         <span className="sub">Educational resources posted by the community — guides, decks, and short explainers anyone can download</span>
       </div>
 
@@ -192,7 +192,7 @@ export default function Edu() {
       </div>
 
       {rewardRates && (
-        <div className="card mb" style={{ padding: '10px 16px', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="card mb card-glow bg-gradient-card" style={{ padding: '10px 16px', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <span className="tiny" style={{ color: 'var(--cyan)' }}>Earn rewards for sharing knowledge:</span>
           <span className="tiny muted">{rewardRates.viewRewardKes} KES ({rewardRates.viewRewardMlpts} MLPTS) per view</span>
           <span className="tiny muted">{rewardRates.downloadRewardKes} KES ({rewardRates.downloadRewardMlpts} MLPTS) per download</span>
@@ -200,7 +200,7 @@ export default function Edu() {
       )}
 
       {showUpload && (
-        <div className="card mb">
+        <div className="card mb card-glow bg-gradient-card">
           <div className="sec-title">
             <h2>{newVersionOf ? `New version of "${newVersionOf.title}"` : 'Post a new resource'}</h2>
           </div>
@@ -267,7 +267,7 @@ export default function Edu() {
       )}
 
       {!loading && resources.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }} className="stagger">
           {resources.map((r) => {
             const isAuthor = st.user.authed && r.authorId === st.user.id;
             const vr = verifyResults[r.id];
@@ -275,7 +275,7 @@ export default function Edu() {
             if (st.user.authed && !isAuthor) trackView(r.id);
 
             return (
-              <div key={r.id} className="card">
+              <div key={r.id} className="card card-glow bg-gradient-card card-hover">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>

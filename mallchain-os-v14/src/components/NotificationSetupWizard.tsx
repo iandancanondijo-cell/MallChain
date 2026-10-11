@@ -113,11 +113,11 @@ export default function NotificationSetupWizard({ contact, userEmail, onComplete
     <div style={{ padding: '20px 16px', textAlign: 'center' }}>
       <div style={{
         width: 48, height: 48, borderRadius: 14, margin: '0 auto 14px',
-        background: 'linear-gradient(135deg, rgba(243,186,47,0.15), rgba(243,186,47,0.05))',
-        border: '1px solid rgba(243,186,47,0.25)',
+        background: 'linear-gradient(135deg, rgba(96,165,250,0.15), rgba(96,165,250,0.05))',
+        border: '1px solid rgba(96,165,250,0.25)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        <Zap size={22} style={{ color: 'var(--accent, #f3ba2f)' }} />
+        <Zap size={22} style={{ color: 'var(--info)' }} />
       </div>
       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: 'var(--txt-1)' }}>
         Receive real-time notifications
@@ -272,8 +272,8 @@ export default function NotificationSetupWizard({ contact, userEmail, onComplete
 
       {devOtp && (
         <div style={{
-          padding: '8px 12px', background: 'rgba(243,186,47,0.08)', borderRadius: 8,
-          border: '1px solid rgba(243,186,47,0.2)', fontSize: 11.5, color: 'var(--gold)',
+          padding: '8px 12px', background: 'rgba(96,165,250,0.08)', borderRadius: 8,
+          border: '1px solid rgba(96,165,250,0.2)', fontSize: 11.5, color: 'var(--info)',
           marginBottom: 12,
         }}>
           Dev mode — your code: <strong>{devOtp}</strong>
@@ -313,7 +313,7 @@ export default function NotificationSetupWizard({ contact, userEmail, onComplete
           toast(r.ok ? 'Code resent' : (r.error || 'Could not resend code'));
           setLoading(false);
         }}
-        style={{ background: 'none', border: 'none', color: 'var(--accent, #f3ba2f)', fontSize: 12, marginTop: 10, cursor: 'pointer', display: 'block', width: '100%', textAlign: 'center' }}
+        style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, marginTop: 10, cursor: 'pointer', display: 'block', width: '100%', textAlign: 'center' }}
       >
         Resend code
       </button>
@@ -405,7 +405,7 @@ export default function NotificationSetupWizard({ contact, userEmail, onComplete
                 key={s}
                 style={{
                   width: isActive ? 18 : 6, height: 6, borderRadius: 3,
-                  background: isActive ? 'var(--accent, #f3ba2f)' : 'var(--bg-3)',
+                  background: isActive ? 'var(--accent)' : 'var(--bg-3)',
                   transition: 'width 0.25s ease, background 0.25s ease',
                 }}
               />

@@ -210,7 +210,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
       <div style={{ textAlign: 'center', marginBottom: 32 }}>
         <Wallet size={48} style={{ color: 'var(--gold)', marginBottom: 16 }} />
-        <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Wallet Setup</h1>
+        <h1 className="text-gradient" style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Wallet Setup</h1>
         <p style={{ color: 'var(--txt-3)', fontSize: 14 }}>Create a new wallet or connect an existing one</p>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -248,7 +248,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   const renderSetPin = () => (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
       <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 700, color: 'var(--gold)', letterSpacing: 1, textTransform: 'uppercase' }}>Final step</div>
-      <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Set a PIN</h1>
+      <h1 className="text-gradient" style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Set a PIN</h1>
       <p style={{ color: 'var(--txt-3)', fontSize: 14, marginBottom: 24 }}>
         Your PIN unlocks your recovery phrase whenever you send, stake, vote, or make a purchase — it's never stored on this device in plain text, only this PIN can unlock it.
       </p>
@@ -278,7 +278,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--green-dim)', border: '2px solid var(--green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px' }}>
         <Check size={32} style={{ color: 'var(--green)' }} />
       </div>
-      <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>{mode === 'create' ? 'Wallet created' : 'Wallet connected'}</h1>
+      <h1 className="text-gradient" style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>{mode === 'create' ? 'Wallet created' : 'Wallet connected'}</h1>
       <p style={{ color: 'var(--txt-3)', fontSize: 14, marginBottom: 24 }}>
         {mode === 'create' ? 'Your new Mallchain wallet is ready to use.' : 'Your wallet has been successfully connected.'}
       </p>

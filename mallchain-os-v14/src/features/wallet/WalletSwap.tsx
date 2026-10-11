@@ -181,7 +181,7 @@ export default function WalletSwap() {
             <Repeat size={22} />
           </div>
           <div className="wo-hero-body">
-            <div className="wo-hero-title">Swap</div>
+            <div className="wo-hero-title text-gradient">Swap</div>
             <div className="wo-hero-sub">Trade tokens on Mallchain DEX pools</div>
           </div>
         </div>
@@ -204,7 +204,7 @@ export default function WalletSwap() {
             <Repeat size={22} />
           </div>
           <div className="wo-hero-body">
-            <div className="wo-hero-title">Swap</div>
+            <div className="wo-hero-title text-gradient">Swap</div>
             <div className="wo-hero-sub">No liquidity pools yet</div>
           </div>
         </div>
@@ -229,12 +229,12 @@ export default function WalletSwap() {
           <Repeat size={22} />
         </div>
         <div className="wo-hero-body">
-          <div className="wo-hero-title">Swap</div>
+          <div className="wo-hero-title text-gradient">Swap</div>
           <div className="wo-hero-sub">Trade tokens on Mallchain DEX pools</div>
         </div>
       </div>
 
-      <div className="wo-card" style={{ maxWidth: 520 }}>
+      <div className="wo-card card-glow bg-gradient-card" style={{ maxWidth: 520 }}>
         {!pools && <div style={{ textAlign: 'center', padding: 20, color: 'var(--txt-3)', fontSize: 13 }}>Loading pools…</div>}
 
         {pools && pool && (

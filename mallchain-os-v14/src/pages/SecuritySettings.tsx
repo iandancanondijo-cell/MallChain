@@ -317,7 +317,7 @@ export function SecuritySettings() {
   return (
     <div className="security-settings">
       <div className="page-header">
-        <h1>Security Settings</h1>
+        <h1 className="text-gradient">Security Settings</h1>
         <p>Manage your account security and authentication methods</p>
       </div>
 
@@ -328,7 +328,7 @@ export function SecuritySettings() {
           <span className="section-status">{hasPinSet ? '✓ Active' : 'Not set'}</span>
         </div>
 
-        <div className="settings-card">
+        <div className="settings-card card-glow bg-gradient-card">
           <div className="setting-item">
             <div className="setting-info">
               <h3>{hasPinSet ? 'Current PIN' : 'Set a PIN'}</h3>
@@ -351,7 +351,7 @@ export function SecuritySettings() {
           <span className="section-status">⚠️ Advanced</span>
         </div>
 
-        <div className="settings-card">
+        <div className="settings-card card-glow bg-gradient-card">
           <div className="setting-item">
             <div className="setting-info">
               <h3>Export Private Key</h3>
@@ -376,7 +376,7 @@ export function SecuritySettings() {
           <span className="section-status coming-soon">Not available yet</span>
         </div>
 
-        <div className="settings-card settings-disabled">
+        <div className="settings-card settings-disabled card-glow bg-gradient-card">
           <p className="placeholder-text">
             Biometric authentication isn't available yet — it needs a real WebAuthn
             enrollment/verification flow, which hasn't been built.
@@ -393,7 +393,7 @@ export function SecuritySettings() {
           </span>
         </div>
 
-        <div className="settings-card">
+        <div className="settings-card card-glow bg-gradient-card">
           <div className="setting-item">
             <div className="setting-info">
               <h3>Manage 2FA</h3>
@@ -415,7 +415,7 @@ export function SecuritySettings() {
           </span>
         </div>
 
-        <div className="settings-card">
+        <div className="settings-card card-glow bg-gradient-card">
           <div className="setting-item">
             <div className="setting-info">
               <h3>Recover your wallet from any device</h3>
@@ -447,7 +447,7 @@ export function SecuritySettings() {
           <h2>Session Management</h2>
         </div>
 
-        <div className="settings-card">
+        <div className="settings-card card-glow bg-gradient-card">
           <div className="setting-item">
             <div className="setting-info">
               <h3>Session Timeout</h3>
@@ -489,7 +489,7 @@ export function SecuritySettings() {
           <h2>Account Security</h2>
         </div>
 
-        <div className="settings-card">
+        <div className="settings-card card-glow bg-gradient-card">
           <div className="setting-item">
             <div className="setting-info">
               <h3>Sign Out Everywhere</h3>

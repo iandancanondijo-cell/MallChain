@@ -4,6 +4,7 @@ import { useStoreVersion, fmtNum, fmtMoney } from '../../components/ui';
 import { useWalletData } from '../../hooks/useWalletData';
 import { priceApi } from '../../services/priceApi';
 import { useFxRate, toDisplayCurrency } from '../../services/currency';
+import { LoadingState } from '../../components/LoadingState';
 import {
   ArrowUpRight, ArrowDownLeft, CreditCard, Building2, Sparkles,
   Repeat, Clock, BarChart3, Wallet, Copy, ExternalLink, Settings, Lock
@@ -122,24 +123,13 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
     }
   };
 
-  const BalanceSkeleton = () => (
-    <div className="wallet-asset-card" aria-busy="true" aria-label="Loading balance">
-      <div className="wallet-asset-icon" style={{ background: 'rgba(255,255,255,0.04)' }} />
-      <div className="wallet-asset-body">
-        <div className="card-label">Loading...</div>
-        <div className="card-value" style={{ backgroundColor: 'var(--bg-3)', height: '28px', borderRadius: '6px', marginTop: 4 }} />
-        <div style={{ backgroundColor: 'var(--bg-3)', height: '14px', borderRadius: '4px', marginTop: 6, width: '60%' }} />
-      </div>
-    </div>
-  );
-
   return (
     <div>
       {/* ── hero ── */}
       <div className="wallet-hero">
         <div className="wallet-hero-left">
           <div className="wallet-hero-head">
-            <h1>Wallet</h1>
+            <h1 className="text-gradient">Wallet</h1>
             {isWalletConnected && (
               <button className="wallet-addr-chip" onClick={copyAddress} title="Copy address">
                 <span className="mono">{walletAddress.slice(0, 8)}...{walletAddress.slice(-4)}</span>
@@ -205,13 +195,9 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
       )}
 
       {/* ── asset cards ── */}
-      <div className="wallet-assets-grid">
+      <div className="wallet-assets-grid stagger">
         {loading ? (
-          <>
-            <BalanceSkeleton />
-            <BalanceSkeleton />
-            <BalanceSkeleton />
-          </>
+          <LoadingState fill style={{ gridColumn: '1 / -1' }} />
         ) : (
           assets.map((a) => (
             <div key={a.sym} className="wallet-asset-card card-hover" style={{ background: a.gradient }}>
@@ -236,7 +222,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
       {/* ── action grid ── */}
       <div className="wallet-actions-section">
         <div className="sec-title"><h2>Actions</h2></div>
-        <div className="wallet-action-grid">
+        <div className="wallet-action-grid stagger">
           {actions.map((a) => {
             const isLocked = !isWalletConnected && a.p !== '/wallet/history';
             return (
@@ -260,7 +246,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
 
       {/* ── recent activity + address ── */}
       <div className="grid-2" style={{ marginTop: 14 }}>
-        <div className="card">
+        <div className="card card-glow bg-gradient-card">
           <div className="sec-title">
             <h2>Recent transactions</h2>
             <button className="sec-link-btn" onClick={() => navigate('/wallet/history')}>View all</button>
@@ -287,7 +273,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
           )}
         </div>
 
-        <div className="card">
+        <div className="card card-glow bg-gradient-card">
           <div className="sec-title"><h2>Wallet details</h2></div>
           {!isWalletConnected ? (
             <div className="wallet-empty-inline">
