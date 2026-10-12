@@ -157,6 +157,18 @@ async function dispatchNotification(userId, category, payload) {
 
     await notification.save();
 
+    if (global.io) {
+      global.io.to(`user:${userId}`).emit('notification', {
+        _id: notification._id,
+        type: notification.type,
+        title: notification.title,
+        message: notification.message,
+        data: notification.data,
+        read: false,
+        createdAt: notification.createdAt,
+      });
+    }
+
     logger.info('notificationDispatcher', 'Notification dispatched', {
       userId,
       category,

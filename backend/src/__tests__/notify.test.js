@@ -1,20 +1,45 @@
 jest.mock('../models/Notification', () => ({
   create: jest.fn(),
+  findByIdAndUpdate: jest.fn(),
+}));
+jest.mock('../models/user', () => ({
+  findById: jest.fn(),
+}));
+jest.mock('../models/notificationPreferences', () => ({
+  findOne: jest.fn(),
 }));
 jest.mock('../models/UserSettings', () => ({
   findOne: jest.fn(),
 }));
+jest.mock('../services/notificationCatalogue', () => ({
+  templateByEvent: new Map(),
+  templates: [],
+  templateById: new Map(),
+}));
+jest.mock('../utils/fieldEncryption', () => ({
+  decryptField: (v) => v,
+}));
+jest.mock('../utils/logger', () => ({
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+}));
 jest.mock('../services/emailService', () => ({
   sendEmail: jest.fn(),
+  complianceFooter: jest.fn(() => '<footer/>'),
 }));
 jest.mock('../services/smsService', () => ({
-  sendSms: jest.fn(),
+  sendSMS: jest.fn(),
+}));
+jest.mock('../services/whatsappService', () => ({
+  sendWhatsApp: jest.fn(),
 }));
 
 const Notification = require('../models/Notification');
+const NotificationPreferences = require('../models/notificationPreferences');
 const UserSettings = require('../models/UserSettings');
 const { sendEmail } = require('../services/emailService');
-const { sendSms } = require('../services/smsService');
+const { sendSMS } = require('../services/smsService');
 const { notify, notifyUser } = require('../services/notify');
 
 describe('notify()', () => {
@@ -24,21 +49,21 @@ describe('notify()', () => {
   });
 
   test('persists the notification and pushes it to the user\'s socket room when global.io exists', async () => {
-    const doc = { _id: 'n1', kind: 'mines', title: 'Approved', body: 'nice', read: false, createdAt: new Date() };
+    const doc = { _id: 'n1', type: 'system', title: 'Approved', message: 'nice', data: undefined, read: false, createdAt: new Date() };
     Notification.create.mockResolvedValue(doc);
     const emit = jest.fn();
     global.io = { to: jest.fn(() => ({ emit })) };
 
     const result = await notify('user1', { kind: 'mines', title: 'Approved', body: 'nice' });
 
-    expect(Notification.create).toHaveBeenCalledWith({ userId: 'user1', kind: 'mines', title: 'Approved', body: 'nice' });
+    expect(Notification.create).toHaveBeenCalledWith({ userId: 'user1', type: 'system', title: 'Approved', message: 'nice', data: undefined });
     expect(global.io.to).toHaveBeenCalledWith('user:user1');
-    expect(emit).toHaveBeenCalledWith('notification', expect.objectContaining({ _id: 'n1', title: 'Approved' }));
+    expect(emit).toHaveBeenCalledWith('notification', expect.objectContaining({ _id: 'n1', title: 'Approved', message: 'nice' }));
     expect(result).toBe(doc);
   });
 
   test('still persists when global.io is unset (no socket server in this process)', async () => {
-    const doc = { _id: 'n1', title: 'X' };
+    const doc = { _id: 'n1', type: 'system', title: 'X', message: '', data: undefined, read: false, createdAt: new Date() };
     Notification.create.mockResolvedValue(doc);
 
     const result = await notify('user1', { title: 'X' });
@@ -63,7 +88,8 @@ describe('notifyUser()', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     delete global.io;
-    Notification.create.mockResolvedValue({ _id: 'n1', title: 'Badge earned' });
+    Notification.create.mockResolvedValue({ _id: 'n1', type: 'system', title: 'Badge earned', message: 'nice', data: undefined, read: false, createdAt: new Date() });
+    NotificationPreferences.findOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
   });
 
   test('always writes the in-app notification regardless of preferences', async () => {
@@ -71,7 +97,7 @@ describe('notifyUser()', () => {
 
     await notifyUser({ _id: 'user1', email: 'a@b.com' }, { title: 'Badge earned', body: 'nice' });
 
-    expect(Notification.create).toHaveBeenCalledWith({ userId: 'user1', kind: 'system', title: 'Badge earned', body: 'nice' });
+    expect(Notification.create).toHaveBeenCalledWith({ userId: 'user1', type: 'system', title: 'Badge earned', message: 'nice', data: undefined });
   });
 
   test('sends email when badgeAlerts is enabled (or unset, defaulting on) and the user has an email', async () => {
@@ -79,7 +105,11 @@ describe('notifyUser()', () => {
 
     await notifyUser({ _id: 'user1', email: 'a@b.com' }, { title: 'Badge earned', body: 'nice' });
 
-    expect(sendEmail).toHaveBeenCalledWith('a@b.com', 'Badge earned', 'nice');
+    expect(sendEmail).toHaveBeenCalledWith(
+      'a@b.com',
+      '[Mallchain] Badge earned',
+      expect.stringContaining('Badge earned'),
+    );
   });
 
   test('does not send email when the user has explicitly disabled badgeAlerts for email', async () => {
@@ -96,13 +126,13 @@ describe('notifyUser()', () => {
     UserSettings.findOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
 
     await notifyUser({ _id: 'user1', phone: '254700000000' }, { title: 'Badge earned', body: 'nice' });
-    expect(sendSms).not.toHaveBeenCalled();
+    expect(sendSMS).not.toHaveBeenCalled();
 
     UserSettings.findOne.mockReturnValue({
       lean: jest.fn().mockResolvedValue({ notifications: { sms: { badgeAlerts: true } } }),
     });
     await notifyUser({ _id: 'user1', phone: '254700000000' }, { title: 'Badge earned', body: 'nice' });
-    expect(sendSms).toHaveBeenCalledWith('254700000000', 'Badge earned — nice');
+    expect(sendSMS).toHaveBeenCalledWith('254700000000', 'Mallchain: Badge earned — nice');
   });
 
   test('never throws even if UserSettings lookup fails', async () => {
