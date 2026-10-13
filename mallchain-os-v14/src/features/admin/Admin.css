@@ -57,6 +57,8 @@
   top: 0;
   height: 100vh;
   overflow: auto;
+  width: 252px;
+  flex-shrink: 0;
 }
 
 .adm-logo {

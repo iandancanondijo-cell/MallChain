@@ -179,8 +179,8 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
     
     // Store compliance in localStorage
     localStorage.setItem('mallchain_age_verified', JSON.stringify({ timestamp: Date.now(), userConfirmed: true }));
-    localStorage.setItem('mallchain_tos_accepted_v1', JSON.stringify({ v: '1.0', accepted: true }));
-    localStorage.setItem('mallchain_privacy_accepted_v1', JSON.stringify({ v: '1.0', accepted: true }));
+    localStorage.setItem('mallchain_tos_accepted', JSON.stringify({ v: '1.0', accepted: true }));
+    localStorage.setItem('mallchain_privacy_accepted', JSON.stringify({ v: '1.0', accepted: true }));
     
     await nextStep();
   };
