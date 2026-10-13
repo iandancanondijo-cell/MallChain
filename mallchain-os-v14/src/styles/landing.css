@@ -175,6 +175,10 @@
   background: linear-gradient(rgba(4, 5, 13, 0.85), transparent);
 }
 
+.landing-nav-wrap {
+  position: relative;
+}
+
 .landing-nav-inner {
   max-width: 1100px;
   margin: auto;
@@ -186,6 +190,10 @@
 }
 
 .landing-logo {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   gap: 11px;
   align-items: center;

@@ -5,6 +5,7 @@ const EmailVerification = require('../models/emailVerification');
 const User = require('../models/user');
 const logger = require('../utils/logger');
 const crypto = require('crypto');
+const brevoService = require('../services/brevoService');
 
 // Middleware: require JWT auth for all routes
 router.use(requireAuth());
@@ -27,10 +28,28 @@ function generateVerificationCode() {
  * Helper: Send verification email (stub - integrate with email service)
  */
 async function sendVerificationEmail(email, code, isNewEmail = true) {
-  // TODO: Integrate with email service (SendGrid, Mailgun, etc)
-  // For now, just log it
-  logger.info('emailManagement', `Verification email would be sent to ${email}`, { code: code.substring(0, 8) + '...' });
-  return true;
+  const subject = isNewEmail
+    ? 'Verify your new email for Mallchain'
+    : 'Confirm your email change on Mallchain';
+
+  const html = `
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2 style="color: #06b6d4;">${isNewEmail ? 'Verify Your New Email' : 'Confirm Email Change'}</h2>
+      <p>A request was made to ${isNewEmail ? 'set this as your new email' : 'change your email'} on Mallchain.</p>
+      <p>Your verification code:</p>
+      <div style="background: #f0f9ff; border: 1px solid #06b6d4; border-radius: 8px; padding: 16px; text-align: center; margin: 20px 0;">
+        <code style="font-size: 18px; letter-spacing: 2px; color: #0e7490;">${code}</code>
+      </div>
+      <p style="color: #666; font-size: 13px;">This code expires in 24 hours. If you didn't request this, you can safely ignore it.</p>
+    </div>
+  `;
+
+  const result = await brevoService.sendEmail(email, subject, html);
+  logger.info('emailManagement', `Verification email sent to ${email}`, {
+    success: result.success,
+    isNewEmail,
+  });
+  return result.success;
 }
 
 /**

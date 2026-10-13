@@ -433,10 +433,12 @@ export default function Landing({ navigate }: LandingProps) {
 
       {/* Nav */}
       <nav>
-        <div className="landing-nav-inner">
-          <div className="landing-logo" onClick={() => goTo('/landing')}>
-            <img src="/mallchain.svg" alt="Mallchain" className="landing-logo-mark" />
-            Mallchain
+        <div className="landing-nav-wrap">
+          <div className="landing-nav-inner">
+            <div className="landing-logo" onClick={() => goTo('/landing')}>
+              <img src="/mallchain.svg" alt="Mallchain" className="landing-logo-mark" />
+              Mallchain
+            </div>
           </div>
         </div>
       </nav>
