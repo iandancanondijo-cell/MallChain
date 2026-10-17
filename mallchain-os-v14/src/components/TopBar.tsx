@@ -1,10 +1,10 @@
 /**
- * TopBar — unified settings & notifications panel with search, wallet display,
- * network status, admin access, and preferences (currency, language, theme).
+ * TopBar — search, wallet display, network status, admin access,
+ * with separate settings and notifications panels.
  * Admin route shows only notifications and network status.
  */
-import { useCallback, useEffect, useState, useMemo } from 'react';
-import { Search, Bell, SlidersHorizontal, ShieldAlert, Wrench, Menu } from 'lucide-react';
+import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
+import { Search, Bell, Settings, ShieldAlert, Wrench, Menu, X, ArrowRight, ArrowLeftRight, ShieldCheck, Megaphone, Award, Package, Vote } from 'lucide-react';
 import { store } from '../store/store';
 import { useStoreVersion, fmtNum, toast, BadgeCheckmark } from './ui';
 import { config } from '../services/config';
@@ -16,18 +16,47 @@ import { socketManager } from '../services/socket';
 import { t } from '../services/i18n';
 import { useMaintenanceStatus } from '../services/maintenanceApi';
 import { openCommandPalette } from './CommandPalette';
-import NotificationSetupWizard from './NotificationSetupWizard';
-import { settingsApi, type ContactInfo } from '../services/settingsApi';
 const LANGS = ['EN', 'FR', 'ES', 'SW'];
 const ACCENTS = ['gold', 'cyan', 'purple', 'emerald'];
 
+const KIND_ICONS: Record<string, typeof Bell> = {
+  transaction: ArrowLeftRight,
+  transactions: ArrowLeftRight,
+  security: ShieldCheck,
+  governance: Vote,
+  campaigns: Megaphone,
+  marketing: Megaphone,
+  badgeAlerts: Award,
+  badge: Award,
+  system: Package,
+};
+
+function kindIcon(kind: string) {
+  const Icon = KIND_ICONS[kind] || Bell;
+  return <Icon size={14} aria-hidden="true" />;
+}
+
+function relativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diff = Math.max(0, now - then);
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return t('just now');
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d`;
+  return new Date(dateStr).toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
 export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { navigate: (p: string) => void; isAdminRoute?: boolean; onToggleMobileNav?: () => void }) {
   const [q, setQ] = useState('');
-  const [open, setOpen] = useState<'unified' | null>(null);
+  const [openPanel, setOpenPanel] = useState<'settings' | 'notifications' | null>(null);
   const [nf, setNf] = useState<'all' | 'unread'>('all');
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [contact, setContact] = useState<ContactInfo | null>(null);
-  const [showWizard, setShowWizard] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
   useStoreVersion();
   const st = store.state;
   const allCurrencies = useSupportedCurrencies();
@@ -50,18 +79,19 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
     return unsubscribe;
   }, [loadNotifications]);
 
-  // Load contact info so we know whether to show the setup wizard.
   useEffect(() => {
-    if (!st.user.authed) return;
-    settingsApi.getContact().then((r) => {
-      if (r.ok && r.data) setContact(r.data);
-    });
-  }, [st.user.authed]);
+    if (!openPanel) return;
+    const onDown = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setOpenPanel(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenPanel(null); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [openPanel]);
 
   const unread = notifications.filter((n) => !n.read).length;
-  const notifs = notifications.filter((n) => (nf === 'all' ? true : !n.read));
-  
-  // Memoize currency and language options for performance
+
   const currencyButtons = useMemo(() => COMMON_CURRENCIES, []);
   const languageButtons = useMemo(() => LANGS, []);
   const accentButtons = useMemo(() => ACCENTS, []);
@@ -90,6 +120,17 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
       navigate('/search?q=' + encodeURIComponent(q.trim()));
     }
   };
+
+  const toggle = (panel: 'settings' | 'notifications') => {
+    setOpenPanel((cur) => (cur === panel ? null : panel));
+  };
+
+  const goNotifications = () => {
+    setOpenPanel(null);
+    navigate('/notifications');
+  };
+
+  const filtered = notifications.filter((n) => (nf === 'all' ? true : !n.read));
 
   return (
     <header className="topbar">
@@ -125,144 +166,156 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
           <span className="bal">{fmtNum(st.balances.MALL)}</span>
         </a>
       )}
-      {/* The only way back into the admin panel once an admin has left it —
-          the sidebar deliberately has no admin entry (see Sidebar.tsx), so
-          without this an admin account can get stranded on the regular
-          user shell with no route back short of hand-editing the URL. */}
       {!isAdminRoute && (st.user.role === 'admin' || st.user.role === 'superadmin') && (
         <a className="chip red" style={{ display: 'flex', alignItems: 'center', gap: 6 }} href="#/admin" title="Go to the admin control center">
           <ShieldAlert size={13} aria-hidden="true" /> {t('Admin panel')}
         </a>
       )}
       <SocketStatus />
+
+      {/* Settings button — regular routes only */}
       {!isAdminRoute && (
         <button
           type="button"
           className="tb-icon"
-          title={t('Settings & Notifications')}
-          aria-label={unread > 0 ? `${t('Settings & Notifications')} (${unread} ${t('unread')})` : t('Settings & Notifications')}
+          title={t('Settings')}
+          aria-label={t('Settings')}
           aria-haspopup="true"
-          aria-expanded={open === 'unified'}
-          onClick={() => setOpen(open === 'unified' ? null : 'unified')}
+          aria-expanded={openPanel === 'settings'}
+          onClick={() => toggle('settings')}
         >
-          <SlidersHorizontal size={16} aria-hidden="true" />
-          {unread > 0 && <span className="tb-badge" aria-hidden="true">{unread}</span>}
+          <Settings size={16} aria-hidden="true" />
         </button>
       )}
-      {isAdminRoute && (
-        <button
-          type="button"
-          className="tb-icon"
-          title={t('Notifications')}
-          aria-label={unread > 0 ? `${t('Notifications')} (${unread} ${t('unread')})` : t('Notifications')}
-          aria-haspopup="true"
-          aria-expanded={open === 'unified'}
-          onClick={() => setOpen(open === 'unified' ? null : 'unified')}
-        >
-          <Bell size={16} aria-hidden="true" />
-          {unread > 0 && <span className="tb-badge" aria-hidden="true">{unread}</span>}
-        </button>
-      )}
-      {open === 'unified' && (
-        <div className="panel" style={{ right: 20, maxWidth: 420 }}>
-          <div className="panel-head" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span className="grow">{isAdminRoute ? t('Notifications') : t('Settings & Notifications')}</span>
-            {!isAdminRoute && <button type="button" className="chip" onClick={() => setNf(nf === 'all' ? 'unread' : 'all')}>{nf === 'all' ? t('All') : t('Unread')}</button>}
-            <button type="button" className="chip gold" onClick={markAllRead}>{t('Mark all read')}</button>
-          </div>
 
-          {!isAdminRoute && (
-            <>
-              <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--line-1)' }}>
-                <div className="field">
-                  <label style={{ fontSize: 12, fontWeight: 600 }}>{t('Currency')}</label>
-                  <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-                    {currencyButtons.map((c) => (
-                      <button key={c} className={'btn btn-ghost btn-sm' + (st.prefs.currency === c ? ' gold' : '')} onClick={() => { st.prefs.currency = c as never; store.commit(); toastLocal('Currency → ' + c); }}>
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="field" style={{ marginTop: 12 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600 }}>{t('Language')}</label>
-                  <div className="row" style={{ gap: 6, marginTop: 6 }}>
-                    {languageButtons.map((l) => (
-                      <button key={l} className={'btn btn-ghost btn-sm' + (st.prefs.lang === l ? ' gold' : '')} onClick={() => { st.prefs.lang = l as never; document.documentElement.lang = l.toLowerCase(); store.commit(); toastLocal('Language → ' + l); }}>
-                        {l}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="field" style={{ marginTop: 12 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600 }}>{t('Theme')}</label>
-                  <div className="row" style={{ gap: 6, marginTop: 6 }}>
-                    {accentButtons.map((a) => (
-                      <button key={a} className={'btn btn-ghost btn-sm' + (st.prefs.accent === a ? ' gold' : '')} onClick={() => applyAccent(a)}>
-                        {a}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--line-1)', fontSize: 11, color: 'var(--txt-3)' }}>
-                🌐 {t('Network')}: <span className="chip" style={{ marginLeft: 4 }}>{config.network}</span>
-              </div>
-            </>
-          )}
+      {/* Notifications button — always visible */}
+      <button
+        type="button"
+        className="tb-icon"
+        title={t('Notifications')}
+        aria-label={unread > 0 ? `${t('Notifications')} (${unread} ${t('unread')})` : t('Notifications')}
+        aria-haspopup="true"
+        aria-expanded={openPanel === 'notifications'}
+        onClick={() => toggle('notifications')}
+      >
+        <Bell size={16} aria-hidden="true" />
+        {unread > 0 && <span className="tb-badge" aria-hidden="true">{unread}</span>}
+      </button>
 
-          {/* Setup prompt banner */}
-          {!showWizard && st.user.authed && contact && !contact.phoneVerified && !contact.emailVerified && (
-            <div style={{
-              padding: '10px 14px', borderBottom: '1px solid var(--line-1)',
-              background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent) 6%, transparent), color-mix(in srgb, var(--accent) 2%, transparent))',
-              display: 'flex', alignItems: 'center', gap: 10,
-            }}>
-              <Bell size={15} style={{ color: 'var(--accent)', flex: 'none' }} />
-              <div style={{ flex: 1, fontSize: 11.5, color: 'var(--txt-2)', lineHeight: 1.4 }}>
-                {t('Enable notifications for real-time updates')}
-              </div>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                style={{ fontSize: 11, flex: 'none' }}
-                onClick={() => setShowWizard(true)}
-              >
-                {t('Set up')}
+      {/* Panels container — click-outside closes whichever is open */}
+      <div ref={panelRef} style={{ position: 'relative' }}>
+        {/* ── Settings panel ── */}
+        {openPanel === 'settings' && (
+          <div className="panel tb-settings-panel" style={{ right: 0 }}>
+            <div className="panel-head">
+              <Settings size={14} aria-hidden="true" style={{ color: 'var(--txt-3)' }} />
+              <span className="grow">{t('Settings')}</span>
+              <button type="button" className="panel-close" aria-label={t('Close')} onClick={() => setOpenPanel(null)}>
+                <X size={14} />
               </button>
             </div>
-          )}
-
-          {showWizard && st.user.authed && (
-            <div style={{ padding: '12px 14px' }}>
-              <NotificationSetupWizard
-                contact={contact}
-                userEmail={st.user.email}
-                onComplete={() => {
-                  setShowWizard(false);
-                  settingsApi.getContact().then((r) => { if (r.ok && r.data) setContact(r.data); });
-                }}
-                onDismiss={() => setShowWizard(false)}
-              />
-            </div>
-          )}
-
-          {/* Notifications list */}
-          <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-            {notifications.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--txt-3)', fontSize: 12.5 }}>{t('No notifications yet')}</div>}
-            {notifications.filter((n) => (nf === 'all' ? true : !n.read)).map((n) => (
-              <div key={n._id} className={'panel-item' + (n.read ? '' : ' unread')}>
-                <div className="grow">
-                  <div className="pt">{n.title}</div>
-                  {n.body && <div className="pm">{n.body}</div>}
+            <div className="tb-settings-body">
+              <div className="field">
+                <label>{t('Currency')}</label>
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                  {currencyButtons.map((c) => (
+                    <button key={c} className={'btn btn-ghost btn-sm' + (st.prefs.currency === c ? ' gold' : '')} onClick={() => { st.prefs.currency = c as never; store.commit(); toastLocal('Currency → ' + c); }}>
+                      {c}
+                    </button>
+                  ))}
                 </div>
-                <span className="pts">{new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                <button type="button" aria-label={t('Dismiss notification')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--txt-3)' }} onClick={() => dismiss(n._id)}>✕</button>
               </div>
-            ))}
+              <div className="field" style={{ marginTop: 14 }}>
+                <label>{t('Language')}</label>
+                <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                  {languageButtons.map((l) => (
+                    <button key={l} className={'btn btn-ghost btn-sm' + (st.prefs.lang === l ? ' gold' : '')} onClick={() => { st.prefs.lang = l as never; document.documentElement.lang = l.toLowerCase(); store.commit(); toastLocal('Language → ' + l); }}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="field" style={{ marginTop: 14 }}>
+                <label>{t('Theme')}</label>
+                <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                  {accentButtons.map((a) => (
+                    <button key={a} className={'btn btn-ghost btn-sm' + (st.prefs.accent === a ? ' gold' : '')} onClick={() => applyAccent(a)}>
+                      {a}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="tb-settings-footer">
+              {t('Network')}: <span className="chip" style={{ marginLeft: 4 }}>{config.network}</span>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* ── Notifications panel ── */}
+        {openPanel === 'notifications' && (
+          <div className="panel tb-notifications-panel" style={{ right: 0 }}>
+            <div className="panel-head">
+              <Bell size={14} aria-hidden="true" style={{ color: 'var(--txt-3)' }} />
+              <span className="grow">{t('Notifications')}</span>
+              {unread > 0 && (
+                <button type="button" className="chip gold" onClick={markAllRead}>{t('Mark all read')}</button>
+              )}
+              <button type="button" className="panel-close" aria-label={t('Close')} onClick={() => setOpenPanel(null)}>
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Filter tabs */}
+            <div className="tb-nf-tabs">
+              <button type="button" className={'tb-nf-tab' + (nf === 'all' ? ' active' : '')} onClick={() => setNf('all')}>
+                {t('All')}
+                <span className="tb-nf-count">{notifications.length}</span>
+              </button>
+              <button type="button" className={'tb-nf-tab' + (nf === 'unread' ? ' active' : '')} onClick={() => setNf('unread')}>
+                {t('Unread')}
+                {unread > 0 && <span className="tb-nf-count unread">{unread}</span>}
+              </button>
+            </div>
+
+            {/* Notifications list */}
+            <div className="tb-nf-list">
+              {filtered.length === 0 && (
+                <div className="tb-nf-empty">
+                  <Bell size={28} strokeWidth={1.2} />
+                  <span>{nf === 'unread' ? t('All caught up') : t('No notifications yet')}</span>
+                </div>
+              )}
+              {filtered.map((n) => (
+                <div key={n._id} className={'tb-nf-item' + (n.read ? '' : ' unread')}>
+                  <div className={'tb-nf-icon kind-' + (n.kind || 'system')}>
+                    {kindIcon(n.kind)}
+                  </div>
+                  <div className="tb-nf-content">
+                    <div className="tb-nf-title">{n.title}</div>
+                    {n.body && <div className="tb-nf-body">{n.body}</div>}
+                    <div className="tb-nf-meta">
+                      <span className="tb-nf-time">{relativeTime(n.createdAt)}</span>
+                      <span className="tb-nf-kind">{n.kind}</span>
+                    </div>
+                  </div>
+                  {!n.read && <span className="tb-nf-dot" aria-label={t('Unread')} />}
+                  <button type="button" className="tb-nf-dismiss" aria-label={t('Dismiss')} onClick={() => dismiss(n._id)}>
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* View all link */}
+            <button type="button" className="tb-nf-view-all" onClick={goNotifications}>
+              {t('View all notifications')}
+              <ArrowRight size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+
       {isAdminRoute ? (
         <div className="tb-user" style={{ cursor: 'default' }}>
           <div className="avatar" aria-hidden="true">{st.user.avatarInitial || 'C'}</div>
@@ -285,6 +338,5 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
 }
 
 function toastLocal(text: string) {
-  // lightweight: reuse the global toast bus
   toast(text);
 }

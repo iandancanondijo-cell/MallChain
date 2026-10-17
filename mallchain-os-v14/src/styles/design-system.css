@@ -1,5 +1,0 @@
-/*
- * Design tokens and component styles have been unified into global.css.
- * This file is kept as a no-op to avoid breaking the import in main.tsx.
- * Remove the import from main.tsx when convenient, then delete this file.
- */

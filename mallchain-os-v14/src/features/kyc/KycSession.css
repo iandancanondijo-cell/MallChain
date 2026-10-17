@@ -164,6 +164,20 @@
   50% { opacity: 1; }
 }
 
+/* ── dual-side camera capture grid in the identity step ── */
+.kyc-id-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+@media (max-width: 720px) {
+  .kyc-id-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── upload zone interactions not covered by KycWizard.css ── */
 .kyc-session .kyc-drop-zone {
   cursor: pointer;

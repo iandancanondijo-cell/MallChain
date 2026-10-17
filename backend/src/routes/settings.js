@@ -147,8 +147,8 @@ router.post('/contact/phone/send-otp', auth, async (req, res) => {
 
     // In production, send via SMS gateway. In dev, return it directly.
     if (config.isProduction) {
-      const { sendSms } = require('../services/smsService');
-      await sendSms(
+      const { sendSMS } = require('../services/brevoService');
+      await sendSMS(
         settings.contactInfo.phoneNumber,
         `Your Mallchain verification code is: ${otp}. Valid for 10 minutes.`
       );

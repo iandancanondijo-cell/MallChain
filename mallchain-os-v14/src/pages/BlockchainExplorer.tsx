@@ -304,7 +304,7 @@ export default function BlockchainExplorer() {
               placeholder="🔍 Search block height..."
               value={blockSearch}
               onChange={(e) => setBlockSearch(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleBlockSearch()}
+              onKeyDown={(e) => e.key === 'Enter' && handleBlockSearch()}
             />
             <button className="btn btn-primary btn-sm" onClick={handleBlockSearch} disabled={!blockSearch || loading}>
               Search
@@ -394,7 +394,7 @@ export default function BlockchainExplorer() {
               placeholder="🔍 Search transaction hash..."
               value={txSearch}
               onChange={(e) => setTxSearch(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleTxSearch()}
+              onKeyDown={(e) => e.key === 'Enter' && handleTxSearch()}
             />
             <button className="btn btn-primary btn-sm" onClick={handleTxSearch} disabled={!txSearch || loading}>
               Search

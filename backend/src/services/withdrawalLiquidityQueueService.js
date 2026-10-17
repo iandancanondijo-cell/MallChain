@@ -23,8 +23,8 @@ async function notifyWithdrawalStateChange(withdrawal, { title, body }) {
       return;
     }
     if (withdrawal.phone) {
-      const { sendSms } = require('./smsService');
-      await sendSms(withdrawal.phone, `${title} — ${body}`).catch(() => {});
+      const { sendSMS } = require('./brevoService');
+      await sendSMS(withdrawal.phone, `${title} — ${body}`).catch(() => {});
     }
   } catch (err) {
     logger.warn('withdrawalLiquidityQueueService: notification failed (non-blocking)', { error: err.message });

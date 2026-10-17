@@ -8,6 +8,7 @@ const {
   isValidAddress,
 } = require('../services/mallcoinService');
 const { signAndBroadcastTransfer } = require('../services/mallcoinTxBuilder');
+const activityEvents = require('../services/activityEvents');
 const { config } = require('../config');
 
 const CHAIN_RPC = process.env.CHAIN_RPC || 'http://localhost:26657';
@@ -101,6 +102,10 @@ exports.sendMallcoins = async (req, res) => {
   }
 
   logger.info('sendMallcoins', 'Transaction broadcast successfully', { txHash, from, to, amount });
+  const userId = req.user?._id || req.user?.id;
+  if (userId) {
+    activityEvents.emitTransferSent(userId.toString(), { txHash, from, to, amount, denom: 'MLCNS' }).catch(() => {});
+  }
   return res.json({
     success: true,
     txHash,
@@ -145,6 +150,10 @@ exports.processPayment = async (req, res) => {
   }
 
   logger.info('processPayment', 'Payment broadcast confirmed', { txHash, buyerAddress, sellerAddress, amountKES });
+  const userId = req.user?._id || req.user?.id;
+  if (userId) {
+    activityEvents.emitTransferSent(userId.toString(), { txHash, from: buyerAddress, to: sellerAddress, amount: amountKES, type: 'payment' }).catch(() => {});
+  }
   return res.json({
     success: true,
     txHash,

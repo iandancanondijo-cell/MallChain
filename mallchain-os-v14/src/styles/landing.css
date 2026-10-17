@@ -858,6 +858,64 @@
   transform: none;
 }
 
+/* mobile: disable heavy fixed layers that cause Android compositor flicker */
+@media (max-width: 768px) {
+  .landing-page::before {
+    display: none;
+  }
+
+  .landing-blob {
+    display: none;
+  }
+
+  .landing-ring {
+    /* was min(150vmin, 1300px) → ~585px on a 390px phone, overflowing the hero.
+       Constrain so it sits behind the heading without clipping it. */
+    width: min(92vmin, 380px);
+    top: 42vh;
+    opacity: 0.42;
+    filter: none;
+    will-change: auto;
+  }
+
+  .landing-page .ico {
+    will-change: auto;
+    box-shadow: none;
+  }
+
+  .landing-page .ico svg.in {
+    animation: l-ico-in-simple 0.3s ease both;
+  }
+
+  .landing-page .ico svg.out {
+    animation: l-ico-out-simple 0.15s ease-in both;
+  }
+
+  .landing-page .t,
+  .landing-page .tile,
+  .landing-page .lane {
+    contain: layout style paint;
+  }
+
+  .landing-door {
+    perspective: none;
+  }
+
+  .landing-door.open .door-panel {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+
+@keyframes l-ico-in-simple {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes l-ico-out-simple {
+  to { opacity: 0; }
+}
+
 /* reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .landing-page *,

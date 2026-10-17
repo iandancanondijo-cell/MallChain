@@ -35,6 +35,15 @@ const TaskSubmissionSchema = new Schema({
   reward_amount: { type: Number, default: 0 },
   reward_currency: { type: String, default: 'MLPTS' },
 
+  // Admin decision evidence (mirrors the KYC pattern — see kyc.js
+  // `reviewedScreenshotRef`). When an admin approves or rejects a
+  // submission they must attach a screenshot proving what they reviewed;
+  // the filename is `${adminId}-${ts}-name.png` and lives in
+  // PROOFS_UPLOAD_DIR. The prefix is what the adminPanel routes use to
+  // confirm the file belongs to the same admin making the call.
+  reviewedScreenshotRef: { type: String },
+  reviewedBy: { type: Schema.Types.Mixed },
+
   // Timestamps
   created_at: { type: Date, default: Date.now },
   completed_at: { type: Date },

@@ -9,4 +9,11 @@
  */
 const requireAuth = require('./requireAuth');
 
-module.exports = requireAuth();
+const authMiddleware = requireAuth();
+
+// Exposed as both default and named export so route files can use either
+// `const auth = require('../middleware/auth');` (most of the codebase)
+// or `const { requireAuth } = require('../middleware/auth');` (a few files
+// like walletPin.js, adminConfig.js) — without breaking the other style.
+module.exports = authMiddleware;
+module.exports.requireAuth = authMiddleware;

@@ -7,7 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { walletApi, type Transaction } from '../../services/walletApi';
-import { fmtNum, fmtMoney, StatusChip } from '../../components/ui';
+import { fmtNum, StatusChip } from '../../components/ui';
 
 interface TransactionDetailModalProps {
   transactionId: string;

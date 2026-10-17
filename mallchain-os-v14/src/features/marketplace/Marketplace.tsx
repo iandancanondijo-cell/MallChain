@@ -22,14 +22,8 @@ function toBaseUnits(amount: number): string {
 
 // Real genesis wallet addresses (blockchain_working/config/genesis.json),
 // standing in for each demo seller's own wallet.
-const PRODUCTS: Product[] = [
-  { id: 'prod-1', name: 'Nairobi Roast Coffee — 500g', seller: 'Safari Beans Co.', sellerAddress: 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg', price: 32.5, rating: 4.8, img: '☕', cat: 'Food' },
-  { id: 'prod-2', name: 'Maasai Beaded Bracelet', seller: 'Maa Crafts', sellerAddress: 'mall1y2tvfjcm6p23cgmzn3gw3y87wznxexzca4lc7l', price: 14.0, rating: 4.9, img: '📿', cat: 'Fashion' },
-  { id: 'prod-3', name: 'Handmade Kiondo Basket', seller: 'Ujenzi Home', sellerAddress: 'mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6', price: 48.0, rating: 4.7, img: '🧺', cat: 'Home' },
-  { id: 'prod-4', name: 'Kente Print Scarf', seller: 'Accra Threads', sellerAddress: 'mall18u7572gkr30nvfvucrghuplgk3cky253fssl28', price: 22.0, rating: 4.6, img: '🧣', cat: 'Fashion' },
-  { id: 'prod-5', name: 'Solar Desk Lamp', seller: 'Jua Energy', sellerAddress: 'mall1g4g64v25exk5v9sluja5qp4w0zl5ed59whuwvd', price: 39.9, rating: 4.5, img: '💡', cat: 'Tech' },
-  { id: 'prod-6', name: 'Baobab Superfood Powder', seller: 'Sahara Harvest', sellerAddress: 'mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5', price: 18.5, rating: 4.4, img: '🌿', cat: 'Food' },
-];
+// TODO: Replace with real marketplace API endpoint to pool products from the Mallchain network
+const PRODUCTS: Product[] = [];
 
 const CATS = ['All', 'Food', 'Fashion', 'Home', 'Tech'];
 const SHIP_FLOW = ['processing', 'shipped', 'transit', 'delivered'] as const;
@@ -228,7 +222,7 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
         ))}
       </div>
 
-      {list.length === 0 && <div className="empty-state"><div className="es-ico">🛍</div><div className="es-t">No products match</div><div className="es-m">Try a different search or category.</div></div>}
+      {list.length === 0 && <div className="empty-state"><div className="es-ico">🛍</div><div className="es-t">Marketplace Coming Soon</div><div className="es-m">Products will appear here once the marketplace endpoints are connected to the Mallchain network.</div></div>}
       <div className="c-grid stagger">
         {list.map((p) => (
           <div key={p.id} className="c-card card-hover card-glow bg-gradient-card">

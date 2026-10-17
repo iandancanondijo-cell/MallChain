@@ -170,7 +170,7 @@ class SocketManager {
       return;
     }
 
-    const socketUrl = url || config.apiBaseUrl || 'http://localhost:4000';
+    const socketUrl = url || config.apiBaseUrl;
     
     if (this.socket?.connected) {
       return;

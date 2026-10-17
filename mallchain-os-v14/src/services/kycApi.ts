@@ -24,7 +24,12 @@ export interface KycStatusResponse {
   submittedAt?: string;
   reviewedAt?: string | null;
   notes?: string;
+  /** Legacy single-document submissions (deprecated schema) — usually false now. */
   hasDocument?: boolean;
+  /** Front of the ID (new dual-side submissions — what new users upload). */
+  hasFrontDocument?: boolean;
+  /** Back of the ID. */
+  hasBackDocument?: boolean;
   personal?: { firstName: string; lastName: string; dateOfBirth: string; nationality: string };
   address?: { address: string; city: string; country: string; postalCode: string; phoneNumber: string };
   identity?: { idType: string; idNumber: string; idExpiry: string };
@@ -48,11 +53,18 @@ export const kycApi = {
     }
   },
 
-  async uploadDocument(file: File): Promise<ApiResult<UploadDocumentResponse>> {
+  /**
+   * Upload one ID image (front OR back). Both sides go through the same
+   * endpoint — multer doesn't need to know which — but we send a `side`
+   * field so the backend can record it for audit (helps spot when a user
+   * uploads two fronts by mistake).
+   */
+  async uploadDocument(file: File, side: 'front' | 'back' | 'document' = 'document'): Promise<ApiResult<UploadDocumentResponse>> {
     const base = config.apiBaseUrl.replace(/\/$/, '');
     const csrfToken = await authService.getCsrfToken();
     const form = new FormData();
     form.append('document', file);
+    form.append('side', side);
 
     try {
       const res = await fetch(`${base}/api/kyc/document`, {
@@ -73,10 +85,14 @@ export const kycApi = {
     }
   },
 
-  /** Fetches an uploaded document as a blob URL for display (auth-gated, not a public link). */
-  async fetchDocumentBlobUrl(kycId: string, reason?: string): Promise<ApiResult<string>> {
+  /** Fetches an uploaded document as a blob URL for display (auth-gated, not a public link).
+   *  side defaults to 'front'. Pass 'back' / 'document' for the other side. */
+  async fetchDocumentBlobUrl(kycId: string, side: 'front' | 'back' | 'document' = 'front', reason?: string): Promise<ApiResult<string>> {
     const base = config.apiBaseUrl.replace(/\/$/, '');
-    const qs = reason?.trim() ? `?reason=${encodeURIComponent(reason.trim())}` : '';
+    const params = new URLSearchParams();
+    params.set('side', side);
+    if (reason?.trim()) params.set('reason', reason.trim());
+    const qs = `?${params.toString()}`;
     try {
       const res = await fetch(`${base}/api/kyc/document/${kycId}${qs}`, { credentials: 'include' });
       if (!res.ok) {

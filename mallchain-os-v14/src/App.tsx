@@ -4,7 +4,6 @@
  */
 import { useEffect, useState, Suspense, lazy } from 'react';
 import Sidebar from './components/Sidebar';
-import AdminSidebar, { type AdminTab } from './components/AdminSidebar';
 import AnimatedBackground from './components/AnimatedBackground';
 const Admin = lazy(() => import('./features/admin/Admin'));
 import TopBar from './components/TopBar';
@@ -70,7 +69,6 @@ export default function App() {
   const [authInitialized, setAuthInitialized] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [expandedBanner, setExpandedBanner] = useState<'maintenance' | 'frozen' | null>(null);
-  const [adminTab, setAdminTab] = useState<AdminTab>('overview');
   const maintenance = useMaintenanceStatus();
   
   // Compliance state
@@ -105,7 +103,7 @@ export default function App() {
         // unconditionally) so a first-time, never-authenticated visitor
         // doesn't trigger a spurious 401 → "session expired" toast.
         if (authService.isAuthenticated() || cameFromOAuthRedirect) {
-          const res = await api.get<{ user?: { id: string; banned: boolean; banReason?: string | null; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string; hasBadge?: boolean }; expiresAt?: number }>('/api/auth/me');
+          const res = await api.get<{ user?: { id: string; banned: boolean; banReason?: string | null; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string; hasBadge?: boolean; adminCategory?: 'users' | 'blockchain' | 'validator' | 'kyc' | 'mining' | 'treasury' | 'marketplace' | 'mlpts' | 'reports' | null }; expiresAt?: number }>('/api/auth/me');
           if (res.ok && res.data?.user) {
             const u = res.data.user;
             if (res.data.expiresAt) authService.setSession(res.data.expiresAt);
@@ -116,6 +114,10 @@ export default function App() {
             store.state.user.kycLevel = u.kycLevel ?? 1;
             store.state.user.role = u.role || 'user';
             store.state.user.hasBadge = Boolean(u.hasBadge);
+            // adminCategory is the routing key for AdminApp: category admins
+            // land directly in their window, superadmin gets the chooser.
+            // /me returns it as null for superadmins/users — pass through.
+            store.state.user.adminCategory = u.adminCategory ?? null;
             // Prefer a real name (set from KYC once submitted) over a manually
             // chosen username, over an email-derived fallback — never show a
             // fictitious placeholder identity.
@@ -229,12 +231,13 @@ export default function App() {
     // discarding the query string in the process.
     const cleanPath = path.split('?')[0];
 
-    // Routes that don't require authentication
-    const isPublicRoute = cleanPath === '/landing' || cleanPath === '/auth';
+    // Routes that don't require authentication.
+    // /wallet is included so users can connect/create a wallet before logging in.
+    // /admin is NOT here — unified auth means all users (including admins) log in
+    // through the main /auth portal first, then get routed by role.
+    const isPublicRoute = cleanPath === '/landing' || cleanPath === '/auth' || cleanPath === '/wallet' || cleanPath === '/wallet/connect';
 
     if (!isAuthenticated && !isPublicRoute) {
-      // Unauthenticated user on protected route → redirect to landing page first
-      // (user can then choose to login or signup from the landing page)
       navigate('/landing');
     } else if (isAuthenticated && cleanPath === '/landing') {
       // Authenticated user on landing → redirect to dashboard
@@ -262,7 +265,9 @@ export default function App() {
     // already handles terms acceptance inline, and the age/TOS/privacy
     // modals would overlay the wizard mid-flow right after registration
     // sets user.authed = true at step 1.
-    if (path.startsWith('/auth') || path.startsWith('/landing')) {
+    // Also skip on admin routes — admins/superadmins bypass KYC and compliance
+    // gates since they need immediate access to admin functions.
+    if (path.startsWith('/auth') || path.startsWith('/landing') || path.startsWith('/admin')) {
       setShowAgeVerification(false);
       setShowTOSAcceptance(false);
       setShowPrivacyAcceptance(false);
@@ -275,19 +280,26 @@ export default function App() {
       return;
     }
 
+    // Read localStorage directly — the hook caches values at mount time
+    // and never re-reads, so modals that write to localStorage would not
+    // be observed otherwise.
+    const ageVerified = !!localStorage.getItem('mallchain_age_verified');
+    const tosAccepted = !!localStorage.getItem('mallchain_tos_accepted');
+    const privacyAccepted = !!localStorage.getItem('mallchain_privacy_accepted');
+
     // Compliance sequence: age → TOS → privacy
     // Only show ONE modal at a time, closing previous ones as we progress
-    if (!complianceStatus.ageVerified) {
+    if (!ageVerified) {
       setComplianceSequence('age');
       setShowAgeVerification(true);
       setShowTOSAcceptance(false);
       setShowPrivacyAcceptance(false);
-    } else if (!complianceStatus.tosAccepted) {
+    } else if (!tosAccepted) {
       setComplianceSequence('tos');
       setShowAgeVerification(false);
       setShowTOSAcceptance(true);
       setShowPrivacyAcceptance(false);
-    } else if (!complianceStatus.privacyAccepted) {
+    } else if (!privacyAccepted) {
       setComplianceSequence('privacy');
       setShowAgeVerification(false);
       setShowTOSAcceptance(false);
@@ -299,7 +311,7 @@ export default function App() {
       setShowTOSAcceptance(false);
       setShowPrivacyAcceptance(false);
     }
-  }, [authInitialized, st.user.authed, complianceStatus, path]);
+  }, [authInitialized, st.user.authed, complianceStatus, path, complianceSequence]);
 
   const isAuthenticated = st.user.authed;
   const route = matchRoute(path, isAuthenticated, st.user.role);
@@ -308,6 +320,7 @@ export default function App() {
   // still literally read "#/admin" after being redirected (matchRoute swaps
   // what renders, not the URL), and the badge/accent must not lie about that.
   const isAdminRoute = route.path.startsWith('/admin');
+  const hideTopBar = path.startsWith('/admin') || path.startsWith('/landing') || path.startsWith('/auth');
 
   // index.html's single static <title> never changed on navigation before
   // this — every route (and every browser tab/history entry) read
@@ -328,18 +341,16 @@ export default function App() {
       <AnimatedBackground />
       <div className={'app-shell' + (isAdminRoute ? ' app-shell--admin' : '')}>
         <a href="#main-content" className="skip-link">Skip to main content</a>
-      {!hiddenNav && (
+      {!hiddenNav && !isAdminRoute && (
         <ErrorBoundary resetKey={path}>
-          {isAdminRoute
-            ? <AdminSidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} activeTab={adminTab} onTabChange={setAdminTab} />
-            : <Sidebar path={path} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />}
+          <Sidebar path={path} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
         </ErrorBoundary>
       )}
       {!hiddenNav && mobileNavOpen && (
         <div className="sidebar-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />
       )}
-      <main className="main" id="main-content" data-section={getSectionId(path)} style={hiddenNav ? { marginLeft: 0 } : undefined}>
-        {!hiddenNav && (
+      <main className="main" id="main-content" data-section={getSectionId(path)} style={hideTopBar ? { marginLeft: 0 } : undefined}>
+        {!hideTopBar && (
           <ErrorBoundary resetKey={path}>
             <TopBar
               navigate={navigate}
@@ -378,17 +389,6 @@ export default function App() {
             )}
           </div>
         )}
-        {!hiddenNav && st.admin.announcements.length > 0 && (
-          <div className="global-banner" role="status">
-            📢 {st.admin.announcements[0].text}
-            <button
-              type="button"
-              className="close"
-              aria-label="Dismiss announcement"
-              onClick={() => { st.admin.announcements.shift(); store.commit(); }}
-            >✕</button>
-          </div>
-        )}
         {!hiddenNav && st.user.frozen && (
           <div className="global-banner warn" role="status">
             <div>
@@ -420,15 +420,13 @@ export default function App() {
         {/* KYC Status Alert — must stay INSIDE .main: as a direct flex child of
             .app-shell it becomes an in-flow flex item beside .main and squeezes
             the whole page content into a narrow column. */}
-        {authInitialized && st.user.authed && complianceSequence === 'complete' && !hiddenNav && (
+        {authInitialized && st.user.authed && st.user.role !== 'admin' && st.user.role !== 'superadmin' && complianceSequence === 'complete' && !hiddenNav && (
           <KYCStatusAlert />
         )}
 
         <ErrorBoundary resetKey={path}>
           <Suspense fallback={<LoadingState page />}>
-            {isAdminRoute
-              ? <Admin activeTab={adminTab} onTabChange={setAdminTab} />
-              : <div key={path} className="page-enter">{route.render(navigate)}</div>}
+            <div key={path} className="page-enter">{route.render(navigate)}</div>
           </Suspense>
         </ErrorBoundary>
       </main>
@@ -437,8 +435,9 @@ export default function App() {
       <PinChallengeHost />
       <CookieConsentBanner />
       
-      {/* KYC Gate - Blocks all features if KYC not completed (never over the /kyc wizard itself) */}
-      {authInitialized && st.user.authed && !hiddenNav && st.user.kycLevel === 1 && path.split('?')[0] !== '/kyc' && (
+      {/* KYC Gate - Blocks all features if KYC not completed (never over the /kyc wizard itself).
+          Admins and superadmins are exempt: they manage KYC, they don't get gated by it. */}
+      {authInitialized && st.user.authed && !hiddenNav && st.user.kycLevel === 1 && st.user.role !== 'admin' && st.user.role !== 'superadmin' && path.split('?')[0] !== '/kyc' && (
         <KYCGate 
           kycLevel={st.user.kycLevel} 
           userId={st.user.id} 

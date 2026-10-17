@@ -21,8 +21,25 @@ const UserSchema = new Schema({
 
   // Roles & moderation
   role: { type: String, enum: ['user', 'admin', 'superadmin'], default: 'user', index: true },
+  // The single admin category this account is scoped to. Null for superadmins
+  // (who see everything) and for regular users. The middleware in
+  // middleware/categoryAccess.js is the gatekeeper — adminCategory is a
+  // promise the route layer enforces, not a hint.
+  adminCategory: {
+    type: String,
+    enum: ['users', 'blockchain', 'validator', 'kyc', 'mining', 'treasury', 'marketplace', 'mlpts', 'reports'],
+    default: null,
+    index: true,
+  },
   banned: { type: Boolean, default: false },
   banReason: { type: String },
+
+  // Updated by requireAuth on every superadmin-authed request, then read by
+  // /api/admin/presence so category admins can tell whether anyone with the
+  // authority to read their messages is currently online. The presence
+  // endpoint considers a superadmin "online" if lastSeenAt is within the
+  // last 60 seconds. null for non-superadmins.
+  lastSeenAt: { type: Date },
 
   // Profile (used by mines / task system)
   name: { type: String },

@@ -81,25 +81,82 @@ export function PinChallengeHost() {
       setError('PIN must be 4-8 digits');
       return;
     }
-    setBusy(true);
-    const result = await decryptMnemonic(store.state.wallet.pinEncryptedMnemonic, pin);
-    setBusy(false);
-    if (result.success && result.decrypted) {
-      pending.resolve(result.decrypted);
-      setPending(null);
+    const encrypted = store.state.wallet.pinEncryptedMnemonic;
+    // Distinguish "no wallet data on this device" from "wrong PIN".
+    // Before the store fix that persisted pinEncryptedMnemonic, every
+    // attempt after a browser refresh failed with a generic
+    // "Failed to decrypt mnemonic. Verify PIN is correct." — and the
+    // modal then escalated it to "wrong PIN — N attempts remaining",
+    // eventually locking the user out for 60s. The actual problem was
+    // never their PIN; it was that the ciphertext wasn't there to
+    // decrypt. Surface that case as a recovery instruction instead,
+    // and DON'T count it against the PIN-attempt budget.
+    if (!encrypted) {
+      setError(
+        'No encrypted wallet on this device. Use "Restore from 24-word phrase" in the wallet menu to re-import your wallet, then set a new PIN.'
+      );
       return;
     }
-    const nextAttempts = attempts + 1;
-    setAttempts(nextAttempts);
-    setPin('');
-    if (nextAttempts >= MAX_ATTEMPTS) {
-      const lockUntil = Date.now() + LOCKOUT_SECONDS * 1000;
-      setLockedUntil(lockUntil);
-      setError(`Too many failed attempts. Try again in ${LOCKOUT_SECONDS}s.`);
-    } else {
-      setError(
-        `Incorrect PIN — ${MAX_ATTEMPTS - nextAttempts} attempt${MAX_ATTEMPTS - nextAttempts === 1 ? '' : 's'} remaining`
-      );
+    setBusy(true);
+    
+    try {
+      // Verify PIN on server first (rate limiting, lockout protection)
+      const verifyResponse = await fetch('/api/wallet/pin/verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+        credentials: 'include',
+      });
+
+      const verifyData = await verifyResponse.json();
+
+      if (!verifyResponse.ok) {
+        // Server-side lockout or too many attempts
+        if (verifyData.locked) {
+          const lockUntil = Date.now() + (verifyData.remainingTime || 300) * 1000;
+          setLockedUntil(lockUntil);
+          setError(`Account locked for ${verifyData.remainingTime || 300} seconds. Too many failed attempts.`);
+          setPin('');
+          setBusy(false);
+          return;
+        }
+
+        // PIN verification failed
+        const attemptsLeft = verifyData.attemptsRemaining || (MAX_ATTEMPTS - attempts - 1);
+        const nextAttempts = attempts + 1;
+        setAttempts(nextAttempts);
+        setPin('');
+        
+        if (attemptsLeft <= 0) {
+          const lockUntil = Date.now() + (verifyData.remainingTime || 300) * 1000;
+          setLockedUntil(lockUntil);
+          setError(`Too many failed attempts. Try again in ${verifyData.remainingTime || 300}s.`);
+        } else {
+          setError(
+            `Incorrect PIN — ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} remaining`
+          );
+        }
+        setBusy(false);
+        return;
+      }
+
+      // PIN verified on server, now decrypt locally with verified PIN
+      const result = await decryptMnemonic(encrypted, pin);
+      setBusy(false);
+      
+      if (result.success && result.decrypted) {
+        pending.resolve(result.decrypted);
+        setPending(null);
+        return;
+      }
+
+      // Decryption failed (shouldn't happen if PIN is correct)
+      setError('Failed to decrypt wallet. Please try again.');
+      setPin('');
+    } catch (err) {
+      setBusy(false);
+      console.error('PIN verification error:', err);
+      setError('PIN verification error. Please check your connection and try again.');
     }
   };
 

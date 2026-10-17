@@ -63,9 +63,7 @@ describe('Error Handling', () => {
           )
       );
 
-      expect(async () => {
-        await fetch('/api/test');
-      }).rejects.toThrow();
+      await expect(fetch('/api/test')).rejects.toThrow();
     });
 
     it('should implement retry logic on timeout', async () => {

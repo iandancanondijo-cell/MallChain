@@ -144,15 +144,18 @@ router.post('/convert', async (req, res) => {
     }
     const sigKey = `adr036_consumed:convert:${Buffer.from(String(signature || '').slice(0, 128)).toString('base64')}`
     if (process.env.TEST_MODE !== 'true') {
+      let rds;
       try {
         const getRedis = require('../mallwallet/queue/redis')
-        const rds = getRedis()
+        rds = getRedis()
         const already = await rds.set(sigKey, '1', 'EX', ADR036_CONSUMED_TTL_SECONDS, 'NX')
         if (already === null) {
           return res.status(401).json({ error: 'signature already used — please sign a fresh message' })
         }
       } catch (_) {
         /* Redis unavailable — allow through; the signed-timestamp window + on-chain sequence replay protect the user */
+      } finally {
+        if (rds) rds.quit().catch(() => {});
       }
     }
     const ownsAddress = verifyConvertSignature({

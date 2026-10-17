@@ -304,9 +304,7 @@ describe('Wallet API', () => {
     it('should handle network timeout', async () => {
       mockFetch.mockRejectedValueOnce(new Error('Network timeout'));
 
-      expect(async () => {
-        await fetch(`${baseUrl}`);
-      }).rejects.toThrow();
+      await expect(fetch(`${baseUrl}`)).rejects.toThrow();
     });
   });
 

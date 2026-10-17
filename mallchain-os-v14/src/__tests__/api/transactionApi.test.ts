@@ -268,9 +268,7 @@ describe('Transaction API', () => {
     it('should handle network errors', async () => {
       mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
-      expect(async () => {
-        await fetch(baseUrl);
-      }).rejects.toThrow();
+      await expect(fetch(baseUrl)).rejects.toThrow();
     });
 
     it('should handle server errors', async () => {

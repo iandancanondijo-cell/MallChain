@@ -35,6 +35,8 @@ import {
   Zap, Globe, CheckCircle, Clock, ChevronRight, ChevronLeft, AlertCircle, Wallet
 } from 'lucide-react';
 import { Button, Heading, Text, Badge } from '../../components/shared';
+import { AgeVerificationModal } from '../../components/ComplianceGates';
+import '../../components/ComplianceGates.css';
 import './EnhancedRegistrationFlow.css';
 
 // Registration flow steps
@@ -108,6 +110,7 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
 
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showAgeModal, setShowAgeModal] = useState(false);
   const [compliance, setCompliance] = useState<ComplianceConsent>({
     ageConfirmed: false,
     tosAccepted: false,
@@ -333,26 +336,36 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
 
             <div className="registration-form">
               {/* Age Verification */}
-              <label className="compliance-check">
-                <input
-                  type="checkbox"
-                  checked={compliance.ageConfirmed}
-                  onChange={(e) => {
-                    const updated = { ...compliance, ageConfirmed: e.target.checked };
-                    updated.allAccepted = updated.ageConfirmed && updated.tosAccepted && updated.privacyAccepted;
-                    setCompliance(updated);
-                  }}
-                  aria-label="Confirm age requirement"
-                />
+              <div className="compliance-check">
                 <div className="compliance-check-content">
                   <span className="compliance-check-label">
-                    I confirm I am 18 years or older
+                    Age Verification
                   </span>
                   <span className="compliance-check-description">
-                    Required to use our platform
+                    {compliance.ageConfirmed
+                      ? '✓ You have confirmed you are 18 years or older'
+                      : 'Required to use our platform'}
                   </span>
                 </div>
-              </label>
+                <button
+                  type="button"
+                  onClick={() => setShowAgeModal(true)}
+                  className="compliance-check-action"
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    borderRadius: 8,
+                    border: compliance.ageConfirmed ? '1px solid var(--gold-dim, rgba(212, 175, 55, 0.3))' : '1px solid var(--border)',
+                    background: compliance.ageConfirmed ? 'var(--gold-dim, rgba(212, 175, 55, 0.12))' : 'var(--bg-2)',
+                    color: compliance.ageConfirmed ? 'var(--gold)' : 'var(--txt-2)',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {compliance.ageConfirmed ? 'Verified' : 'Verify Age'}
+                </button>
+              </div>
 
               {/* TOS Acceptance */}
               <label className="compliance-check">
@@ -428,6 +441,17 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
                 </motion.div>
               )}
             </div>
+
+            {showAgeModal && (
+              <AgeVerificationModal
+                onVerify={() => {
+                  setShowAgeModal(false);
+                  const updated = { ...compliance, ageConfirmed: true };
+                  updated.allAccepted = updated.ageConfirmed && updated.tosAccepted && updated.privacyAccepted;
+                  setCompliance(updated);
+                }}
+              />
+            )}
           </motion.div>
         );
 

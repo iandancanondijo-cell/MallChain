@@ -648,6 +648,13 @@ form {
   }
 
   .logo img { width: 24px; height: 24px; }
+
+  /* was min(135vmin, 1100px) → ~527px on a 390px phone; sits behind the form and overflows. */
+  .auth-ring {
+    width: min(82vmin, 340px);
+    opacity: 0.45;
+    filter: blur(4px);
+  }
 }
 
 /* ── responsive: phone ── */

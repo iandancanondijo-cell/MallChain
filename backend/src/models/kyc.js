@@ -8,7 +8,7 @@ const { encryptField, decryptField } = require('../utils/fieldEncryption');
 // userId/_id), so no blind index is needed for these.
 const ENCRYPTED_FIELDS = [
   'idNumber', 'phoneNumber', 'address', 'city', 'postalCode',
-  'firstName', 'lastName', 'dateOfBirth', 'idDocumentUrl', 'annualIncome',
+  'firstName', 'lastName', 'dateOfBirth', 'idDocumentUrl', 'idFrontUrl', 'idBackUrl', 'annualIncome',
 ];
 
 const KYCSchema = new Schema({
@@ -27,11 +27,13 @@ const KYCSchema = new Schema({
   postalCode: { type: String, required: true },
   phoneNumber: { type: String, required: true },
   
-  // Identity Verification
+  // Identity Verification - Support both old single-document and new dual-document formats
   idType: { type: String, enum: ['passport', 'drivers_license', 'national_id'], required: true },
   idNumber: { type: String, required: true },
   idExpiry: { type: Date, required: true },
-  idDocumentUrl: { type: String },
+  idDocumentUrl: { type: String }, // Deprecated: single-document format for backwards compatibility
+  idFrontUrl: { type: String }, // New: front of ID (required for new submissions)
+  idBackUrl: { type: String }, // New: back of ID (required for new submissions)
   
   // Financial Information
   occupation: { type: String, required: true },
@@ -62,6 +64,14 @@ const KYCSchema = new Schema({
   reviewedAt: { type: Date },
   reviewedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   notes: { type: String },
+  // Filename of the admin's review-screenshot (uploaded through
+  // /api/admin/proof), stored as a bare reference so the file path can
+  // be re-resolved on read. The screenshot is the admin's proof of the
+  // decision they made (terminal capture, dashboard screenshot at review
+  // time) — required for KYC so a compliance audit can reconstruct what
+  // evidence supported each approve/reject. Not encrypted at rest:
+  // the filename itself is non-PII (just `${userId}-${ts}-name.png`).
+  reviewedScreenshotRef: { type: String },
 
   // Set by services/gdprService.js on an erasure request. The identity
   // fields above (name/DOB/address/ID number/document/AML raw payload) are
@@ -72,6 +82,16 @@ const KYCSchema = new Schema({
   // (Article 17(3)(b)). The exact retention period is a legal/compliance
   // policy decision, not one this code makes — see docs/compliance/gdpr.md.
   erasedAt: { type: Date },
+
+  // P1 ISSUE #3 WORKAROUND: Add data retention policy
+  // KYC records older than 7 years (standard regulatory retention) are candidates for deletion
+  // Compliance note: Adjust RETENTION_YEARS per legal/compliance policy for your jurisdiction
+  retentionExpiresAt: {
+    type: Date,
+    index: true,
+    // Set to 7 years after submission by default (adjustable per policy)
+    default: () => new Date(Date.now() + (365 * 7 * 24 * 60 * 60 * 1000))
+  },
 
   // Draft progress — stores partial KYC data so users can resume after
   // closing the browser. Only populated while the user is mid-flow; cleared

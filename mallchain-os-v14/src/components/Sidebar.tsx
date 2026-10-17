@@ -3,7 +3,7 @@
  * v14 OS navigation: Home, Wallet, Marketplace, Staking, Governance,
  * Mines, Validators, Explorer, Ecosystem. Admin access isn't listed here —
  * admin credentials are routed straight to the dedicated admin shell
- * (AdminSidebar.tsx) on login instead.
+ * (#/admin) on login instead.
  *
  * Below 768px this becomes an off-canvas drawer (see styles/global.css's
  * .sidebar.open transform) instead of the old permanent icon-only rail,
@@ -135,7 +135,7 @@ export default function Sidebar({ path, mobileOpen, onClose }: { path: string; m
     <aside className={'sidebar' + (mobileOpen ? ' open' : '')}>
       <a href="#/" className="side-logo" onClick={() => onClose?.()}>
         <span className="hex" aria-hidden="true">
-          <img src="/mallchain.svg" alt="" width={28} height={28} />
+          <img src="/mallchain.svg" alt="Mallchain" width={28} height={28} />
         </span>
         <span className="txt">Mallchain</span>
       </a>

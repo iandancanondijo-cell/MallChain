@@ -88,8 +88,8 @@ describe('marketplaceTx', () => {
     expect(result.txHash).toBe('CREATEHASH');
     expect(result.escrowId).toBe('escrow-42');
 
-    expect(api.post).toHaveBeenCalledTimes(1);
-    const [path, body] = vi.mocked(api.post).mock.calls[0] as [string, { txBytes: string }];
+    expect(api.post).toHaveBeenCalledTimes(2);
+    const [path, body] = vi.mocked(api.post).mock.calls[1] as [string, { txBytes: string }];
     expect(path).toBe('/api/marketplace/escrow/broadcast');
     expect(typeof body.txBytes).toBe('string');
     expect(body.txBytes.length).toBeGreaterThan(0);
@@ -125,7 +125,7 @@ describe('marketplaceTx', () => {
     const result = await releaseFunds({ mnemonic: TEST_MNEMONIC, buyer, escrowId: 'escrow-42' });
 
     expect(result.txHash).toBe('RELEASEHASH');
-    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(api.post).toHaveBeenCalledTimes(2);
   });
 
   it('openDispute signs opener as the buyer', async () => {
@@ -135,6 +135,6 @@ describe('marketplaceTx', () => {
     const result = await openDispute({ mnemonic: TEST_MNEMONIC, buyer, escrowId: 'escrow-42' });
 
     expect(result.txHash).toBe('DISPUTEHASH');
-    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(api.post).toHaveBeenCalledTimes(2);
   });
 });

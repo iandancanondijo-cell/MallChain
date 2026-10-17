@@ -192,7 +192,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
                 <div style={{ fontWeight: 700, fontSize: 13 }}>Wallet not connected</div>
                 <div style={{ fontSize: 11.5, color: 'var(--txt-3)', marginTop: 2 }}>Connect to view balances and transact</div>
               </div>
-              <button className="btn btn-primary btn-sm" onClick={() => navigate('/auth')}>Connect</button>
+              <button className="btn btn-primary btn-sm" onClick={() => navigate('/wallet/connect')}>Connect</button>
             </div>
           )}
           {spark.length > 0 && (

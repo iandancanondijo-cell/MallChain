@@ -16,6 +16,7 @@ import { requestCache } from '../services/requestCache';
 import { apiUrl } from '../config/apiBase';
 import QRCode from 'qrcode';
 import type { MallchainWallet } from '../wallet/MallchainWallet';
+import PrivacySettings from '../pages/PrivacySettings';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -91,6 +92,8 @@ const NAVIGATION_ITEMS = [
   // DEVELOPER section
   { label: 'Smart Contracts', id: 'contracts', section: 'DEVELOPER', icon: '<>' },
   { label: 'DevHub', id: 'devhub', section: 'DEVELOPER', icon: '👨‍💻' },
+  // ACCOUNT section
+  { label: 'Privacy & Settings', id: 'privacy', section: 'ACCOUNT', icon: '🔐' },
 ];
 
 /**
@@ -576,6 +579,9 @@ export function MallchainDashboard({ onOpenCreateWallet }: { onOpenCreateWallet?
 
             {/* DevHub Page */}
             {state.activeSection === 'devhub' && <DevHubPage />}
+
+            {/* Privacy & Settings Page */}
+            {state.activeSection === 'privacy' && <PrivacySettings />}
           </div>
 
           {/* Right Rail (Dashboard Only) */}

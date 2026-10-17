@@ -118,7 +118,7 @@ export const chain = {
 /** Expose the same global contract as the HTML preview. */
 declare global {
   interface Window {
-    MALLCHAIN_CONFIG?: Partial<MallchainConfig>;
+    MALLCHAIN_CONFIG?: Partial<MallchainConfig> & { rpc?: string; rest?: string; api?: string; live?: boolean };
     __mallOS?: unknown;
   }
 }

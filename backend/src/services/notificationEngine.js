@@ -238,7 +238,7 @@ async function deliverEmail(recipient, rendered) {
     return { channel: 'email', status: 'skipped', reason: 'No email address' };
   }
   try {
-    const { sendEmail, complianceFooter } = require('./emailService');
+    const { sendEmail, complianceFooter } = require('./brevoService');
     const subject = rendered.subject
       ? `[Mallchain] ${rendered.subject}`
       : `[Mallchain] ${rendered.title}`;
@@ -266,13 +266,13 @@ async function deliverSMS(recipient, rendered) {
     return { channel: 'sms', status: 'skipped', reason: 'No phone number' };
   }
   try {
-    const { sendSMS } = require('./smsService');
+    const { sendSMS } = require('./brevoService');
     const message = `Mallchain: ${rendered.title} — ${rendered.body}`;
-    const result = await sendSMS(phone, message.substring(0, 1600));
+    const result = await sendSMS(phone, message.substring(0, 765));
     return {
       channel: 'sms',
       status: result.success ? 'sent' : 'failed',
-      providerMessageId: result.sid,
+      providerMessageId: result.messageId,
       reason: result.error,
     };
   } catch (err) {
@@ -290,7 +290,7 @@ async function deliverWhatsApp(recipient, rendered, prefs) {
     return { channel: 'whatsapp', status: 'skipped', reason: 'WhatsApp not opted in' };
   }
   try {
-    const { sendWhatsApp } = require('./whatsappService');
+    const { sendWhatsApp } = require('./brevoService');
     const message = `*${rendered.title}*\n${rendered.body}`;
     const result = await sendWhatsApp(phone, message);
     return {

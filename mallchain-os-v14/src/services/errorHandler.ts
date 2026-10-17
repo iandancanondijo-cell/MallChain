@@ -154,6 +154,14 @@ export function handle401Error(context: ErrorContext, onRedirect?: () => void): 
 
   console.warn(`[Unauthorized] ${action}`, { endpoint });
 
+  // The admin panel has its own separate auth system — a 401 from the main
+  // app's API while on an admin route just means the user isn't logged into
+  // the main app, which is expected. Don't clear the session or redirect.
+  const currentHash = (window.location.hash.replace(/^#\/?/, '/') || '/').split('?')[0];
+  if (currentHash === '/admin' || currentHash.startsWith('/admin/')) {
+    return;
+  }
+
   // Clear the local session marker immediately, synchronously — a 401 means
   // the session is already invalid, so the UI must not keep assuming it's
   // authenticated while we wait for the toast to display.

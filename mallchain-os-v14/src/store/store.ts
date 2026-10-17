@@ -12,7 +12,42 @@ import { config } from '../services/config';
 import { detectDefaultCurrency } from '../services/locale';
 
 export const OS_KEY = 'mallchain_os_v1_v14';
-const WALLET_SECRETS_KEY = 'mallchain_wallet_secrets_v1';
+
+/**
+ * Security model for wallet secrets:
+ *
+ *   st.wallet.pinEncryptedMnemonic — the recovery phrase encrypted with
+ *     the user's PIN via AES-256-GCM (PBKDF2-SHA256, 250k iterations,
+ *     fresh random salt + IV per encryption — services/security.ts).
+ *     PERSISTED to localStorage alongside the rest of the store so the
+ *     wallet survives a browser refresh; without this the user is locked
+ *     out of every signing operation the moment they reload, and the
+ *     modal misreports it as a never-ending "wrong PIN".
+ *
+ *   st.wallet.pinHash — bcrypt(10) hash of the same PIN. PERSISTED too —
+ *     it's what verifyPin() checks before letting the modal attempt the
+ *     expensive PBKDF2/AES-GCM decrypt. Both fields are useless without
+ *     the PIN itself: PBKDF2 × 250k makes a 6+ digit PIN offline
+ *     brute-force infeasible, and AES-GCM's auth tag rejects tampered
+ *     ciphertext before any plaintext is exposed. The 24-word phrase
+ *     backup (held by the user, never written anywhere we can read)
+ *     remains the recovery path if the PIN itself is lost.
+ *
+ *   Plaintext mnemonic (st.wallet.mnemonic) is still stripped from
+ *     localStorage — it's only ever populated by legacy wallets awaiting
+ *     PIN migration (App.tsx's "needsMigration" effect), and Security
+ *     Settings wipes it the moment the encryption runs.
+ *
+ *   The in-memory `memoryWalletSecrets` mirror below is kept for fast
+ *   reads and as a fallback in applyExternalState; localStorage remains
+ *   the source of truth, written through persistMainStore() on every
+ *   commit and rehydrated by Store.load() on the next page load.
+ */
+interface WalletSecrets {
+  pinEncryptedMnemonic: string;
+  pinHash: string;
+}
+let memoryWalletSecrets: WalletSecrets | null = null;
 
 /* ---------------- types ---------------- */
 
@@ -69,6 +104,10 @@ export interface AppState {
     kycLevel: number;
     role: 'user' | 'admin' | 'superadmin';
     hasBadge: boolean;
+    // Set on login when role==='admin'. null for superadmin/users. Used by
+    // AdminApp to land category admins directly in their category window
+    // and gate the Reports UI on its own category.
+    adminCategory: 'users' | 'blockchain' | 'validator' | 'kyc' | 'mining' | 'treasury' | 'marketplace' | 'mlpts' | 'reports' | null;
   };
   balances: Balance;
   txs: Tx[];
@@ -174,10 +213,6 @@ export interface AppState {
     earned: number;
     count: number;
     claimed: number;
-  };
-  admin: {
-    flags: Record<string, boolean>;
-    announcements: Array<{ id: string; text: string; ts: number }>;
   };
   contracts: Array<{ id: string; name: string; addr: string; type: string; txs: number }>;
   devhub: {
@@ -292,6 +327,11 @@ function emptyState(): AppState {
       kycLevel: 1,
       role: 'user',
       hasBadge: false,
+      // 'adminCategory' is set on login when role==='admin'. null for
+      // superadmin/users. AdminApp uses this to land them directly in their
+      // category window — category admins cannot navigate to other
+      // categories, the route simply doesn't exist for them.
+      adminCategory: null,
     },
     balances: { MALL: 0, MLPTS: 0, USD_M: 0, KES: 0, EUR: 0, GBP: 0 },
     txs: [],
@@ -317,7 +357,6 @@ function emptyState(): AppState {
     explorer: { blocks: [], txs: [] },
     messaging: { conversations: [] },
     referrals: { code: '', earned: 0, count: 0, claimed: 0 },
-    admin: { flags: {}, announcements: [] },
     notifs: [],
     contracts: [],
     devhub: { keys: [] },
@@ -384,28 +423,24 @@ class Store {
     }
     const base = parsed ? this.merge(parsed) : emptyState();
 
-    // F1: The PIN-encrypted mnemonic ciphertext lives in sessionStorage
-    // (cleared when the tab/browser closes) rather than localStorage
-    // (persistent). This limits the XSS exposure window: an attacker who
-    // steals the ciphertext from sessionStorage can only brute-force the
-    // PIN while the tab is still open. On load, we overlay the session
-    // secret onto the localStorage-backed state. If sessionStorage has no
-    // secret yet but localStorage does (migration from older versions),
-    // we promote it to sessionStorage and strip it from localStorage.
-    try {
-      const sessionRaw = sessionStorage.getItem(WALLET_SECRETS_KEY);
-      if (sessionRaw) {
-        const secrets = JSON.parse(sessionRaw) as { pinEncryptedMnemonic?: string; pinHash?: string };
-        if (secrets.pinEncryptedMnemonic) base.wallet.pinEncryptedMnemonic = secrets.pinEncryptedMnemonic;
-        if (secrets.pinHash) base.wallet.pinHash = secrets.pinHash;
-      } else if (parsed?.wallet?.pinEncryptedMnemonic) {
-        this.writeWalletSecrets(parsed.wallet.pinEncryptedMnemonic, parsed.wallet.pinHash);
-        base.wallet.pinEncryptedMnemonic = parsed.wallet.pinEncryptedMnemonic;
-        base.wallet.pinHash = parsed.wallet.pinHash;
-        this.persistMainStore(parsed);
-      }
-    } catch {
-      /* sessionStorage unavailable — fall back to localStorage copy already in base */
+    // Wallet secrets round-trip through localStorage (see WalletSecrets
+    // comment above) — pull whatever the persistence layer has. Memory
+    // is only a fast-read mirror; on a fresh tab it's empty and the
+    // disk copy is the only source of truth, so the second branch
+    // (load from disk) is the one that actually carries the user
+    // across a refresh. The first branch is hit on the rare same-tab
+    // call to load() where something else already populated memory.
+    if (memoryWalletSecrets?.pinEncryptedMnemonic) {
+      base.wallet.pinEncryptedMnemonic = memoryWalletSecrets.pinEncryptedMnemonic;
+      base.wallet.pinHash = memoryWalletSecrets.pinHash;
+    } else if (parsed?.wallet?.pinEncryptedMnemonic) {
+      // Fresh-tab load — rehydrate the in-memory mirror from disk.
+      memoryWalletSecrets = {
+        pinEncryptedMnemonic: parsed.wallet.pinEncryptedMnemonic,
+        pinHash: parsed.wallet.pinHash || '',
+      };
+      base.wallet.pinEncryptedMnemonic = parsed.wallet.pinEncryptedMnemonic;
+      base.wallet.pinHash = parsed.wallet.pinHash || '';
     }
 
     // Task 4.8: Sync auth state with the session marker on initial load.
@@ -452,7 +487,6 @@ class Store {
       explorer: { ...base.explorer, ...saved.explorer },
       messaging: { ...base.messaging, ...saved.messaging },
       referrals: { ...base.referrals, ...saved.referrals },
-      admin: { ...base.admin, ...saved.admin },
       flows: { ...base.flows, ...saved.flows },
     };
     return out;
@@ -464,22 +498,24 @@ class Store {
   }
 
   private writeWalletSecrets(pinEncryptedMnemonic: string, pinHash: string) {
-    try {
-      sessionStorage.setItem(
-        WALLET_SECRETS_KEY,
-        JSON.stringify({ pinEncryptedMnemonic: pinEncryptedMnemonic || '', pinHash: pinHash || '' })
-      );
-    } catch {
-      /* sessionStorage unavailable */
-    }
+    // Store secrets in memory only (not sessionStorage) to prevent XSS theft
+    memoryWalletSecrets = {
+      pinEncryptedMnemonic: pinEncryptedMnemonic || '',
+      pinHash: pinHash || ''
+    };
   }
 
   private persistMainStore(state: AppState) {
     try {
       const toPersist = { ...state };
       if (toPersist.wallet) {
-        const { mnemonic: _m, pinEncryptedMnemonic: _pe, pinHash: _ph, ...safeWallet } = toPersist.wallet as typeof toPersist.wallet & { mnemonic?: string; pinEncryptedMnemonic?: string; pinHash?: string };
-        toPersist.wallet = { ...safeWallet, mnemonic: '', pinEncryptedMnemonic: '', pinHash: '' } as typeof toPersist.wallet;
+        // Only strip the legacy plaintext mnemonic field — the
+        // PIN-encrypted blob and PIN hash MUST round-trip through
+        // localStorage, otherwise the wallet is dead after a refresh
+        // (PinChallenge would treat every decrypt failure as a wrong
+        // PIN and lock the user out forever).
+        const { mnemonic: _m, ...safeWallet } = toPersist.wallet as typeof toPersist.wallet & { mnemonic?: string };
+        toPersist.wallet = { ...safeWallet, mnemonic: '' } as typeof toPersist.wallet;
       }
       if (toPersist.devhub?.keys) {
         toPersist.devhub = {
@@ -646,8 +682,11 @@ class Store {
    * Apply a full snapshot already persisted by another tab (via a `storage` event).
    * Unlike every other mutation path this does NOT re-persist — the snapshot is
    * already on disk — it only merges into memory and notifies subscribers.
-   * Wallet secrets (pinEncryptedMnemonic, pinHash) are preserved from the current
-   * tab's sessionStorage — they're not in the localStorage snapshot.
+   * Wallet secrets (pinEncryptedMnemonic, pinHash) now live in localStorage too,
+   * so the freshly-merged values are correct; we only fall back to the
+   * current memory copy if the incoming snapshot somehow doesn't carry them
+   * (defensive — merge() spreads `saved` on top of `base`, so this branch
+   * should never fire in practice).
    */
   applyExternalState(newState: AppState) {
     const savedSecrets = {
@@ -655,8 +694,10 @@ class Store {
       pinHash: this.state.wallet.pinHash,
     };
     this.state = this.merge(newState);
-    this.state.wallet.pinEncryptedMnemonic = savedSecrets.pinEncryptedMnemonic;
-    this.state.wallet.pinHash = savedSecrets.pinHash;
+    if (!this.state.wallet.pinEncryptedMnemonic && savedSecrets.pinEncryptedMnemonic) {
+      this.state.wallet.pinEncryptedMnemonic = savedSecrets.pinEncryptedMnemonic;
+      this.state.wallet.pinHash = savedSecrets.pinHash;
+    }
     this.listeners.forEach((fn) => {
       try {
         fn();
@@ -668,7 +709,7 @@ class Store {
 
   reset() {
     localStorage.removeItem(OS_KEY);
-    sessionStorage.removeItem(WALLET_SECRETS_KEY);
+    memoryWalletSecrets = null;  // Clear memory secrets on logout
     this.state = emptyState();
     this.commit();
   }

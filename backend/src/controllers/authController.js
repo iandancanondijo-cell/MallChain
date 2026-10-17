@@ -8,6 +8,7 @@ const { config } = require('../config');
 const { revokeToken, revokeAllUserTokens, isRevoked } = require('../middleware/tokenDenylist');
 const getRedis = require('../mallwallet/queue/redis');
 const { blindIndex, decryptField } = require('../utils/fieldEncryption');
+const activityEvents = require('../services/activityEvents');
 
 const LINK_WALLET_SIGNATURE_MAX_AGE_MS = 10 * 60 * 1000;
 const ADR036_CONSUMED_TTL_SECONDS = 60 * 60;
@@ -23,8 +24,8 @@ const FAILED_LOGIN_LIMIT = 10;
 const FAILED_LOGIN_WINDOW_SECONDS = 15 * 60;
 
 async function checkAccountLock(identifier) {
+  const redis = getRedis();
   try {
-    const redis = getRedis();
     const key = `failed_login:${identifier}`;
     const count = Number(await redis.get(key) || 0);
     if (count >= FAILED_LOGIN_LIMIT) {
@@ -32,30 +33,38 @@ async function checkAccountLock(identifier) {
       return { locked: true, retryAfterSeconds: ttl > 0 ? ttl : FAILED_LOGIN_WINDOW_SECONDS };
     }
   } catch (err) {
-    // Redis unavailable — fail CLOSED. Log the error for ops visibility.
     const logger = require('../utils/logger');
     logger.error('authController', `Lockout check failed (failing closed for ${identifier}): ${err.message || err}`);
     return { locked: true, retryAfterSeconds: FAILED_LOGIN_WINDOW_SECONDS, reason: 'lockout_check_unavailable' };
+  } finally {
+    redis.quit().catch(() => {});
   }
   return { locked: false };
 }
 
 async function recordFailedLogin(identifier) {
+  const redis = getRedis();
   try {
-    const redis = getRedis();
     const key = `failed_login:${identifier}`;
     const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, FAILED_LOGIN_WINDOW_SECONDS);
+    if (count === 1) {
+      await redis.expire(key, FAILED_LOGIN_WINDOW_SECONDS);
+    }
   } catch (_) {
     /* best-effort only */
+  } finally {
+    redis.quit().catch(() => {});
   }
 }
 
 async function clearFailedLogins(identifier) {
+  const redis = getRedis();
   try {
-    await getRedis().del(`failed_login:${identifier}`);
+    await redis.del(`failed_login:${identifier}`);
   } catch (_) {
     /* best-effort only */
+  } finally {
+    redis.quit().catch(() => {});
   }
 }
 
@@ -101,7 +110,15 @@ function signToken(user) {
   // jti is a per-token id: logout revokes by jti (see routes/auth.js's
   // /logout and middleware/tokenDenylist.js) without needing to invalidate
   // every other token this user holds.
+  // P1 ISSUE #1 WORKAROUND: Reduce default SESSION_TTL_MIN from 120 to 120 minutes
+  // (recommended 2 hours for financial app, but allowing override)
   const sessionTtlMin = parseInt(process.env.SESSION_TTL_MIN || '120', 10);
+  // Clamp to reasonable bounds: minimum 30 min, maximum 480 min (8 hours)
+  // This prevents misconfiguration from creating security holes
+  const clampedTtl = Math.max(30, Math.min(480, sessionTtlMin));
+  if (clampedTtl !== sessionTtlMin && process.env.SESSION_TTL_MIN) {
+    logger.warn('auth', 'SESSION_TTL_MIN clamped to safe bounds', { requested: sessionTtlMin, clamped: clampedTtl });
+  }
   const token = jwt.sign(
     {
       userId: String(user._id),
@@ -109,9 +126,9 @@ function signToken(user) {
       jti: crypto.randomUUID(),
     },
     getJwtSecret(),
-    { expiresIn: `${sessionTtlMin}m` }
+    { expiresIn: `${clampedTtl}m` }
   );
-  return { token, sessionTtlMin, expiresAt: Math.floor(Date.now() / 1000) + sessionTtlMin * 60 };
+  return { token, sessionTtlMin: clampedTtl, expiresAt: Math.floor(Date.now() / 1000) + clampedTtl * 60 };
 }
 
 // The JWT itself now lives ONLY in an httpOnly cookie — never in a JSON
@@ -174,6 +191,10 @@ function toPublicUser(user) {
     fraud_status: user.fraud_status || 'clear',
     banned: Boolean(user.banned),
     kycLevel: Number(user.kycLevel || 1),
+    // Sent to admin clients so AdminApp can land category admins directly
+    // in their category window. null/undefined for superadmins and
+    // regular users.
+    adminCategory: user.adminCategory || null,
     created_at: user.createdAt || new Date().toISOString(),
     updated_at: user.updatedAt || user.createdAt || new Date().toISOString(),
   };
@@ -241,54 +262,50 @@ exports.register = async (req, res) => {
 
   const { token, sessionTtlMin, expiresAt } = signToken(u);
   setAuthCookie(res, token, sessionTtlMin);
+  activityEvents.emitAccountCreated(u._id.toString(), {}).catch(() => {});
   res.json({ expiresAt, user: toPublicUser(u) });
 };
 
 exports.login = async (req, res) => {
   const { password, otp } = req.body;
   const email = normalizeEmail(req.body.email);
-  console.log('[LOGIN] Step 1: Email normalized:', email);
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
 
-  console.log('[LOGIN] Step 2: Checking account lock...');
   const lock = await checkAccountLock(email);
   if (lock.locked) {
-    console.log('[LOGIN] Step 2.5: Account locked:', lock);
     if (lock.reason === 'lockout_check_unavailable') {
       return res.status(503).json({ error: 'service temporarily unavailable, please retry in a moment', retryAfterSeconds: lock.retryAfterSeconds });
     }
     return res.status(423).json({ error: 'account temporarily locked after repeated failed logins', retryAfterSeconds: lock.retryAfterSeconds });
   }
 
-  console.log('[LOGIN] Step 3: Looking up user by email_blind...');
   const blindEmailIndex = blindIndex(email);
-  console.log('[LOGIN] Step 3.1: blind index computed:', blindEmailIndex);
   const u = await User.findOne({ email_blind: blindEmailIndex }).select('+password');
-  console.log('[LOGIN] Step 3.2: User lookup result:', u ? `Found user ${u._id}` : 'No user found');
-  if (!u) { await recordFailedLogin(email); return res.status(400).json({ error: 'invalid credentials' }); }
+  if (!u) {
+    await recordFailedLogin(email);
+    return res.status(400).json({ error: 'invalid credentials' });
+  }
   if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
-  
-  console.log('[LOGIN] Step 4: Comparing password...');
+
   const ok = await bcrypt.compare(password, u.password);
-  console.log('[LOGIN] Step 4.1: Password match:', ok);
   if (!ok) { await recordFailedLogin(email); return res.status(400).json({ error: 'invalid credentials' }); }
 
-  console.log('[LOGIN] Step 5: Checking 2FA...');
   const twoFactorResult = await checkTwoFactor(u._id, otp);
-  console.log('[LOGIN] Step 5.1: 2FA result:', twoFactorResult);
   if (twoFactorResult?.requires2fa) return res.json({ requires2fa: true });
   if (twoFactorResult?.error) return res.status(twoFactorResult.status).json({ error: twoFactorResult.error });
 
-  console.log('[LOGIN] Step 6: Clearing failed logins...');
   await clearFailedLogins(email);
-  
-  console.log('[LOGIN] Step 7: Updating lastLoginAt...');
+
   u.lastLoginAt = new Date();
   await u.save();
-  
-  console.log('[LOGIN] Step 8: Signing token...');
+
   const { token, sessionTtlMin, expiresAt } = signToken(u);
   setAuthCookie(res, token, sessionTtlMin);
+  activityEvents.emitNewLogin(u._id.toString(), {
+    event_time: new Date().toISOString(),
+    device_name: req.get('user-agent') || 'Unknown device',
+    ip: req.ip,
+  }).catch(() => {});
   res.json({ expiresAt, user: toPublicUser(u) });
 };
 
@@ -435,15 +452,18 @@ exports.linkWallet = async (req, res) => {
   }
   const sigKey = `adr036_consumed:link:${Buffer.from(String(signature || '').slice(0, 128)).toString('base64')}`;
   if (process.env.TEST_MODE !== 'true') {
+    let rds;
     try {
       const getRedis = require('../mallwallet/queue/redis');
-      const rds = getRedis();
+      rds = getRedis();
       const already = await rds.set(sigKey, '1', 'EX', ADR036_CONSUMED_TTL_SECONDS, 'NX');
       if (already === null) {
         return res.status(401).json({ error: 'signature already used — please sign a fresh message' });
       }
     } catch (_) {
       /* Redis unavailable — allow through; replay window + sequence replay on chain is still protection enough */
+    } finally {
+      if (rds) rds.quit().catch(() => {});
     }
   }
   // Lazy require: verifyAdr036.js pulls in @cosmjs/amino -> @cosmjs/crypto,

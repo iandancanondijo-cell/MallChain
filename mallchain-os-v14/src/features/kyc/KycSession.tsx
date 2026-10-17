@@ -11,11 +11,12 @@
  * Styling reuses features/auth/KycWizard.css; KycSession.css only adapts
  * the standalone auth-page layout to the in-app shell.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import { AlertTriangle, Check, Shield } from 'lucide-react';
 import { kycApi } from '../../services/kycApi';
 import { api } from '../../services/api';
+import CameraCapture from '../../components/CameraCapture';
 import '../auth/KycWizard.css';
 import './KycSession.css';
 
@@ -34,8 +35,10 @@ interface KycForm {
   idType: string;
   idNumber: string;
   idExpiry: string;
-  idDocumentUrl: string;
-  idDocumentName: string;
+  idFrontUrl: string;
+  idFrontName: string;
+  idBackUrl: string;
+  idBackName: string;
   occupation: string;
   sourceOfFunds: string;
   annualIncome: string;
@@ -46,7 +49,7 @@ interface KycForm {
 const EMPTY_FORM: KycForm = {
   firstName: '', lastName: '', dateOfBirth: '', nationality: '',
   address: '', city: '', country: 'Kenya', postalCode: '', phoneNumber: '',
-  idType: 'national_id', idNumber: '', idExpiry: '', idDocumentUrl: '', idDocumentName: '',
+  idType: 'national_id', idNumber: '', idExpiry: '', idFrontUrl: '', idFrontName: '', idBackUrl: '', idBackName: '',
   occupation: '', sourceOfFunds: '', annualIncome: '', politicalExposure: false, confirm: false,
 };
 
@@ -69,7 +72,7 @@ const LEADS: Record<(typeof STEPS)[number]['id'], string> = {
 const REQUIRED: Record<(typeof STEPS)[number]['id'], string[]> = {
   personal: ['firstName', 'lastName', 'dateOfBirth', 'nationality'],
   address: ['address', 'city', 'country', 'postalCode', 'phoneNumber'],
-  identity: ['idType', 'idNumber', 'idExpiry', 'idDocumentUrl'],
+  identity: ['idType', 'idNumber', 'idExpiry', 'idFrontUrl', 'idBackUrl'],
   financial: ['occupation', 'sourceOfFunds', 'annualIncome'],
   review: ['confirm'],
 };
@@ -97,7 +100,7 @@ interface DraftResponse {
     id type) and the confirm box alone don't justify creating a draft. */
 function hasAnyInput(f: KycForm): boolean {
   const rec = f as unknown as Record<string, unknown>;
-  const typed = ['firstName', 'lastName', 'dateOfBirth', 'nationality', 'address', 'city', 'postalCode', 'phoneNumber', 'idNumber', 'idExpiry', 'idDocumentUrl', 'occupation', 'sourceOfFunds', 'annualIncome'];
+  const typed = ['firstName', 'lastName', 'dateOfBirth', 'nationality', 'address', 'city', 'postalCode', 'phoneNumber', 'idNumber', 'idExpiry', 'idFrontUrl', 'idBackUrl', 'occupation', 'sourceOfFunds', 'annualIncome'];
   return typed.some((k) => String(rec[k] ?? '').trim() !== '') || f.politicalExposure;
 }
 
@@ -135,12 +138,18 @@ export default function KycSession({ navigate }: { navigate: (p: string) => void
   const [showErrors, setShowErrors] = useState(false);
   const [rejectedNotes, setRejectedNotes] = useState('');
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState('');
-  const [dragOver, setDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
+  // Per-slot upload state — front and back are independent, so a
+  // network error on one should not visually fail the other's preview.
+  const [uploadingFront, setUploadingFront] = useState(false);
+  const [uploadingBack, setUploadingBack] = useState(false);
+  const [errorFront, setErrorFront] = useState('');
+  const [errorBack, setErrorBack] = useState('');
+  // Camera capture produces a Blob we hand back to CameraCapture's preview;
+  // it lives in the parent so a side-switch or autosave doesn't drop it.
+  const [frontCaptureBlob, setFrontCaptureBlob] = useState<Blob | null>(null);
+  const [backCaptureBlob, setBackCaptureBlob] = useState<Blob | null>(null);
 
   /* Load current status + any saved draft. Status decides the phase;
      pending/review/approved users land on a result screen instead of the
@@ -218,30 +227,69 @@ export default function KycSession({ navigate }: { navigate: (p: string) => void
     goTo(stepIndex + 1);
   };
 
-  const acceptFile = useCallback(async (file: File | undefined | null) => {
+  const acceptFile = useCallback(async (file: File | undefined | null, side: 'front' | 'back') => {
     if (!file) return;
-    setUploadError('');
+    const setError = side === 'front' ? setErrorFront : setErrorBack;
+    const setUploadingFlag = side === 'front' ? setUploadingFront : setUploadingBack;
+    setError('');
     if (!['image/png', 'image/jpeg', 'application/pdf'].includes(file.type)) {
-      setUploadError('Unsupported format — upload a PNG, JPG, or PDF.');
+      setError('Unsupported format — upload a PNG, JPG, or PDF.');
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      setUploadError('That file is larger than 10 MB — try a smaller copy.');
+      setError('That file is larger than 10 MB — try a smaller copy.');
       return;
     }
-    setUploading(true);
-    const res = await kycApi.uploadDocument(file);
-    setUploading(false);
+    setUploadingFlag(true);
+    const res = await kycApi.uploadDocument(file, side);
+    setUploadingFlag(false);
     if (!res.ok || !res.data?.documentRef) {
-      setUploadError(res.error ?? 'Upload failed — please try again.');
+      setError(res.error ?? 'Upload failed — please try again.');
       return;
     }
-    setForm((f) => ({ ...f, idDocumentUrl: res.data!.documentRef, idDocumentName: file.name }));
+    if (side === 'front') {
+      setForm((f) => ({ ...f, idFrontUrl: res.data!.documentRef, idFrontName: file.name }));
+    } else {
+      setForm((f) => ({ ...f, idBackUrl: res.data!.documentRef, idBackName: file.name }));
+    }
+  }, []);
+
+  const onFrontCaptured = useCallback((blob: Blob, fileName: string) => {
+    setFrontCaptureBlob(blob);
+    setErrorFront('');
+    const file = new File([blob], fileName, { type: blob.type || 'image/png' });
+    void acceptFile(file, 'front');
+  }, [acceptFile]);
+
+  const onBackCaptured = useCallback((blob: Blob, fileName: string) => {
+    setBackCaptureBlob(blob);
+    setErrorBack('');
+    const file = new File([blob], fileName, { type: blob.type || 'image/png' });
+    void acceptFile(file, 'back');
+  }, [acceptFile]);
+
+  const clearFront = useCallback(() => {
+    setFrontCaptureBlob(null);
+    setForm((f) => ({ ...f, idFrontUrl: '', idFrontName: '' }));
+    setErrorFront('');
+  }, []);
+
+  const clearBack = useCallback(() => {
+    setBackCaptureBlob(null);
+    setForm((f) => ({ ...f, idBackUrl: '', idBackName: '' }));
+    setErrorBack('');
   }, []);
 
   const submit = async () => {
     if (submitting) return;
     setSubmitError('');
+    
+    // Validate both front and back required
+    if (!form.idFrontUrl || !form.idBackUrl) {
+      setSubmitError('Both front and back of your ID are required');
+      return;
+    }
+    
     setSubmitting(true);
     const res = await kycApi.submit({
       firstName: form.firstName.trim(),
@@ -256,7 +304,8 @@ export default function KycSession({ navigate }: { navigate: (p: string) => void
       idType: form.idType,
       idNumber: form.idNumber.trim(),
       idExpiry: form.idExpiry,
-      idDocumentUrl: form.idDocumentUrl,
+      idFrontUrl: form.idFrontUrl,
+      idBackUrl: form.idBackUrl,
       occupation: form.occupation.trim(),
       sourceOfFunds: form.sourceOfFunds,
       annualIncome: form.annualIncome,
@@ -340,7 +389,8 @@ export default function KycSession({ navigate }: { navigate: (p: string) => void
     { label: 'ID type', value: ID_TYPES.find((t) => t.value === form.idType)?.label ?? form.idType, step: 2 },
     { label: 'ID number', value: form.idNumber, step: 2 },
     { label: 'ID expiry', value: form.idExpiry, step: 2 },
-    { label: 'Document', value: form.idDocumentName || (form.idDocumentUrl ? 'Uploaded' : ''), step: 2 },
+    { label: 'Front of ID', value: form.idFrontName || (form.idFrontUrl ? '✓ Uploaded' : ''), step: 2 },
+    { label: 'Back of ID', value: form.idBackName || (form.idBackUrl ? '✓ Uploaded' : ''), step: 2 },
     { label: 'Occupation', value: form.occupation, step: 3 },
     { label: 'Source of funds', value: form.sourceOfFunds, step: 3 },
     { label: 'Annual income', value: form.annualIncome, step: 3 },
@@ -541,56 +591,39 @@ export default function KycSession({ navigate }: { navigate: (p: string) => void
                   />
                 </div>
 
-                <div
-                  className={`kyc-drop-zone${form.idDocumentUrl ? ' has-file' : ''}${dragOver ? ' drag' : ''}`}
-                  onClick={() => fileRef.current?.click()}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOver(true);
-                  }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDragOver(false);
-                    acceptFile(e.dataTransfer.files?.[0]);
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      fileRef.current?.click();
-                    }
-                  }}
-                  aria-label="Upload ID document"
-                >
-                  <div className="kyc-upload-frame">
-                    <b>{form.idDocumentUrl ? 'Document attached' : 'Drop your document here'}</b>
-                    <span>
-                      {form.idDocumentUrl
-                        ? form.idDocumentName || 'ID document'
-                        : 'Or click to browse · PNG, JPG or PDF · up to 10 MB'}
-                    </span>
-                  </div>
+                <div className="kyc-id-grid">
+                  <CameraCapture
+                    side="front"
+                    file={null}
+                    capturedBlob={frontCaptureBlob}
+                    uploading={uploadingFront}
+                    error={errorFront || (bad('idFrontUrl') ? 'Front of ID is required' : '')}
+                    hint="Hold your ID steady in good light. Make sure all four corners are visible and any text is sharp."
+                    fileName={form.idFrontName || undefined}
+                    onCapture={onFrontCaptured}
+                    onFile={(f) => void acceptFile(f, 'front')}
+                    onClear={clearFront}
+                  />
+                  <CameraCapture
+                    side="back"
+                    file={null}
+                    capturedBlob={backCaptureBlob}
+                    uploading={uploadingBack}
+                    error={errorBack || (bad('idBackUrl') ? 'Back of ID is required' : '')}
+                    hint="Flip your ID over and capture the back the same way. Make sure all four corners are visible."
+                    fileName={form.idBackName || undefined}
+                    onCapture={onBackCaptured}
+                    onFile={(f) => void acceptFile(f, 'back')}
+                    onClear={clearBack}
+                  />
                 </div>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/png,image/jpeg,application/pdf"
-                  style={{ display: 'none' }}
-                  onChange={(e) => {
-                    acceptFile(e.target.files?.[0]);
-                    e.target.value = '';
-                  }}
-                />
-                <p className={`kyc-upload-status${uploadError ? ' err' : ''}`} role={uploadError ? 'alert' : undefined}>
-                  {uploadError || (uploading ? 'Uploading…' : '')}
-                </p>
 
                 <ul className="kyc-tips">
-                  <li>All four corners of the document visible</li>
+                  <li>Both front and back required for verification</li>
+                  <li>All four corners visible on each side</li>
                   <li>Text fully readable — no glare or blur</li>
                   <li>Valid (not expired) government-issued document</li>
+                  <li>No camera on this device? Use "Upload image" to pick a saved photo or scan instead</li>
                 </ul>
               </>
             )}

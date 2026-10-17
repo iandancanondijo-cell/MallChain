@@ -3,6 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const { requireAdmin } = require('../middleware/adminAuth');
 const requireAuth = require('../middleware/requireAuth');
+const activityEvents = require('../services/activityEvents');
 const logger = require('../utils/logger');
 const idempotency = require('../middleware/idempotency');
 
@@ -16,6 +17,9 @@ const { PLATFORMS, DEFAULT_DAILY_CAP_MLPTS, getDailyCapMlpts } = require('../con
 const { computeCampaignRate, clampMultiplier, MIN_CAMPAIGN_MULTIPLIER, MAX_CAMPAIGN_MULTIPLIER } = require('../services/rewardEngineService');
 const { markActiveToday } = require('../utils/activityTracker');
 const { syncMallPointAccount, requireWalletAddress } = require('../services/mallpointsService');
+const { uploadProof, PROOFS_UPLOAD_DIR } = require('../middleware/upload');
+const fs = require('fs');
+const path = require('path');
 
 const SUBMISSION_CREATE_FIELDS = ['campaign_id', 'title', 'task_type', 'description', 'proof_url'];
 const SUBMISSION_UPDATE_FIELDS = ['title', 'task_type', 'description', 'proof_url'];
@@ -342,7 +346,118 @@ async function checkCampaignAbuseLimits(userId, campaignId, session) {
   return { ok: true };
 }
 
+// Upload a screenshot proof of activity — required before /submissions
+// will accept a `proof_url` that references a local file. The returned
+// `documentRef` is the on-disk filename inside PROOFS_UPLOAD_DIR; the
+// client passes that ref to /submissions, which then resolves and
+// confirms the file actually exists. This breaks the old "any string is
+// a valid proof" loophole that let submitters paste a placeholder URL
+// and get rewarded.
+router.post('/upload', minesAuth, uploadProof.single('proof'), (req, res) => {
+  if (!req.file) return badRequest(res, 'proof file is required (PNG or JPG)');
+  res.json(ok({ documentRef: req.file.filename }));
+});
+
+// Look up an uploaded proof file. Same authorization model as KYC's
+// /document — owner can read their own, admin/superadmin can read any
+// for review purposes. Path-traversal hardening mirrors kycController.js
+// (only the basename may be served), and every read is logged.
+router.get('/proof/:ref', minesAuth, async (req, res) => {
+  const userId = req.userId;
+  const isAdmin = req.user?.role === 'admin' || req.user?.role === 'superadmin';
+  const ref = path.basename(req.params.ref);
+  const filePath = path.join(PROOFS_UPLOAD_DIR, ref);
+  if (!fs.existsSync(filePath)) return badRequest(res, 'proof not found', 404);
+  // Owner check: filename must start with `${userId}-` unless the
+  // caller is admin. Without this, any logged-in user could request
+  // another user's proof filename and read it.
+  if (!isAdmin && !ref.startsWith(`${userId}-`)) {
+    return res.status(403).json({ ok: false, error: 'forbidden' });
+  }
+  res.sendFile(filePath, (err) => {
+    if (err && !res.headersSent) res.status(404).json({ ok: false, error: 'not found' });
+  });
+});
+
 router.post('/submissions', minesAuth, async (req, res) => {
+  // Validate required fields
+  const { campaign_id, proof_url, description } = req.body;
+
+  if (!campaign_id) {
+    return badRequest(res, 'campaign_id is required');
+  }
+
+  if (!proof_url || typeof proof_url !== 'string') {
+    return badRequest(res, 'proof_url is required (screenshot ref or external URL)');
+  }
+
+  // proof_url must be EITHER a local screenshot ref produced by /upload
+  // (filename starts with the userId- prefix and lives in PROOFS_UPLOAD_DIR)
+  // OR a real external URL. Two separate rules instead of one permissive
+  // regex — anything not matching both is rejected. The filesystem check
+  // for local refs is what closes the "any string is fine" hole; just
+  // passing `https://example.com/x.png` does not satisfy the local-ref
+  // branch, so submitters are pushed toward the upload path that
+  // produces an actual on-disk image.
+  const looksLocalRef = /^[a-f0-9]{20,}-[\d]+-.+\.(png|jpg|jpeg)$/i.test(proof_url);
+  const looksExternalUrl = (() => {
+    try { const u = new URL(proof_url); return u.protocol === 'http:' || u.protocol === 'https:'; }
+    catch { return false; }
+  })();
+
+  if (!looksLocalRef && !looksExternalUrl) {
+    return badRequest(res, 'proof_url must be either an uploaded screenshot ref or an http(s) URL');
+  }
+  if (looksLocalRef) {
+    const safeName = path.basename(proof_url);
+    const onDisk = path.join(PROOFS_UPLOAD_DIR, safeName);
+    if (!fs.existsSync(onDisk)) {
+      return badRequest(res, 'proof screenshot not found on disk — upload via /api/mines/upload first');
+    }
+    if (!safeName.startsWith(`${req.userId}-`)) {
+      return badRequest(res, 'proof screenshot was not uploaded by this account');
+    }
+  }
+
+  // Description validation if provided
+  if (description && typeof description === 'string' && description.length > 500) {
+    return badRequest(res, 'Description must be under 500 characters');
+  }
+
+  // Valid-task enforcement: refuse submissions pointing at a campaign
+  // that isn't active, doesn't exist, or was created by a user who's
+  // since been banned / downgraded below creator_level 1. Without this
+  // guard, a previously-valid campaign keeps paying out rewards long
+  // after its creator lost the right to run one — turning the Mines
+  // queue into a way for banned accounts to launder activity.
+  let campaign;
+  try {
+    campaign = await Campaign.findById(campaign_id).lean();
+  } catch (_) {
+    campaign = null;
+  }
+  if (!campaign) {
+    return badRequest(res, 'campaign not found');
+  }
+  if (campaign.status !== 'active') {
+    return badRequest(res, `campaign is ${campaign.status} — no longer accepting submissions`);
+  }
+  if (!campaign.creator_id) {
+    return badRequest(res, 'campaign has no creator — cannot validate task origin');
+  }
+  const creator = await User.findById(campaign.creator_id)
+    .select('banned creator_level role')
+    .lean();
+  if (!creator) {
+    return badRequest(res, 'campaign creator no longer exists');
+  }
+  if (creator.banned === true) {
+    return badRequest(res, 'campaign creator is banned — submissions blocked');
+  }
+  if ((creator.role === 'admin' || creator.role === 'superadmin') ? false : (Number(creator.creator_level) || 0) < 1) {
+    return badRequest(res, 'campaign creator is no longer authorized to run campaigns');
+  }
+
   // The check-then-create below must be atomic: without a transaction,
   // concurrent requests for the same campaign can all read the same
   // under-limit submission count before any of their creates land,
@@ -364,6 +479,7 @@ router.post('/submissions', minesAuth, async (req, res) => {
     // Randomly assign up to 6 staked reviewers; if none are eligible yet the
     // submission is untouched and falls back to the admin manual-review queue.
     await autoAssignReviewers(row);
+    activityEvents.emitProofSubmitted(req.userId, { submissionId: row._id, campaignId: row.campaign_id, taskType: row.task_type }).catch(() => {});
     res.json(ok(row));
   } catch (e) {
     if (e.abuseCheck) return badRequest(res, e.message, 429);
@@ -398,7 +514,9 @@ router.get('/submissions/pending', requireAdmin, async (_req, res) => {
   } catch (e) { res.json(ok([])); }
 });
 
-router.post('/submissions/:id/approve', requireAdmin, async (req, res) => {
+// P0 ISSUE #3 WORKAROUND: Add idempotency to reward approval
+// Prevents double-crediting if endpoint called twice (race condition fix)
+router.post('/submissions/:id/approve', requireAdmin, idempotency({ required: true }), async (req, res) => {
   try {
     const { rewardAmount } = req.body || {};
     const sub = await TaskSubmission.findById(req.params.id).lean();
@@ -459,6 +577,9 @@ router.post('/submissions/:id/approve', requireAdmin, async (req, res) => {
         $inc: { completions_count: 1, budget_remaining: -finalReward },
       });
     }
+    const minerId = sub.miner_id.toString();
+    activityEvents.emitProofApproved(minerId, { submissionId: sub._id, rewardAmount: finalReward }).catch(() => {});
+    activityEvents.emitMlptsEarned(minerId, { amount: finalReward, source: 'mining_approval', submissionId: sub._id }).catch(() => {});
     res.json(ok(updated));
   } catch (e) { res.status(500).json(fail(e)); }
 });
@@ -472,6 +593,9 @@ router.post('/submissions/:id/reject', requireAdmin, async (req, res) => {
       { new: true }
     ).lean();
     if (!row) return res.status(404).json(fail('submission not found'));
+    if (row.miner_id) {
+      activityEvents.emitProofRejected(row.miner_id.toString(), { submissionId: req.params.id, note }).catch(() => {});
+    }
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }
 });

@@ -265,29 +265,43 @@ const marketSchemas = {
  * If validation succeeds, stores validated/sanitized body in req.validatedBody
  */
 function validateInput(schema, options = {}) {
-  return (req, res, next) => {
-    const { error, value } = schema.validate(req.body, {
+  // Joi schemas with `.external()` rules must be validated with
+  // validateAsync (it returns a Promise that the rule's async work can run
+  // inside); passing such a schema to `validate()` throws
+  // "Schema with external rules must use validateAsync()" and turns the
+  // request into a generic 500. Always go through validateAsync so the
+  // sync-only and async-rule paths share one code path.
+  const validate = (body) =>
+    schema.validateAsync(body, {
       abortEarly: false,     // Report all errors, not just first one
       stripUnknown: true,    // Remove unexpected fields (security)
       convert: true,         // Type coercion (e.g., "123" → 123)
       ...options,
     });
 
-    if (error) {
-      // Format validation errors for client response
-      const details = error.details.map((detail) => ({
-        field: detail.path.join('.'),
-        message: detail.message,
-      }));
-
-      // Return 400 Bad Request with detailed validation errors
-      // Helps frontend show field-specific error messages
-      return res.status(400).json({
-        ok: false,
-        error: 'validation_failed',
-        code: 400,
-        details,
-      });
+  return async (req, res, next) => {
+    let value;
+    try {
+      value = await validate(req.body);
+    } catch (err) {
+      // Joi validateAsync rejects with the same `error` object validate()
+      // would have produced; normalise it back into the documented 400
+      // response shape so callers don't see a difference between sync and
+      // async rule failures.
+      const joiError = err && err.isJoi ? err : null;
+      if (joiError) {
+        const details = joiError.details.map((detail) => ({
+          field: detail.path.join('.'),
+          message: detail.message,
+        }));
+        return res.status(400).json({
+          ok: false,
+          error: 'validation_failed',
+          code: 400,
+          details,
+        });
+      }
+      return next(err);
     }
 
     // Store validated and sanitized body for route handler

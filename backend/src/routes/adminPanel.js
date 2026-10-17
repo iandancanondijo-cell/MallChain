@@ -13,6 +13,8 @@ const LiquidityReconciliation = require('../models/LiquidityReconciliation');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 const { initiateB2CPayout } = require('../services/b2cPayoutService');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/adminAuth');
+const { requireCategory } = require('../middleware/categoryAccess');
+const activityEvents = require('../services/activityEvents');
 const { invalidateCachedUser } = require('../middleware/authCache');
 const { BurnPolicy, DynamicBurnThreshold } = require('../models/BurnPolicy');
 const TreasuryLedger = require('../models/TreasuryLedger');
@@ -30,6 +32,8 @@ const { notifyUser } = require('../services/notify');
 const { limiters } = require('../middleware/rateLimiter');
 const { blindIndex, decryptField } = require('../utils/fieldEncryption');
 const { uploadBadgeImage, BADGE_UPLOAD_DIR } = require('../middleware/upload');
+const { uploadProof, PROOFS_UPLOAD_DIR } = require('../middleware/upload');
+const fs = require('fs');
 const path = require('path');
 
 const MAINTENANCE_SCOPES = ['send', 'withdraw', 'buy', 'payment', 'marketplace', 'staking', 'vault', 'key-vault', 'badge', 'dex'];
@@ -109,7 +113,9 @@ async function auditLog(action, actor, details, outcome = 'success') {
 }
 
 // ============ DASHBOARD ============
-router.get('/dashboard', async (req, res) => {
+// Dashboard aggregates every category's KPIs, so only superadmins see it.
+// Category admins get a single-category view inside their own window.
+router.get('/dashboard', requireSuperAdmin, async (req, res) => {
   try {
     const [
       totalUsers,
@@ -151,7 +157,7 @@ function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-router.get('/users', async (req, res) => {
+router.get('/users', requireCategory('users'), async (req, res) => {
   try {
     const { page = 0, limit = 50, search, role, banned } = req.query;
     const query = {};
@@ -191,7 +197,7 @@ router.get('/users', async (req, res) => {
   }
 });
 
-router.get('/users/:id', async (req, res) => {
+router.get('/users/:id', requireCategory('users'), async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('-password').lean();
     if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
@@ -235,7 +241,7 @@ router.put('/users/:id/role', requireSuperAdmin, limiters.strict, async (req, re
   }
 });
 
-router.put('/users/:id/ban', limiters.strict, async (req, res) => {
+router.put('/users/:id/ban', requireCategory('users'), limiters.strict, async (req, res) => {
   try {
     const { banned, reason } = req.body;
     const update = { banned: !!banned };
@@ -276,7 +282,7 @@ router.delete('/users/:id', requireSuperAdmin, limiters.strict, async (req, res)
 });
 
 // ============ VALIDATOR MANAGEMENT ============
-router.get('/validators/applications', async (req, res) => {
+router.get('/validators/applications', requireCategory('validator'), async (req, res) => {
   try {
     const { status, page = 0, limit = 50 } = req.query;
     const query = {};
@@ -297,7 +303,7 @@ router.get('/validators/applications', async (req, res) => {
   }
 });
 
-router.post('/validators/applications/:id/review', limiters.strict, async (req, res) => {
+router.post('/validators/applications/:id/review', requireCategory('validator'), limiters.strict, async (req, res) => {
   try {
     const { action, notes } = req.body;
     if (!['approved', 'rejected'].includes(action)) {
@@ -327,7 +333,7 @@ router.post('/validators/applications/:id/review', limiters.strict, async (req, 
 });
 
 // ============ KYC REVIEW ============
-router.get('/kyc/pending', async (req, res) => {
+router.get('/kyc/pending', requireCategory('kyc'), async (req, res) => {
   try {
     const { page = 0, limit = 50 } = req.query;
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
@@ -361,11 +367,31 @@ router.get('/kyc/pending', async (req, res) => {
   }
 });
 
-router.post('/kyc/:id/review', limiters.strict, async (req, res) => {
+router.post('/kyc/:id/review', requireCategory('kyc'), limiters.strict, async (req, res) => {
   try {
-    const { action, notes } = req.body;
+    const { action, notes, screenshotRef } = req.body;
     if (!['approved', 'rejected'].includes(action)) {
       return res.status(400).json({ ok: false, error: 'action must be approved or rejected' });
+    }
+
+    // Screenshot proof of the admin's decision (their terminal/dashboard
+    // capture at review time) is mandatory for KYC — without it a review
+    // is a word-against-record between admin and applicant, which fails
+    // a compliance audit. Reject with 400 and a clear message; the
+    // frontend surfaces a file-picker so admins have no reason to omit
+    // it. We additionally require the file to physically exist in
+    // PROOFS_UPLOAD_DIR and carry this admin's userId prefix, so a
+    // crafted string can't impersonate an uploaded screenshot.
+    const adminId = req.user?._id || req.user?.id;
+    if (!screenshotRef || typeof screenshotRef !== 'string') {
+      return res.status(400).json({ ok: false, error: 'screenshotRef is required — upload the review screenshot via /api/admin/proof first' });
+    }
+    const safeName = path.basename(screenshotRef);
+    if (!safeName.startsWith(`${adminId}-`)) {
+      return res.status(400).json({ ok: false, error: 'screenshotRef was not uploaded by this admin account' });
+    }
+    if (!fs.existsSync(path.join(PROOFS_UPLOAD_DIR, safeName))) {
+      return res.status(400).json({ ok: false, error: 'screenshotRef not found on disk — re-upload via /api/admin/proof' });
     }
 
     const kyc = await KYC.findById(req.params.id);
@@ -375,13 +401,20 @@ router.post('/kyc/:id/review', limiters.strict, async (req, res) => {
     kyc.reviewedAt = new Date();
     kyc.reviewedBy = req.user._id;
     kyc.notes = notes || '';
+    // Persist the screenshot filename (not a URL) — the review-screenshot
+    // route streams it back after re-checking the adminId prefix, matching
+    // the KYC-document pattern.
+    kyc.reviewedScreenshotRef = safeName;
     await kyc.save();
 
     if (action === 'approved') {
       await User.findByIdAndUpdate(kyc.userId, { kycLevel: 2 });
+      activityEvents.emitKycApproved(String(kyc.userId), { kycId: kyc._id }).catch(() => {});
+    } else {
+      activityEvents.emitKycRejected(String(kyc.userId), { kycId: kyc._id, reason: notes }).catch(() => {});
     }
 
-    await auditLog('kyc_review', req.user, { kycId: req.params.id, action, applicantId: String(kyc.userId) });
+    await auditLog('kyc_review', req.user, { kycId: req.params.id, action, applicantId: String(kyc.userId), screenshotRef: safeName });
     return res.json({ ok: true, kyc });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -390,7 +423,7 @@ router.post('/kyc/:id/review', limiters.strict, async (req, res) => {
 });
 
 // ============ AML REVIEW ============
-router.get('/aml-reviews/pending', async (req, res) => {
+router.get('/aml-reviews/pending', requireCategory('kyc'), async (req, res) => {
   try {
     const { page = 0, limit = 50 } = req.query;
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
@@ -420,7 +453,7 @@ router.get('/aml-reviews/pending', async (req, res) => {
   }
 });
 
-router.post('/aml-reviews/:id/review', limiters.strict, async (req, res) => {
+router.post('/aml-reviews/:id/review', requireCategory('kyc'), limiters.strict, async (req, res) => {
   try {
     const { action, notes } = req.body;
     if (!['approved', 'rejected'].includes(action)) {
@@ -445,7 +478,7 @@ router.post('/aml-reviews/:id/review', limiters.strict, async (req, res) => {
 });
 
 // ============ STRUCTURING FLAGS ============
-router.get('/structuring-flags', async (req, res) => {
+router.get('/structuring-flags', requireCategory('treasury'), async (req, res) => {
   try {
     const { acknowledged, page = 0, limit = 50 } = req.query;
     const query = {};
@@ -470,7 +503,7 @@ router.get('/structuring-flags', async (req, res) => {
   }
 });
 
-router.post('/structuring-flags/:id/acknowledge', limiters.strict, async (req, res) => {
+router.post('/structuring-flags/:id/acknowledge', requireCategory('treasury'), limiters.strict, async (req, res) => {
   try {
     const flag = await WithdrawalStructuringFlag.findById(req.params.id);
     if (!flag) return res.status(404).json({ ok: false, error: 'Structuring flag not found' });
@@ -492,7 +525,7 @@ router.post('/structuring-flags/:id/acknowledge', limiters.strict, async (req, r
 });
 
 // ============ TREASURY MANAGEMENT ============
-router.get('/treasury/policies', async (_req, res) => {
+router.get('/treasury/policies', requireCategory('treasury'), async (_req, res) => {
   try {
     const policies = await BurnPolicy.find({}).lean();
     return res.json({ ok: true, policies });
@@ -502,7 +535,7 @@ router.get('/treasury/policies', async (_req, res) => {
   }
 });
 
-router.post('/treasury/policies', limiters.strict, async (req, res) => {
+router.post('/treasury/policies', requireCategory('treasury'), limiters.strict, async (req, res) => {
   try {
     const { activity, burnPercentage, description, enabled } = req.body;
     if (!activity || typeof burnPercentage !== 'number') {
@@ -521,7 +554,7 @@ router.post('/treasury/policies', limiters.strict, async (req, res) => {
   }
 });
 
-router.delete('/treasury/policies/:activity', limiters.strict, async (req, res) => {
+router.delete('/treasury/policies/:activity', requireCategory('treasury'), limiters.strict, async (req, res) => {
   try {
     const result = await BurnPolicy.deleteOne({ activity: req.params.activity });
     await auditLog('treasury_policy_delete', req.user, { activity: req.params.activity });
@@ -532,7 +565,7 @@ router.delete('/treasury/policies/:activity', limiters.strict, async (req, res) 
   }
 });
 
-router.get('/treasury/dynamic-thresholds', async (_req, res) => {
+router.get('/treasury/dynamic-thresholds', requireCategory('treasury'), async (_req, res) => {
   try {
     const thresholds = await DynamicBurnThreshold.find({}).sort({ activity: 1, supplyThreshold: -1 }).lean();
     return res.json({ ok: true, thresholds });
@@ -542,7 +575,7 @@ router.get('/treasury/dynamic-thresholds', async (_req, res) => {
   }
 });
 
-router.post('/treasury/dynamic-thresholds', limiters.strict, async (req, res) => {
+router.post('/treasury/dynamic-thresholds', requireCategory('treasury'), limiters.strict, async (req, res) => {
   try {
     const { activity, supplyThreshold, burnPercentage, order, enabled } = req.body;
     if (!activity || typeof supplyThreshold !== 'number' || typeof burnPercentage !== 'number') {
@@ -561,7 +594,7 @@ router.post('/treasury/dynamic-thresholds', limiters.strict, async (req, res) =>
   }
 });
 
-router.delete('/treasury/dynamic-thresholds/:id', limiters.strict, async (req, res) => {
+router.delete('/treasury/dynamic-thresholds/:id', requireCategory('treasury'), limiters.strict, async (req, res) => {
   try {
     const result = await DynamicBurnThreshold.deleteOne({ _id: req.params.id });
     await auditLog('treasury_threshold_delete', req.user, { id: req.params.id });
@@ -572,7 +605,7 @@ router.delete('/treasury/dynamic-thresholds/:id', limiters.strict, async (req, r
   }
 });
 
-router.get('/treasury/ledger', async (req, res) => {
+router.get('/treasury/ledger', requireCategory('treasury'), async (req, res) => {
   try {
     const { activity, direction, limit = 100 } = req.query;
     const query = {};
@@ -588,7 +621,7 @@ router.get('/treasury/ledger', async (req, res) => {
   }
 });
 
-router.get('/treasury/metrics', async (_req, res) => {
+router.get('/treasury/metrics', requireCategory('treasury'), async (_req, res) => {
   try {
     const totals = await TreasuryLedger.aggregate([
       { $group: { _id: { activity: '$activity', direction: '$direction' }, totalAmount: { $sum: '$amount' }, count: { $sum: 1 } } },
@@ -602,7 +635,7 @@ router.get('/treasury/metrics', async (_req, res) => {
 });
 
 // ============ MINING TASK MANAGEMENT ============
-router.get('/mining/campaigns', async (req, res) => {
+router.get('/mining/campaigns', requireCategory('mining'), async (req, res) => {
   try {
     const { status, page = 0, limit = 50 } = req.query;
     const query = {};
@@ -623,7 +656,7 @@ router.get('/mining/campaigns', async (req, res) => {
   }
 });
 
-router.get('/mining/submissions/pending', async (req, res) => {
+router.get('/mining/submissions/pending', requireCategory('mining'), async (req, res) => {
   try {
     const { page = 0, limit = 50 } = req.query;
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
@@ -641,15 +674,58 @@ router.get('/mining/submissions/pending', async (req, res) => {
   }
 });
 
-router.post('/mining/submissions/:id/approve', limiters.strict, async (req, res) => {
+router.post('/mining/submissions/:id/approve', requireCategory('mining'), limiters.strict, async (req, res) => {
   try {
-    const { rewardAmount } = req.body || {};
+    const { rewardAmount, screenshotRef } = req.body || {};
+    const adminId = req.user?._id || req.user?.id;
+
+    // Same screenshot-proof rule as KYC review: an approval that pays out
+    // MLPTS must be backed by an uploaded capture, or a corrupt admin
+    // could approve phantom submissions with no traceable evidence.
+    if (!screenshotRef || typeof screenshotRef !== 'string') {
+      return res.status(400).json({ ok: false, error: 'screenshotRef is required — upload the approval screenshot via /api/admin/proof first' });
+    }
+    const safeName = path.basename(screenshotRef);
+    if (!safeName.startsWith(`${adminId}-`)) {
+      return res.status(400).json({ ok: false, error: 'screenshotRef was not uploaded by this admin account' });
+    }
+    if (!fs.existsSync(path.join(PROOFS_UPLOAD_DIR, safeName))) {
+      return res.status(400).json({ ok: false, error: 'screenshotRef not found on disk — re-upload via /api/admin/proof' });
+    }
+
     const sub = await TaskSubmission.findById(req.params.id).lean();
     if (!sub) return res.status(404).json({ ok: false, error: 'submission not found' });
 
+    // Valid-task enforcement at the payout boundary too: even after a
+    // submission passed mines.js's POST /submissions gate, the campaign
+    // or its creator could have changed status between submission and
+    // approval. Re-check before crediting MLPTS so a banned creator or
+    // paused campaign can't keep paying out.
+    if (sub.campaign_id) {
+      const campaign = await Campaign.findById(sub.campaign_id).lean();
+      if (!campaign) {
+        return res.status(400).json({ ok: false, error: 'submission references a campaign that no longer exists' });
+      }
+      if (campaign.status !== 'active') {
+        return res.status(400).json({ ok: false, error: `campaign is ${campaign.status} — cannot approve rewards` });
+      }
+      const creator = await User.findById(campaign.creator_id).select('banned creator_level role').lean();
+      if (!creator) {
+        return res.status(400).json({ ok: false, error: 'campaign creator no longer exists' });
+      }
+      if (creator.banned === true) {
+        return res.status(400).json({ ok: false, error: 'campaign creator is banned — cannot approve rewards' });
+      }
+    }
+
     const updated = await TaskSubmission.findByIdAndUpdate(
       req.params.id,
-      { $set: { status: 'auto_approved', completed_at: new Date().toISOString() } },
+      { $set: {
+        status: 'auto_approved',
+        completed_at: new Date().toISOString(),
+        reviewedScreenshotRef: safeName,
+        reviewedBy: adminId,
+      } },
       { new: true }
     ).lean();
 
@@ -667,7 +743,7 @@ router.post('/mining/submissions/:id/approve', limiters.strict, async (req, res)
       });
     }
 
-    await auditLog('mining_submission_approve', req.user, { submissionId: req.params.id, rewardAmount });
+    await auditLog('mining_submission_approve', req.user, { submissionId: req.params.id, rewardAmount, screenshotRef: safeName });
     return res.json({ ok: true, submission: updated });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -675,17 +751,35 @@ router.post('/mining/submissions/:id/approve', limiters.strict, async (req, res)
   }
 });
 
-router.post('/mining/submissions/:id/reject', limiters.strict, async (req, res) => {
+router.post('/mining/submissions/:id/reject', requireCategory('mining'), limiters.strict, async (req, res) => {
   try {
-    const { note } = req.body || {};
+    const { note, screenshotRef } = req.body || {};
+    const adminId = req.user?._id || req.user?.id;
+
+    if (!screenshotRef || typeof screenshotRef !== 'string') {
+      return res.status(400).json({ ok: false, error: 'screenshotRef is required — upload the rejection screenshot via /api/admin/proof first' });
+    }
+    const safeName = path.basename(screenshotRef);
+    if (!safeName.startsWith(`${adminId}-`)) {
+      return res.status(400).json({ ok: false, error: 'screenshotRef was not uploaded by this admin account' });
+    }
+    if (!fs.existsSync(path.join(PROOFS_UPLOAD_DIR, safeName))) {
+      return res.status(400).json({ ok: false, error: 'screenshotRef not found on disk — re-upload via /api/admin/proof' });
+    }
+
     const row = await TaskSubmission.findByIdAndUpdate(
       req.params.id,
-      { $set: { status: 'rejected', rejection_note: note || null } },
+      { $set: {
+        status: 'rejected',
+        rejection_note: note || null,
+        reviewedScreenshotRef: safeName,
+        reviewedBy: adminId,
+      } },
       { new: true }
     ).lean();
     if (!row) return res.status(404).json({ ok: false, error: 'submission not found' });
 
-    await auditLog('mining_submission_reject', req.user, { submissionId: req.params.id, note });
+    await auditLog('mining_submission_reject', req.user, { submissionId: req.params.id, note, screenshotRef: safeName });
     return res.json({ ok: true, submission: row });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -693,7 +787,41 @@ router.post('/mining/submissions/:id/reject', limiters.strict, async (req, res) 
   }
 });
 
-router.put('/mining/campaigns/:id', limiters.strict, async (req, res) => {
+// Upload a proof screenshot — used by KYC reviewers, mining submission
+// approvers/rejectors. Returns a `documentRef` filename the caller then
+// sends back as `screenshotRef` in the review body. Stored under the
+// shared PROOFS_UPLOAD_DIR so the same retrieval/audit path works for
+// both mining proofs (user-side) and admin review proofs (admin-side);
+// ownership is encoded in the filename's `${userId}-` prefix.
+router.post('/proof', requireAdmin, uploadProof.single('proof'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: 'proof file is required (PNG or JPG)' });
+    await auditLog('admin_proof_upload', req.user, { filename: req.file.filename, size: req.file.size });
+    return res.json({ ok: true, documentRef: req.file.filename });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Stream a previously-uploaded proof back to an admin (or, when the
+// caller is the same admin who uploaded it, for their own review). Used
+// for audit-log lookups and to show the proof beside a decision.
+router.get('/proof/:ref', requireAdmin, async (req, res) => {
+  const adminId = req.user?._id || req.user?.id;
+  const isSuper = req.user?.role === 'superadmin';
+  const ref = path.basename(req.params.ref);
+  if (!isSuper && !ref.startsWith(`${adminId}-`)) {
+    return res.status(403).json({ ok: false, error: 'forbidden' });
+  }
+  const filePath = path.join(PROOFS_UPLOAD_DIR, ref);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ ok: false, error: 'not found' });
+  res.sendFile(filePath, (err) => {
+    if (err && !res.headersSent) res.status(404).json({ ok: false, error: 'not found' });
+  });
+});
+
+router.put('/mining/campaigns/:id', requireCategory('mining'), limiters.strict, async (req, res) => {
   try {
     // Whitelist allowed fields — $set: req.body would let an attacker set
     // any model field (budget, creatorId, status, etc.).
@@ -713,7 +841,7 @@ router.put('/mining/campaigns/:id', limiters.strict, async (req, res) => {
 });
 
 // ============ GOVERNANCE OVERSIGHT ============
-router.get('/governance/stats', async (_req, res) => {
+router.get('/governance/stats', requireCategory('blockchain'), async (_req, res) => {
   try {
     // Forward to on-chain query or return basic info
     const axios = require('axios');
@@ -738,7 +866,7 @@ router.get('/governance/stats', async (_req, res) => {
 });
 
 // ============ AUDIT LOG ============
-router.get('/audit', async (req, res) => {
+router.get('/audit', requireSuperAdmin, async (req, res) => {
   try {
     const { action, actor, page = 0, limit = 100 } = req.query;
     const query = {};
@@ -759,7 +887,7 @@ router.get('/audit', async (req, res) => {
 });
 
 // ============ SYSTEM OPERATIONS ============
-router.post('/reconcile', limiters.strict, async (req, res) => {
+router.post('/reconcile', requireCategory('treasury'), limiters.strict, async (req, res) => {
   try {
     const liquidityController = require('../controllers/liquidityController');
     const mallcoinService = require('../services/mallcoinService');
@@ -780,7 +908,7 @@ router.post('/reconcile', limiters.strict, async (req, res) => {
   }
 });
 
-router.post('/reconciliation/run', limiters.strict, async (req, res) => {
+router.post('/reconciliation/run', requireCategory('treasury'), limiters.strict, async (req, res) => {
   try {
     const { runReconciliationJob } = require('../services/reconciliationService');
     const result = await runReconciliationJob();
@@ -792,7 +920,7 @@ router.post('/reconciliation/run', limiters.strict, async (req, res) => {
   }
 });
 
-router.get('/reconciliation/items', async (req, res) => {
+router.get('/reconciliation/items', requireCategory('treasury'), async (req, res) => {
   try {
     const { status, page = 0, limit = 100 } = req.query;
     const query = {};
@@ -818,7 +946,7 @@ router.get('/reconciliation/items', async (req, res) => {
 // claiming something was fixed without an actual reversal would be a
 // financial-integrity bug, so this just lets an admin document how a
 // pending_manual (or detected) item was actually handled out-of-band.
-router.post('/reconciliation/:id/resolve', limiters.strict, async (req, res) => {
+router.post('/reconciliation/:id/resolve', requireCategory('treasury'), limiters.strict, async (req, res) => {
   try {
     const { note } = req.body || {};
     if (!note || !String(note).trim()) {
@@ -845,7 +973,7 @@ router.post('/reconciliation/:id/resolve', limiters.strict, async (req, res) => 
   }
 });
 
-router.get('/withdrawals', async (req, res) => {
+router.get('/withdrawals', requireCategory('treasury'), async (req, res) => {
   try {
     const { status, page = 0, limit = 100 } = req.query;
     const query = {};
@@ -868,7 +996,7 @@ router.get('/withdrawals', async (req, res) => {
 // Re-attempts the Safaricom B2C payout for a withdrawal whose prior attempt
 // failed — the same call routes/withdraw.js and routes/buy.js's /sell make
 // on the original request, just triggered manually instead of automatically.
-router.post('/withdrawals/:id/retry', limiters.strict, async (req, res) => {
+router.post('/withdrawals/:id/retry', requireCategory('treasury'), limiters.strict, async (req, res) => {
   try {
     const withdrawal = await WithdrawalRequest.findById(req.params.id);
     if (!withdrawal) return res.status(404).json({ ok: false, error: 'Withdrawal not found' });
@@ -907,7 +1035,7 @@ router.post('/withdrawals/:id/retry', limiters.strict, async (req, res) => {
 // payout path (e.g. a manual M-Pesa send, or a refund back to the user by
 // another channel) — like reconciliation/resolve above, this is record-
 // keeping only and does not itself move any money.
-router.post('/withdrawals/:id/resolve', limiters.strict, async (req, res) => {
+router.post('/withdrawals/:id/resolve', requireCategory('treasury'), limiters.strict, async (req, res) => {
   try {
     const { note, outcome } = req.body || {};
     if (!['completed', 'refunded'].includes(outcome)) {
@@ -936,7 +1064,7 @@ router.post('/withdrawals/:id/resolve', limiters.strict, async (req, res) => {
 });
 
 // ============ BADGES ============
-router.get('/badges/purchases', async (req, res) => {
+router.get('/badges/purchases', requireCategory('mining'), async (req, res) => {
   try {
     const { status, page = 0, limit = 50 } = req.query;
     const query = {};
@@ -957,7 +1085,7 @@ router.get('/badges/purchases', async (req, res) => {
   }
 });
 
-router.get('/badges/issuances', async (req, res) => {
+router.get('/badges/issuances', requireCategory('mining'), async (req, res) => {
   try {
     const { method, page = 0, limit = 50 } = req.query;
     const query = {};
@@ -981,7 +1109,7 @@ router.get('/badges/issuances', async (req, res) => {
 // Manual grant for support cases (streak missed due to a tracking gap, goodwill
 // gesture, etc). Reuses the same on-chain issuance path as the streak snapshot
 // and the paid-purchase flow, just recorded with method 'admin_manual'.
-router.post('/badges/grant', limiters.strict, async (req, res) => {
+router.post('/badges/grant', requireSuperAdmin, limiters.strict, async (req, res) => {
   try {
     const { walletAddress } = req.body || {};
     if (!walletAddress) return res.status(400).json({ ok: false, error: 'walletAddress is required' });
@@ -1030,7 +1158,7 @@ router.post('/badges/grant', limiters.strict, async (req, res) => {
 // Off-chain support action only (mark a purchase as void/refunded) — there is
 // no on-chain "revoke badge" message, so this can't undo an already-issued
 // badge, only stop a purchase short of issuance.
-router.post('/badges/purchases/:quoteId/void', limiters.strict, async (req, res) => {
+router.post('/badges/purchases/:quoteId/void', requireCategory('mining'), limiters.strict, async (req, res) => {
   try {
     const { reason } = req.body || {};
     const purchase = await BadgePurchase.findOne({ quoteId: req.params.quoteId });
@@ -1054,7 +1182,7 @@ router.post('/badges/purchases/:quoteId/void', limiters.strict, async (req, res)
 // Admin approves a paid purchase and issues the badge on-chain to the chosen wallet.
 // The walletAddress can differ from the purchase's original walletAddress — this lets
 // the buyer choose which of their wallets receives the badge at approval time.
-router.post('/badges/approve', limiters.strict, async (req, res) => {
+router.post('/badges/approve', requireCategory('mining'), limiters.strict, async (req, res) => {
   try {
     const { quoteId, walletAddress } = req.body || {};
     if (!quoteId || !walletAddress) {
@@ -1128,7 +1256,7 @@ router.post('/badges/approve', limiters.strict, async (req, res) => {
 });
 
 // Admin rejects a paid purchase — marks it as rejected without issuing a badge.
-router.post('/badges/reject', limiters.strict, async (req, res) => {
+router.post('/badges/reject', requireCategory('mining'), limiters.strict, async (req, res) => {
   try {
     const { quoteId, reason } = req.body || {};
     if (!quoteId) return res.status(400).json({ ok: false, error: 'quoteId is required' });
@@ -1165,7 +1293,7 @@ router.post('/badges/reject', limiters.strict, async (req, res) => {
 });
 
 // Upload a new badge design image. Deactivates previous active designs.
-router.post('/badges/design', limiters.strict, uploadBadgeImage.single('image'), async (req, res) => {
+router.post('/badges/design', requireCategory('mining'), limiters.strict, uploadBadgeImage.single('image'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ ok: false, error: 'No image file provided' });
 
@@ -1190,7 +1318,7 @@ router.post('/badges/design', limiters.strict, uploadBadgeImage.single('image'),
 });
 
 // Get current active badge design
-router.get('/badges/design', async (_req, res) => {
+router.get('/badges/design', requireCategory('mining'), async (_req, res) => {
   try {
     const design = await BadgeDesign.findOne({ active: true }).sort({ createdAt: -1 }).lean();
     return res.json({ ok: true, design });
@@ -1201,7 +1329,7 @@ router.get('/badges/design', async (_req, res) => {
 });
 
 // Serve badge images statically
-router.get('/badges/design/image', async (_req, res) => {
+router.get('/badges/design/image', requireCategory('mining'), async (_req, res) => {
   try {
     const design = await BadgeDesign.findOne({ active: true }).sort({ createdAt: -1 }).lean();
     if (!design) return res.status(404).json({ ok: false, error: 'No badge design uploaded yet' });
@@ -1214,28 +1342,31 @@ router.get('/badges/design/image', async (_req, res) => {
 });
 
 // ============ CHAIN MONITORING ============
-router.get('/chain/status', async (_req, res) => {
+router.get('/chain/status', requireCategory('blockchain'), async (_req, res) => {
   try {
     const axios = require('axios');
     const chainRest = process.env.CHAIN_REST || 'http://localhost:1317';
     const timeout = 5000;
 
-    const [nodeInfo, block, netInfo, txCount] = await Promise.all([
+    const [nodeInfo, block, netInfo] = await Promise.all([
       axios.get(`${chainRest}/cosmos/base/tendermint/v1beta1/node_info`, { timeout }).catch(() => null),
       axios.get(`${chainRest}/cosmos/base/tendermint/v1beta1/blocks/latest`, { timeout }).catch(() => null),
-      axios.get(`${chainRest}/cosmos/base/tendermint/v1beta1/node_info`, { timeout }).catch(() => null),
-      axios.get(`${chainRest}/cosmos/tx/v1beta1/txs?events=tx.height=${block?.data?.block?.header?.height || 0}&pagination.limit=100`, { timeout }).catch(() => null),
+      axios.get(`${chainRest}/cosmos/base/tendermint/v1beta1/net_info`, { timeout }).catch(() => null),
     ]);
 
     const header = block?.data?.block?.header;
     const blockTime = header?.time;
     const height = header ? parseInt(header.height, 10) : 0;
 
-    let peerCount = 0;
-    try {
-      const netRes = await axios.get(`${chainRest}/cosmos/base/tendermint/v1beta1/node_info`, { timeout });
-      peerCount = netRes.data?.default_node_info?.listeners?.length || 0;
-    } catch { /* ignore */ }
+    let txCount = 0;
+    if (height > 0) {
+      try {
+        const txRes = await axios.get(`${chainRest}/cosmos/tx/v1beta1/txs?events=tx.height=${height}&pagination.limit=100`, { timeout });
+        txCount = txRes?.data?.tx_responses?.length || 0;
+      } catch { /* ignore */ }
+    }
+
+    const peerCount = netInfo?.data?.n_peers || 0;
 
     const status = {
       blockHeight: height,
@@ -1246,17 +1377,17 @@ router.get('/chain/status', async (_req, res) => {
       syncing: nodeInfo?.data?.sync_info?.catching_up || false,
       latestBlockHash: block?.data?.block_id?.hash || null,
       peerCount,
-      txCountInBlock: txCount?.data?.tx_responses?.length || 0,
+      txCountInBlock: txCount,
     };
 
     return res.json({ ok: true, status });
   } catch (err) {
-    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
-    return res.status(500).json({ ok: false, error: 'internal error' });
+    logger.error('adminPanel', { route: '/chain/status', error: err.message || String(err) });
+    return res.json({ ok: true, status: { blockHeight: 0, chainId: 'unavailable', nodeVersion: 'unknown', moniker: 'unknown', syncing: false, peerCount: 0, txCountInBlock: 0, blockTime: null, latestBlockHash: null } });
   }
 });
 
-router.get('/chain/blocks', async (req, res) => {
+router.get('/chain/blocks', requireCategory('blockchain'), async (req, res) => {
   try {
     const axios = require('axios');
     const chainRest = process.env.CHAIN_REST || 'http://localhost:1317';
@@ -1293,7 +1424,7 @@ router.get('/chain/blocks', async (req, res) => {
   }
 });
 
-router.get('/chain/validators', async (_req, res) => {
+router.get('/chain/validators', requireCategory('blockchain'), async (_req, res) => {
   try {
     const axios = require('axios');
     const chainRest = process.env.CHAIN_REST || 'http://localhost:1317';
@@ -1367,7 +1498,7 @@ router.post('/notifications/broadcast', requireSuperAdmin, limiters.strict, asyn
 // Break-glass control for money-moving surfaces (send/withdraw/buy/payment/
 // marketplace/staking/vault). Read is available to any admin; toggling
 // requires superadmin, the same bar as user role changes and deletes.
-router.get('/maintenance', async (_req, res) => {
+router.get('/maintenance', requireSuperAdmin, async (_req, res) => {
   try {
     const state = await MaintenanceMode.findById('singleton').lean();
     return res.json({
@@ -1424,6 +1555,249 @@ router.post('/maintenance', requireSuperAdmin, limiters.strict, async (req, res)
       reason: state.reason,
       updatedBy: state.updatedBy || null,
       updatedAt: state.updatedAt || null,
+    });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+const Report = require('../models/Report');
+
+const VALID_CATEGORIES = ['users', 'blockchain', 'validator', 'kyc', 'mining', 'treasury', 'marketplace', 'mlpts', 'reports'];
+
+// ============ PRESENCE ============
+// Tells category admins whether a superadmin is currently online so the
+// Reports UI can colour the "awaiting reply" indicator. "Online" = a
+// superadmin hit any authed route in the last 60 seconds; requireAuth has
+// been doing the lastSeenAt touch since the category system was added.
+router.get('/presence', async (_req, res) => {
+  try {
+    const since = new Date(Date.now() - 60 * 1000);
+    const onlineAdmin = await User.findOne({
+      role: 'superadmin',
+      lastSeenAt: { $gte: since },
+    }).select('email lastSeenAt').lean();
+
+    // Email is encrypted at rest — decrypt for the presence response so
+    // the UI can show "Super Admin X is online" without ever seeing the
+    // ciphertext blob. Fall back gracefully if the row is unreadable.
+    let decryptedEmail = null;
+    if (onlineAdmin) {
+      try {
+        decryptedEmail = onlineAdmin.email ? decryptField(onlineAdmin.email) : null;
+      } catch {
+        decryptedEmail = null;
+      }
+    }
+
+    return res.json({
+      ok: true,
+      superadminOnline: !!onlineAdmin,
+      lastSeenAt: onlineAdmin ? onlineAdmin.lastSeenAt : null,
+      lastSeenEmail: decryptedEmail,
+    });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// ============ REPORTS ============
+// Submitting a report — any admin can do this. category admins use this
+// to escalate to the superadmin. The fromCategory snapshot is taken from
+// req.user so an admin who later gets reassigned still has their reports
+// labelled correctly.
+router.post('/reports', limiters.strict, async (req, res) => {
+  try {
+    const { subject, body } = req.body || {};
+    if (typeof subject !== 'string' || subject.trim().length < 3 || subject.length > 200) {
+      return res.status(400).json({ ok: false, error: 'subject must be 3–200 chars' });
+    }
+    if (typeof body !== 'string' || body.trim().length < 10 || body.length > 5000) {
+      return res.status(400).json({ ok: false, error: 'body must be 10–5000 chars' });
+    }
+
+    const report = await Report.create({
+      fromUserId: req.user._id,
+      fromCategory: req.user.adminCategory || 'reports',
+      subject: subject.trim(),
+      body: body.trim(),
+    });
+
+    return res.json({ ok: true, report });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Listing reports — superadmins see all (inbox view), category admins
+// see only what they've sent (sent view). Both views need the list to
+// drive the colour-coded status pills.
+router.get('/reports', async (req, res) => {
+  try {
+    let reportsRaw;
+    if (req.user.role === 'superadmin') {
+      reportsRaw = await Report.find({}).sort({ createdAt: -1 }).limit(200);
+    } else {
+      reportsRaw = await Report.find({ fromUserId: req.user._id }).sort({ createdAt: -1 }).limit(200);
+    }
+    // Trim down to the payload shape the UI cares about — don't leak _id
+    // internals or the as-objectId type
+    const reports = reportsRaw.map((r) => ({
+      _id: r._id,
+      fromCategory: r.fromCategory,
+      subject: r.subject,
+      body: r.body,
+      status: r.status,
+      createdAt: r.createdAt,
+      readAt: r.readAt,
+      actionedAt: r.actionedAt,
+      superadminReply: r.superadminReply,
+      repliedAt: r.repliedAt,
+    }));
+    return res.json({ ok: true, reports });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Mark a report as read — superadmin only. This is the action that flips
+// the sender's pill from orange to blue.
+router.patch('/reports/:id/read', requireSuperAdmin, async (req, res) => {
+  try {
+    const report = await Report.findById(req.params.id);
+    if (!report) return res.status(404).json({ ok: false, error: 'report not found' });
+
+    // Idempotent: only set readAt the first time. Subsequent reads leave
+    // the original timestamp so the sender can see when the superadmin
+    // first opened it.
+    if (report.status === 'sent') {
+      report.status = 'read';
+      report.readAt = new Date();
+      await report.save();
+    }
+    return res.json({ ok: true, report });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Mark a report for action — superadmin only. Flips the sender's pill
+// from blue to green. A reply note is optional but recommended.
+router.patch('/reports/:id/action', requireSuperAdmin, async (req, res) => {
+  try {
+    const { reply } = req.body || {};
+    const report = await Report.findById(req.params.id);
+    if (!report) return res.status(404).json({ ok: false, error: 'report not found' });
+
+    report.status = 'actioned';
+    report.actionedAt = new Date();
+    if (!report.readAt) report.readAt = report.actionedAt;
+    if (typeof reply === 'string' && reply.trim().length > 0) {
+      if (reply.length > 1000) {
+        return res.status(400).json({ ok: false, error: 'reply must be ≤1000 chars' });
+      }
+      report.superadminReply = reply.trim();
+      report.repliedAt = new Date();
+    }
+    await report.save();
+    return res.json({ ok: true, report });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// ============ CATEGORY ADMIN PROVISIONING ============
+// Create a new category-scoped admin — superadmin only. The new admin
+// gets role=admin and exactly one adminCategory. Password is bcrypt-hashed
+// with cost 12 to match the rest of the auth system.
+router.post('/users', requireSuperAdmin, limiters.strict, async (req, res) => {
+  try {
+    const { email, password, name, adminCategory } = req.body || {};
+
+    if (typeof email !== 'string' || !email.includes('@') || email.length > 254) {
+      return res.status(400).json({ ok: false, error: 'valid email required' });
+    }
+    if (typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({ ok: false, error: 'password must be at least 8 chars' });
+    }
+    if (!VALID_CATEGORIES.includes(adminCategory)) {
+      return res.status(400).json({ ok: false, error: 'valid adminCategory required' });
+    }
+
+    const blind = blindIndex(email.toLowerCase().trim());
+    const existing = await User.findOne({ email_blind: blind }).select('_id').lean();
+    if (existing) {
+      return res.status(409).json({ ok: false, error: 'email already registered' });
+    }
+
+    const bcrypt = require('bcryptjs');
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const user = await User.create({
+      email,
+      password: hashedPassword,
+      name: name || email.split('@')[0],
+      role: 'admin',
+      adminCategory,
+      kycLevel: 1,
+      ageVerifiedAt: new Date(),
+      tosAcceptedAt: new Date(),
+      privacyAcceptedAt: new Date(),
+    });
+
+    await auditLog('category_admin_created', req.user, { createdEmail: email, category: adminCategory });
+
+    return res.json({
+      ok: true,
+      user: {
+        _id: user._id,
+        email: decryptField(user.email) || user.email,
+        name: user.name,
+        role: user.role,
+        adminCategory: user.adminCategory,
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Reassign a category admin's category — superadmin only. Used when an
+// admin needs to be moved between categories. Cannot escalate to
+// superadmin through this endpoint — that's a manual DB move.
+router.patch('/users/:id/category', requireSuperAdmin, limiters.strict, async (req, res) => {
+  try {
+    const { adminCategory } = req.body || {};
+    if (!VALID_CATEGORIES.includes(adminCategory)) {
+      return res.status(400).json({ ok: false, error: 'valid adminCategory required' });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
+    if (user.role !== 'admin') {
+      return res.status(400).json({ ok: false, error: 'only admin users can be assigned a category' });
+    }
+
+    const oldCategory = user.adminCategory;
+    user.adminCategory = adminCategory;
+    await user.save();
+    await auditLog('category_admin_reassigned', req.user, { userEmail: user.email, from: oldCategory, to: adminCategory });
+
+    return res.json({
+      ok: true,
+      user: {
+        _id: user._id,
+        email: decryptField(user.email) || user.email,
+        adminCategory: user.adminCategory,
+      },
     });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });

@@ -9,9 +9,7 @@
 const User = require('../models/user');
 const NotificationPreferences = require('../models/notificationPreferences');
 const Notification = require('../models/Notification');
-const emailService = require('./emailService');
-const smsService = require('./smsService');
-const whatsappService = require('./whatsappService');
+const brevoService = require('./brevoService');
 const { decryptField } = require('../utils/fieldEncryption');
 const logger = require('../utils/logger');
 
@@ -202,7 +200,7 @@ async function sendEmailNotification(user, category, payload) {
       return { success: false, error: 'No email address' };
     }
 
-    const { complianceFooter } = require('./emailService');
+    const { complianceFooter } = require('./brevoService');
     const subject = `[Mallchain] ${payload.title}`;
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -213,7 +211,7 @@ async function sendEmailNotification(user, category, payload) {
       </div>
     `;
 
-    return await emailService.sendEmail(email, subject, html);
+    return await brevoService.sendEmail(email, subject, html);
   } catch (error) {
     logger.error('notificationDispatcher', 'Email notification failed', { error: error.message });
     return { success: false, error: error.message };
@@ -231,7 +229,7 @@ async function sendSMSNotification(user, category, payload) {
     }
 
     const message = `Mallchain: ${payload.title} - ${payload.message}`;
-    return await smsService.sendSMS(phone, message);
+    return await brevoService.sendSMS(phone, message);
   } catch (error) {
     logger.error('notificationDispatcher', 'SMS notification failed', { error: error.message });
     return { success: false, error: error.message };
@@ -249,7 +247,7 @@ async function sendWhatsAppNotification(user, category, payload) {
     }
 
     const message = `*${payload.title}*\n${payload.message}`;
-    return await whatsappService.sendWhatsApp(phone, message);
+    return await brevoService.sendWhatsApp(phone, message);
   } catch (error) {
     logger.error('notificationDispatcher', 'WhatsApp notification failed', { error: error.message });
     return { success: false, error: error.message };

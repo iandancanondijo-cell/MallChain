@@ -1,11 +1,13 @@
 import { authService } from '../../services/auth';
 import { store } from '../../store/store';
+import { isRateLimited, getRateLimitErrorMessage, resetRateLimit } from '../../services/rateLimit';
+import { config } from '../../services/config';
 
 export type Result = { ok: boolean; message?: string };
 export type SignInData = { email: string; password: string; remember: boolean };
 export type SignUpData = { email: string; password: string; referral: string };
 
-const API_BASE = '/api';
+const API_BASE = `${config.apiBaseUrl}/api`;
 
 type AuthUser = {
   id?: string;
@@ -16,6 +18,10 @@ type AuthUser = {
   banned?: boolean;
   banReason?: string | null;
   kycLevel?: number;
+  // Set on the /api/auth/login + /api/auth/me responses when the user is a
+  // category admin. null for superadmin/users. AdminApp uses it to land
+  // the user directly in their category window.
+  adminCategory?: 'users' | 'blockchain' | 'validator' | 'kyc' | 'mining' | 'treasury' | 'marketplace' | 'mlpts' | 'reports' | null;
 };
 
 // signIn/signUp navigate via hash change, so App's initializeAuth /me sync
@@ -33,11 +39,21 @@ function applyAuthUser(u?: AuthUser | null) {
   store.state.user.kycLevel = u.kycLevel ?? 1;
   store.state.user.frozen = !!u.banned;
   store.state.user.frozenReason = u.banned ? (u.banReason || null) : null;
+  // adminCategory is null for superadmin (sees all) and for non-admins.
+  // Category admins get their category set here so AdminApp can land them
+  // in the correct window on first paint.
+  store.state.user.adminCategory = u.role === 'admin' ? (u.adminCategory || null) : null;
   store.commit();
 }
 
 export const authApi = {
   async signIn(data: SignInData): Promise<Result> {
+    // Rate limit: max 3 attempts per minute per email
+    const rateLimitKey = `signin_${data.email}`;
+    if (isRateLimited(rateLimitKey, 3, 60000)) {
+      return { ok: false, message: getRateLimitErrorMessage(rateLimitKey) };
+    }
+
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
@@ -47,11 +63,20 @@ export const authApi = {
       });
 
       if (res.ok) {
+        // Reset rate limit on success
+        resetRateLimit(rateLimitKey);
+
         const loginBody = await res.json();
         if (typeof loginBody?.expiresAt === 'number') {
           authService.setSession(loginBody.expiresAt);
         }
         applyAuthUser(loginBody?.user);
+        
+        // Determine redirect based on role — admin/superadmin go to admin panel,
+        // regular users go to dashboard
+        const role = store.state.user.role;
+        const adminRedirect = (role === 'admin' || role === 'superadmin') ? '/admin' : '/';
+        
         // Check KYC status after login
         const meRes = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
         if (meRes.ok) {
@@ -59,13 +84,16 @@ export const authApi = {
           if (typeof meBody?.expiresAt === 'number') {
             authService.setSession(meBody.expiresAt);
           }
-          if (meBody.user?.kycLevel === 1) {
-            // KYC not completed — dashboard shows the KYC gate modal
+          if (meBody.user?.kycLevel === 1 && role === 'user') {
+            // KYC not completed for regular user — dashboard shows the KYC gate modal
             window.location.hash = "/";
             return { ok: true };
           }
-          // KYC completed, go to dashboard
-          window.location.hash = "/";
+          // KYC completed or admin/superadmin (they bypass KYC gate), go to role-based destination
+          window.location.hash = adminRedirect;
+        } else {
+          // /me failed but login succeeded — still redirect based on role
+          window.location.hash = adminRedirect;
         }
         return { ok: true };
       }
@@ -78,6 +106,12 @@ export const authApi = {
   },
 
   async signUp(data: SignUpData): Promise<Result> {
+    // Rate limit: max 3 attempts per minute per email
+    const rateLimitKey = `signup_${data.email}`;
+    if (isRateLimited(rateLimitKey, 3, 60000)) {
+      return { ok: false, message: getRateLimitErrorMessage(rateLimitKey) };
+    }
+
     try {
       const res = await fetch(`${API_BASE}/auth/register`, {
         method: "POST",
@@ -87,6 +121,9 @@ export const authApi = {
       });
 
       if (res.ok) {
+        // Reset rate limit on success
+        resetRateLimit(rateLimitKey);
+
         const body = await res.json();
         if (typeof body?.expiresAt === 'number') {
           authService.setSession(body.expiresAt);

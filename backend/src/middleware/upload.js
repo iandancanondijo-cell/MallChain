@@ -119,9 +119,42 @@ const uploadBadgeImage = multer({
   },
 });
 
+// Mining task proofs (user-side screenshot of activity on the external
+// platform) and admin review proofs (admin-side screenshot of their
+// decision). Stored together under /uploads/proofs/ because they share
+// the same ownership convention (`${userId}-${ts}-${filename}`) and
+// the same hard allowlist, but kept off KYC/AML directories so a future
+// retention-policy sweep can target one without touching the others.
+const PROOFS_UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'proofs');
+fs.mkdirSync(PROOFS_UPLOAD_DIR, { recursive: true });
+
+const PROOFS_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png'];
+
+const proofsStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, PROOFS_UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    // req.user is the cached JSON object (see kycController.js's note) —
+    // fall through to the same id-shapes authCache hands back.
+    const userId = req.user?.id || req.user?._id || req.user?.userId || 'unknown';
+    cb(null, `${userId}-${Date.now()}-${sanitizeFilename(file.originalname)}`);
+  },
+});
+
+const uploadProof = multer({
+  storage: proofsStorage,
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!PROOFS_ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      return cb(new Error('Only PNG or JPG files are accepted for activity proofs'));
+    }
+    cb(null, true);
+  },
+});
+
 module.exports = {
   uploadKycDocument, KYC_UPLOAD_DIR,
   uploadAmlDocument, AML_UPLOAD_DIR,
   uploadEduResource, EDU_UPLOAD_DIR,
   uploadBadgeImage, BADGE_UPLOAD_DIR,
+  uploadProof, PROOFS_UPLOAD_DIR,
 };

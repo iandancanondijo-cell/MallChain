@@ -61,6 +61,7 @@ const onchainRoutes = require('./routes/onchain');
 const historyRoutes = require('./routes/history');
 const faucetRoutes = require('./routes/faucet');
 const adminPanelRoutes = require('./routes/adminPanel');
+const consoleDataRoutes = require('./routes/consoleData');
 const maintenanceStatusRoutes = require('./routes/maintenanceStatus');
 const contractsRoutes = require('./routes/contracts');
 const devhubRoutes = require('./routes/devhub');
@@ -517,6 +518,8 @@ app.use('/api/blockchain', limiters.lenient, blockchainRoutes);
 app.use('/api/blockchain/tx', blockchainTxRoutes);
 app.use('/api/wallets', walletsRoutes);
 app.use('/api/kyc', kycRoutes);
+const walletPinRoutes = require('./routes/walletPin');
+app.use('/api/wallet/pin', walletPinRoutes);
 app.use('/api/walletConnection', walletConnectionRoutes);
 app.use('/api/wallet', walletCreationRoutes);
 app.use('/api/governance', governanceRoutes);
@@ -555,6 +558,9 @@ app.use('/api/faucet', faucetRoutes);
 const minesRoutes = require('./routes/mines');
 app.use('/api/mines', minesRoutes);
 app.use('/api/admin', adminPanelRoutes);
+const adminConfigRoutes = require('./routes/adminConfig');
+app.use('/api/admin', adminConfigRoutes);
+app.use('/api/admin/console', consoleDataRoutes);
 // Public read of maintenance status — separate from /api/admin/maintenance
 // (which requires admin auth) because regular, unauthenticated users need
 // this to show a real banner and disable paused actions.
@@ -918,13 +924,8 @@ async function start() {
   // optional, in production: a Redis-less prod deployment silently falls
   // back to per-instance in-memory state for all of that.
   try {
-    // getConnection() is a lazyConnect + enableOfflineQueue:false singleton
-    // also used by BullMQ elsewhere — with both of those set, a command
-    // issued before the socket is actually open is rejected outright
-    // instead of queued, so .connect() must be awaited explicitly first.
-    // Skip it if something else already started connecting (races the
-    // "already connecting/connected" rejection) and just verify readiness
-    // with ping either way.
+    // getConnection() creates a fresh ioredis instance per call; this one
+    // is kept as a long-lived singleton for /api/health and the cache service.
     global.redisClient = require('./mallwallet/queue/redis')();
     if (global.redisClient.status === 'wait') {
       await global.redisClient.connect();

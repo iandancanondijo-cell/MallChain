@@ -15,6 +15,10 @@ export interface CurrentUser {
   username: string | null;
   role: 'user' | 'admin' | 'superadmin';
   banned?: boolean;
+  // Present for role==='admin'. null/undefined for superadmin (sees all)
+  // and for non-admins. Used by AdminApp to land the user in the correct
+  // category window and gate the Reports UI on its own category.
+  adminCategory?: 'users' | 'blockchain' | 'validator' | 'kyc' | 'mining' | 'treasury' | 'marketplace' | 'mlpts' | 'reports' | null;
 }
 
 export interface AdminDashboardStats {
@@ -322,8 +326,19 @@ class AdminApi {
     return api.get('/api/admin/kyc/pending');
   }
 
-  async reviewKyc(id: string, action: 'approved' | 'rejected', notes?: string): Promise<ApiResult<{ kyc: AdminKycSubmission }>> {
-    return api.post(`/api/admin/kyc/${encodeURIComponent(id)}/review`, { action, notes });
+  // Screenshot proof upload used by every admin review action below.
+  // Backend (/api/admin/proof) writes the file under PROOFS_UPLOAD_DIR
+  // with the admin's userId as filename prefix; the returned documentRef
+  // must then be sent with reviewKyc / approveSubmission / rejectSubmission
+  // or the backend 400s with "screenshotRef is required".
+  async uploadAdminProof(file: File): Promise<ApiResult<{ ok: true; documentRef: string }>> {
+    const fd = new FormData();
+    fd.append('proof', file);
+    return api.upload<{ ok: true; documentRef: string }>('/api/admin/proof', fd);
+  }
+
+  async reviewKyc(id: string, action: 'approved' | 'rejected', screenshotRef: string, notes?: string): Promise<ApiResult<{ kyc: AdminKycSubmission }>> {
+    return api.post(`/api/admin/kyc/${encodeURIComponent(id)}/review`, { action, notes, screenshotRef });
   }
 
   async listPendingAmlReviews(): Promise<ApiResult<{ reviews: AdminAmlReview[]; total: number }>> {
@@ -350,12 +365,15 @@ class AdminApi {
     return api.get('/api/admin/mining/submissions/pending');
   }
 
-  async approveSubmission(id: string, rewardAmount?: number): Promise<ApiResult<{ submission: AdminSubmission }>> {
-    return api.post(`/api/admin/mining/submissions/${encodeURIComponent(id)}/approve`, rewardAmount ? { rewardAmount } : {});
+  async approveSubmission(id: string, screenshotRef: string, rewardAmount?: number): Promise<ApiResult<{ submission: AdminSubmission }>> {
+    return api.post(`/api/admin/mining/submissions/${encodeURIComponent(id)}/approve`, {
+      screenshotRef,
+      ...(rewardAmount ? { rewardAmount } : {}),
+    });
   }
 
-  async rejectSubmission(id: string, note?: string): Promise<ApiResult<{ submission: AdminSubmission }>> {
-    return api.post(`/api/admin/mining/submissions/${encodeURIComponent(id)}/reject`, { note });
+  async rejectSubmission(id: string, screenshotRef: string, note?: string): Promise<ApiResult<{ submission: AdminSubmission }>> {
+    return api.post(`/api/admin/mining/submissions/${encodeURIComponent(id)}/reject`, { screenshotRef, note });
   }
 
   /** Campaign creation lives on /api/mines (requireAdmin-gated), not /api/admin. */
@@ -506,6 +524,57 @@ class AdminApi {
   async broadcastNotification(payload: { title: string; message: string; type?: string; channels?: { email?: boolean; sms?: boolean; whatsapp?: boolean; inApp?: boolean } }): Promise<ApiResult<{ recipientCount: number }>> {
     return api.post('/api/admin/notifications/broadcast', payload);
   }
+
+  // ============ CATEGORY ADMIN PROVISIONING (superadmin only) ============
+  async createCategoryAdmin(payload: { email: string; password: string; name?: string; adminCategory: string }): Promise<ApiResult<{ user: AdminUser }>> {
+    return api.post('/api/admin/users', payload);
+  }
+
+  async reassignCategory(userId: string, adminCategory: string): Promise<ApiResult<{ user: AdminUser }>> {
+    return api.patch(`/api/admin/users/${userId}/category`, { adminCategory });
+  }
+
+  // ============ PRESENCE ============
+  async getPresence(): Promise<ApiResult<PresenceState>> {
+    return api.get('/api/admin/presence');
+  }
+
+  // ============ REPORTS ============
+  async submitReport(payload: { subject: string; body: string }): Promise<ApiResult<{ report: ReportRecord }>> {
+    return api.post('/api/admin/reports', payload);
+  }
+
+  async listReports(): Promise<ApiResult<{ reports: ReportRecord[] }>> {
+    return api.get('/api/admin/reports');
+  }
+
+  async markReportRead(id: string): Promise<ApiResult<{ report: ReportRecord }>> {
+    return api.patch(`/api/admin/reports/${id}/read`);
+  }
+
+  async markReportActioned(id: string, reply?: string): Promise<ApiResult<{ report: ReportRecord }>> {
+    return api.patch(`/api/admin/reports/${id}/action`, { reply });
+  }
+}
+
+export interface PresenceState {
+  ok: boolean;
+  superadminOnline: boolean;
+  lastSeenAt: string | null;
+  lastSeenEmail: string | null;
+}
+
+export interface ReportRecord {
+  _id: string;
+  fromCategory: 'users' | 'blockchain' | 'validator' | 'kyc' | 'mining' | 'treasury' | 'marketplace' | 'mlpts' | 'reports';
+  subject: string;
+  body: string;
+  status: 'sent' | 'read' | 'actioned';
+  createdAt: string;
+  readAt?: string;
+  actionedAt?: string;
+  superadminReply?: string;
+  repliedAt?: string;
 }
 
 export interface MaintenanceState {

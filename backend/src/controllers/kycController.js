@@ -6,18 +6,51 @@ const { KYC_UPLOAD_DIR } = require('../middleware/upload');
 const { screenAml } = require('../services/amlProvider');
 const { AppError, ErrorCodes, asyncHandler } = require('../utils/errorHandler');
 const logger = require('../utils/logger');
+const activityEvents = require('../services/activityEvents');
+// idFrontUrl / idBackUrl / idDocumentUrl are stored encrypted at rest
+// (ENCRYPTED_FIELDS in models/kyc.js). Lookups that translate them back to
+// the on-disk filename must pass them through decryptField first —
+// otherwise we'd resolve `path.join(KYC_UPLOAD_DIR, "v1:...:...")` and
+// sendFile() would 404.
+const { decryptField } = require('../utils/fieldEncryption');
 
 exports.uploadDocument = asyncHandler(async (req, res) => {
   if (!req.file) {
     throw new AppError(ErrorCodes.MISSING_REQUIRED_FIELD, 'No document uploaded', 400);
   }
+  
+  // P1 ISSUE #2 WORKAROUND: Add file corruption detection
+  // Verify PNG/JPEG headers to ensure file integrity
+  const buffer = req.file.buffer || Buffer.alloc(0);
+  
+  if (buffer.length > 0) {
+    // PNG magic bytes: 89 50 4E 47
+    const isPng = buffer.length >= 4 && 
+      buffer[0] === 0x89 && buffer[1] === 0x50 && 
+      buffer[2] === 0x4E && buffer[3] === 0x47;
+    
+    // JPEG magic bytes: FF D8
+    const isJpeg = buffer.length >= 2 && 
+      buffer[0] === 0xFF && buffer[1] === 0xD8;
+    
+    if (!isPng && !isJpeg) {
+      throw new AppError(
+        ErrorCodes.INVALID_INPUT,
+        'File appears corrupted or is not a valid PNG/JPEG image',
+        400
+      );
+    }
+  }
+  
   // The ref is just the on-disk filename — resolved back to a path only by
   // getDocument below, and never exposed as a public URL.
   res.json({ ok: true, documentRef: req.file.filename });
 });
 
 exports.getDocument = asyncHandler(async (req, res) => {
-  const userId = req.user?.id || req.user?.userId;
+  // req.user is the cached JSON object (NOT a Mongoose doc), so there is
+  // no `id` virtual — fall through to _id/stringify of the ObjectId.
+  const userId = req.user?._id || req.user?.id || req.user?.userId;
   const kyc = await KYC.findById(req.params.kycId);
   if (!kyc) throw new AppError(ErrorCodes.NOT_FOUND, 'Not found', 404);
 
@@ -26,11 +59,31 @@ exports.getDocument = asyncHandler(async (req, res) => {
   if (!isOwner && !isAdmin) {
     throw new AppError(ErrorCodes.INSUFFICIENT_PERMISSIONS, 'Forbidden', 403);
   }
-  if (!kyc.idDocumentUrl) {
-    throw new AppError(ErrorCodes.NOT_FOUND, 'No document on file', 404);
+
+  // side ∈ { 'front', 'back', 'document' } — 'document' is the legacy
+  // single-side field, still here so old submissions remain viewable.
+  // Default to 'front' because every new submission is dual-side and
+  // admins reviewing such a record most often want to start with the
+  // front (photo + name + DOB) anyway.
+  const sideParam = typeof req.query?.side === 'string' ? req.query.side.toLowerCase() : 'front';
+  const fieldName = sideParam === 'back'
+    ? 'idBackUrl'
+    : sideParam === 'document' || sideParam === 'single'
+      ? 'idDocumentUrl'
+      : 'idFrontUrl';
+
+  // idFrontUrl / idBackUrl / idDocumentUrl are AES-GCM encrypted at rest
+  // (see ENCRYPTED_FIELDS in models/kyc.js). The stored value is opaque
+  // ciphertext like `v1:iv:tag:ct` — feeding that straight into
+  // path.basename() yields junk and sendFile() would 404. decryptField
+  // is a no-op for already-plain values, so legacy records (pre-encryption
+  // migration) keep working too.
+  const storedUrl = decryptField(kyc[fieldName]);
+  if (!storedUrl) {
+    throw new AppError(ErrorCodes.NOT_FOUND, `No ${fieldName === 'idDocumentUrl' ? 'document' : sideParam + ' document'} on file`, 404);
   }
 
-  // idDocumentUrl only needs to start with `${userId}-` (see submitKYC) —
+  // Each id*Url only needs to start with `${userId}-` (see submitKYC) —
   // nothing stops an owner from submitting e.g. `${userId}-../../../etc/passwd`
   // as the value. path.join would happily resolve that outside
   // KYC_UPLOAD_DIR, turning this into an arbitrary-file-read via a KYC
@@ -38,7 +91,7 @@ exports.getDocument = asyncHandler(async (req, res) => {
   // bare filename inside KYC_UPLOAD_DIR can ever be served — this matches
   // what uploadDocument actually produces (multer's filename has no path
   // separators) and is a no-op for every legitimate document.
-  const filePath = path.join(KYC_UPLOAD_DIR, path.basename(kyc.idDocumentUrl));
+  const filePath = path.join(KYC_UPLOAD_DIR, path.basename(storedUrl));
 
   // Every view of a raw identity document is logged — who (viewer id/role)
   // looked at whose KYC record and when. This matters most for the isAdmin
@@ -96,11 +149,28 @@ exports.submitKYC = asyncHandler(async (req, res) => {
   // idDocumentUrl is a client-supplied string (Joi only checks it's
   // non-empty) that getDocument later trusts to stream a file back to
   // whoever owns *this* KYC record — without this check, submitting
-  // another user's uploaded filename (predictable: `${userId}-${ts}-
-  // ${name}`, see upload.js) would let an attacker read that user's ID
-  // document back through their own, legitimately-owned KYC record.
+  // Validate document ownership: idDocumentUrl, idFrontUrl, idBackUrl must start with userId
   if (kycData.idDocumentUrl && !kycData.idDocumentUrl.startsWith(`${userId}-`)) {
     throw new AppError(ErrorCodes.INSUFFICIENT_PERMISSIONS, 'Document was not uploaded by this account', 403);
+  }
+  if (kycData.idFrontUrl && !kycData.idFrontUrl.startsWith(`${userId}-`)) {
+    throw new AppError(ErrorCodes.INSUFFICIENT_PERMISSIONS, 'Front document was not uploaded by this account', 403);
+  }
+  if (kycData.idBackUrl && !kycData.idBackUrl.startsWith(`${userId}-`)) {
+    throw new AppError(ErrorCodes.INSUFFICIENT_PERMISSIONS, 'Back document was not uploaded by this account', 403);
+  }
+
+  // Validate at least one document format provided
+  const hasSingleDoc = !!kycData.idDocumentUrl;
+  const hasDualDocs = !!(kycData.idFrontUrl && kycData.idBackUrl);
+  
+  if (!hasSingleDoc && !hasDualDocs) {
+    throw new AppError(ErrorCodes.MISSING_REQUIRED_FIELD, 'Document(s) required: either idDocumentUrl or both idFrontUrl and idBackUrl', 400);
+  }
+
+  // Warn if using deprecated single-document format
+  if (hasSingleDoc && !hasDualDocs) {
+    logger.warn('kycController', 'Deprecated single-document KYC format used', { userId });
   }
 
   // Check if user already has a pending KYC
@@ -160,6 +230,7 @@ exports.submitKYC = asyncHandler(async (req, res) => {
     throw new AppError(ErrorCodes.DATABASE_ERROR, 'Failed to submit KYC', 500);
   }
 
+  activityEvents.emitKycSubmitted(userId, { kycId: kyc._id, riskLevel }).catch(() => {});
   res.json({
     success: true,
     kycId: kyc._id,
@@ -237,6 +308,8 @@ exports.getKYCStatus = asyncHandler(async (req, res) => {
     reviewedAt: kyc.reviewedAt || null,
     notes: kyc.notes || '',
     hasDocument: !!kyc.idDocumentUrl,
+    hasFrontDocument: !!kyc.idFrontUrl,
+    hasBackDocument: !!kyc.idBackUrl,
     personal: {
       firstName: kyc.firstName,
       lastName: kyc.lastName,

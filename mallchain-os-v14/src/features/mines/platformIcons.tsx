@@ -33,6 +33,13 @@ export const PLATFORM_BRAND: Record<string, { Icon: IconType; label: string; bg:
   medium: { Icon: SiMedium, label: 'Medium / Blog', bg: '#000000', fg: '#ffffff' },
 };
 
+/** Display order for platforms in platform picker */
+export const PLATFORM_ORDER: string[] = [
+  'tiktok', 'instagram', 'youtube', 'whatsapp', 'telegram',
+  'facebook', 'threads', 'x', 'snapchat', 'reddit',
+  'discord', 'linkedin', 'pinterest', 'twitch', 'spotify', 'medium',
+];
+
 /** Bare glyph, inherits surrounding text color — for inline/compact use (lists, chips). */
 export function PlatformIcon({ platform, size = 18 }: { platform: string; size?: number }) {
   const brand = PLATFORM_BRAND[platform];

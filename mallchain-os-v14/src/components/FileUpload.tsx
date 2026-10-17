@@ -75,9 +75,16 @@ export const FileUpload: React.FC<FileUploadProps> = ({
         return `File type not accepted. Allowed: ${accept}`;
       }
 
+      // For avatar uploads: validate minimum file size (prevents empty/corrupt files)
+      if (category === 'avatar' && file.type.startsWith('image/')) {
+        if (file.size < 100) {
+          return 'File is too small or corrupt (minimum 100 bytes for image)';
+        }
+      }
+
       return null;
     },
-    [accept, maxSize]
+    [accept, maxSize, category]
   );
 
   const uploadFile = useCallback(

@@ -299,9 +299,10 @@ export default function Landing({ navigate }: LandingProps) {
     return () => observers.forEach((io) => io.disconnect());
   }, []);
 
-  // Ring parallax + pupil pointer tracking
+  // Ring parallax + pupil pointer tracking (disabled on mobile to prevent Android compositor flicker)
   useEffect(() => {
     if (reducedMotion) return;
+    if (window.matchMedia('(max-width: 768px)').matches) return;
 
     const ring = ringRef.current;
     const pupil = pupilRef.current;

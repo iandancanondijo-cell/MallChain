@@ -27,6 +27,7 @@ import AuthPage from './features/auth/AuthPage';
 import EnhancedRegistrationFlow from './features/auth/EnhancedRegistrationFlow';
 const KycSession = lazy(() => import('./features/kyc/KycSession'));
 const WalletHub = lazy(() => import('./features/wallet/WalletHub'));
+const WalletFlow = lazy(() => import('./features/wallet/WalletFlow'));
 const WalletSend = lazy(() => import('./features/wallet/WalletSend'));
 const WalletReceive = lazy(() => import('./features/wallet/WalletReceive'));
 const WalletSwap = lazy(() => import('./features/wallet/WalletSwap'));
@@ -54,7 +55,7 @@ const ValidatorsLeaderboard = lazy(() => import('./features/validators/Validator
 const ValidatorsProfile = lazy(() => import('./features/validators/ValidatorsProfile'));
 const Messaging = lazy(() => import('./features/messaging/Messaging'));
 const Referrals = lazy(() => import('./features/referrals/Referrals'));
-const Admin = lazy(() => import('./features/admin/Admin'));
+const Admin = lazy(() => import('./features/admin/advanced/AdminApp'));
 const Settings = lazy(() => import('./features/settings/Settings'));
 const Contracts = lazy(() => import('./features/contracts/Contracts'));
 const DevHub = lazy(() => import('./features/devhub/DevHub'));
@@ -101,6 +102,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/wallet/withdraw', title: 'Withdraw', render: () => <WalletWithdraw /> },
   { path: '/wallet/points', title: 'Mallpoints', render: (n) => <WalletPoints navigate={n} /> },
   { path: '/wallet/performance', title: 'Performance', render: () => <Performance /> },
+  { path: '/wallet/connect', title: 'Connect Wallet', render: (n) => <WalletFlow navigate={n} onBack={() => n('/wallet')} /> },
   { path: '/wallet', title: 'Wallet', render: (n) => <WalletHub navigate={n} /> },
   /* marketplace / staking / governance */
   { path: '/marketplace', title: 'Marketplace', render: (n) => <Marketplace navigate={n} /> },
@@ -151,16 +153,18 @@ const ADMIN_ROUTES = ['/admin'];
 export function matchRoute(path: string, isAuthenticated: boolean = true, role: string = 'user'): RouteDef {
   const clean = path.split('?')[0];
 
-  // PHASE 0 FIX: Public routes that don't require authentication
-  const publicRoutes = ['/landing', '/auth', '/login', '/dmca'];
+  // Public routes that don't require authentication.
+  // /wallet is included so users can connect/create a wallet before logging in.
+  // /admin is NOT here — unauthenticated users hitting /admin get redirected to /auth
+  // so there is ONE login portal across the whole platform.
+  const publicRoutes = ['/landing', '/auth', '/login', '/dmca', '/wallet', '/wallet/connect'];
   const isAdmin = role === 'admin' || role === 'superadmin';
 
   const denyIfAdminOnly = (routePath: string): RouteDef | null => {
     const isAdminRoute = ADMIN_ROUTES.some((r) => routePath === r || routePath.startsWith(r + '/'));
-    // This is the real authorization boundary — a non-admin must never mount
-    // Admin.tsx at all, not just see it render an "access denied" message
-    // inside the normal page content (which is all the previous check did).
-    if (isAdminRoute && !isAdmin) {
+    // Block authenticated non-admin users from admin routes — they go to dashboard instead.
+    // Unauthenticated users are already redirected to /auth by the publicRoutes check above.
+    if (isAdminRoute && isAuthenticated && !isAdmin) {
       return { path: '/', title: 'Dashboard', render: (n) => <Dashboard navigate={n} /> };
     }
     return null;

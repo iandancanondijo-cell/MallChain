@@ -24,22 +24,18 @@ jest.mock('../utils/logger', () => ({
   warn: jest.fn(),
   error: jest.fn(),
 }));
-jest.mock('../services/emailService', () => ({
+jest.mock('../services/brevoService', () => ({
   sendEmail: jest.fn(),
-  complianceFooter: jest.fn(() => '<footer/>'),
-}));
-jest.mock('../services/smsService', () => ({
   sendSMS: jest.fn(),
-}));
-jest.mock('../services/whatsappService', () => ({
   sendWhatsApp: jest.fn(),
+  complianceFooter: jest.fn(() => '<footer/>'),
 }));
 
 const Notification = require('../models/Notification');
 const NotificationPreferences = require('../models/notificationPreferences');
 const UserSettings = require('../models/UserSettings');
-const { sendEmail } = require('../services/emailService');
-const { sendSMS } = require('../services/smsService');
+const { sendEmail } = require('../services/brevoService');
+const { sendSMS } = require('../services/brevoService');
 const { notify, notifyUser } = require('../services/notify');
 
 describe('notify()', () => {

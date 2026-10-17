@@ -104,6 +104,37 @@ function requireAuth(role) {
       req.authMethod = authMethod;
       if (!role) markActiveToday(user._id); // fire-and-forget — feeds the badge streak, never blocks the request
 
+      // Presence: touch lastSeenAt for superadmins on every authed request
+      // so /api/admin/presence can answer "is anyone with reply authority
+      // online right now" cheaply. Throttled to once per 20s to avoid a
+      // write storm from a page that polls every few seconds.
+      //
+      // Uses findByIdAndUpdate (not user.save) because the cached user
+      // object is a lean doc — it has no model methods, so .save() would
+      // throw a TypeError like "user.save is not a function".
+      //
+      // lastSeenAt may be a Date (fresh from Mongo) or an ISO string
+      // (after a Redis round-trip) — normalise both before arithmetic.
+      if (user.role === 'superadmin') {
+        const lastRaw = user.lastSeenAt;
+        const lastMs = lastRaw ? new Date(lastRaw).getTime() : 0;
+        if (Date.now() - lastMs > 20000) {
+          const next = new Date();
+          User.findByIdAndUpdate(user._id, { $set: { lastSeenAt: next } }).catch(() => {});
+          // Mirror to the auth cache so the next request from this user
+          // (within the cache TTL) sees the fresh lastSeenAt without an
+          // extra DB hit.
+          // Spread a plain object, never the Mongoose doc itself: spreading
+          // a Document copies its internal $__/_doc wrapper fields, so the
+          // JSON written to the auth cache had no top-level `role` and every
+          // role check failed for the rest of the cache TTL.
+          const base = typeof user.toObject === 'function' ? user.toObject() : user;
+          const refreshed = { ...base, lastSeenAt: next };
+          setCachedUser(user._id, refreshed).catch(() => {});
+          user.lastSeenAt = next; // local mutation for downstream middleware/handlers in the same request
+        }
+      }
+
       // Only a cookie-authenticated request needs the CSRF check — see
       // checkCsrf's comment above. Runs on every request (not just
       // mutating ones) so the secret cookie gets established on an

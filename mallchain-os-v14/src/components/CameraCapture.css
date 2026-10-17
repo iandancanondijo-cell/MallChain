@@ -1,0 +1,226 @@
+/* CameraCapture — one-shot camera widget for KYC ID documents.
+   Designed to slot into the existing KYC wizard step panel without
+   inheriting KycWizard.css's auth-page background layers (the parent
+   already provides the surface). All sizing is panel-relative so it
+   works inside both the auth-page wizard and the in-app KycSession. */
+
+.cam-cap {
+  --_line: rgba(238, 242, 248, 0.14);
+  --_line-strong: rgba(238, 242, 248, 0.22);
+  --_gold: var(--accent, #f3ba2f);
+  --_red: #fca5a5;
+  --_dim: #9aa7bd;
+  --_paper: #eef2f8;
+  --_input-bg: rgba(5, 8, 16, 0.7);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--_line);
+  border-radius: 16px;
+  background: rgba(13, 17, 27, 0.45);
+}
+
+.cam-cap.has-error {
+  border-color: rgba(252, 165, 165, 0.55);
+  box-shadow: 0 0 0 3px rgba(252, 165, 165, 0.1);
+}
+
+.cam-cap.is-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.cam-cap-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.cam-cap-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--_paper);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.cam-cap-clear {
+  background: transparent;
+  border: 1px solid var(--_line-strong);
+  border-radius: 999px;
+  color: var(--_dim);
+  font-size: 12px;
+  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: color 0.18s, border-color 0.18s, background 0.18s;
+}
+
+.cam-cap-clear:hover {
+  color: var(--_paper);
+  border-color: var(--_gold);
+  background: rgba(243, 186, 47, 0.06);
+}
+
+.cam-cap-stage {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--_input-bg);
+  border: 1px dashed var(--_line-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cam-cap-video,
+.cam-cap-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+.cam-cap-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px;
+  text-align: center;
+  color: var(--_dim);
+  max-width: 32ch;
+}
+
+.cam-cap-empty-text {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cam-cap-loading {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 8, 16, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cam-cap-loading-text {
+  color: var(--_paper);
+  letter-spacing: 0.08em;
+  font-size: 13px;
+  animation: cam-cap-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes cam-cap-pulse {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+
+.cam-cap-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(252, 165, 165, 0.06);
+  border: 1px solid rgba(252, 165, 165, 0.4);
+  border-radius: 10px;
+  padding: 8px 12px;
+  color: var(--_red);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.cam-cap-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.cam-cap-filename {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--_dim);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.cam-cap-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(238, 242, 248, 0.04);
+  border: 1px solid var(--_line-strong);
+  border-radius: 999px;
+  color: var(--_paper);
+  font-size: 13px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+
+.cam-cap-btn:hover {
+  background: rgba(243, 186, 47, 0.08);
+  border-color: var(--_gold);
+}
+
+.cam-cap-btn-primary {
+  background: var(--_gold);
+  border-color: var(--_gold);
+  color: #0c1320;
+  font-weight: 600;
+}
+
+.cam-cap-btn-primary:hover {
+  background: color-mix(in srgb, var(--_gold) 80%, white);
+  border-color: color-mix(in srgb, var(--_gold) 80%, white);
+}
+
+.cam-cap-btn-icon {
+  padding: 7px;
+}
+
+.cam-cap-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  border: 0;
+  padding: 0;
+  white-space: nowrap;
+  clip-path: inset(50%);
+  clip: rect(0 0 0 0);
+  overflow: hidden;
+}
+
+@media (max-width: 720px) {
+  .cam-cap-stage {
+    aspect-ratio: 4 / 3;
+  }
+  .cam-cap-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .cam-cap-btn {
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cam-cap-loading-text {
+    animation: none;
+  }
+}

@@ -60,7 +60,18 @@ describe('mallcoinTx.sendMallcoinTransfer', () => {
   });
 
   it('signs and broadcasts a well-formed transfer, converting MALL to 6-decimal base units', async () => {
-    vi.mocked(api.get).mockResolvedValue({ ok: true, data: { success: true, notFound: false, accountNumber: 3, sequence: 7 } });
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path.startsWith('/api/send/account/')) {
+        return Promise.resolve({ ok: true, data: { success: true, notFound: false, accountNumber: 3, sequence: 7 } });
+      }
+      if (path.startsWith('/api/send/status/')) {
+        return Promise.resolve({
+          ok: true,
+          data: { success: true, status: 'confirmed', code: 0, events: [] },
+        });
+      }
+      return Promise.resolve({ ok: false, error: 'unexpected path: ' + path });
+    });
     vi.mocked(api.post).mockResolvedValue({ ok: true, data: { success: true, txHash: 'ABCDEF1234' } });
 
     const { DirectSecp256k1HdWallet } = await import('@cosmjs/proto-signing');
@@ -77,8 +88,12 @@ describe('mallcoinTx.sendMallcoinTransfer', () => {
     expect(result.txHash).toBe('ABCDEF1234');
     expect(api.get).toHaveBeenCalledWith(`/api/send/account/${account.address}`);
 
-    expect(api.post).toHaveBeenCalledTimes(1);
-    const [path, body] = vi.mocked(api.post).mock.calls[0] as [string, { from: string; to: string; amount: number; txBytes: string }];
+    expect(api.post).toHaveBeenCalledTimes(2);
+    const [simulatePath, simulateBody] = vi.mocked(api.post).mock.calls[0] as [string, { txBytes: string }];
+    expect(simulatePath).toBe('/api/send/simulate');
+    expect(typeof simulateBody.txBytes).toBe('string');
+
+    const [path, body] = vi.mocked(api.post).mock.calls[1] as [string, { from: string; to: string; amount: number; txBytes: string }];
     expect(path).toBe('/api/send/mallcoins');
     expect(body.from).toBe(account.address);
     expect(body.to).toBe('mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6');
@@ -90,7 +105,7 @@ describe('mallcoinTx.sendMallcoinTransfer', () => {
 
   it('surfaces the backend error when broadcast fails', async () => {
     vi.mocked(api.get).mockResolvedValue({ ok: true, data: { success: true, notFound: false, accountNumber: 3, sequence: 7 } });
-    vi.mocked(api.post).mockResolvedValue({ ok: false, error: 'insufficient funds' });
+    vi.mocked(api.post).mockResolvedValue({ ok: false, code: 400, error: 'insufficient funds' });
 
     const { DirectSecp256k1HdWallet } = await import('@cosmjs/proto-signing');
     const wallet = await DirectSecp256k1HdWallet.fromMnemonic(TEST_MNEMONIC, { prefix: 'mall' });

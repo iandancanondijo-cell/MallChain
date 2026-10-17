@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, fmtNum, StatusChip, toast } from '../../components/ui';
 import { minesApi, type MinesCampaign, type MinesProfile, type RewardRatesTable } from '../../services/minesApi';
-import { PlatformIcon, PlatformBadge, PLATFORM_BRAND } from './platformIcons';
+import { PlatformIcon, PlatformBadge, PLATFORM_BRAND, PLATFORM_ORDER } from './platformIcons';
 
 /**
  * My Campaigns — bring a content link + description, pick a platform/
@@ -91,11 +91,6 @@ export default function MinesMyCampaigns() {
   );
 }
 
-const PLATFORM_ORDER = [
-  'tiktok', 'instagram', 'youtube', 'whatsapp', 'telegram', 'facebook', 'threads', 'x',
-  'snapchat', 'reddit', 'discord', 'linkedin', 'pinterest', 'twitch', 'spotify', 'medium',
-];
-
 function CreateCampaignWizard({
   rates,
   balance,
@@ -105,7 +100,7 @@ function CreateCampaignWizard({
   balance: number;
   onCreated: () => void;
 }) {
-  const platformKeys = PLATFORM_ORDER.filter((k) => rates.platforms[k] && PLATFORM_BRAND[k]);
+  const platformKeys = PLATFORM_ORDER.filter((k: string) => rates.platforms[k] && PLATFORM_BRAND[k]);
   const [platform, setPlatform] = useState<string | null>(null);
 
   // Step 1: platform picker.
@@ -120,7 +115,7 @@ function CreateCampaignWizard({
             gap: 12,
           }}
         >
-          {platformKeys.map((k) => (
+          {platformKeys.map((k: string) => (
             <button
               key={k}
               type="button"
@@ -203,6 +198,33 @@ function CampaignDetailsStep({
       toast('Add a content link', false);
       return;
     }
+    
+    // Validate content link is valid URL
+    try {
+      new URL(contentLink.trim());
+    } catch {
+      toast('Content link must be a valid URL', false);
+      return;
+    }
+
+    // Validate directive (if provided) is specific and not vague
+    if (directive.trim()) {
+      if (directive.length < 20) {
+        toast('Task directive must be at least 20 characters - be specific', false);
+        return;
+      }
+      if (directive.length > 500) {
+        toast('Task directive must be under 500 characters', false);
+        return;
+      }
+      const vaguePhrases = ['engage', 'do something', 'interact', 'participate', 'like'];
+      const hasVaguePhrases = vaguePhrases.some(phrase => directive.toLowerCase().includes(phrase) && directive.toLowerCase().indexOf(phrase) === 0);
+      if (hasVaguePhrases) {
+        toast(`Task directive too vague - be specific (e.g., "Like the video" not just "like content")`, false);
+        return;
+      }
+    }
+
     if (budgetNum <= 0) {
       toast('Enter a Mallpoints budget', false);
       return;

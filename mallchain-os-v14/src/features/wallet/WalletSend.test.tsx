@@ -71,10 +71,10 @@ describe('WalletSend', () => {
     });
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '10' } });
 
-    fireEvent.click(screen.getByText('Review transaction →'));
+    fireEvent.click(screen.getByText(/Review transaction/i));
     expect(screen.getByText('Review')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('Continue to authorize →'));
+    fireEvent.click(screen.getByText(/Continue to sign/i));
     expect(screen.getByText(/Authorize transaction/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Authorize & broadcast'));
@@ -91,7 +91,7 @@ describe('WalletSend', () => {
       amountMlcns: 10,
     });
 
-    await waitFor(() => expect(screen.getByText('tx REALTXHASH123')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('REALTXHASH123')).toBeInTheDocument());
     expect(screen.getByText('Sent 10 MALL')).toBeInTheDocument();
   });
 
@@ -103,25 +103,25 @@ describe('WalletSend', () => {
       target: { value: RECIPIENT_ADDRESS },
     });
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '10' } });
-    fireEvent.click(screen.getByText('Review transaction →'));
-    fireEvent.click(screen.getByText('Continue to authorize →'));
+    fireEvent.click(screen.getByText(/Review transaction/i));
+    fireEvent.click(screen.getByText(/Continue to sign/i));
     fireEvent.click(screen.getByText('Authorize & broadcast'));
 
     await waitFor(() => expect(requestMnemonic).toHaveBeenCalledTimes(1));
     expect(sendMallcoinTransfer).not.toHaveBeenCalled();
   });
 
-  test('an invalid (non-bech32) recipient address is rejected before reaching review', () => {
+  test('an invalid (non-bech32) recipient address is rejected before reaching review', async () => {
     render(<WalletSend />);
 
     fireEvent.change(screen.getByPlaceholderText(/mall1… \(bech32 address\)/i), {
       target: { value: '0x1234567890abcdef1234567890abcdef12345678' },
     });
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '10' } });
-    fireEvent.click(screen.getByText('Review transaction →'));
+    fireEvent.click(screen.getByText(/Review transaction/i));
 
-    expect(screen.getByText(/Invalid address/i)).toBeInTheDocument();
-    expect(screen.queryByText('Review')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/Invalid address — expected/i)).toBeInTheDocument());
+    expect(screen.queryByText('Transaction Summary')).not.toBeInTheDocument();
   });
 
   test('surfaces the no-on-chain-history error with a way to get gas, instead of a raw error', async () => {
@@ -135,10 +135,10 @@ describe('WalletSend', () => {
       target: { value: RECIPIENT_ADDRESS },
     });
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '10' } });
-    fireEvent.click(screen.getByText('Review transaction →'));
-    fireEvent.click(screen.getByText('Continue to authorize →'));
+    fireEvent.click(screen.getByText(/Review transaction/i));
+    fireEvent.click(screen.getByText(/Continue to sign/i));
     fireEvent.click(screen.getByText('Authorize & broadcast'));
 
-    expect(await screen.findByText(/Get network fee tokens/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Get fee tokens/i)).toBeInTheDocument();
   });
 });
