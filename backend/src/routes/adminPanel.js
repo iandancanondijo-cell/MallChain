@@ -106,7 +106,12 @@ router.use(requireAdmin);
 // ============ AUDIT LOGGING ============
 async function auditLog(action, actor, details, outcome = 'success') {
   try {
-    await AuditLog.create({ action, actor: actor?.email || actor?.toString() || 'system', details, outcome });
+    // actor is usually req.user, whose email is encrypted at rest — decrypt
+    // before recording, otherwise every audit entry stores ciphertext.
+    const actorEmail = actor && typeof actor === 'object' && actor.email
+      ? User.decryptUserPii(actor).email
+      : null;
+    await AuditLog.create({ action, actor: actorEmail || actor?.toString?.() || 'system', details, outcome });
   } catch (e) {
     logger.error('adminPanel', 'audit log failed', e);
   }
@@ -315,7 +320,7 @@ router.post('/validators/applications/:id/review', requireCategory('validator'),
 
     application.status = action;
     application.reviewedAt = new Date();
-    application.reviewer = req.user.email;
+    application.reviewer = User.decryptUserPii(req.user).email;
     application.reviewNotes = notes || '';
     // isActiveValidator only grants mines task-review eligibility (see the
     // field comment in models/ValidatorApplication.js) — it has no effect
@@ -981,10 +986,13 @@ router.get('/withdrawals', requireCategory('treasury'), async (req, res) => {
 
     const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
     const skip = Math.max(Number(page) || 0, 0) * safeLimit;
-    const [withdrawals, total] = await Promise.all([
+    const [rawWithdrawals, total] = await Promise.all([
       WithdrawalRequest.find(query).sort({ createdAt: -1 }).skip(skip).limit(safeLimit).lean(),
       WithdrawalRequest.countDocuments(query),
     ]);
+    // phone is encrypted at rest; decrypt for the admin-facing list so it
+    // doesn't render as ciphertext.
+    const withdrawals = rawWithdrawals.map((w) => WithdrawalRequest.decryptPhone(w));
 
     return res.json({ ok: true, withdrawals, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
@@ -1005,7 +1013,7 @@ router.post('/withdrawals/:id/retry', requireCategory('treasury'), limiters.stri
     }
 
     const payoutResult = await initiateB2CPayout({
-      sellerPhone: withdrawal.phone,
+      sellerPhone: WithdrawalRequest.decryptPhone(withdrawal).phone,
       mlcnsAmount: withdrawal.amountMlcns,
       saleId: withdrawal.saleId || `withdrawal-${withdrawal.withdrawalId}`,
     });
@@ -1533,7 +1541,7 @@ router.post('/maintenance', requireSuperAdmin, limiters.strict, async (req, res)
     const existing = await MaintenanceMode.findById('singleton').lean();
     const update = {
       reason: reason !== undefined ? reason : (existing?.reason || ''),
-      updatedBy: req.user.email || String(req.user._id),
+      updatedBy: User.decryptUserPii(req.user).email || String(req.user._id),
     };
     if (global !== undefined) update.global = !!global;
     if (scope !== undefined) update[`scopes.${scope}`] = !!paused;
@@ -1789,7 +1797,7 @@ router.patch('/users/:id/category', requireSuperAdmin, limiters.strict, async (r
     const oldCategory = user.adminCategory;
     user.adminCategory = adminCategory;
     await user.save();
-    await auditLog('category_admin_reassigned', req.user, { userEmail: user.email, from: oldCategory, to: adminCategory });
+    await auditLog('category_admin_reassigned', req.user, { userEmail: decryptField(user.email) || user.email, from: oldCategory, to: adminCategory });
 
     return res.json({
       ok: true,

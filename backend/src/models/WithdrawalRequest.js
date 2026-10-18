@@ -67,8 +67,11 @@ WithdrawalRequestSchema.index({ walletAddress: 1, createdAt: -1 })
 // phone on save and populates the blind index for exact-match queries.
 WithdrawalRequestSchema.pre('save', function encryptPhoneOnSave() {
   if (this.isModified('phone') && this.phone != null) {
-    this.phone = encryptField(this.phone);
+    // Blind index must be computed over the PLAINTEXT phone. GDPR erasure
+    // looks records up by phone_blind = blindIndex(plaintext); blinding the
+    // ciphertext instead produces an index that never matches.
     this.phone_blind = blindIndex(this.phone);
+    this.phone = encryptField(this.phone);
   }
 });
 

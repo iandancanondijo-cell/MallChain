@@ -25,7 +25,28 @@ const SAFARICOM_CONSUMER_SECRET = process.env.SAFARICOM_SECRET
 const SAFARICOM_SHORTCODE = process.env.SAFARICOM_SHORTCODE || '174379'
 const SAFARICOM_PASSKEY = process.env.SAFARICOM_PASSKEY || 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919'
 const SAFARICOM_ENV = process.env.SAFARICOM_ENV || 'sandbox'
-const CALLBACK_URL = process.env.CALLBACK_URL || 'https://decorating-interface-locations-obtain.trycloudflare.com/api/mallpoints/purchase/mpesa/callback'
+
+// Daraja posts the STK-push result back to this URL, and this is the ONLY thing
+// that flips a purchase from `payment_initiated` → `confirmed`; the frontend
+// poll just reads that status. Two things used to break it:
+//   1. It reused process.env.CALLBACK_URL, which points at the *buy* route
+//      (/api/buy/mpesa/callback). That handler only looks up MallcoinPurchase in
+//      Mongo and knows nothing about the Redis `purchase:*` record here, so the
+//      Mallpoints quote never confirmed and the UI timed out.
+//   2. /mpesa/callback is guarded by verifyWebhookToken (?token=...), but the
+//      registered URL had no token appended, so even a right-path callback got
+//      401. config/index.js appendWebhookToken is the pattern the other flows use.
+const PAYMENT_WEBHOOK_SECRET = process.env.PAYMENT_WEBHOOK_SECRET
+function appendWebhookToken(url, secret) {
+  if (!secret) return url
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}token=${encodeURIComponent(secret)}`
+}
+const CALLBACK_URL = appendWebhookToken(
+  process.env.MALLPOINTS_CALLBACK_URL
+    || `${process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000'}/api/mallpoints/purchase/mpesa/callback`,
+  PAYMENT_WEBHOOK_SECRET
+)
 
 const BASE_URL = SAFARICOM_ENV === 'production'
   ? 'https://api.safaricom.co.ke'
@@ -93,6 +114,36 @@ async function getDarajaToken() {
   if (!res.ok) throw new Error('Failed to get Daraja token')
   const data = await res.json()
   return data.access_token
+}
+
+// Actively ask Daraja for an STK push's outcome. The async /mpesa/callback is
+// the primary confirmation path, but it only lands if the registered public
+// tunnel is up and reachable — which the ephemeral sandbox tunnel frequently
+// is not, so a paid purchase would sit at `payment_initiated` until the UI's
+// 10-min poll expired ("nothing happened"). This query endpoint lets the
+// backend confirm payment on its own, regardless of inbound callback delivery.
+async function queryDarajaStatus(purchase) {
+  const token = await getDarajaToken()
+  // Daraja requires the Timestamp baked into Password to be the SAME string
+  // sent in the Timestamp field — computing it twice can straddle a second
+  // boundary and the query then fails with a password mismatch.
+  const timestamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
+  const res = await fetch(`${BASE_URL}/mpesa/stkpushquery/v10/query/`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      BusinessShortCode: SAFARICOM_SHORTCODE,
+      Password: Buffer.from(`${SAFARICOM_SHORTCODE}${SAFARICOM_PASSKEY}${timestamp}`).toString('base64'),
+      Timestamp: timestamp,
+      MerchantRequestID: purchase.merchantRequestId,
+      CheckoutRequestID: purchase.paymentId,
+    }),
+  })
+  if (!res.ok) throw new Error('stkquery request failed')
+  return res.json()
 }
 
 // POST /api/mallpoints/purchase/reserve - create a purchase quote
@@ -421,6 +472,46 @@ router.get('/status/:quoteId', requireAuth(), async (req, res) => {
     const purchase = await getPurchase(req.params.quoteId)
     if (!purchase) {
       return res.json({ status: 'unknown' })
+    }
+
+    // The async callback is the primary path to `confirmed`; when it hasn't
+    // landed yet (e.g. the public tunnel is down so Daraja can't POST back),
+    // actively ask Daraja for the outcome so a genuinely-paid quote still
+    // confirms. Throttled to once per 5s per quote to avoid hammering Daraja
+    // while the UI polls every 3s.
+    if (purchase.status === 'payment_initiated' && purchase.paymentId) {
+      const now = Date.now()
+      if (!purchase.lastQueryAt || now - Number(purchase.lastQueryAt) > 5000) {
+        purchase.lastQueryAt = now
+        await savePurchase(purchase)
+        try {
+          const q = await queryDarajaStatus(purchase)
+          const cb = q?.Body?.stkCallbackResult
+          if (cb && cb.ResultCode === 0) {
+            purchase.status = 'confirmed'
+            purchase.callbackData = cb
+            purchase.confirmedAt = Date.now()
+            await savePurchase(purchase)
+          } else if (cb && cb.ResultCode && cb.ResultCode !== 0) {
+            // A definitive failure (wrong password / cancelled). Note: Daraja
+            // also returns non-zero codes while the prompt is genuinely still
+            // pending, so only the well-known terminal codes fail the quote —
+            // otherwise leave it `payment_initiated` and keep polling.
+            const terminal = /cancelled|expired|fail|timeout|insufficient/i.test(cb.ResultDesc || '')
+            if (terminal) {
+              purchase.status = 'failed'
+              purchase.failureReason = cb.ResultDesc
+              purchase.callbackData = cb
+              await savePurchase(purchase)
+            }
+          }
+        } catch (qErr) {
+          logger.warn('mallpoints-purchase', 'status query failed (non-fatal)', {
+            quoteId: purchase.quoteId,
+            error: qErr.message || String(qErr),
+          })
+        }
+      }
     }
 
     return res.json({

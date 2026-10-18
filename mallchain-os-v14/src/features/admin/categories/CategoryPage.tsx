@@ -80,6 +80,24 @@ function formatKes(n: number): string {
   return `${Math.round(n * 100) / 100} KES`;
 }
 
+function formatCommission(rate: string): string {
+  const r = parseFloat(rate);
+  if (isNaN(r)) return rate || '—';
+  const pct = r * 100;
+  return `${Number.isInteger(pct) ? pct : pct.toFixed(2)}%`;
+}
+
+function statusLabel(status: string): string {
+  const s = status.replace(/^BOND_STATUS_/, '');
+  return s.charAt(0) + s.slice(1).toLowerCase();
+}
+
+function formatTokens(t: string): string {
+  const n = Number(t);
+  if (!Number.isFinite(n)) return t || '—';
+  return n.toLocaleString();
+}
+
 export default function CategoryPage({ category }: { category: Category }) {
   const me = store.state.user;
   const isSuper = me.role === 'superadmin';
@@ -455,7 +473,7 @@ function BlockchainAdmin() {
       <div className="stat-grid">
         <div className="card">
           <div className="card-label">Block Height</div>
-          <div className="card-value">{status ? fmtNum(status.blockHeight) : '—'}</div>
+          <div className="card-value">{status ? status.blockHeight.toLocaleString() : '—'}</div>
           <div className="card-sub">
             {status ? `${status.peerCount} peers · ${status.chainId}` : 'live from :1317'}
           </div>
@@ -474,7 +492,7 @@ function BlockchainAdmin() {
         <div className="card">
           <div className="card-label">Validators</div>
           <div className="card-value">{validators.length}</div>
-          <div className="card-sub">{bonded || '—'} bonded</div>
+          <div className="card-sub">{bonded ? formatTokens(bonded) : '—'} stake bonded</div>
         </div>
         <div className="card">
           <div className="card-label">Pending Proposals</div>
@@ -506,7 +524,7 @@ function BlockchainAdmin() {
           <div key={b.height} className="list-row">
             <div className="grow">
               <div className="t mono">
-                #{fmtNum(b.height)} — {b.txCount} txs
+                #{b.height.toLocaleString()} — {b.txCount} txs
               </div>
               <div className="m tiny mono">
                 {b.hash.slice(0, 18)}… · {b.proposer}
@@ -524,7 +542,7 @@ function BlockchainAdmin() {
         <div className="sec-title">
           <h2>Validators</h2>
           <span className="sub">
-            {validators.length} active · {bonded || '0'} bonded
+            {validators.length} active · {bonded ? `${formatTokens(bonded)} stake` : '0'} bonded
           </span>
         </div>
         <table className="tbl">
@@ -547,11 +565,11 @@ function BlockchainAdmin() {
                   {v.jailed ? (
                     <span className="chip red">jailed</span>
                   ) : (
-                    <span className="chip green">{v.status}</span>
+                    <span className="chip green">{statusLabel(v.status)}</span>
                   )}
                 </td>
-                <td className="num">{v.tokens}</td>
-                <td className="num">{v.commission}</td>
+                <td className="num">{formatTokens(v.tokens)}</td>
+                <td className="num">{formatCommission(v.commission)}</td>
               </tr>
             ))}
           </tbody>

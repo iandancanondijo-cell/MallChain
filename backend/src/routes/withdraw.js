@@ -49,7 +49,7 @@ function withdrawalSummary(withdrawal) {
     amountKes: withdrawal.amountKes,
     currency: withdrawal.currency,
     walletAddress: withdrawal.walletAddress,
-    phone: withdrawal.phone,
+    phone: WithdrawalRequest.decryptPhone(withdrawal).phone,
     settlementMode: withdrawal.settlementMode || 'review',
     saleId: withdrawal.saleId || null,
     sellTxHash: withdrawal.sellTxHash || null,

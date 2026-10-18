@@ -1118,7 +1118,7 @@ io.on('connection', socket => {
       return
     }
     const owner = await User.findById(socket.data.userId).select('walletAddress')
-    if (!owner || owner.walletAddress !== address) {
+    if (!owner || User.decryptUserPii(owner).walletAddress !== address) {
       logger.warn('Wallet subscription address mismatch', { socketId: socket.id, userId: socket.data.userId, address })
       socket.emit('error', { message: 'You can only subscribe to your own wallet' })
       return

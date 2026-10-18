@@ -364,10 +364,11 @@ router.post('/aml-screen', requireJWT, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Screen with AML provider
+    // Screen with AML provider (email is encrypted at rest — decrypt it first,
+    // otherwise the provider screens against ciphertext and never matches).
     const screeningResult = await amlProvider.screen({
       name: user.name,
-      email: user.email,
+      email: User.decryptUserPii(user).email,
     });
 
     // Save result

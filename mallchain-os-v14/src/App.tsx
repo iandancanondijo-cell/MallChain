@@ -325,6 +325,9 @@ export default function App() {
   // index.html's single static <title> never changed on navigation before
   // this — every route (and every browser tab/history entry) read
   // "Mallchain Network" regardless of what was actually open.
+  // Runs AFTER the seo.ts updateSEO() effect above, so `${route.title} · Mallchain`
+  // wins over the preset title while the preset's description, canonical,
+  // structured data and robots tags stay in place.
   useEffect(() => {
     document.title = `${route.title} · Mallchain`;
   }, [route.title]);

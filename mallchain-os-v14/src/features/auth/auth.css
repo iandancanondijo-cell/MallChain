@@ -3,6 +3,12 @@
  * Tokens aligned to global.css design system.
  * Display font: Bricolage Grotesque (brand, shared with landing).
  * Body font: Inter via var(--font-ui).
+ *
+ * SCOPING: every selector in this file is prefixed with `.auth-root`.
+ * Vite bundles feature CSS as a side-effect, so once the auth chunk loads these
+ * rules persist in the document for the whole SPA session. Unscoped generic
+ * names (.logo/.card/.sub/.field/.status/.tag/.err…) would otherwise leak into
+ * every later page that reuses them. Keep new rules scoped.
  */
 
 .auth-root {
@@ -43,7 +49,7 @@
 }
 
 /* ── background layers ── */
-.blob {
+.auth-root .blob {
   position: fixed;
   border-radius: 50%;
   filter: blur(120px);
@@ -51,7 +57,7 @@
   z-index: 0;
 }
 
-.blob.a {
+.auth-root .blob.a {
   width: 60vmax;
   height: 60vmax;
   background: var(--_blue);
@@ -61,7 +67,7 @@
   animation: blob-drift 25s ease-in-out infinite alternate;
 }
 
-.blob.b {
+.auth-root .blob.b {
   width: 55vmax;
   height: 55vmax;
   background: var(--_red);
@@ -77,7 +83,7 @@
   100% { transform: translate(-2vmax, 3vmax) scale(0.97); }
 }
 
-.auth-dust {
+.auth-root .auth-dust {
   position: fixed;
   inset: 0;
   width: 100%;
@@ -86,7 +92,7 @@
   pointer-events: none;
 }
 
-.auth-ring {
+.auth-root .auth-ring {
   position: fixed;
   left: 50%;
   top: 50%;
@@ -98,25 +104,25 @@
   filter: blur(7px) drop-shadow(0 0 80px color-mix(in srgb, var(--accent) 20%, transparent));
 }
 
-.auth-ring svg { display: block; width: 100%; overflow: visible; }
+.auth-root .auth-ring svg { display: block; width: 100%; overflow: visible; }
 
-.auth-ring text {
+.auth-root .auth-ring text {
   font: 800 11px "Bricolage Grotesque", sans-serif;
   letter-spacing: 0.4em;
   fill: rgba(238, 242, 248, 0.5);
 }
 
-.auth-ring .s1, .auth-ring .s2, .auth-ring .s3, .auth-ring .s4, .auth-ring .s5 {
+.auth-root .auth-ring .s1, .auth-root .auth-ring .s2, .auth-root .auth-ring .s3, .auth-root .auth-ring .s4, .auth-root .auth-ring .s5 {
   transform-origin: 200px 200px;
   animation: auth-sp var(--t) linear infinite;
 }
-.auth-ring .s1 { --t: 60s; }
-.auth-ring .s2 { --t: 40s; animation-direction: reverse; }
-.auth-ring .s3 { --t: 26s; }
-.auth-ring .s4 { --t: 18s; animation-direction: reverse; }
-.auth-ring .s5 { --t: 110s; animation-direction: reverse; }
+.auth-root .auth-ring .s1 { --t: 60s; }
+.auth-root .auth-ring .s2 { --t: 40s; animation-direction: reverse; }
+.auth-root .auth-ring .s3 { --t: 26s; }
+.auth-root .auth-ring .s4 { --t: 18s; animation-direction: reverse; }
+.auth-root .auth-ring .s5 { --t: 110s; animation-direction: reverse; }
 
-.vignette {
+.auth-root .vignette {
   position: fixed;
   inset: 0;
   z-index: 1;
@@ -125,7 +131,7 @@
 }
 
 /* ── logo ── */
-.logo {
+.auth-root .logo {
   position: fixed;
   z-index: 5;
   left: max(24px, env(safe-area-inset-left));
@@ -138,10 +144,10 @@
   animation: auth-fade-in 0.6s var(--ease) both;
 }
 
-.logo img { width: 28px; height: 28px; display: block; }
+.auth-root .logo img { width: 28px; height: 28px; display: block; }
 
 /* ── tag line (bottom-left) ── */
-.tag {
+.auth-root .tag {
   position: fixed;
   z-index: 5;
   bottom: 28px;
@@ -150,16 +156,16 @@
   animation: auth-fade-in 0.8s 0.3s var(--ease) both;
 }
 
-.tag p {
+.auth-root .tag p {
   margin: 0 0 14px;
   color: #c9cde0;
   font-size: 18px;
   line-height: 1.4;
 }
 
-.pills { display: flex; gap: 8px; flex-wrap: wrap; }
+.auth-root .pills { display: flex; gap: 8px; flex-wrap: wrap; }
 
-.pills span {
+.auth-root .pills span {
   display: inline-flex;
   gap: 8px;
   align-items: center;
@@ -173,19 +179,19 @@
   transition: border-color 0.2s, background 0.2s;
 }
 
-.pills span:hover {
+.auth-root .pills span:hover {
   border-color: var(--_line-strong);
   background: rgba(5, 8, 16, 0.7);
 }
 
-.pills b {
+.auth-root .pills b {
   width: 8px;
   height: 8px;
   border-radius: 50%;
 }
 
 /* ── card ── */
-.card {
+.auth-root .card {
   position: relative;
   z-index: 4;
   width: min(520px, 100%);
@@ -216,7 +222,7 @@
 }
 
 /* ── tab switcher ── */
-.switch {
+.auth-root .switch {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -228,7 +234,7 @@
   position: relative;
 }
 
-.switch-icon {
+.auth-root .switch-icon {
   flex: 1;
   height: 44px;
   border: 0;
@@ -246,36 +252,36 @@
   z-index: 1;
 }
 
-.switch-icon:hover { color: var(--_paper); }
+.auth-root .switch-icon:hover { color: var(--_paper); }
 
-.switch-icon.active {
+.auth-root .switch-icon.active {
   color: #1a1100;
   background: linear-gradient(100deg, var(--_gold-bright), var(--_gold-deep));
   box-shadow: 0 0 24px -4px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
-.switch-login, .switch-signup { order: 0; }
+.auth-root .switch-login, .auth-root .switch-signup { order: 0; }
 
 /* ── headings ── */
-.card h1 {
+.auth-root .card h1 {
   margin: 0 0 12px;
   font: 800 clamp(36px, 8vw, 52px) / 0.95 "Bricolage Grotesque", sans-serif;
   letter-spacing: -0.045em;
   animation: auth-fade-in 0.5s 0.2s var(--ease) both;
 }
 
-.card h1 em {
+.auth-root .card h1 em {
   font-style: normal;
   color: var(--_gold);
   text-shadow: 0 0 40px currentColor;
 }
 
-form.up h1 em {
+.auth-root form.up h1 em {
   color: var(--_mint);
   text-shadow: 0 0 40px currentColor;
 }
 
-.sub {
+.auth-root .sub {
   margin: 0 0 8px;
   color: var(--_dim);
   font-size: 15px;
@@ -283,43 +289,43 @@ form.up h1 em {
 }
 
 /* ── form layout ── */
-form {
+.auth-root form {
   display: flex;
   flex-direction: column;
   gap: 18px;
 }
 
 /* ── field ── */
-.field {
+.auth-root .field {
   display: flex;
   flex-direction: column;
   gap: 8px;
   animation: auth-field-in 0.4s var(--ease) both;
 }
 
-.field:nth-child(1) { animation-delay: 0.15s; }
-.field:nth-child(2) { animation-delay: 0.22s; }
-.field:nth-child(3) { animation-delay: 0.29s; }
-.field:nth-child(4) { animation-delay: 0.36s; }
-.field:nth-child(5) { animation-delay: 0.43s; }
+.auth-root .field:nth-child(1) { animation-delay: 0.15s; }
+.auth-root .field:nth-child(2) { animation-delay: 0.22s; }
+.auth-root .field:nth-child(3) { animation-delay: 0.29s; }
+.auth-root .field:nth-child(4) { animation-delay: 0.36s; }
+.auth-root .field:nth-child(5) { animation-delay: 0.43s; }
 
 @keyframes auth-field-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-.field label {
+.auth-root .field label {
   font-weight: 600;
   font-size: 13px;
   color: var(--_dim);
   letter-spacing: 0.04em;
 }
 
-.box {
+.auth-root .box {
   position: relative;
 }
 
-.box .field-icon {
+.auth-root .box .field-icon {
   position: absolute;
   left: 16px;
   top: 50%;
@@ -332,9 +338,6 @@ form {
   height: 18px;
 }
 
-/* Higher specificity than the legacy src/styles/auth.css `.field input[type=…]`
-   rules, which load later in the bundle and would otherwise strip the icon
-   padding and restyle the inputs. */
 .auth-root .field .box input {
   width: 100%;
   height: 54px;
@@ -373,7 +376,7 @@ form {
   caret-color: var(--_paper);
 }
 
-.eye {
+.auth-root .eye {
   position: absolute;
   right: 6px;
   top: 5px;
@@ -389,10 +392,10 @@ form {
   transition: color 0.2s;
 }
 
-.eye:hover { color: var(--_paper); }
-.eye svg { width: 20px; height: 20px; }
+.auth-root .eye:hover { color: var(--_paper); }
+.auth-root .eye svg { width: 20px; height: 20px; }
 
-.err {
+.auth-root .err {
   margin: 0;
   font-size: 13px;
   color: #fca5a5;
@@ -402,13 +405,13 @@ form {
 }
 
 /* ── password strength ── */
-.pw-strength {
+.auth-root .pw-strength {
   display: flex;
   gap: 4px;
   margin-top: 2px;
 }
 
-.pw-bar {
+.auth-root .pw-bar {
   flex: 1;
   height: 3px;
   border-radius: 2px;
@@ -416,23 +419,23 @@ form {
   transition: background 0.3s var(--ease);
 }
 
-.pw-bar.weak { background: var(--_red); }
-.pw-bar.medium { background: #f59e0b; }
-.pw-bar.strong { background: var(--_mint); }
+.auth-root .pw-bar.weak { background: var(--_red); }
+.auth-root .pw-bar.medium { background: #f59e0b; }
+.auth-root .pw-bar.strong { background: var(--_mint); }
 
-.pw-label {
+.auth-root .pw-label {
   font-size: 12px;
   margin-top: 2px;
   font-weight: 500;
   transition: color 0.3s;
 }
 
-.pw-label.weak { color: var(--_red); }
-.pw-label.medium { color: #f59e0b; }
-.pw-label.strong { color: var(--_mint); }
+.auth-root .pw-label.weak { color: var(--_red); }
+.auth-root .pw-label.medium { color: #f59e0b; }
+.auth-root .pw-label.strong { color: var(--_mint); }
 
 /* ── row (remember + forgot) ── */
-.row {
+.auth-root .row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -442,32 +445,32 @@ form {
   color: var(--_dim);
 }
 
-.row a, .alt a {
+.auth-root .row a, .auth-root .alt a {
   color: var(--_gold);
   font-weight: 600;
   transition: color 0.2s, text-decoration 0.2s;
 }
 
-.row a:hover, .alt a:hover {
+.auth-root .row a:hover, .auth-root .alt a:hover {
   color: var(--_gold-bright);
   text-decoration: underline;
 }
 
-.chk {
+.auth-root .chk {
   display: flex;
   gap: 12px;
   align-items: center;
   cursor: pointer;
 }
 
-.chk input {
+.auth-root .chk input {
   width: 18px;
   height: 18px;
   accent-color: var(--_gold);
   flex: none;
 }
 
-.chkcard {
+.auth-root .chkcard {
   padding: 14px 16px;
   border: 1px solid var(--_line);
   border-radius: 14px;
@@ -477,18 +480,18 @@ form {
   transition: border-color 0.2s, background 0.2s;
 }
 
-.chkcard:hover {
+.auth-root .chkcard:hover {
   border-color: var(--_line-strong);
   background: rgba(5, 8, 16, 0.6);
 }
 
 /* ── step indicator (signup) ── */
-.steps {
+.auth-root .steps {
   display: flex;
   gap: 6px;
 }
 
-.steps i {
+.auth-root .steps i {
   flex: 1;
   height: 4px;
   border-radius: 2px;
@@ -496,12 +499,12 @@ form {
   transition: background 0.3s;
 }
 
-.steps i:first-child {
+.auth-root .steps i:first-child {
   background: linear-gradient(90deg, var(--_gold), var(--_gold-deep));
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-.hint {
+.auth-root .hint {
   margin: -8px 0 0;
   font-size: 13px;
   color: var(--_dim);
@@ -509,7 +512,7 @@ form {
 }
 
 /* ── submit button ── */
-.go {
+.auth-root .go {
   position: relative;
   overflow: hidden;
   height: 58px;
@@ -524,16 +527,16 @@ form {
   transition: transform 0.2s var(--ease), box-shadow 0.3s var(--ease);
 }
 
-.go:hover:not(:disabled) {
+.auth-root .go:hover:not(:disabled) {
   transform: translateY(-3px);
   box-shadow: 0 0 60px -4px color-mix(in srgb, var(--accent) 85%, transparent);
 }
 
-.go:active:not(:disabled) {
+.auth-root .go:active:not(:disabled) {
   transform: translateY(-1px);
 }
 
-.go::after {
+.auth-root .go::after {
   content: "";
   position: absolute;
   top: 0;
@@ -545,14 +548,14 @@ form {
   animation: auth-gl 4s infinite;
 }
 
-.go[disabled] {
+.auth-root .go[disabled] {
   opacity: 0.6;
   cursor: progress;
   transform: none;
 }
 
 /* ── Google button ── */
-.google {
+.auth-root .google {
   height: 54px;
   border: 1px solid var(--_line);
   border-radius: 999px;
@@ -568,14 +571,14 @@ form {
   transition: background 0.2s, border-color 0.2s, transform 0.15s;
 }
 
-.google:hover {
+.auth-root .google:hover {
   background: rgba(238, 242, 248, 0.08);
   border-color: var(--_line-strong);
   transform: translateY(-1px);
 }
 
 /* ── alt link ── */
-.alt {
+.auth-root .alt {
   margin: 0;
   text-align: center;
   font-size: 14px;
@@ -583,7 +586,7 @@ form {
 }
 
 /* ── status message ── */
-.status {
+.auth-root .status {
   margin: 18px 0 0;
   padding: 14px 16px;
   border-radius: 14px;
@@ -597,7 +600,7 @@ form {
   animation: auth-status-in 0.35s var(--ease) both;
 }
 
-.status.bad {
+.auth-root .status.bad {
   border-color: rgba(239, 68, 68, 0.3);
   background: rgba(239, 68, 68, 0.06);
   color: #fca5a5;
@@ -624,7 +627,7 @@ form {
 
 /* ── responsive: tablet ── */
 @media (max-width: 900px) {
-  .tag { display: none; }
+  .auth-root .tag { display: none; }
 }
 
 @media (max-width: 768px) {
@@ -632,25 +635,25 @@ form {
     padding: 80px 16px 48px;
   }
 
-  .card {
+  .auth-root .card {
     padding: 32px 24px;
     border-radius: 24px;
   }
 
-  .card h1 {
+  .auth-root .card h1 {
     font-size: clamp(30px, 8vw, 44px);
   }
 
-  .logo {
+  .auth-root .logo {
     left: 16px;
     top: 16px;
     font-size: 22px;
   }
 
-  .logo img { width: 24px; height: 24px; }
+  .auth-root .logo img { width: 24px; height: 24px; }
 
   /* was min(135vmin, 1100px) → ~527px on a 390px phone; sits behind the form and overflows. */
-  .auth-ring {
+  .auth-root .auth-ring {
     width: min(82vmin, 340px);
     opacity: 0.45;
     filter: blur(4px);
@@ -665,24 +668,24 @@ form {
     padding-top: 90px;
   }
 
-  .card {
+  .auth-root .card {
     padding: 24px 18px;
     border-radius: 22px;
   }
 
-  .card h1 {
+  .auth-root .card h1 {
     font-size: clamp(28px, 8vw, 38px);
     margin-bottom: 8px;
   }
 
-  .sub { font-size: 14px; }
+  .auth-root .sub { font-size: 14px; }
 
-  .go {
+  .auth-root .go {
     height: 52px;
     font-size: 16px;
   }
 
-  .google {
+  .auth-root .google {
     height: 48px;
     font-size: 14px;
   }
@@ -693,35 +696,35 @@ form {
     border-radius: 12px;
   }
 
-  .switch-icon {
+  .auth-root .switch-icon {
     height: 40px;
   }
 
-  .chkcard {
+  .auth-root .chkcard {
     padding: 12px 14px;
     font-size: 13px;
   }
 
-  .row { font-size: 13px; }
+  .auth-root .row { font-size: 13px; }
 
-  .logo {
+  .auth-root .logo {
     left: 12px;
     top: 12px;
     font-size: 20px;
     gap: 8px;
   }
 
-  .logo img { width: 22px; height: 22px; }
+  .auth-root .logo img { width: 22px; height: 22px; }
 }
 
 /* ── responsive: small phone ── */
 @media (max-width: 380px) {
-  .card {
+  .auth-root .card {
     padding: 20px 14px;
     border-radius: 18px;
   }
 
-  .card h1 {
+  .auth-root .card h1 {
     font-size: 26px;
   }
 
@@ -731,19 +734,19 @@ form {
     border-radius: 10px;
   }
 
-  .go {
+  .auth-root .go {
     height: 48px;
     font-size: 15px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .auth-ring .s1, .auth-ring .s2, .auth-ring .s3, .auth-ring .s4, .auth-ring .s5,
-  .go::after, .blob.a, .blob.b {
+  .auth-root .auth-ring .s1, .auth-root .auth-ring .s2, .auth-root .auth-ring .s3, .auth-root .auth-ring .s4, .auth-root .auth-ring .s5,
+  .auth-root .go::after, .auth-root .blob.a, .auth-root .blob.b {
     animation: none !important;
   }
 
-  .card, .card h1, .sub, .field, .status, .logo, .tag {
+  .auth-root .card, .auth-root .card h1, .auth-root .sub, .auth-root .field, .auth-root .status, .auth-root .logo, .auth-root .tag {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;

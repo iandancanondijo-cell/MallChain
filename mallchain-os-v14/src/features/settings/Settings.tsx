@@ -329,7 +329,16 @@ export default function Settings() {
           <div className="card mb card-glow bg-gradient-card">
             <div className="sec-title"><h2>Edit profile</h2></div>
             <div className="row mb">
-              <div className="avatar" style={{ width: 56, height: 56, fontSize: 24 }}>{st.user.avatarInitial}</div>
+              {st.user.avatarUrl ? (
+                <img
+                  className="avatar avatar-img"
+                  src={st.user.avatarUrl.startsWith('http') ? st.user.avatarUrl : `${config.apiBaseUrl}${st.user.avatarUrl}`}
+                  alt=""
+                  style={{ width: 56, height: 56 }}
+                />
+              ) : (
+                <div className="avatar" style={{ width: 56, height: 56, fontSize: 24 }}>{st.user.avatarInitial}</div>
+              )}
               <div>
                 <div style={{ fontWeight: 800, fontSize: 15 }}>{st.user.name}{st.user.hasBadge && <BadgeCheckmark />}</div>
                 <div className="tiny">{profile?.email}</div>
@@ -339,14 +348,13 @@ export default function Settings() {
             {/* Avatar Upload */}
             <div style={{ marginBottom: 20, padding: 16, backgroundColor: 'var(--surface-alt)', borderRadius: 8 }}>
               <AvatarUpload
-                currentAvatar={profile?.avatarUrl}
+                currentAvatar={st.user.avatarUrl ? (st.user.avatarUrl.startsWith('http') ? st.user.avatarUrl : `${config.apiBaseUrl}${st.user.avatarUrl}`) : undefined}
                 onAvatarChange={async (url) => {
+                  // Persist to store so TopBar + this page reflect the new avatar
+                  // without waiting for a full /api/auth/me refresh.
+                  st.user.avatarUrl = url;
+                  store.commit();
                   toast('Avatar updated successfully! 🎉');
-                  // Reload profile to get updated data
-                  const res = await minesApi.getProfile();
-                  if (res.ok && res.data) {
-                    setProfile(res.data);
-                  }
                 }}
                 userName={profile?.username || st.user.name || 'User'}
               />

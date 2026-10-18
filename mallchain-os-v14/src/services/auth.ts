@@ -17,8 +17,6 @@
 import { store } from '../store/store';
 import { api } from './api';
 import { chain, config } from './config';
-import { Secp256k1HdWallet, makeSignDoc } from '@cosmjs/amino';
-import { toBase64, toUtf8 } from '@cosmjs/encoding';
 import { requestMnemonic } from './mnemonicAccess';
 
 /** Exported so storeSync.ts can recognize this key in cross-tab 'storage' events without duplicating the literal. */
@@ -231,6 +229,15 @@ class AuthService {
       const mnemonic = await requestMnemonic();
       if (!mnemonic) return;
 
+      // @cosmjs/amino + @cosmjs/encoding are ~250 KB gzipped and only needed
+      // when the user actually links an on-chain wallet — pulling them in
+      // statically forced every visitor of the landing page to download them
+      // before first paint. Dynamic import keeps them in the txConfirmation
+      // chunk (already lazy-loaded for other signing flows).
+      const [{ Secp256k1HdWallet, makeSignDoc }, { toBase64, toUtf8 }] = await Promise.all([
+        import('@cosmjs/amino'),
+        import('@cosmjs/encoding'),
+      ]);
       const wallet = await Secp256k1HdWallet.fromMnemonic(mnemonic, { prefix: chain.addressPrefix });
       const timestamp = new Date().toISOString();
       const msg = {

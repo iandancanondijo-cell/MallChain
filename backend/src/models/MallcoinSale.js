@@ -1,7 +1,7 @@
 /* eslint-env node */
 /* global require, module */
 const mongoose = require('mongoose');
-const { encryptField, decryptField } = require('../utils/fieldEncryption');
+const { encryptField, decryptField, blindIndex } = require('../utils/fieldEncryption');
 
 // A held signed transaction is at least as sensitive as KYC PII — anyone who
 // obtains it can broadcast it verbatim — so it's encrypted at rest the same
@@ -52,14 +52,16 @@ MallcoinSaleSchema.index({ status: 1, createdAt: -1 })
 // only recognizes this style as promise-returning-or-synchronous. Encrypts
 // pendingTxBytes and phone on save, and populates the blind index for phone.
 MallcoinSaleSchema.pre('save', function encryptFieldsOnSave() {
+  // Blind index must be computed over the PLAINTEXT phone, before the
+  // encryption loop below overwrites this.phone with ciphertext. GDPR
+  // erasure looks records up by phone_blind = blindIndex(plaintext).
+  if (this.isModified('phone') && this.phone != null) {
+    this.phone_blind = blindIndex(this.phone);
+  }
   for (const field of ENCRYPTED_FIELDS) {
     if (this.isModified(field) && this[field] != null) {
       this[field] = encryptField(this[field]);
     }
-  }
-  // Populate blind index for phone queries
-  if (this.isModified('phone') && this.phone != null) {
-    this.phone_blind = blindIndex(this.phone);
   }
 });
 

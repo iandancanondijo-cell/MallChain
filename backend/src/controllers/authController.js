@@ -180,6 +180,7 @@ function toPublicUser(user) {
     username: user.username || null,
     phone,
     walletAddress,
+    avatarUrl: user.avatarUrl || null,
     role: user.role || 'user',
     creator_level: String(user.creator_level ?? 0),
     mlpts_balance: Number(user.mlpts_balance || 0),

@@ -318,7 +318,7 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
 
       {isAdminRoute ? (
         <div className="tb-user" style={{ cursor: 'default' }}>
-          <div className="avatar" aria-hidden="true">{st.user.avatarInitial || 'C'}</div>
+          <UserAvatar />
           <div style={{ lineHeight: 1.2 }}>
             <div style={{ fontSize: 12.5, fontWeight: 800 }}>{st.user.name || st.user.email?.split('@')[0] || t('Guest')}{st.user.hasBadge && <BadgeCheckmark />}</div>
             <div style={{ fontSize: 10.5, color: 'var(--txt-3)' }}>{st.user.frozen ? `❄ ${t('Frozen')}` : st.settings.network}</div>
@@ -326,7 +326,7 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
         </div>
       ) : (
         <a className="tb-user" href="#/settings">
-          <div className="avatar" aria-hidden="true">{st.user.avatarInitial || 'C'}</div>
+          <UserAvatar />
           <div style={{ lineHeight: 1.2 }}>
             <div style={{ fontSize: 12.5, fontWeight: 800 }}>{st.user.name || st.user.email?.split('@')[0] || t('Guest')}{st.user.hasBadge && <BadgeCheckmark />}</div>
             <div style={{ fontSize: 10.5, color: 'var(--txt-3)' }}>{st.user.frozen ? `❄ ${t('Frozen')}` : st.settings.network}</div>
@@ -335,6 +335,20 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
       )}
     </header>
   );
+}
+
+// Renders the uploaded avatar when present (resolved against the API origin
+// since the backend stores a relative `/uploads/avatars/...` path), otherwise
+// falls back to the initial-in-a-circle placeholder.
+function UserAvatar() {
+  const st = store.state;
+  const src = st.user.avatarUrl
+    ? (st.user.avatarUrl.startsWith('http') ? st.user.avatarUrl : `${config.apiBaseUrl}${st.user.avatarUrl}`)
+    : null;
+  if (src) {
+    return <img className="avatar avatar-img" src={src} alt="" role="img" />;
+  }
+  return <div className="avatar" aria-hidden="true">{st.user.avatarInitial || 'C'}</div>;
 }
 
 function toastLocal(text: string) {

@@ -92,7 +92,10 @@ router.post('/claim', auth, async (req, res) => {
           { session }
         );
         // GATE 61: Synchronize referral reward to MallPointAccount for conversion
-        await syncMallPointAccount(user.walletAddress, unclaimed, session, {
+        // user.walletAddress is ciphertext at rest (ENCRYPTED_FIELDS, no toJSON
+        // transform); MallPointAccount keys on the plaintext bech32 address, so
+        // decrypt before syncing or the credit never lands on-chain.
+        await syncMallPointAccount(User.decryptUserPii(user).walletAddress, unclaimed, session, {
           userId: user._id,
           flow: 'referral_claim',
         });

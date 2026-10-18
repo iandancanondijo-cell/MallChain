@@ -399,6 +399,11 @@ a:hover { color: var(--gold-2); text-decoration: underline; }
   display: flex; align-items: center; justify-content: center; flex: none;
   box-shadow: 0 2px 8px rgba(var(--section-accent-rgb), 0.2);
 }
+.avatar.avatar-img {
+  object-fit: cover;
+  background: var(--bg-3);
+  padding: 0;
+}
 .frozen-badge {
   font-size: 10px; font-weight: 800; background: rgba(239, 68, 68, 0.15);
   color: var(--red-2); border: 1px solid rgba(239, 68, 68, 0.4);

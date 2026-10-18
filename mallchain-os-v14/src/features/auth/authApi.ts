@@ -14,6 +14,7 @@ type AuthUser = {
   email?: string | null;
   name?: string | null;
   username?: string | null;
+  avatarUrl?: string | null;
   role?: 'user' | 'admin' | 'superadmin';
   banned?: boolean;
   banReason?: string | null;
@@ -35,6 +36,7 @@ function applyAuthUser(u?: AuthUser | null) {
   store.state.user.email = u.email || '';
   store.state.user.name = name;
   store.state.user.avatarInitial = name[0]?.toUpperCase() || 'C';
+  store.state.user.avatarUrl = u.avatarUrl || null;
   store.state.user.role = u.role || 'user';
   store.state.user.kycLevel = u.kycLevel ?? 1;
   store.state.user.frozen = !!u.banned;
@@ -116,7 +118,10 @@ export const authApi = {
       const res = await fetch(`${API_BASE}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        // The form field is called `referral` but the backend register
+        // controller reads `referralCode` (authController.assignReferralCode);
+        // sending `referral` left it undefined so referrers were never credited.
+        body: JSON.stringify({ email: data.email, password: data.password, referralCode: data.referral }),
         credentials: "include",
       });
 

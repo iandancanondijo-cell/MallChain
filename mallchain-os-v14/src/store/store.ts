@@ -98,6 +98,7 @@ export interface AppState {
     email: string;
     phone: string;
     avatarInitial: string;
+    avatarUrl: string | null;
     bio: string;
     frozen: boolean;
     frozenReason: string | null;
@@ -321,6 +322,7 @@ function emptyState(): AppState {
       email: '',
       phone: '',
       avatarInitial: 'C',
+      avatarUrl: null,
       bio: '',
       frozen: false,
       frozenReason: null,

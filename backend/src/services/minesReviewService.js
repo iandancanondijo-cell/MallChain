@@ -154,7 +154,7 @@ async function settle(task, { approved, reason }) {
           // GATE 61.1: Wallet-first enforcement — reject reward if no wallet linked
           requireWalletAddress(miner, { userId: task.miner_id, flow: 'mines_reviewer_miner_reward' });
           await User.findByIdAndUpdate(task.miner_id, { $inc: { mlpts_balance: finalReward } }).session(session);
-          await syncMallPointAccount(miner.walletAddress, finalReward, session, {
+          await syncMallPointAccount(User.decryptUserPii(miner).walletAddress, finalReward, session, {
             userId: task.miner_id,
             flow: 'mines_reviewer_miner_reward',
           });
@@ -211,7 +211,7 @@ async function settle(task, { approved, reason }) {
             // GATE 61.1: Wallet-first enforcement — reject reward if no wallet linked
             requireWalletAddress(reviewerUser, { userId: reviewerId, flow: 'mines_reviewer_vote_reward' });
             await User.findByIdAndUpdate(reviewerId, { $inc: { mlpts_balance: VOTE_REWARD } }).session(session);
-            await syncMallPointAccount(reviewerUser?.walletAddress, VOTE_REWARD, session, {
+            await syncMallPointAccount(User.decryptUserPii(reviewerUser).walletAddress, VOTE_REWARD, session, {
               userId: reviewerId,
               flow: 'mines_reviewer_vote_reward',
             });

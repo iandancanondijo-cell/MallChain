@@ -9,6 +9,18 @@ function compactObject(value) {
   );
 }
 
+// purchase/source are Mongoose docs whose .phone is ciphertext at rest.
+// LiquidityPoolActivity's own pre('save') encrypts whatever phone it's handed,
+// so passing ciphertext through would double-encrypt it and leave a phone_blind
+// that never matches a GDPR lookup. Decrypt via the doc's own model static
+// before recording; fall back to the raw value for plain override objects.
+function plaintextPhone(doc) {
+  if (!doc) return doc;
+  const Ctor = doc.constructor;
+  if (Ctor && typeof Ctor.decryptPhone === 'function') return Ctor.decryptPhone(doc).phone;
+  return doc.phone;
+}
+
 async function recordLiquidityActivity(entry) {
   const payload = compactObject({
     flow: entry.flow,
@@ -55,7 +67,7 @@ async function recordBuyLiquidityActivity(stage, purchase, overrides = {}) {
       purchase?.paymentId ??
       purchase?.paymentIds?.[purchase.paymentIds.length - 1],
     walletAddress: overrides.walletAddress ?? purchase?.walletAddress,
-    phone: overrides.phone ?? purchase?.phone,
+    phone: overrides.phone ?? plaintextPhone(purchase),
     currency: overrides.currency ?? purchase?.currency ?? 'KES',
     amountMlcns: overrides.amountMlcns ?? purchase?.amount,
     fiatAmount: overrides.fiatAmount ?? purchase?.fiatAmount,
@@ -80,7 +92,7 @@ async function recordWithdrawLiquidityActivity(stage, source, overrides = {}) {
     saleId: overrides.saleId ?? source?.saleId,
     payoutRef: overrides.payoutRef ?? source?.payoutRef,
     walletAddress: overrides.walletAddress ?? source?.walletAddress ?? source?.sellerAddress,
-    phone: overrides.phone ?? source?.phone ?? source?.sellerPhone,
+    phone: overrides.phone ?? plaintextPhone(source) ?? source?.sellerPhone,
     currency: overrides.currency ?? source?.currency ?? 'KES',
     amountMlcns: overrides.amountMlcns ?? source?.amountMlcns ?? source?.amount,
     fiatAmount: overrides.fiatAmount ?? source?.amountKes ?? source?.pesaAmount,

@@ -100,7 +100,8 @@ async function initiateMpesaRequest(purchase, phone) {
   }
 
   const stkBody = buildStkBody(purchase, phone);
-  console.log('[BADGE STK] Sending to Safaricom:', { phone, businessCode: stkBody.BusinessShortCode });
+  // Never log the full MSISDN — logs are shipped to aggregators and phone is PII.
+  console.log('[BADGE STK] Sending to Safaricom:', { phone: `•••${String(phone).slice(-4)}`, businessCode: stkBody.BusinessShortCode });
   const stkRes = await axios.post(
     `${SAFARICOM_API.replace(/\/$/, '')}/mpesa/stkpush/v1/processrequest`,
     stkBody,

@@ -99,7 +99,15 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
       email: '',
       password: '',
       confirmPassword: '',
-      referralCode: new URLSearchParams(window.location.search).get('ref') || '',
+      // Referral links arrive as `#/signup-v2?ref=CODE` under hash routing, so
+      // the query lives inside location.hash, not location.search — reading
+      // search alone always came back empty. Parse both to be safe.
+      referralCode: (() => {
+        const hash = window.location.hash.split('?')[1] ?? '';
+        return new URLSearchParams(hash).get('ref')
+          || new URLSearchParams(window.location.search).get('ref')
+          || '';
+      })(),
       emailVerificationCode: '',
       setup2fa: false,
       walletCreated: false,

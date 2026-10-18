@@ -6,6 +6,7 @@ const User = require('../models/user');
 const logger = require('../utils/logger');
 const crypto = require('crypto');
 const brevoService = require('../services/brevoService');
+const { blindIndex } = require('../utils/fieldEncryption');
 
 // Middleware: require JWT auth for all routes
 router.use(requireAuth());
@@ -67,7 +68,7 @@ router.get('/status', async (req, res) => {
     }).lean();
 
     res.json({
-      currentEmail: user?.email || null,
+      currentEmail: user ? User.decryptUserPii(user).email : null,
       hasPendingChange: !!pendingChange,
       pendingChange: pendingChange
         ? {
@@ -144,8 +145,9 @@ router.post('/change-email', async (req, res) => {
     // Normalize email
     const normalizedNewEmail = newEmail.toLowerCase().trim();
 
-    // Check if new email already in use
-    const existingUser = await User.findOne({ email: normalizedNewEmail });
+    // Check if new email already in use (email is encrypted at rest, so
+    // match on the deterministic blind index — a plaintext query never hits).
+    const existingUser = await User.findOne({ email_blind: blindIndex(normalizedNewEmail) });
     if (existingUser) {
       return res.status(409).json({ error: 'Email already in use' });
     }
@@ -156,11 +158,12 @@ router.post('/change-email', async (req, res) => {
       status: { $in: ['pending', 'current-verified', 'new-verified'] },
     });
 
-    // Get current user email
+    // Get current user email (encrypted at rest — decrypt before use)
     const user = await User.findById(userId).select('email');
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
+    const currentEmail = User.decryptUserPii(user).email;
 
     // Generate verification code
     const verificationCode = generateVerificationCode();
@@ -171,7 +174,7 @@ router.post('/change-email', async (req, res) => {
     // Create verification record
     const verification = new EmailVerification({
       userId,
-      currentEmail: user.email,
+      currentEmail,
       newEmail: normalizedNewEmail,
       verificationCode,
       verificationCodeHash,
@@ -185,12 +188,12 @@ router.post('/change-email', async (req, res) => {
     await verification.save();
 
     // Send verification emails
-    await sendVerificationEmail(user.email, verificationCode, false); // Current email
+    await sendVerificationEmail(currentEmail, verificationCode, false); // Current email
     await sendVerificationEmail(normalizedNewEmail, verificationCode, true); // New email
 
     logger.info('emailManagement', 'Email change initiated', {
       userId: userId.toString(),
-      fromEmail: user.email,
+      fromEmail: currentEmail,
       toEmail: normalizedNewEmail,
     });
 
@@ -351,10 +354,16 @@ router.post('/complete-change', async (req, res) => {
       return res.status(404).json({ error: 'Email change not ready to complete' });
     }
 
-    // Update user email
-    await User.findByIdAndUpdate(userId, {
-      email: verification.newEmail,
-    });
+    // Update user email. Must go through save() — not findByIdAndUpdate —
+    // so the pre('save') hook encrypts the new email and recomputes
+    // email_blind; a bypassed hook stores plaintext with a stale blind index,
+    // which breaks email login and leaks PII at rest.
+    const userToUpdate = await User.findById(userId);
+    if (!userToUpdate) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    userToUpdate.email = verification.newEmail;
+    await userToUpdate.save();
 
     // Mark verification as completed
     verification.status = 'completed';
@@ -428,9 +437,10 @@ router.post('/set-backup-email', async (req, res) => {
 
     const normalizedBackupEmail = backupEmail.toLowerCase().trim();
 
-    // Check if backup email same as current
+    // Check if backup email same as current (email is encrypted at rest)
     const user = await User.findById(userId).select('email');
-    if (normalizedBackupEmail === user.email) {
+    const currentEmail = user ? User.decryptUserPii(user).email : null;
+    if (normalizedBackupEmail === currentEmail) {
       return res.status(400).json({ error: 'Backup email cannot be same as primary email' });
     }
 
@@ -442,7 +452,7 @@ router.post('/set-backup-email', async (req, res) => {
 
     const verification = new EmailVerification({
       userId,
-      currentEmail: user.email,
+      currentEmail,
       newEmail: normalizedBackupEmail,
       verificationCode,
       verificationCodeHash,
@@ -482,9 +492,10 @@ router.post('/set-backup-email', async (req, res) => {
  */
 router.get('/recovery-options', async (req, res) => {
   try {
-    const user = await User.findById(req.user._id)
+    const rawUser = await User.findById(req.user._id)
       .select('email backupEmail')
       .lean();
+    const user = rawUser ? User.decryptUserPii(rawUser) : null;
 
     res.json({
       primaryEmail: user?.email || null,

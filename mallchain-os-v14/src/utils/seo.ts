@@ -208,6 +208,38 @@ export const SEO_PRESETS = {
       mainEntity: [],
     },
   },
+
+  dmca: {
+    title: 'DMCA Policy · Mallchain',
+    description:
+      'Mallchain Network DMCA policy, designated agent, and the process for filing copyright takedown notices and counter-claims.',
+    keywords: 'dmca, copyright, takedown, mallchain, designated agent',
+    robots: 'index, follow',
+    structured: {
+      '@type': 'WebPage',
+      name: 'DMCA Policy',
+      description: 'Copyright takedown and counter-notice policy for Mallchain Network',
+    },
+  },
+
+  mallpointsPurchase: {
+    title: 'Purchase Mallpoints · Mallchain',
+    description:
+      'Buy MLPTS Mallpoints with M-Pesa at KSH 2 per point. Earn points by completing mining tasks or top up instantly to convert into Mallcoin.',
+    keywords: 'mallpoints, mlpts, m-pesa, buy crypto, mallchain, creator economy',
+    robots: 'index, follow',
+    twitterCard: 'summary_large_image' as const,
+    structured: {
+      '@type': 'Product',
+      name: 'MLPTS Mallpoints',
+      description: 'Mallchain Network loyalty points, priced at KSH 2 each via M-Pesa',
+      offers: {
+        '@type': 'Offer',
+        price: 2,
+        priceCurrency: 'KES',
+      },
+    },
+  },
 };
 
 /**
@@ -216,12 +248,30 @@ export const SEO_PRESETS = {
 export function getSEOForRoute(path: string): SEOConfig {
   const cleanPath = path.split('?')[0].split('#')[0];
 
-  if (cleanPath === '/') return SEO_PRESETS.landing;
+  if (cleanPath === '/' || cleanPath === '/landing') return SEO_PRESETS.landing;
   if (cleanPath === '/dashboard') return SEO_PRESETS.dashboard;
   if (cleanPath.startsWith('/marketplace')) return SEO_PRESETS.marketplace;
   if (cleanPath.startsWith('/wallet')) return SEO_PRESETS.wallet;
   if (cleanPath.startsWith('/staking')) return SEO_PRESETS.staking;
   if (cleanPath.startsWith('/help') || cleanPath.startsWith('/edu')) return SEO_PRESETS.help;
+  if (cleanPath === '/dmca') return SEO_PRESETS.dmca;
+  if (cleanPath === '/mallpoints-purchase') return SEO_PRESETS.mallpointsPurchase;
+  // Private surfaces — never let search engines index them.
+  if (
+    cleanPath === '/settings' ||
+    cleanPath === '/security' ||
+    cleanPath === '/transactions' ||
+    cleanPath === '/notifications' ||
+    cleanPath === '/messaging' ||
+    cleanPath === '/admin' ||
+    cleanPath.startsWith('/admin') ||
+    cleanPath === '/auth' ||
+    cleanPath === '/login' ||
+    cleanPath.startsWith('/mines/') ||
+    cleanPath.startsWith('/validators/')
+  ) {
+    return { robots: 'noindex, nofollow' };
+  }
 
   return {
     title: 'Mallchain',

@@ -76,6 +76,10 @@ const authSchemas = {
         'string.min': 'Password must be at least 8 characters',
         'string.pattern.base': 'Password must contain uppercase, lowercase, and numbers',
       }),
+    // Referral code carried in from a shared invite link. Without this field in
+    // the schema stripUnknown:true silently deletes it and no referrer is ever
+    // credited (see authController.assignReferralCode).
+    referralCode: Joi.string().trim().max(64).optional(),
   }),
   
   // Registration with username

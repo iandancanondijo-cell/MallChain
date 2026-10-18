@@ -15,7 +15,9 @@ const UserSchema = new Schema({
   // HMAC for exact-match lookups (login, registration duplicate check).
   // The unique constraint moved from email → email_blind.
   email: { type: String, required: true },
-  email_blind: { type: String, unique: true, sparse: true },
+  // Index (unique+sparse) defined once in the UserSchema.index() block below —
+  // do not also set unique/sparse here or Mongoose emits a duplicate-index warning.
+  email_blind: { type: String },
   password: { type: String, select: false },
   googleId: { type: String },
 
@@ -45,8 +47,13 @@ const UserSchema = new Schema({
   name: { type: String },
   username: { type: String },
   phone: { type: String },
-  phone_blind: { type: String, sparse: true },
+  phone_blind: { type: String },
   creator_level: { type: Number, default: 0 },
+
+  // Public URL of the user's uploaded profile picture (see POST /api/upload/avatar).
+  // Relative path like `/uploads/avatars/<id>-<ts>-<name>.<ext>`; the frontend
+  // resolves it against config.apiBaseUrl. null until the user uploads one.
+  avatarUrl: { type: String, default: null },
 
   // The on-chain wallet this account has linked (see POST /api/auth/link-wallet).
   // Wallets are otherwise purely client-side/self-custodied — this is the
@@ -54,7 +61,7 @@ const UserSchema = new Schema({
   // the badge snapshot job knows which address to issue a badge to.
   // Encrypted at rest like email; walletAddress_blind for exact-match lookups.
   walletAddress: { type: String },
-  walletAddress_blind: { type: String, sparse: true },
+  walletAddress_blind: { type: String },
 
   // Balances
   mlpts_balance: { type: Number, default: 0, min: 0 },

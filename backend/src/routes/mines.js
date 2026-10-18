@@ -93,13 +93,16 @@ router.get('/leaderboard', async (_req, res) => {
       .limit(50)
       .select('username email mlpts_balance tasks_completed rank_points')
       .lean();
-    const leaderboard = rows.map((u) => ({
-      id: u._id.toString(),
-      name: u.username || u.email.split('@')[0],
-      earned: u.mlpts_balance || 0,
-      tasks: u.tasks_completed || 0,
-      rankPoints: u.rank_points || 0,
-    }));
+    const leaderboard = rows.map((raw) => {
+      const u = User.decryptUserPii(raw);
+      return {
+        id: u._id.toString(),
+        name: u.username || (u.email ? u.email.split('@')[0] : 'user'),
+        earned: u.mlpts_balance || 0,
+        tasks: u.tasks_completed || 0,
+        rankPoints: u.rank_points || 0,
+      };
+    });
     res.json(ok(leaderboard));
   } catch (e) {
     res.json(ok([]));
@@ -185,7 +188,7 @@ router.post('/campaigns/create', minesAuth, async (req, res) => {
         }], { session });
 
         // GATE 61: Synchronize campaign debit to MallPointAccount for conversion consistency
-        await syncMallPointAccount(user.walletAddress, -budget, session, {
+        await syncMallPointAccount(User.decryptUserPii(user).walletAddress, -budget, session, {
           userId: req.userId,
           flow: 'mines_campaign_create',
         });
@@ -220,8 +223,9 @@ router.put('/campaigns/:id', requireAdmin, async (req, res) => {
 
 router.get('/profile/me', minesAuth, async (req, res) => {
    try {
-     const u = await User.findById(req.userId).lean();
-     if (!u) return res.status(404).json(fail('user not found'));
+     const raw = await User.findById(req.userId).lean();
+     if (!raw) return res.status(404).json(fail('user not found'));
+     const u = User.decryptUserPii(raw);
      res.json(ok({
        id: u._id.toString(),
        username: u.username || null,
@@ -245,11 +249,18 @@ router.get('/profile/me', minesAuth, async (req, res) => {
 
 router.put('/profile', minesAuth, async (req, res) => {
   try {
-    const updates = {};
-    if (req.body.username !== undefined) updates.username = req.body.username;
-    if (req.body.phone !== undefined) updates.phone = req.body.phone;
-    const u = await User.findByIdAndUpdate(req.userId, { $set: updates }, { new: true }).select('-password').lean();
-    res.json(ok(u));
+    // Hydrated doc + save(), not findByIdAndUpdate: the pre('save') hook is
+    // what encrypts phone and recomputes phone_blind. A $set through
+    // findByIdAndUpdate would store plaintext phone and leave the blind
+    // index pointing at the old value.
+    const u = await User.findById(req.userId);
+    if (!u) return res.status(404).json(fail('user not found'));
+    if (req.body.username !== undefined) u.username = req.body.username;
+    if (req.body.phone !== undefined) u.phone = req.body.phone;
+    await u.save();
+    const plain = User.decryptUserPii(u);
+    delete plain.password;
+    res.json(ok(plain));
   } catch (e) { res.status(400).json(fail(e)); }
 });
 
@@ -563,7 +574,7 @@ router.post('/submissions/:id/approve', requireAdmin, idempotency({ required: tr
         await User.findByIdAndUpdate(sub.miner_id, { $inc: { mlpts_balance: finalReward } }).session(session);
 
         // GATE 61: Synchronize mining reward to MallPointAccount (conversion-eligible ledger)
-        await syncMallPointAccount(user.walletAddress, finalReward, session, {
+        await syncMallPointAccount(User.decryptUserPii(user).walletAddress, finalReward, session, {
           userId: sub.miner_id,
           flow: 'mining_approval',
         });
@@ -625,7 +636,7 @@ router.post('/balance/credit', idempotency({ required: true }), requireAdmin, as
         description: 'Balance credit by admin',
       }], { session });
       // GATE 61: Synchronize admin credit to MallPointAccount for conversion
-      await syncMallPointAccount(user.walletAddress, amount, session, {
+      await syncMallPointAccount(User.decryptUserPii(user).walletAddress, amount, session, {
         userId,
         flow: 'admin_balance_credit',
       });
@@ -661,7 +672,7 @@ router.post('/balance/deduct', idempotency({ required: true }), requireAdmin, as
         description: 'Balance deduction by admin',
       }], { session });
       // GATE 61: Synchronize admin deduct to MallPointAccount for conversion consistency
-      await syncMallPointAccount(result.walletAddress, -amount, session, {
+      await syncMallPointAccount(User.decryptUserPii(result).walletAddress, -amount, session, {
         userId,
         flow: 'admin_balance_deduct',
       });

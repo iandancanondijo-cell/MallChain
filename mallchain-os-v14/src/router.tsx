@@ -22,9 +22,9 @@ const MallpointsPurchase = lazy(() => import('./pages/MallpointsPurchase'));
 const Dmca = lazy(() => import('./pages/Dmca'));
 
 /* feature modules — each maps to a v14 view */
-import Dashboard from './features/dashboard/Dashboard';
+const Dashboard = lazy(() => import('./features/dashboard/Dashboard'));
 import AuthPage from './features/auth/AuthPage';
-import EnhancedRegistrationFlow from './features/auth/EnhancedRegistrationFlow';
+const EnhancedRegistrationFlow = lazy(() => import('./features/auth/EnhancedRegistrationFlow'));
 const KycSession = lazy(() => import('./features/kyc/KycSession'));
 const WalletHub = lazy(() => import('./features/wallet/WalletHub'));
 const WalletFlow = lazy(() => import('./features/wallet/WalletFlow'));

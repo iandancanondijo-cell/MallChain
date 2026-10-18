@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /dashboard
+Disallow: /settings
+Disallow: /wallet
+Disallow: /api
+
+Sitemap: https://mallchain.network/sitemap.xml

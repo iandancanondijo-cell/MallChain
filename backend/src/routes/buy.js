@@ -209,7 +209,7 @@ function paymentSummary(purchase) {
     quoteId: purchase.quoteId,
     paymentId: purchase.paymentId || purchase.paymentIds?.[purchase.paymentIds.length - 1] || null,
     walletAddress: purchase.walletAddress,
-    phone: purchase.phone,
+    phone: MallcoinPurchase.decryptPhone(purchase).phone,
     amountMlcns: purchase.amount,
     amountKes: purchase.fiatAmount,
     currency: purchase.currency || 'KES',
@@ -277,7 +277,7 @@ async function saleSummary(sale) {
     saleId: sale.saleId,
     sellerAddress: sale.sellerAddress,
     amountMlcns: sale.amount,
-    phone: sale.phone || null,
+    phone: MallcoinSale.decryptPhone(sale).phone || null,
     status: sale.status,
     overallStatus:
       payout?.payoutStatus === 'succeeded'

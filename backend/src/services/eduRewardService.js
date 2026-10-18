@@ -71,7 +71,7 @@ async function rewardForInteraction({ resourceId, viewerId, type }) {
         $inc: { mlpts_balance: rewardMlpts },
       }).session(session);
 
-      await syncMallPointAccount(author.walletAddress, rewardMlpts, session, {
+      await syncMallPointAccount(User.decryptUserPii(author).walletAddress, rewardMlpts, session, {
         userId: resource.authorId,
         flow: `edu_${type}_reward`,
       });

@@ -92,7 +92,10 @@ router.post('/campaigns/create', creatorAuth, async (req, res) => {
       }], { session })
 
       // GATE 61: Synchronize campaign debit to MallPointAccount for conversion consistency
-      await syncMallPointAccount(updatedUser.walletAddress, -budget, session, {
+      // MallPointAccount stores the plaintext bech32 address; updatedUser
+      // (from findOneAndUpdate) carries the at-rest ciphertext in
+      // walletAddress, so it must be decrypted before use as the lookup key.
+      await syncMallPointAccount(User.decryptUserPii(updatedUser).walletAddress, -budget, session, {
         userId: req.userId,
         flow: 'creator_space_campaign_create',
       })
@@ -136,10 +139,19 @@ router.get('/balance', creatorAuth, async (req, res) => {
       return res.status(404).json({ error: 'user not found' })
     }
 
+    // walletAddress is encrypted at rest (ENCRYPTED_FIELDS) and the User
+    // model has no toJSON/getter transform, so `user.walletAddress` on the
+    // hydrated doc is raw ciphertext ("v1:..."). Purchase Mallpoints POSTs
+    // this value straight to /reserve, which blindIndexes the submitted
+    // address to match the account — ciphertext never matches, so every
+    // purchase failed with "wallet address is not linked to your account".
+    // Decrypt before returning so callers get the real mall1... address.
+    const plain = User.decryptUserPii(user)
+
     return res.json({
       ok: true,
-      mlpts_balance: user.mlpts_balance || 0,
-      walletAddress: user.walletAddress,
+      mlpts_balance: plain.mlpts_balance || 0,
+      walletAddress: plain.walletAddress || null,
     })
   } catch (e) {
     logger.error('creatorSpace', { route: req.originalUrl, error: e.message || String(e) });

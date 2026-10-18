@@ -6,6 +6,7 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const { uploadAmlDocument, AML_UPLOAD_DIR } = require('../middleware/upload');
 const WithdrawalAmlReview = require('../models/WithdrawalAmlReview');
+const User = require('../models/user');
 const AuditLog = require('../models/AuditLog');
 const { AppError, ErrorCodes, asyncHandler } = require('../utils/errorHandler');
 const logger = require('../utils/logger');
@@ -49,7 +50,12 @@ router.post('/document', auth, uploadAmlDocument.single('document'), asyncHandle
 
 router.post('/declare', auth, asyncHandler(async (req, res) => {
   const userId = req.user?.id || req.user?._id;
-  const walletAddress = req.user?.walletAddress;
+  // WithdrawalAmlReview keys walletAddress as plaintext, and buy.js's
+  // requireApprovedAmlReview gate looks it up by the plaintext sellerAddress
+  // from the /sell request. req.user.walletAddress is ciphertext at rest, so
+  // decrypt it here — otherwise the review is stored under a value the gate
+  // never matches and withdrawals stay blocked even after admin approval.
+  const walletAddress = req.user ? User.decryptUserPii(req.user).walletAddress : null;
   if (!walletAddress) {
     throw new AppError(
       ErrorCodes.INVALID_REQUEST_FORMAT,
@@ -99,7 +105,7 @@ router.post('/declare', auth, asyncHandler(async (req, res) => {
 }));
 
 router.get('/status', auth, asyncHandler(async (req, res) => {
-  const walletAddress = req.user?.walletAddress;
+  const walletAddress = req.user ? User.decryptUserPii(req.user).walletAddress : null;
   if (!walletAddress) {
     return res.json({ ok: true, walletLinked: false, reviewStatus: 'none', reviewId: null });
   }

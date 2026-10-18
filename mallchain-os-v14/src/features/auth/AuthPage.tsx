@@ -11,9 +11,19 @@ type PwStrength = "weak" | "medium" | "strong";
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+function readQuery(): URLSearchParams {
+  return new URLSearchParams(window.location.hash.split("?")[1] ?? "");
+}
+
 function readMode(): Mode {
-  const q = window.location.hash.split("?")[1] ?? "";
-  return new URLSearchParams(q).get("mode") === "register" ? "register" : "login";
+  const q = readQuery();
+  // A referral invite link should land the visitor on the signup tab.
+  if (q.get("ref")) return "register";
+  return q.get("mode") === "register" ? "register" : "login";
+}
+
+function readRef(): string {
+  return readQuery().get("ref") ?? "";
 }
 
 function calcPwStrength(pw: string): PwStrength | null {
@@ -165,13 +175,15 @@ export default function AuthPage() {
   const [upEmail, setUpEmail] = useState("");
   const [upPass, setUpPass] = useState("");
   const [upPass2, setUpPass2] = useState("");
-  const [referral, setReferral] = useState("");
+  const [referral, setReferral] = useState(readRef);
   const [age, setAge] = useState(false);
   const [terms, setTerms] = useState(false);
 
   useEffect(() => {
     const onHash = () => {
       setModeState(readMode());
+      const ref = readRef();
+      if (ref) setReferral(ref);
       setErrors({});
       setStatus(null);
     };

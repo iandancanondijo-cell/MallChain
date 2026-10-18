@@ -22,9 +22,10 @@ async function notifyWithdrawalStateChange(withdrawal, { title, body }) {
       await notifyUser(user, { kind: 'system', title, body, category: 'withdrawals' });
       return;
     }
-    if (withdrawal.phone) {
+    const decryptedPhone = WithdrawalRequest.decryptPhone(withdrawal).phone;
+    if (decryptedPhone) {
       const { sendSMS } = require('./brevoService');
-      await sendSMS(withdrawal.phone, `${title} — ${body}`).catch(() => {});
+      await sendSMS(decryptedPhone, `${title} — ${body}`).catch(() => {});
     }
   } catch (err) {
     logger.warn('withdrawalLiquidityQueueService: notification failed (non-blocking)', { error: err.message });
@@ -89,7 +90,7 @@ async function releaseQueuedWithdrawal(withdrawal) {
     withdrawal,
     txBytes,
     amount: withdrawal.amountMlcns,
-    phone: withdrawal.phone,
+    phone: WithdrawalRequest.decryptPhone(withdrawal).phone,
     sellerAddress: withdrawal.walletAddress,
     saleId: withdrawal.saleId,
     withdrawalId: withdrawal.withdrawalId,

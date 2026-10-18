@@ -46,8 +46,10 @@ MallcoinPurchaseSchema.index({ status: 1, createdAt: -1 })
 // phone on save and populates the blind index for exact-match queries.
 MallcoinPurchaseSchema.pre('save', function encryptPhoneOnSave() {
   if (this.isModified('phone') && this.phone != null) {
-    this.phone = encryptField(this.phone);
+    // Blind index over the PLAINTEXT phone, before encryption — GDPR erasure
+    // matches phone_blind against blindIndex(plaintext).
     this.phone_blind = blindIndex(this.phone);
+    this.phone = encryptField(this.phone);
   }
 });
 

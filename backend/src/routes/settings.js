@@ -329,7 +329,7 @@ router.post('/security/2fa/setup', auth, async (req, res) => {
       secret,
       // For manual entry into an authenticator app (no QR renderer wired
       // up client-side) — the same information a QR code would encode.
-      otpauthUrl: totp.keyUri(secret, req.user.email || String(req.user._id)),
+      otpauthUrl: totp.keyUri(secret, User.decryptUserPii(req.user).email || String(req.user._id)),
     }));
   } catch (e) {
     res.status(500).json(fail(e));

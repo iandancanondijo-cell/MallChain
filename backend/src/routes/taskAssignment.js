@@ -89,12 +89,13 @@ router.get('/validators/active', requireAdmin, async (_req, res) => {
     const validatorMap = new Map();
 
     // Add users with admin/superadmin roles
-    for (const u of approvedValidators) {
+    for (const raw of approvedValidators) {
+      const u = User.decryptUserPii(raw);
       validatorMap.set(u._id.toString(), {
         _id: u._id,
         validator_id: u._id.toString(),
         email: u.email,
-        moniker: u.email.split('@')[0],
+        moniker: u.email ? u.email.split('@')[0] : 'admin',
         type: 'user',
       });
     }
@@ -189,7 +190,7 @@ router.post('/tasks/:id/assign', requireAdmin, async (req, res) => {
 
     await AuditLog.create({
       action: 'task_assign_validators',
-      actor: req.user?.email || 'admin',
+      actor: (req.user ? User.decryptUserPii(req.user).email : null) || 'admin',
       details: { taskId: req.params.id, validatorCount: validator_ids.length },
       outcome: 'success'
     });
@@ -339,7 +340,7 @@ router.post('/tasks/:id/vote', verifyToken, async (req, res) => {
 
     await AuditLog.create({
       action: 'validator_vote',
-      actor: req.user?.email || validatorId,
+      actor: (req.user ? User.decryptUserPii(req.user).email : null) || validatorId,
       details: { taskId: req.params.id, vote, weight },
       outcome: 'success'
     });
@@ -385,7 +386,7 @@ router.post('/tasks/:id/final-reject', requireAdmin, async (req, res) => {
 
     await AuditLog.create({
       action: 'task_final_reject',
-      actor: req.user?.email || 'admin',
+      actor: (req.user ? User.decryptUserPii(req.user).email : null) || 'admin',
       details: { taskId: req.params.id, note },
       outcome: 'success'
     });
@@ -423,12 +424,13 @@ router.post('/reviewer/stake', verifyToken, async (req, res) => {
           { session, new: true }
         );
         if (!user) throw new Error('insufficient MLPTS balance');
+        const plain = User.decryptUserPii(user);
 
         reviewer = await MinesReviewer.findOneAndUpdate(
           { validator_id: req.userId },
           {
             $inc: { stakedAmount: amount },
-            $setOnInsert: { moniker: user.username || user.email.split('@')[0], email: user.email },
+            $setOnInsert: { moniker: user.username || plain.email?.split('@')[0], email: plain.email },
           },
           { session, new: true, upsert: true }
         );
@@ -436,7 +438,7 @@ router.post('/reviewer/stake', verifyToken, async (req, res) => {
         await reviewer.save({ session });
 
         // GATE 61: Synchronize stake debit to MallPointAccount
-        await syncMallPointAccount(user.walletAddress, -amount, session, {
+        await syncMallPointAccount(plain.walletAddress, -amount, session, {
           userId: req.userId,
           flow: 'reviewer_stake',
         });
@@ -482,7 +484,7 @@ router.post('/reviewer/unstake', verifyToken, async (req, res) => {
         await User.findByIdAndUpdate(req.userId, { $inc: { mlpts_balance: amount } }).session(session);
 
         // GATE 61: Synchronize unstake return credit to MallPointAccount
-        await syncMallPointAccount(user?.walletAddress, amount, session, {
+        await syncMallPointAccount(user ? User.decryptUserPii(user).walletAddress : undefined, amount, session, {
           userId: req.userId,
           flow: 'reviewer_unstake',
         });
