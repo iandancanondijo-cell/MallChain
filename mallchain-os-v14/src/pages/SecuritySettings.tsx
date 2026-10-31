@@ -16,6 +16,7 @@ import QRCode from 'qrcode';
 import { store, type Activity } from '../store/store';
 import { useStoreVersion, toast } from '../components/ui';
 import { verifyPin, hashPin, encryptMnemonic, decryptMnemonic } from '../services/security';
+import { api } from '../services/api';
 import { authService } from '../services/auth';
 import { settingsApi, type UserSettingsData } from '../services/settingsApi';
 import { requestMnemonic } from '../services/mnemonicAccess';
@@ -270,6 +271,12 @@ export function SecuritySettings() {
       // a no-op for the normal "change PIN" path, where it's already empty.
       st.wallet.mnemonic = '';
       store.commit();
+
+      // Keep the server's copy of the PIN hash in sync (same rationale as
+      // WalletFlow.handleSetPin) so verify-pin rate limiting applies.
+      api.post('/api/wallet/pin/set-pin', { pinHash: hashResult.hash }).then((r) => {
+        if (!r.ok) console.warn('[SecuritySettings] PIN sync to server failed:', r.error);
+      });
 
       setState(prev => ({
         ...prev,

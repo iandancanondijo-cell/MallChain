@@ -66,6 +66,7 @@ router.post('/verify-pin', requireAuth, async (req, res) => {
     if (!user || !user.wallet || !user.wallet.pinHash) {
       return res.status(400).json({
         ok: false,
+        code: 'no_pin_set',
         error: 'No PIN set for this wallet. Use wallet setup to configure a PIN.',
       });
     }
@@ -124,6 +125,52 @@ router.post('/verify-pin', requireAuth, async (req, res) => {
       ok: false,
       error: 'PIN verification failed. Please try again.',
     });
+  }
+});
+
+/**
+ * POST /api/wallet/pin/set-pin
+ * Upload (or replace) the bcrypt hash of the wallet PIN for this account.
+ * The PIN itself never leaves the device — only its bcrypt hash, identical
+ * to the one kept client-side in st.wallet.pinHash — so verify-pin can
+ * enforce server-side rate limiting/lockout. Requires an authenticated
+ * session; overwriting an existing hash is the legitimate "change PIN"
+ * path (the client proves knowledge of nothing here — an attacker with a
+ * hijacked session cookie already owns the account session).
+ *
+ * Body: { pinHash: string }  ($2a/$2b/$2y bcrypt, cost 04-15)
+ */
+router.post('/set-pin', requireAuth, async (req, res) => {
+  const { pinHash } = req.body || {};
+  const userId = req.user._id || req.user.id;
+
+  if (typeof pinHash !== 'string' || !/^\$2[aby]\$(0[4-9]|1[0-5])\$[./A-Za-z0-9]{53}$/.test(pinHash)) {
+    return res.status(400).json({
+      ok: false,
+      error: 'pinHash must be a bcrypt hash of a 4-8 digit PIN',
+    });
+  }
+
+  try {
+    const User = require('../models/user');
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ ok: false, error: 'user not found' });
+    }
+
+    user.wallet = user.wallet || {};
+    user.wallet.pinHash = pinHash;
+    user.markModified('wallet');
+    await user.save();
+
+    // A fresh PIN clears any stale lockout from wrong guesses on the old one.
+    await PinAttempt.resetAttempts(userId).catch(() => {});
+
+    logger.info('wallet', 'Wallet PIN hash stored', { userId, ip: req.ip });
+    return res.json({ ok: true, hasPinSet: true });
+  } catch (error) {
+    logger.error('wallet', 'PIN set error', error, { userId });
+    return res.status(500).json({ ok: false, error: 'Failed to store PIN' });
   }
 });
 

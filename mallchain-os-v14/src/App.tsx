@@ -19,6 +19,7 @@ import { storeSync } from './services/storeSync';
 import { socketManager } from './services/socket';
 import { api } from './services/api';
 import { authService } from './services/auth';
+import { chain } from './services/config';
 import { useMaintenanceStatus } from './services/maintenanceApi';
 import { 
   AgeVerificationModal, 
@@ -103,7 +104,7 @@ export default function App() {
         // unconditionally) so a first-time, never-authenticated visitor
         // doesn't trigger a spurious 401 → "session expired" toast.
         if (authService.isAuthenticated() || cameFromOAuthRedirect) {
-          const res = await api.get<{ user?: { id: string; banned: boolean; banReason?: string | null; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string; hasBadge?: boolean; adminCategory?: 'users' | 'blockchain' | 'validator' | 'kyc' | 'mining' | 'treasury' | 'marketplace' | 'mlpts' | 'reports' | null }; expiresAt?: number }>('/api/auth/me');
+          const res = await api.get<{ user?: { id: string; banned: boolean; banReason?: string | null; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string; walletAddress?: string | null; hasBadge?: boolean; adminCategory?: 'users' | 'blockchain' | 'validator' | 'kyc' | 'mining' | 'treasury' | 'marketplace' | 'mlpts' | 'reports' | null }; expiresAt?: number }>('/api/auth/me');
           if (res.ok && res.data?.user) {
             const u = res.data.user;
             if (res.data.expiresAt) authService.setSession(res.data.expiresAt);
@@ -125,6 +126,16 @@ export default function App() {
             if (realName) {
               store.state.user.name = realName;
               store.state.user.avatarInitial = realName[0]?.toUpperCase() || store.state.user.avatarInitial;
+            }
+            // Seed the wallet address from the account's server-side link so
+            // a connected wallet survives reloads and carries to other
+            // devices. Pages like Purchase Mallpoints gate on the linked
+            // address; without this, a fresh session on a device that never
+            // ran the connect flow looked "wallet not connected".
+            if (!store.state.wallet.address && u.walletAddress) {
+              store.state.wallet.address = u.walletAddress;
+              store.state.wallet.accountId = u.walletAddress;
+              store.state.wallet.chainId = store.state.wallet.chainId || chain.chainId;
             }
             store.commit();
             // subscribeUser() records the intent even if the socket hasn't

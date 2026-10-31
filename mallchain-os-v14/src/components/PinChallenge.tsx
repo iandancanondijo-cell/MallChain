@@ -8,7 +8,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { store } from '../store/store';
-import { decryptMnemonic } from '../services/security';
+import { decryptMnemonic, verifyPin } from '../services/security';
+import { api } from '../services/api';
 import { mnemonicRequestBus, type MnemonicRequest } from '../services/mnemonicAccess';
 import { Modal } from './ui';
 import PINInput from './PINInput';
@@ -118,6 +119,50 @@ export function PinChallengeHost() {
           setError(`Account locked for ${verifyData.remainingTime || 300} seconds. Too many failed attempts.`);
           setPin('');
           setBusy(false);
+          return;
+        }
+
+        // Accounts created before PIN-hash syncing existed have no
+        // server-side copy — the backend answers "No PIN set" (400), which
+        // used to be shown as "Incorrect PIN" and blocked every send even
+        // with the right PIN. Fall back to local bcrypt verification against
+        // st.wallet.pinHash, and backfill the hash to the server on success
+        // so future checks get rate limiting (self-heals per device).
+        if (verifyData.code === 'no_pin_set') {
+          const localHash = store.state.wallet.pinHash;
+          if (!localHash) {
+            setBusy(false);
+            setPin('');
+            setError('No PIN record found on this device. Restore your wallet or set a new PIN in Security settings.');
+            return;
+          }
+          const localOk = await verifyPin(pin, localHash);
+          if (!localOk.success || !localOk.valid) {
+            const nextAttempts = attempts + 1;
+            setAttempts(nextAttempts);
+            setPin('');
+            setBusy(false);
+            const left = MAX_ATTEMPTS - nextAttempts;
+            if (left <= 0) {
+              setLockedUntil(Date.now() + LOCKOUT_SECONDS * 1000);
+              setError(`Too many failed attempts. Try again in ${LOCKOUT_SECONDS}s.`);
+            } else {
+              setError(`Incorrect PIN — ${left} attempt${left === 1 ? '' : 's'} remaining`);
+            }
+            return;
+          }
+          api.post('/api/wallet/pin/set-pin', { pinHash: localHash }).then((r) => {
+            if (!r.ok) console.warn('[PinChallenge] PIN hash backfill failed:', r.error);
+          });
+          const fallbackResult = await decryptMnemonic(encrypted, pin);
+          setBusy(false);
+          if (fallbackResult.success && fallbackResult.decrypted) {
+            pending.resolve(fallbackResult.decrypted);
+            setPending(null);
+            return;
+          }
+          setError('Failed to decrypt wallet. Please try again.');
+          setPin('');
           return;
         }
 

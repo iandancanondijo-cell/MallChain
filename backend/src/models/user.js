@@ -63,6 +63,16 @@ const UserSchema = new Schema({
   walletAddress: { type: String },
   walletAddress_blind: { type: String },
 
+  // bcrypt(PIN) uploaded by the wallet connect / change-PIN flows (see
+  // POST /api/wallet/pin/set-pin). The PIN itself never leaves the device —
+  // only its hash, which mirrors the client-side st.wallet.pinHash so
+  // /api/wallet/pin/verify-pin can apply server-side rate limiting and
+  // lockout (PinAttempt) instead of failing "No PIN set" for every user.
+  // select:false — never returned by a plain findById.
+  wallet: {
+    pinHash: { type: String, select: false },
+  },
+
   // Balances
   mlpts_balance: { type: Number, default: 0, min: 0 },
   mallcoin_balance: { type: Number, default: 0, min: 0 },

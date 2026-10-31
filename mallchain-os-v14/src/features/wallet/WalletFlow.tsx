@@ -7,6 +7,7 @@ import { useWizard } from '../../hooks/useWizard';
 import { validateMnemonicPhrase, generateNewMnemonic, deriveAddressFromMnemonic } from '../../services/wallet';
 import { chain } from '../../services/config';
 import { hashPin, encryptMnemonic as encryptMnemonicWithPin } from '../../services/security';
+import { api } from '../../services/api';
 import PINInput from '../../components/PINInput';
 import { Shield, Check, AlertTriangle, Key, Wallet, ArrowLeft, ChevronRight } from 'lucide-react';
 import { encryptMnemonic, decryptMnemonic, type VaultEntry } from './walletCrypto';
@@ -193,6 +194,13 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       st.wallet.pinEncryptedMnemonic = encryptResult.encrypted;
       st.wallet.createdAt = Date.now();
       store.commit();
+      // Mirror the bcrypt hash to the server so /api/wallet/pin/verify-pin
+      // can rate-limit/lock out brute force instead of failing "No PIN set"
+      // (which PinChallenge used to surface as "Incorrect PIN"). Best-effort:
+      // offline/device-only users still pass the local fallback.
+      api.post('/api/wallet/pin/set-pin', { pinHash: hashResult.hash }).then((r) => {
+        if (!r.ok) console.warn('[WalletFlow] PIN sync to server failed:', r.error);
+      });
       setWalletAddress(pendingWallet.address);
       setPendingWallet(null); setPin(''); setConfirmPin('');
       goTo('success');
