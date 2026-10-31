@@ -3,6 +3,7 @@ import { Sparkles, Lock, Unlock, Coins, ArrowRight, CheckCircle2, Loader2, Walle
 import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, toast } from '../../components/ui';
 import { mallpointsApi, type MallpointsBalance } from '../../services/mallpointsApi';
+import { walletApi } from '../../services/walletApi';
 import { useLivePrice } from '../../hooks/useLivePrice';
 import { requestMnemonic } from '../../services/mnemonicAccess';
 
@@ -17,6 +18,10 @@ export default function WalletPoints({ navigate }: { navigate: (p: string) => vo
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
+  // Persistent receipt of the last successful conversion — shown after the
+  // toast disappears so the user can see exactly what they received and the
+  // credit reference (tx hash).
+  const [success, setSuccess] = useState<{ points: number; mallcoins: number; reference: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!address) return;
@@ -35,6 +40,37 @@ export default function WalletPoints({ navigate }: { navigate: (p: string) => vo
     load();
   }, [load]);
 
+  const refreshWalletAmounts = useCallback(async () => {
+    if (!address) return;
+    // The credit is already broadcast by the time /convert returns, but the
+    // block containing it may not be queryable yet — refetch now and again
+    // after the next block or two so TopBar + Wallet Hub amounts never stay
+    // stale within the session.
+    const bal = await walletApi.getBalance(address);
+    if (bal.ok && bal.data) {
+      store.state.balances = {
+        MALL: bal.data.MALL || 0,
+        MLPTS: bal.data.MLPTS || 0,
+        USD_M: bal.data.USD_M || 0,
+        KES: bal.data.KES || 0,
+        EUR: bal.data.EUR || 0,
+        GBP: bal.data.GBP || 0,
+      };
+      store.commit();
+    }
+  }, [address]);
+
+  // The MLCNS credit lands on-chain a block or two AFTER /convert responds,
+  // so one immediate refetch can still read the pre-conversion balance. Poll
+  // until the shared store actually shows a different MALL amount (max ~30s).
+  const waitForCredit = useCallback(async (prevMall: number) => {
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      await refreshWalletAmounts();
+      if (store.state.balances.MALL !== prevMall) return;
+    }
+  }, [refreshWalletAmounts]);
+
   const doConvert = async () => {
     if (!address) return;
     if (!st.wallet.pinEncryptedMnemonic) {
@@ -44,10 +80,21 @@ export default function WalletPoints({ navigate }: { navigate: (p: string) => vo
     const mnemonic = await requestMnemonic();
     if (!mnemonic) return;
     setConverting(true);
+    setSuccess(null);
     try {
       const result = await mallpointsApi.convert(address, mnemonic);
       if (result.ok && result.data) {
+        const reference =
+          (result.data.credit as { transfer?: { txHash?: string } } | null | undefined)?.transfer?.txHash ?? 'pending';
+        setSuccess({
+          points: result.data.convertedPoints,
+          mallcoins: result.data.mallcoins,
+          reference,
+        });
         toast(`Converted ${fmtNum(result.data.convertedPoints)} Mallpoints → ${fmtNum(result.data.mallcoins)} Mallcoin`);
+        const prevMall = store.state.balances.MALL;
+        await refreshWalletAmounts();
+        void waitForCredit(prevMall);
       } else {
         toast(result.error || 'Conversion failed', false);
       }
@@ -200,6 +247,31 @@ export default function WalletPoints({ navigate }: { navigate: (p: string) => vo
             <><Sparkles size={14} /> Convert {data ? fmtNum(data.convertiblePoints) : ''} Mallpoints <ArrowRight size={14} /> Mallcoin</>
           )}
         </button>
+
+        {success && (
+          <div
+            style={{
+              marginTop: 14, display: 'flex', gap: 10, alignItems: 'flex-start',
+              padding: '12px 14px', borderRadius: 'var(--radius-sm, 10px)',
+              background: 'rgba(34, 197, 94, 0.08)', border: '1px solid rgba(34, 197, 94, 0.25)',
+            }}
+          >
+            <CheckCircle2 size={16} style={{ color: 'var(--green)', flexShrink: 0, marginTop: 2 }} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--green)' }}>
+                {fmtNum(success.mallcoins)} MLCNS received
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--txt-2)', marginTop: 3 }}>
+                {fmtNum(success.points)} Mallpoints converted at the live rate and credited to{' '}
+                <span style={{ fontFamily: 'var(--font-mono, monospace)' }}>{address.slice(0, 12)}…{address.slice(-6)}</span>.
+                Your wallet balance and Mallpoints amount above are updated.
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--txt-3)', marginTop: 4, fontFamily: 'var(--font-mono, monospace)', wordBreak: 'break-all' }}>
+                Reference: {success.reference}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

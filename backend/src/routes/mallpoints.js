@@ -259,6 +259,7 @@ router.post('/convert', async (req, res) => {
         walletAddress: address,
         amountMlcns: mlcoins,
         fiatAmount: kesValue,
+        creditTxHash: credit?.transfer?.txHash,
         note: 'Conversion settled; no pool-reserve change since no new fiat entered (ledger-based pool).',
       }).catch(() => {})
       const liquidityResult = { ledgerTracked: true }

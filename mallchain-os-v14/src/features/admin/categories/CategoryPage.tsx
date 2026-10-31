@@ -1471,13 +1471,19 @@ function MarketplaceAdmin() {
 function MlptsAdmin() {
   const [items, setItems] = useState<LiquidityActivityItem[]>([]);
   const [metrics, setMetrics] = useState<TreasuryMetricTotal[]>([]);
+  // Every MLPTS→MLCNS conversion collection, not just whatever shares the
+  // latest-25 page with buy/withdraw noise — /api/liquidity/activity filters
+  // server-side by flow and reports the unfiltered-by-page `total`.
+  const [conversions, setConversions] = useState<{ items: LiquidityActivityItem[]; total: number }>({ items: [], total: 0 });
 
   const load = async () => {
-    const [l, m] = await Promise.all([
+    const [l, c, m] = await Promise.all([
       adminApi.listLiquidityActivity({ limit: 25 }),
+      adminApi.listLiquidityActivity({ flow: 'mallpoints_convert', limit: 500 }),
       adminApi.getTreasuryMetrics(),
     ]);
     if (l.ok && l.data) setItems(l.data.items);
+    if (c.ok && c.data) setConversions({ items: c.data.items, total: c.data.total });
     if (m.ok && m.data) setMetrics(m.data.totals);
   };
 
@@ -1495,6 +1501,11 @@ function MlptsAdmin() {
     [metrics]
   );
 
+  const convertedMlcns = useMemo(
+    () => conversions.items.reduce((acc, i) => acc + Number(i.amountMlcns || 0), 0),
+    [conversions.items]
+  );
+
   return (
     <>
       <div className="stat-grid">
@@ -1504,10 +1515,55 @@ function MlptsAdmin() {
           <div className="card-sub">sum of mallpoints_convert activity</div>
         </div>
         <div className="card">
+          <div className="card-label">Conversions recorded</div>
+          <div className="card-value">{conversions.total}</div>
+          <div className="card-sub">{fmtNum(conversions.items.length)} loaded, {fmtNum(convertedMlcns)} MLCNS issued</div>
+        </div>
+        <div className="card">
           <div className="card-label">Recent liquidity events</div>
           <div className="card-value">{items.length}</div>
           <div className="card-sub">refresh every 30s</div>
         </div>
+      </div>
+
+      <div className="card mt">
+        <div className="sec-title">
+          <h2>Mallpoints → Mallcoin conversions</h2>
+          <span className="sub">every conversion collection · admin-only</span>
+        </div>
+        {!conversions.items.length && (
+          <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>No Mallpoints conversions have been settled yet.</div>
+        )}
+        {conversions.items.length > 0 && (
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Wallet</th>
+                <th>MLCNS credited</th>
+                <th>MLPTS value (KES)</th>
+                <th>Status</th>
+                <th>Stage</th>
+                <th>Reference</th>
+                <th>When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {conversions.items.map((i) => (
+                <tr key={i._id}>
+                  <td className="tiny mono">{i.walletAddress ? `${i.walletAddress.slice(0, 12)}…${i.walletAddress.slice(-6)}` : '—'}</td>
+                  <td className="num">{i.amountMlcns != null ? `${i.amountMlcns} MLCNS` : '—'}</td>
+                  <td className="num">{i.fiatAmount != null ? formatKes(i.fiatAmount) : '—'}</td>
+                  <td>
+                    <span className={`chip ${i.status === 'success' ? 'green' : i.status === 'failed' ? 'red' : 'gold'}`}>{i.status}</span>
+                  </td>
+                  <td className="tiny">{i.stage}</td>
+                  <td className="tiny mono">{i.creditTxHash ? `${i.creditTxHash.slice(0, 14)}…` : '—'}</td>
+                  <td className="tiny">{timeAgo(i.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="card mt">

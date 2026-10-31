@@ -18,7 +18,7 @@ import {
   ShoppingBag, Layers, Scale, Vote, SlidersHorizontal, Compass, Megaphone,
   CheckCircle, DollarSign, Trophy, BarChart3, ShieldCheck, Lock, Shield,
   ClipboardEdit, User, Search, MessageCircle, Link as LinkIcon, FileCode,
-  Code, Briefcase, Settings as SettingsIcon, PieChart, GraduationCap,
+  Code, Briefcase, Settings as SettingsIcon, PieChart, GraduationCap, Sparkles,
 } from 'lucide-react';
 import { store, type AppState } from '../store/store';
 import { useStoreVersion } from './ui';
@@ -53,6 +53,7 @@ const GROUPS: NavGroup[] = [
       { label: 'Send', path: '/wallet/send', icon: Send },
       { label: 'Receive', path: '/wallet/receive', icon: Download },
       { label: 'Swap', path: '/wallet/swap', icon: Repeat },
+      { label: 'Mallpoints', path: '/wallet/points', icon: Sparkles },
       { label: 'History', path: '/wallet/history', icon: History },
       { label: 'Performance', path: '/wallet/performance', icon: BarChart3 },
       { label: 'Transactions', path: '/transactions', icon: List },
