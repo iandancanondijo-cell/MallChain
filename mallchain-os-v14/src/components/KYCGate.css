@@ -214,7 +214,9 @@
   position: fixed;
   bottom: 20px;
   right: 20px;
-  z-index: 9999;
+  /* was 9999 — floated above the sidebar drawer (z 50), modals and every
+     other surface; 40 keeps it over page content but under the drawer */
+  z-index: 40;
   animation: slideIn 0.3s ease-out;
 }
 
@@ -280,5 +282,6 @@
   .kyc-gate-expand {
     padding: 10px 14px;
     font-size: 0.85rem;
+    min-height: 44px;
   }
 }

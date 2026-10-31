@@ -120,8 +120,8 @@ const NAV_LINKS: { id: string; label: string }[] = [
 
 const MPESA_STEPS = [
   { title: 'Make an account', body: 'Sign up and create (or import) a wallet in one flow. The recovery phrase stays yours.' },
-  { title: 'Pick an amount', body: 'Choose how much KSH to turn into MLCN and give the Safaricom number that will pay.' },
-  { title: 'Accept the push', body: 'Your phone asks for your M-Pesa PIN. Once it clears, MLCN is credited on-chain — send it, stake it or spend it.' },
+  { title: 'Pick an amount', body: 'Choose how much KSH to turn into MLCNS and give the Safaricom number that will pay.' },
+  { title: 'Accept the push', body: 'Your phone asks for your M-Pesa PIN. Once it clears, MLCNS is credited on-chain — send it, stake it or spend it.' },
 ];
 
 // Auto-contrast glyph color for a chip background (WCAG relative luminance)
@@ -568,7 +568,7 @@ export default function Landing({ navigate }: LandingProps) {
             <h2 className="rv">Pay with M-Pesa. Receive on-chain.</h2>
             <p className="lead rv">
               No exchange account, no card, no crypto jargon. Type an amount, take the STK push on your
-              phone, and MLCN arrives in your wallet from the chain
+              phone, and MLCNS arrives in your wallet from the chain
               {price.buyKes != null ? (
                 <> — <span className="rate">right now 1 MLCNS ≈ KSh {price.buyKes.toFixed(2)}</span>, priced live from the network.</>
               ) : (

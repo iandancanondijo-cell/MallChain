@@ -172,7 +172,9 @@
   top: 0;
   z-index: 30;
   padding-top: env(safe-area-inset-top, 0px);
-  background: linear-gradient(rgba(4, 5, 13, 0.85), transparent);
+  /* faded to fully transparent before, so section headings collided with the
+     logo mid-scroll — keep a readable base under the whole bar */
+  background: linear-gradient(rgba(4, 5, 13, 0.92), rgba(4, 5, 13, 0.65));
 }
 
 .landing-nav-wrap {
@@ -881,7 +883,9 @@
        Constrain so it sits behind the heading without clipping it. */
     width: min(92vmin, 380px);
     top: 42vh;
-    opacity: 0.42;
+    /* the fixed ring scrolls behind every section — at 0.42 its "BUY IT ·
+       SELL IT" letter ring fought the body copy for legibility on phones */
+    opacity: 0.24;
     filter: none;
     will-change: auto;
   }

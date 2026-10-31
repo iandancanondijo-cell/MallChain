@@ -253,6 +253,21 @@
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
+/* phones: the fixed-width "Complete Now" button squeezed the message into
+   one-word lines — let it drop to its own full-width row instead */
+@media (max-width: 640px) {
+  .compliance-alert {
+    flex-wrap: wrap;
+  }
+
+  .compliance-alert .btn {
+    margin-left: 0;
+    flex: 1 1 100%;
+    text-align: center;
+    justify-content: center;
+  }
+}
+
 .compliance-alert .btn--secondary {
   background: rgba(255, 255, 255, 0.06);
   color: var(--accent);

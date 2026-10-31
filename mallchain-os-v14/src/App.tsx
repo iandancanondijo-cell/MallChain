@@ -203,6 +203,31 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A client-side login (Auth page) flips st.user.authed without a page
+  // reload, so the boot-time /me seeding above never runs for that session —
+  // on a device that never ran the connect flow the app then kept showing
+  // "Wallet not connected" until an explicit refresh. Fetch /me once when
+  // auth turns on with no local wallet and seed the server-side link the
+  // same way boot does.
+  useEffect(() => {
+    if (!authInitialized || !st.user.authed || st.wallet.address) return;
+    let cancelled = false;
+    (async () => {
+      const res = await api.get<{ user?: { walletAddress?: string | null } }>('/api/auth/me');
+      if (cancelled || !res.ok || !res.data?.user?.walletAddress) return;
+      const addr = res.data.user.walletAddress;
+      if (!store.state.wallet.address) {
+        store.state.wallet.address = addr;
+        store.state.wallet.accountId = addr;
+        store.state.wallet.chainId = store.state.wallet.chainId || chain.chainId;
+        store.commit();
+      }
+      linkedAddressRef.current = addr;
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authInitialized, st.user.authed]);
+
   // Keep the account's server-side wallet link in sync whenever both an
   // authed session and a wallet address are present — covers every path
   // that sets st.wallet.address (signup's embedded wallet step, standalone

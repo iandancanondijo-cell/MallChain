@@ -41,7 +41,12 @@ function KycPendingBanner() {
       case 'pending': return { text: 'Under Review', color: 'gold' as const };
       case 'approved': return { text: 'Approved', color: 'success' as const };
       case 'rejected': return { text: 'Rejected', color: 'error' as const };
-      default: return { text: s, color: 'info' as const };
+      // raw enums must never reach the UI — "not_submitted" rendered verbatim
+      // on the dashboard banner before these were mapped.
+      case 'not_submitted': return { text: 'Not Submitted', color: 'info' as const };
+      case 'draft': return { text: 'Draft', color: 'info' as const };
+      case 'review': return { text: 'In Review', color: 'gold' as const };
+      default: return { text: s.replace(/_/g, ' '), color: 'info' as const };
     }
   };
 
@@ -64,7 +69,9 @@ function KycPendingBanner() {
         <Text size="sm" color="secondary" className="kyc-banner-message">
           {status?.status === 'rejected'
             ? `Your KYC submission was rejected.${status.reviewNotes ? ` Reason: ${status.reviewNotes}` : ''} Please resubmit.`
-            : 'Your KYC submission is under review. Some features (withdrawals, high-value transactions) are limited until verification is complete.'}
+            : status?.status === 'not_submitted' || status?.status === 'draft'
+              ? 'You have not submitted your identity verification yet. Some features (withdrawals, high-value transactions) are limited until verification is complete.'
+              : 'Your KYC submission is under review. Some features (withdrawals, high-value transactions) are limited until verification is complete.'}
         </Text>
         {status?.submittedAt && (
           <Text size="xs" color="tertiary" className="kyc-banner-timestamp">

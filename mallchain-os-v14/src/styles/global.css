@@ -457,7 +457,10 @@ a:hover { color: var(--gold-2); text-decoration: underline; }
 .cookie-notice-body .banner-detail { margin-top: 10px; }
 .cookie-notice-ack { align-self: flex-end; padding: 6px 18px; font-size: 13px; }
 @media (max-width: 480px) {
-  .cookie-notice { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+  .cookie-notice { left: 12px; right: 12px; bottom: 12px; max-width: none; padding: 14px; gap: 10px; }
+  /* 69×29 "Got it" was a thumb trap; stretch it to a full-width 44px bar */
+  .cookie-notice-ack { align-self: stretch; min-height: 44px; }
+  .banner-learn-more { padding: 8px 14px; }
 }
 
 /* ── typography ── */
@@ -1440,6 +1443,12 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .tb-search { display: none; }
   .tb-hamburger, .tb-search-trigger { display: flex; }
   .tb-wallet .lbl { display: none; }
+  /* thumb-friendly hit areas (were 34×34 icons / 27-36px rows) */
+  .tb-icon, .tb-hamburger, .tb-search-trigger { width: 40px; height: 40px; }
+  .tb-wallet { min-height: 40px; }
+  .side-item { min-height: 42px; }
+  .side-group-title { min-height: 36px; }
+  .btn-sm, .btn--sm { min-height: 40px; }
   /* Collapse the remaining wide items so the row fits a 360px phone.
      An overflowing topbar expands the mobile layout viewport, which
      breaks every position:fixed element (modals, animated background). */
@@ -1480,6 +1489,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .wallet-hero-right { min-width: 0; width: 100%; }
   .wallet-hero-num { font-size: 24px; }
   .wallet-hero-label { font-size: 11px; }
+  /* label/amount/meta are inline spans — at 24px the amount collided with the label */
+  .wallet-hero-balance { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 }
 
 @media (max-width: 480px) {

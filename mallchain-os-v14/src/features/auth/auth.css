@@ -232,6 +232,13 @@
   border: 1px solid var(--_line);
   background: rgba(5, 8, 16, 0.6);
   position: relative;
+  /* global.css styles the toggle-switch component with a bare `.switch`
+     selector (width:42px; height:24px; flex:none) — this element shares the
+     class name but is the Sign-in/Create tab bar, and without an explicit
+     size here the leak crushed it to 42×24 on every viewport */
+  width: 100%;
+  height: auto;
+  flex: 1 0 auto;
 }
 
 .auth-root .switch-icon {
