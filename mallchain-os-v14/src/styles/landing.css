@@ -190,10 +190,10 @@
 }
 
 .landing-logo {
-  position: absolute;
-  left: 16px;
-  top: 50%;
-  transform: translateY(-50%);
+  /* in normal flow: with links/actions hidden below 768px an absolutely
+     positioned logo left the hamburger toggle as the only flex child, which
+     space-between then pushed to the left edge — under the logo. */
+  position: relative;
   display: flex;
   gap: 11px;
   align-items: center;
@@ -276,6 +276,14 @@
   flex-direction: column;
   padding: 32px 22px;
   gap: 24px;
+  overflow-y: auto;
+}
+
+/* while the mobile menu is open the nav strip must go solid, otherwise
+   scrolled page content shows through the gradient and collides with the
+   menu's top row */
+.landing-page nav.menu-open {
+  background: rgba(4, 5, 13, 0.97);
 }
 
 .landing-mobile-menu a {
@@ -942,8 +950,10 @@
 /* interactive door */
 .landing-door {
   position: fixed;
-  top: 14px;
-  right: 18px;
+  /* bottom-right corner: the top-right slot now holds the nav Login/Buy
+     actions, and on phones the door hid behind them entirely */
+  bottom: 26px;
+  right: 24px;
   z-index: 50;
   cursor: pointer;
   perspective: 600px;
@@ -1207,8 +1217,9 @@
   }
 
   .landing-door {
-    top: 10px;
-    right: 12px;
+    /* hidden on phones: the nav menu + hero CTAs now carry "enter", and the
+       36px door was too small a tap target to be worth a fixed overlay */
+    display: none;
   }
 
   .door-frame {
@@ -1327,4 +1338,110 @@
 
 @media (prefers-reduced-motion: reduce) {
   .tw-caret { animation: none; }
+}
+
+/* ── nav link + mobile-menu buttons (markup uses <button>, old CSS only
+   styled <a>) ── */
+.landing-nav-links .lk {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: 400 15px/1 system-ui, sans-serif;
+  color: var(--l-dim);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.landing-nav-links .lk:hover {
+  color: var(--l-paper);
+}
+
+.landing-mobile-menu .lk {
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: 600 20px 'Bricolage Grotesque', sans-serif;
+  color: var(--l-paper);
+}
+
+/* ── M-Pesa purchase lane ── */
+.landing-page .steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px;
+  margin-top: 50px;
+}
+
+.landing-page .step {
+  display: flex;
+  /* column stacking is explicit: h2/h3 are inline-block globally, which
+     otherwise lets the step title sit beside the number badge */
+  flex-direction: column;
+  align-items: flex-start;
+  border: 1px solid var(--l-line);
+  border-radius: 26px;
+  padding: 26px;
+  background:
+    radial-gradient(200px 90px at 25% 12%, rgba(255, 200, 61, 0.09), transparent),
+    rgba(10, 12, 32, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.landing-page .step b {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  margin-bottom: 20px;
+  font: 800 20px 'Bricolage Grotesque', sans-serif;
+  color: #1a1100;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--accent) 65%, white), var(--accent-2));
+  box-shadow: 0 0 30px -6px rgba(255, 184, 32, 0.6);
+}
+
+.landing-page .step h3 {
+  font-size: 24px;
+  line-height: 1.05;
+}
+
+.landing-page .step p {
+  margin: 10px 0 0;
+  color: var(--l-dim);
+  font-size: 16px;
+}
+
+.landing-page .rate {
+  color: var(--l-mint);
+  font-weight: 600;
+}
+
+.landing-page .mpesa-cta {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 36px;
+}
+
+@media (max-width: 768px) {
+  .landing-page .steps {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-top: 32px;
+  }
+
+  .landing-page .step {
+    padding: 20px;
+    border-radius: 20px;
+  }
+
+  .landing-page .step h3 {
+    font-size: 21px;
+  }
+
+  .landing-page .mpesa-cta .bt {
+    width: 100%;
+  }
 }

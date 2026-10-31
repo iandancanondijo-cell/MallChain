@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStoreVersion } from '../components/ui';
+import { store } from '../store/store';
+import { useLivePrice } from '../hooks/useLivePrice';
 import '../styles/landing.css';
 
 interface LandingProps {
@@ -104,6 +106,22 @@ const ICON_SETS: { set: string; label: string }[] = [
   { set: 'trade', label: 'Buy, sell and deliver' },
   { set: 'study', label: 'Study' },
   { set: 'validate', label: 'Validate' },
+];
+
+// In-page anchors. Hash links would fight the hash router, so nav items
+// scrollIntoView by element id instead.
+const NAV_LINKS: { id: string; label: string }[] = [
+  { id: 'mpesa', label: 'M-Pesa' },
+  { id: 'paths', label: 'Ways in' },
+  { id: 'build', label: 'Build' },
+  { id: 'study', label: 'Study' },
+  { id: 'validate', label: 'Validate' },
+];
+
+const MPESA_STEPS = [
+  { title: 'Make an account', body: 'Sign up and create (or import) a wallet in one flow. The recovery phrase stays yours.' },
+  { title: 'Pick an amount', body: 'Choose how much KSH to turn into MLCN and give the Safaricom number that will pay.' },
+  { title: 'Accept the push', body: 'Your phone asks for your M-Pesa PIN. Once it clears, MLCN is credited on-chain — send it, stake it or spend it.' },
 ];
 
 // Auto-contrast glyph color for a chip background (WCAG relative luminance)
@@ -228,8 +246,12 @@ function Typewriter({ text }: { text: string }) {
 export default function Landing({ navigate }: LandingProps) {
   useStoreVersion();
 
+  const st = store.state;
+  const price = useLivePrice();
+
   const [activeBand, setActiveBand] = useState(-1);
   const [doorOpen, setDoorOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const ringRef = useRef<HTMLDivElement>(null);
   const pupilRef = useRef<SVGGElement>(null);
@@ -252,11 +274,33 @@ export default function Landing({ navigate }: LandingProps) {
     navigate('/auth?mode=login');
   }, [navigate]);
 
+  // M-Pesa purchase is the landing page's primary action. Authed users go
+  // straight to the buy flow; everyone else starts at signup, and the buy
+  // page itself is reached from the wallet once they have an account.
+  const goBuyMpesa = useCallback(() => {
+    if (store.state.user.authed) navigate('/wallet/buy');
+    else navigate('/auth?mode=register');
+  }, [navigate]);
+
+  const scrollToSection = useCallback((id: string) => {
+    setMenuOpen(false);
+    document.getElementById(id)?.scrollIntoView({
+      behavior: reducedMotion ? 'auto' : 'smooth',
+      block: 'start',
+    });
+  }, [reducedMotion]);
+
   const handlePathClick = useCallback((band: number) => {
     setActiveBand(band);
     setTimeout(() => setActiveBand(-1), 1600);
+    // "Buy it" is the M-Pesa path — send people to the actual purchase flow
+    // (or signup) instead of a generic register page.
+    if (band === 0) {
+      goBuyMpesa();
+      return;
+    }
     goSignup();
-  }, [goSignup]);
+  }, [goSignup, goBuyMpesa]);
 
   // Scroll reveal via IntersectionObserver
   useEffect(() => {
@@ -433,15 +477,66 @@ export default function Landing({ navigate }: LandingProps) {
       </div>
 
       {/* Nav */}
-      <nav>
+      <nav className={menuOpen ? 'menu-open' : ''}>
         <div className="landing-nav-wrap">
           <div className="landing-nav-inner">
             <div className="landing-logo" onClick={() => goTo('/landing')}>
               <img src="/mallchain.svg" alt="Mallchain" className="landing-logo-mark" />
               Mallchain
             </div>
+            <div className="landing-nav-links">
+              {NAV_LINKS.map((l) => (
+                <button key={l.id} className="lk" onClick={() => scrollToSection(l.id)}>
+                  {l.label}
+                </button>
+              ))}
+            </div>
+            <div className="landing-nav-actions">
+              {st.user.authed ? (
+                <button className="bt" onClick={() => goTo('/')}>Open dashboard</button>
+              ) : (
+                <>
+                  <button className="bt g" onClick={goLogin}>Login</button>
+                  <button className="bt" onClick={goBuyMpesa}>Buy MLCNS</button>
+                </>
+              )}
+            </div>
+            <button
+              className="landing-nav-toggle"
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={menuOpen}
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                {menuOpen ? (
+                  <path d="M6 6l12 12M18 6L6 18" />
+                ) : (
+                  <path d="M4 7h16M4 12h16M4 17h16" />
+                )}
+              </svg>
+            </button>
           </div>
         </div>
+        {menuOpen && (
+          <div className="landing-mobile-menu">
+            {NAV_LINKS.map((l) => (
+              <button key={l.id} className="lk" onClick={() => scrollToSection(l.id)}>
+                {l.label}
+              </button>
+            ))}
+            <div className="landing-mobile-actions">
+              {st.user.authed ? (
+                <button className="bt" onClick={() => { setMenuOpen(false); goTo('/'); }}>Open dashboard</button>
+              ) : (
+                <>
+                  <button className="bt" onClick={() => { setMenuOpen(false); goBuyMpesa(); }}>Buy MLCNS with M-Pesa</button>
+                  <button className="bt g" onClick={() => { setMenuOpen(false); goLogin(); }}>Login</button>
+                  <button className="bt g" onClick={() => { setMenuOpen(false); goSignup(); }}>Create account</button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </nav>
 
       <main>
@@ -449,6 +544,16 @@ export default function Landing({ navigate }: LandingProps) {
         <header className="hero">
           <h1 className="vh">Mallchain</h1>
           <p className="sub"><Typewriter text="An open network you can use, create on, and learn from." /></p>
+          <div className="cta">
+            <button className="bt" onClick={goBuyMpesa}>
+              Buy MLCNS with M-Pesa <span aria-hidden="true">&rarr;</span>
+            </button>
+            {st.user.authed ? (
+              <button className="bt g" onClick={() => goTo('/')}>Open dashboard</button>
+            ) : (
+              <button className="bt g" onClick={goSignup}>Create account</button>
+            )}
+          </div>
           <div className="cue">
             <svg width="16" height="24" viewBox="0 0 16 24" fill="none" strokeLinecap="round" strokeLinejoin="round">
               <line x1="8" y1="0" x2="8" y2="20" stroke="rgba(180,180,180,0.4)" strokeWidth="1" />
@@ -456,6 +561,40 @@ export default function Landing({ navigate }: LandingProps) {
             </svg>
           </div>
         </header>
+
+        {/* M-Pesa purchase lane */}
+        <section id="mpesa">
+          <div className="w">
+            <h2 className="rv">Pay with M-Pesa. Receive on-chain.</h2>
+            <p className="lead rv">
+              No exchange account, no card, no crypto jargon. Type an amount, take the STK push on your
+              phone, and MLCN arrives in your wallet from the chain
+              {price.buyKes != null ? (
+                <> — <span className="rate">right now 1 MLCNS ≈ KSh {price.buyKes.toFixed(2)}</span>, priced live from the network.</>
+              ) : (
+                ', priced live from the network.'
+              )}
+            </p>
+            <div className="steps">
+              {MPESA_STEPS.map((s, idx) => (
+                <div
+                  key={s.title}
+                  className="step rv"
+                  style={{ '--rv-delay': `${idx * 0.12}s` } as React.CSSProperties}
+                >
+                  <b>{idx + 1}</b>
+                  <h3>{s.title}</h3>
+                  <p>{s.body}</p>
+                </div>
+              ))}
+            </div>
+            <div className="cta mpesa-cta rv">
+              <button className="bt" onClick={goBuyMpesa}>
+                {st.user.authed ? 'Buy now with M-Pesa' : 'Start with M-Pesa'} <span aria-hidden="true">&rarr;</span>
+              </button>
+            </div>
+          </div>
+        </section>
 
         {/* Paths */}
         <section>
