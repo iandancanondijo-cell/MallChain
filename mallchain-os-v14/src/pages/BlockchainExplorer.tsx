@@ -159,6 +159,27 @@ export default function BlockchainExplorer() {
     }
   }, [txSearch]);
 
+  // Deep-link support: Transaction History links here as #/explorer?tx=<hash>.
+  // The router keeps the query in the hash, so parse it from there and load
+  // the referenced transaction on mount.
+  useEffect(() => {
+    const match = window.location.hash.match(/[?&]tx=([0-9A-Fa-f]+)/);
+    if (!match) return;
+    const hash = match[1];
+    setTxSearch(hash);
+    getTransaction(hash)
+      .then((tx) => {
+        setSelectedTx(tx);
+        toast('Transaction loaded');
+      })
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : 'Failed to load transaction';
+        setError(msg);
+        toast(msg, false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Loading state
   if (loading && !stats) {
     return (

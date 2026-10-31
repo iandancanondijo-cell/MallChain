@@ -52,18 +52,28 @@ async function getTransactions(req, res) {
   // the raw payload through, which left `tx.status` undefined and crashed
   // the Explorer's render. `status: 'success'` is honest here, not fabricated:
   // this feed only ever records completed transfers, there's no failed-tx entry.
-  const transactions = (data.transactions || []).map((tx) => ({
-    hash: tx.tx_id,
-    height: Number(tx.block_height) || 0,
-    timestamp: Number(tx.timestamp) || 0,
-    status: 'success',
-    from: tx.from,
-    to: tx.to,
-    amount: tx.amount,
-    txType: tx.tx_type,
-    memo: tx.memo || '',
-  }))
-  return res.json({ transactions, pagination: data.pagination })
+  const transactions = (data.transactions || [])
+    .map((tx) => ({
+      hash: tx.tx_id,
+      height: Number(tx.block_height) || 0,
+      timestamp: Number(tx.timestamp) || 0,
+      status: 'success',
+      from: tx.from,
+      to: tx.to,
+      amount: tx.amount,
+      txType: tx.tx_type,
+      memo: tx.memo || '',
+    }))
+    // The module returns the log in lexicographic tx_id order (TX-0, TX-1,
+    // TX-10, …), which puts the newest transfer last — a "recent
+    // transactions" feed that buries the latest purchase. Sort newest-first
+    // and honor the caller's limit.
+    .sort((a, b) => b.height - a.height || b.timestamp - a.timestamp)
+  const limit = Math.min(parseInt(req.query.limit, 10) || 0, 100)
+  return res.json({
+    transactions: limit > 0 ? transactions.slice(0, limit) : transactions,
+    pagination: data.pagination,
+  })
 }
 
 async function getMarketTrades(req, res) {

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CreditCard, Phone, Coins, CheckCircle2, Loader2, Smartphone, ShoppingBag, ArrowRight, Wallet } from 'lucide-react';
+import { CreditCard, Phone, Coins, CheckCircle2, Loader2, Smartphone, ShoppingBag, ArrowRight, Wallet, AlertTriangle } from 'lucide-react';
 import { api } from '../services/api';
 import { useStoreVersion, toast } from '../components/ui';
 
-type Step = 'form' | 'awaiting_payment' | 'crediting' | 'done';
+type Step = 'form' | 'awaiting_payment' | 'stalled' | 'crediting' | 'done';
 
 /**
  * Mallpoints price in KES — a fixed product constant (backend default:
@@ -14,6 +14,9 @@ type Step = 'form' | 'awaiting_payment' | 'crediting' | 'done';
 const MALLPOINT_PRICE_KES = 2;
 const MIN_MLPTS = 5; // backend enforces amount_kes >= 10
 
+// 40 × 3s ≈ 2 minutes with no callback means the prompt was never answered.
+const STALL_TICKS = 40;
+
 const STEP_META: { label: string; icon: typeof CreditCard }[] = [
   { label: 'Details', icon: ShoppingBag },
   { label: 'Pay', icon: Smartphone },
@@ -21,7 +24,7 @@ const STEP_META: { label: string; icon: typeof CreditCard }[] = [
   { label: 'Done', icon: CheckCircle2 },
 ];
 
-const STEP_INDEX: Record<Step, number> = { form: 0, awaiting_payment: 1, crediting: 2, done: 3 };
+const STEP_INDEX: Record<Step, number> = { form: 0, awaiting_payment: 1, stalled: 1, crediting: 2, done: 3 };
 
 /** Purchase Mallpoints (MLPTS) with real money via M-Pesa STK push. */
 export default function MallpointsPurchase({ navigate }: { navigate: (p: string) => void }) {
@@ -94,10 +97,11 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
     pollTicksRef.current = 0;
     pollRef.current = setInterval(async () => {
       pollTicksRef.current += 1;
-      if (pollTicksRef.current > 200) { // quote expires server-side after 10 min
+      // Bail out well before the 10 minute server-side expiry: an unanswered
+      // prompt never gets a callback, so without this the page just spins.
+      if (pollTicksRef.current > STALL_TICKS) {
         if (pollRef.current) clearInterval(pollRef.current);
-        toast('Payment timed out — the quote expired', false);
-        setStep('form');
+        setStep('stalled');
         setBusy(false);
         return;
       }
@@ -126,6 +130,12 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
         setBusy(false);
       }
     }, 3000);
+  };
+
+  const cancelPayment = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    setBusy(false);
+    setStep('form');
   };
 
   const submit = async () => {
@@ -290,6 +300,28 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
               Complete the M-Pesa prompt sent to <b className="mono">{phone}</b> for <b>{totalKes.toLocaleString()} KES</b>.
             </div>
             {quoteId && <div className="wo-hash" style={{ marginTop: 12 }}>Quote {quoteId}</div>}
+            <div className="wo-status-text" style={{ marginTop: 6, fontSize: 12, color: 'var(--txt-3)' }}>
+              Stops waiting after ~2 minutes if the prompt is left unanswered.
+            </div>
+            <button className="btn btn-ghost" onClick={cancelPayment} style={{ marginTop: 16 }}>
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {step === 'stalled' && (
+          <div className="wo-status" style={{ textAlign: 'center', padding: '24px 16px' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(251, 191, 36, 0.1)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <AlertTriangle size={24} style={{ color: 'var(--gold)' }} />
+            </div>
+            <div className="wo-status-title" style={{ color: 'var(--warning)' }}>No payment received</div>
+            <div className="wo-status-text">
+              We did not get a payment from <b className="mono">{phone}</b>. The prompt may have expired or been missed — check the handset and start a new request.
+            </div>
+            {quoteId && <div className="wo-hash" style={{ marginTop: 12 }}>Quote {quoteId}</div>}
+            <button className="btn btn-primary" onClick={() => { setStep('form'); setQuoteId(null); }} style={{ marginTop: 20 }}>
+              Try again
+            </button>
           </div>
         )}
 

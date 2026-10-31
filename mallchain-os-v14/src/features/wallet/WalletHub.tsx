@@ -1,13 +1,12 @@
-import { useEffect, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, fmtMoney } from '../../components/ui';
 import { useWalletData } from '../../hooks/useWalletData';
-import { priceApi } from '../../services/priceApi';
-import { useFxRate, toDisplayCurrency } from '../../services/currency';
+import { useLivePrice } from '../../hooks/useLivePrice';
+import { useCurrencyConverter, type FiatUnit } from '../../services/currency';
 import { LoadingState } from '../../components/LoadingState';
 import {
   ArrowUpRight, ArrowDownLeft, CreditCard, Building2, Sparkles,
-  Repeat, Clock, BarChart3, Wallet, Copy, ExternalLink, Settings, Lock
+  Repeat, Clock, BarChart3, Wallet, Copy, ExternalLink, Settings, Lock, Banknote
 } from 'lucide-react';
 
 /**
@@ -19,8 +18,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
   useStoreVersion();
   const st = store.state;
   const cur = st.prefs.currency;
-  const fxRate = useFxRate(cur);
-  const disp = (usd: number | null) => (usd === null ? null : toDisplayCurrency(usd, cur, fxRate));
+  const toDisplay = useCurrencyConverter(cur);
   const walletAddress = st.wallet.address;
   const walletCreatedAt = st.wallet.createdAt;
 
@@ -38,12 +36,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
     return `${Math.floor(days / 365)}y`;
   };
 
-  const [mallPrice, setMallPrice] = useState<number | null>(null);
-  useEffect(() => {
-    priceApi.getMallPrice().then((res) => {
-      if (res.ok && res.data) setMallPrice(res.data.mid);
-    });
-  }, []);
+  const { midKes, pointPriceKes } = useLivePrice();
 
   const isWalletConnected = walletAddress && walletAddress.length > 0;
 
@@ -57,12 +50,15 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
   const mallLocked = balance?.MALL_LOCKED ?? 0;
   const mallUnlockTime = balance?.MALL_UNLOCK_TIME ?? null;
 
-  const assets = [
+  interface Asset { sym: string; name: string; val: number; fiat: number | null; fiatFrom: FiatUnit; gradient: string; accentColor: string; iconBg: string; note: string | null }
+
+  const assets: Asset[] = [
     {
       sym: 'MALL',
       name: 'Mallcoin',
       val: realBalance.MALL,
-      usd: mallPrice !== null ? realBalance.MALL * mallPrice : null,
+      fiat: midKes !== null ? realBalance.MALL * midKes : null,
+      fiatFrom: 'KES',
       gradient: 'linear-gradient(135deg, rgba(243, 186, 47, 0.15), rgba(243, 186, 47, 0.05))',
       accentColor: 'var(--gold)',
       iconBg: 'rgba(243, 186, 47, 0.12)',
@@ -74,7 +70,8 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
       sym: 'MLPTS',
       name: 'Mallpoints',
       val: realBalance.MLPTS,
-      usd: null,
+      fiat: pointPriceKes !== null ? realBalance.MLPTS * pointPriceKes : null,
+      fiatFrom: 'KES',
       gradient: 'linear-gradient(135deg, rgba(34, 211, 238, 0.12), rgba(34, 211, 238, 0.04))',
       accentColor: 'var(--cyan)',
       iconBg: 'rgba(34, 211, 238, 0.12)',
@@ -84,7 +81,8 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
       sym: 'USD-M',
       name: 'USD Stable',
       val: realBalance.USD_M,
-      usd: realBalance.USD_M,
+      fiat: realBalance.USD_M,
+      fiatFrom: 'USD',
       gradient: 'linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(34, 197, 94, 0.04))',
       accentColor: 'var(--green-2)',
       iconBg: 'rgba(34, 197, 94, 0.12)',
@@ -92,10 +90,16 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
     },
   ];
 
-  const totalUsd = assets.reduce((a, x) => a + (x.usd ?? 0), 0);
   const totalDisplay = (() => {
-    const t = disp(totalUsd);
-    return t === null ? '...' : fmtMoney(t, cur);
+    let sum = 0;
+    let pending = false;
+    for (const a of assets) {
+      const dv = toDisplay(a.fiat, a.fiatFrom);
+      if (a.fiat === null) continue;
+      if (dv === null) { pending = true; continue; }
+      sum += dv;
+    }
+    return pending ? '…' : fmtMoney(sum, cur);
   })();
 
   const actions = [
@@ -204,13 +208,15 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
               <div className="wallet-asset-icon" style={{ background: a.iconBg, color: a.accentColor }}>
                 {a.sym === 'MALL' && <span style={{ fontWeight: 900, fontSize: 13 }}>M</span>}
                 {a.sym === 'MLPTS' && <Sparkles size={15} />}
-                {a.sym === 'USD-M' && <span style={{ fontWeight: 900, fontSize: 12 }}>$</span>}
+                {a.sym === 'USD-M' && (cur === 'USD'
+                  ? <span style={{ fontWeight: 900, fontSize: 12 }}>$</span>
+                  : <Banknote size={15} />)}
               </div>
               <div className="wallet-asset-body">
                 <div className="card-label">{a.name}</div>
                 <div className="card-value" style={{ color: a.accentColor }}>{fmtNum(a.val)} <span className="unit">{a.sym}</span></div>
                 <div className="card-sub">
-                  {a.usd !== null ? (disp(a.usd) !== null ? `~ ${fmtMoney(disp(a.usd)!, cur)}` : '...') : 'no market price'}
+                  {a.fiat !== null ? (() => { const dv = toDisplay(a.fiat, a.fiatFrom); return dv !== null ? `~ ${fmtMoney(dv, cur)}` : '…'; })() : 'no market price'}
                 </div>
                 {a.note && <div className="card-sub" style={{ color: 'var(--txt-3)', marginTop: 2 }}>{a.note}</div>}
               </div>

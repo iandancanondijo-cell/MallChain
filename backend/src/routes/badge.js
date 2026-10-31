@@ -25,6 +25,7 @@ const { config } = require('../config');
 const { createBlockchainBreaker } = require('../utils/circuitBreaker');
 const { issueBadgeFromMnemonic } = require('../services/badgeTxBuilder');
 const { notifyUser } = require('../services/notify');
+const { describeFailure } = require('../services/mpesaCallbackService');
 const logger = require('../utils/logger');
 
 const {
@@ -32,6 +33,7 @@ const {
   consumerKey: SAFARICOM_KEY,
   consumerSecret: SAFARICOM_SECRET,
   businessShortCode: BUSINESS_SHORT_CODE,
+  tillNumber: MERCHANT_TILL,
   passkey: PASSKEY,
   badgeCallbackUrl: CALLBACK_URL,
 } = config.payment.safaricom;
@@ -68,10 +70,10 @@ function buildStkBody(purchase, phone) {
     BusinessShortCode: BUSINESS_SHORT_CODE,
     Password: password,
     Timestamp: timestamp,
-    TransactionType: 'CustomerPayBillOnline',
+    TransactionType: 'CustomerBuyGoodsOnline',
     Amount: purchase.fiatAmount,
     PartyA: phone,
-    PartyB: BUSINESS_SHORT_CODE,
+    PartyB: MERCHANT_TILL,
     PhoneNumber: phone,
     CallBackURL: CALLBACK_URL,
     AccountReference: purchase.quoteId,
@@ -101,7 +103,7 @@ async function initiateMpesaRequest(purchase, phone) {
 
   const stkBody = buildStkBody(purchase, phone);
   // Never log the full MSISDN — logs are shipped to aggregators and phone is PII.
-  console.log('[BADGE STK] Sending to Safaricom:', { phone: `•••${String(phone).slice(-4)}`, businessCode: stkBody.BusinessShortCode });
+  logger.info('badge', '[BADGE STK] Sending to Safaricom', { phoneLast4: String(phone).slice(-4), businessCode: stkBody.BusinessShortCode });
   const stkRes = await axios.post(
     `${SAFARICOM_API.replace(/\/$/, '')}/mpesa/stkpush/v1/processrequest`,
     stkBody,
@@ -109,8 +111,24 @@ async function initiateMpesaRequest(purchase, phone) {
   );
 
   const resp = stkRes.data || {};
+  // Daraja returns HTTP 200 even when it refuses to deliver the push
+  // (ResponseCode '1' + an errorCode). Only '0' with a CheckoutRequestID means
+  // a prompt actually reached the handset; anything else must not be recorded
+  // as initiated, or the modal polls a quote that can never be paid.
+  const responseCode = String(resp.ResponseCode ?? resp.responseCode ?? '');
   const checkoutId = resp.CheckoutRequestID || resp.checkoutRequestID || '';
-  const paymentId = checkoutId || `BADGE${Date.now()}${crypto.randomBytes(4).toString('hex')}`;
+  if (responseCode !== '0' || !checkoutId) {
+    const message = describeFailure(resp.ErrorMessage || resp.ResultDesc || '');
+    purchase.reason = message;
+    await purchase.save();
+    const err = new Error(message);
+    err.status = 400;
+    err.expose = true;
+    err.darajaCode = responseCode || undefined;
+    throw err;
+  }
+
+  const paymentId = checkoutId;
 
   addPaymentIdToPurchase(purchase, paymentId);
   purchase.status = 'payment_initiated';
@@ -125,12 +143,13 @@ function getMpesaCallbackData(data) {
   return {
     paymentId: callback.CheckoutRequestID || callback.RequestID || '',
     resultCode: typeof callback.ResultCode !== 'undefined' ? callback.ResultCode : 1,
+    resultDesc: callback.ResultDesc || '',
     callbackMetadata: callback.CallbackMetadata?.Item || [],
   };
 }
 
 async function processMpesaCallback(data) {
-  const { paymentId, resultCode, callbackMetadata } = getMpesaCallbackData(data);
+  const { paymentId, resultCode, resultDesc, callbackMetadata } = getMpesaCallbackData(data);
   if (!paymentId) return { ResultCode: 1 };
 
   const purchase = await BadgePurchase.findOne({ $or: [{ paymentId }, { paymentIds: paymentId }] });
@@ -144,7 +163,7 @@ async function processMpesaCallback(data) {
     purchase.reason = 'Payment confirmed — awaiting admin approval for badge issuance.';
   } else {
     purchase.status = 'failed';
-    purchase.reason = 'User cancelled or payment failed';
+    purchase.reason = describeFailure(resultDesc);
   }
 
   await purchase.save();
@@ -187,22 +206,17 @@ router.post('/reserve', validate(schemas.badgeReserve), async (req, res) => {
 
 router.post('/mpesa', validate(schemas.badgeMpesaInitiate), async (req, res) => {
   try {
-    console.log('[BADGE MPESA] Starting request with body:', req.validatedBody);
     const { quoteId, phone } = req.validatedBody;
     const purchase = await BadgePurchase.findOne({ quoteId });
     if (!purchase) {
-      console.log('[BADGE MPESA] Purchase not found for quoteId:', quoteId);
       return res.status(404).json({ error: 'Quote not found' });
     }
 
-    console.log('[BADGE MPESA] Found purchase, calling initiateMpesaRequest');
     const response = await initiateMpesaRequest(purchase, phone);
-    console.log('[BADGE MPESA] Success response:', response);
     return res.json({ ...response, quoteId: purchase.quoteId, amountKes: purchase.fiatAmount });
   } catch (e) {
     const status = e.response?.status || e.status || 500;
     const message = e.response?.data?.errorMessage || e.response?.data?.message || e.message || 'unknown error';
-    console.error('[BADGE MPESA] Error:', { status, message, error: e.message });
     logger.error('badge', { route: req.originalUrl, error: message, status, response: e.response?.data });
     res.status(status).json({ error: message || (status === 400 ? 'invalid request' : 'internal error') });
   }

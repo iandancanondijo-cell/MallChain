@@ -64,6 +64,9 @@ router.post('/send', requireAuth(), asyncHandler(async (req, res) => {
       to,
       amount,
       denom,
+      // The worker's notifications resolve the sender from tx.userId;
+      // omitting it here made every emit on this path a silent no-op.
+      userId: req.user?._id || req.user?.id,
       status: 'queued'
     })
 

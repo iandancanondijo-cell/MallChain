@@ -2,9 +2,12 @@
 // 1. The conversion rate bug — it used to fetch the live MLCNS price and
 //    then ignore it, hardcoding 1 MLPTS = 1 MLCNS regardless of the
 //    established baseline (1 MLPTS = KSh 2, 1 MLCNS ~= KSh 0.60-0.62).
-// 2. Newly-minted MLCNS from a conversion must feed the same MLCN/KES
-//    liquidity pool a fiat buy does, since Mallpoints conversion is the
-//    other permanent MLCNS-acquisition path (see buyGateService.js).
+// 2. Liquidity bookkeeping — the pool is the credited-purchase ledger (see
+//    liquidityController.fetchLedgerPoolReserves), so a conversion must
+//    settle its liquidity bookkeeping without attempting the impossible
+//    operator-signed MsgAddLiquidity (unfunded operator account; MLCNS is
+//    an internal-ledger token the bank-coin dex can't hold) that used to
+//    dead-letter every conversion into the convert-liquidity DLQ.
 // 3. The route requires an ADR-036 wallet signature proving control of
 //    `address` (see mallwallet/security/verifyAdr036.js) — without it,
 //    anyone who knew an address with a badge + balance could force a real
@@ -26,8 +29,31 @@
 const request = require('supertest');
 const express = require('express');
 
+// The /convert handler debits balances inside a real Mongo transaction
+// (mongoose.startSession → withTransaction). With no mongoose connection in
+// the test process, commitTransaction buffers until timeout — fake the
+// session layer to just run the transaction body. Everything else stays real.
+jest.mock('mongoose', () => {
+  const actual = jest.requireActual('mongoose');
+  return {
+    ...actual,
+    startSession: jest.fn(() => ({
+      withTransaction: jest.fn(async (fn) => { await fn(); }),
+      endSession: jest.fn().mockResolvedValue(undefined),
+    })),
+  };
+});
+
 jest.mock('../models/MallPointAccount', () => ({
   findOne: jest.fn(),
+  findOneAndUpdate: jest.fn(),
+}));
+// The /convert handler debits User.mlpts_balance inside the same Mongo
+// transaction as the MallPointAccount debit — the real model would buffer
+// against a never-connected mongoose instance and time the test out.
+jest.mock('../models/user', () => ({
+  findOne: jest.fn(() => ({ session: jest.fn(() => Promise.resolve(null)) })),
+  updateOne: jest.fn().mockResolvedValue({}),
 }));
 jest.mock('../services/mallpointsService', () => ({
   getChainUserPoints: jest.fn(),
@@ -52,9 +78,6 @@ jest.mock('../services/mallcoinService', () => ({
   getMlptsPerMlcnsScale: jest.fn().mockReturnValue(1000000),
   mlptsPerMlcnsToNumber: jest.fn().mockImplementation((s) => Number(s) / 1000000),
 }));
-jest.mock('../controllers/liquidityController', () => ({
-  addLiquidityToPool: jest.fn(),
-}));
 jest.mock('../services/liquidityActivityService', () => ({
   recordLiquidityActivity: jest.fn().mockResolvedValue(undefined),
 }));
@@ -67,7 +90,6 @@ const { buildConversionStatus } = require('../services/mallpointsService');
 const { getUserBadgeInfo } = require('../services/badgeService');
 const { creditMlcns } = require('../services/faucetService');
 const { getMarketPrice } = require('../services/mallcoinService');
-const { addLiquidityToPool } = require('../controllers/liquidityController');
 const { recordLiquidityActivity } = require('../services/liquidityActivityService');
 const { verifyConvertSignature } = require('../mallwallet/security/verifyAdr036');
 const mallpointsRouter = require('../routes/mallpoints');
@@ -115,6 +137,8 @@ describe('POST /api/mallpoints/convert', () => {
   function mockAccount(balance) {
     const acc = { balance, lastConversionAt: null, save: jest.fn().mockResolvedValue(undefined) };
     MallPointAccount.findOne.mockResolvedValue(acc);
+    // The transactional debit must find a matching row or the route 400s.
+    MallPointAccount.findOneAndUpdate.mockResolvedValue({ address: 'mall1x', balance: balance - 1 });
     return acc;
   }
 
@@ -122,7 +146,6 @@ describe('POST /api/mallpoints/convert', () => {
     mockAccount(100); // 100 MLPTS
     getMarketPrice.mockResolvedValue({ midPriceKes: 0.625 }); // MLCNS price
     creditMlcns.mockResolvedValue({ txHash: '0xabc' });
-    addLiquidityToPool.mockResolvedValue({ lpTokens: 5 });
 
     const res = await request(app).post('/api/mallpoints/convert').send(validBody);
 
@@ -133,46 +156,19 @@ describe('POST /api/mallpoints/convert', () => {
     expect(creditMlcns).toHaveBeenCalledWith(address, 320);
   });
 
-  test('adds liquidity to pool 2 with the credited MLCNS and the KES value of points spent', async () => {
+  test('settles liquidity bookkeeping via the ledger instead of an on-chain add', async () => {
     mockAccount(50);
     getMarketPrice.mockResolvedValue({ midPriceKes: 0.6 });
     creditMlcns.mockResolvedValue({ txHash: '0xdef' });
-    addLiquidityToPool.mockResolvedValue({ lpTokens: 3 });
 
     const res = await request(app).post('/api/mallpoints/convert').send(validBody);
 
     expect(res.status).toBe(200);
-    // 50 MLPTS * 2 KES = 100 KES value; mlcoins = 100 / 0.6 = 166.666667
-    expect(addLiquidityToPool).toHaveBeenCalledWith({
-      poolId: 2,
-      amount0: res.body.mallcoins,
-      amount1: 100,
-      userAddress: address,
-    });
+    expect(res.body.liquidity).toEqual({ ledgerTracked: true });
     expect(recordLiquidityActivity).toHaveBeenCalledWith(
-      expect.objectContaining({ flow: 'mallpoints_convert', stage: 'liquidity_added', status: 'success' })
+      expect.objectContaining({ flow: 'mallpoints_convert', stage: 'liquidity_settled', status: 'success' })
     );
   });
-
-  test('a liquidity-add failure does not undo the already-successful MLCNS credit', async () => {
-    mockAccount(50);
-    getMarketPrice.mockResolvedValue({ midPriceKes: 0.6 });
-    creditMlcns.mockResolvedValue({ txHash: '0xdef' });
-    addLiquidityToPool.mockRejectedValue(new Error('pool unavailable'));
-
-    const res = await request(app).post('/api/mallpoints/convert').send(validBody);
-
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
-    expect(res.body.credit).toEqual({ txHash: '0xdef' });
-    expect(recordLiquidityActivity).toHaveBeenCalledWith(
-      expect.objectContaining({ flow: 'mallpoints_convert', stage: 'liquidity_add_enqueued_dlq', status: 'failed' })
-    );
-    // Everything here is mocked (no real I/O), but this test has been
-    // observed to occasionally exceed Jest's default 5000ms under heavy
-    // full-suite parallel load (many worker processes competing for CPU) —
-    // a longer explicit timeout avoids that being mistaken for a regression.
-  }, 15000);
 
   test('rejects when the conversion window is closed', async () => {
     mockAccount(50);
@@ -182,7 +178,7 @@ describe('POST /api/mallpoints/convert', () => {
 
     expect(res.status).toBe(400);
     expect(creditMlcns).not.toHaveBeenCalled();
-    expect(addLiquidityToPool).not.toHaveBeenCalled();
+    expect(recordLiquidityActivity).not.toHaveBeenCalled();
   });
 
   test('restores the points balance if the MLCNS credit itself fails', async () => {
@@ -194,7 +190,7 @@ describe('POST /api/mallpoints/convert', () => {
 
     expect(res.status).toBe(502);
     expect(acc.balance).toBe(50); // restored after being decremented
-    expect(addLiquidityToPool).not.toHaveBeenCalled();
+    expect(recordLiquidityActivity).not.toHaveBeenCalled();
   });
 
   describe('wallet-ownership signature requirement', () => {
@@ -236,7 +232,6 @@ describe('POST /api/mallpoints/convert', () => {
       mockAccount(50);
       getMarketPrice.mockResolvedValue({ midPriceKes: 0.6 });
       creditMlcns.mockResolvedValue({ txHash: '0xok' });
-      addLiquidityToPool.mockResolvedValue({ lpTokens: 1 });
 
       await request(app).post('/api/mallpoints/convert').send(validBody);
 
@@ -254,7 +249,6 @@ describe('POST /api/mallpoints/convert', () => {
       mockAccount(50);
       getMarketPrice.mockResolvedValue({ midPriceKes: 0.6 });
       creditMlcns.mockResolvedValue({ txHash: '0xok' });
-      addLiquidityToPool.mockResolvedValue({ lpTokens: 1 });
 
       const res = await request(app).post('/api/mallpoints/convert').send(validBody);
 

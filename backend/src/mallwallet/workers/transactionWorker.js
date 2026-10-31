@@ -5,7 +5,7 @@ const Tx = require('../../models/transaction')
 const register = require('../monitoring/prometheus')
 const logger = require('../../utils/logger')
 const { broadcastTransaction } = require('../../services/transactionService')
-const { emitTransactionEvent } = require('../../services/activityEvents')
+const { emitTransactionEvent, emitTransferReceived, emitTransferFailed, userIdForAddress } = require('../../services/activityEvents')
 
 const CHAIN_REST = process.env.CHAIN_REST || 'http://127.0.0.1:1317'
 const txJobCounter = register.txJobCounter
@@ -142,6 +142,21 @@ async function handleBroadcast(job) {
       }
     }
 
+    // Email the recipient's linked account too (fire-and-forget).
+    if (tx.status === 'confirmed' && tx.txHash) {
+      userIdForAddress(tx.to)
+        .then((recipientId) => {
+          if (!recipientId) return
+          return emitTransferReceived(recipientId, {
+            amount: tx.amount,
+            asset: tx.denom,
+            sender_display: tx.from,
+            reference_id: tx.txHash,
+          }).catch(() => {})
+        })
+        .catch(() => {})
+    }
+
     txJobCounter.inc({ status: 'completed' })
     return result
   } catch (error) {
@@ -186,6 +201,14 @@ worker.on('failed', async (job, err) => {
         tx.error = err?.message || 'unknown error'
         tx.updatedAt = Date.now()
         await tx.save()
+        if (finalFailure && tx.userId) {
+          // wallet.transfer_failed fields: [amount, asset, user_safe_reason]
+          emitTransferFailed(tx.userId, {
+            amount: tx.amount,
+            asset: tx.denom,
+            user_safe_reason: 'The network could not process this transfer after multiple attempts.',
+          }).catch(() => {})
+        }
       }
     }
   } catch (saveError) {

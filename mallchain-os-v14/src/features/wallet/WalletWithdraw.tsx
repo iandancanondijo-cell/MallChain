@@ -7,10 +7,9 @@ import { withdrawalAmlApi, NATIVE_EARNINGS_SOURCES, type FundsSource } from '../
 import { buildSignedTxBytes, MallcoinTxError } from '../../services/mallcoinTx';
 import { requestMnemonic } from '../../services/mnemonicAccess';
 import { Tooltip } from '../../components/Tooltip';
+import { useLivePrice } from '../../hooks/useLivePrice';
 
 type Step = 'form' | 'aml-declare' | 'confirm' | 'processing' | 'done';
-
-const FALLBACK_SELL_KES_PER_MLCNS = 0.58;
 
 const STEP_META: { label: string; icon: typeof Building2 }[] = [
   { label: 'Amount', icon: Coins },
@@ -58,7 +57,11 @@ export default function WalletWithdraw() {
   const [declareBusy, setDeclareBusy] = useState(false);
   const isNativeEarnings = NATIVE_EARNINGS_SOURCES.includes(fundsSource);
 
-  const sellRateKes = config?.rates?.sellPriceKes || FALLBACK_SELL_KES_PER_MLCNS;
+  const { sellKes } = useLivePrice();
+  // Selling/cash-out is disabled for now (buy-only phase); this rate is display
+  // only and now comes from the same live source as the rest of the platform
+  // rather than a hardcoded 0.58 that could disagree with the real price.
+  const sellRateKes = config?.rates?.sellPriceKes ?? sellKes ?? 0;
   const payoutConfigured = config?.configured?.b2cPayout ?? false;
 
   useEffect(() => {

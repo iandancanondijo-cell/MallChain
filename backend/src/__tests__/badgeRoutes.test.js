@@ -17,9 +17,7 @@ jest.mock('axios');
 
 const BadgePurchase = require('../models/BadgePurchase');
 const BadgeIssuance = require('../models/BadgeIssuance');
-const User = require('../models/user');
 const { issueBadgeFromMnemonic } = require('../services/badgeTxBuilder');
-const { notifyUser } = require('../services/notify');
 const axios = require('axios');
 const badgeRoutes = require('../routes/badge');
 
@@ -79,7 +77,7 @@ describe('POST /api/badge/mpesa/callback', () => {
   let app;
   beforeEach(() => { jest.clearAllMocks(); app = buildApp(); delete process.env.PAYMENT_WEBHOOK_SECRET; });
 
-  test('confirms the purchase on a successful callback', async () => {
+  test('confirms the payment but waits for admin approval before issuing', async () => {
     const purchase = { paymentId: 'CR1', save: jest.fn().mockResolvedValue(undefined), status: 'payment_initiated' };
     BadgePurchase.findOne.mockResolvedValue(purchase);
 
@@ -95,8 +93,12 @@ describe('POST /api/badge/mpesa/callback', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.ResultCode).toBe(0);
-    expect(purchase.status).toBe('confirmed');
+    // Payment alone never mints a badge: a human has to approve it at
+    // POST /api/admin/badges/approve.
+    expect(purchase.status).toBe('awaiting_admin');
     expect(purchase.mpesaRef).toBe('REF123');
+    expect(issueBadgeFromMnemonic).not.toHaveBeenCalled();
+    expect(BadgeIssuance.create).not.toHaveBeenCalled();
   });
 
   test('marks the purchase failed on a non-zero result code', async () => {
@@ -111,6 +113,29 @@ describe('POST /api/badge/mpesa/callback', () => {
     expect(purchase.status).toBe('failed');
   });
 
+  test('a 2029 undelivered prompt is reported as our line failing, not the buyer cancelling', async () => {
+    // Regression: 2029 arrives ~2s after the push and means Safaricom never
+    // routed it to the handset. It used to read "User cancelled or payment
+    // failed", which told the buyer they had done something wrong.
+    const purchase = { paymentId: 'CR5', save: jest.fn().mockResolvedValue(undefined), status: 'payment_initiated' };
+    BadgePurchase.findOne.mockResolvedValue(purchase);
+
+    const res = await request(app).post('/api/badge/mpesa/callback').send({
+      Body: {
+        stkCallback: {
+          CheckoutRequestID: 'CR5',
+          ResultCode: 2029,
+          ResultDesc: 'Failed due to an unresolved reason type.',
+        },
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(purchase.status).toBe('failed');
+    expect(purchase.reason).toMatch(/payment line was not reachable/i);
+    expect(purchase.reason).not.toMatch(/cancel/i);
+  });
+
   test('rejects a request with the wrong webhook token when PAYMENT_WEBHOOK_SECRET is set', async () => {
     process.env.PAYMENT_WEBHOOK_SECRET = 'realsecret';
     const res = await request(app)
@@ -122,35 +147,58 @@ describe('POST /api/badge/mpesa/callback', () => {
   });
 });
 
+// /issue used to build and broadcast the badge transaction itself, which
+// let anyone who knew a quoteId mint a badge the moment Daraja confirmed
+// payment. Task #407 moved issuance behind a human: POST
+// /api/admin/badges/approve performs the on-chain step, and this route is
+// now a read-only acknowledgement for the buyer's modal.
 describe('POST /api/badge/issue', () => {
   let app;
   beforeEach(() => {
     jest.clearAllMocks();
     app = buildApp();
-    process.env.OPERATOR_MNEMONIC = 'operator test mnemonic';
   });
-  afterEach(() => { delete process.env.OPERATOR_MNEMONIC; });
 
-  test('rejects when the purchase has not been confirmed yet', async () => {
+  test('reports still-processing without issuing when payment has not landed', async () => {
     BadgePurchase.findOne.mockResolvedValue({ quoteId: 'q1', walletAddress: VALID_ADDRESS, status: 'payment_initiated' });
 
     const res = await request(app).post('/api/badge/issue').send({ quoteId: 'q1' });
 
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe('payment_not_confirmed');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, success: false, message: 'Payment is still being processed', status: 'payment_initiated' });
+    expect(issueBadgeFromMnemonic).not.toHaveBeenCalled();
+    expect(BadgeIssuance.create).not.toHaveBeenCalled();
+  });
+
+  test('a paid quote sits at awaiting_admin and is never issued from this route', async () => {
+    BadgePurchase.findOne.mockResolvedValue({ quoteId: 'q1', walletAddress: VALID_ADDRESS, status: 'awaiting_admin' });
+
+    const res = await request(app).post('/api/badge/issue').send({ quoteId: 'q1' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(false);
+    expect(res.body.status).toBe('awaiting_admin');
+    expect(issueBadgeFromMnemonic).not.toHaveBeenCalled();
+    expect(BadgeIssuance.create).not.toHaveBeenCalled();
+    expect(BadgePurchase.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('a rejected quote surfaces the rejection reason instead of issuing', async () => {
+    BadgePurchase.findOne.mockResolvedValue({
+      quoteId: 'q1',
+      walletAddress: VALID_ADDRESS,
+      status: 'rejected',
+      reason: 'Duplicate purchase',
+    });
+
+    const res = await request(app).post('/api/badge/issue').send({ quoteId: 'q1' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, success: false, message: 'Duplicate purchase', status: 'rejected' });
     expect(issueBadgeFromMnemonic).not.toHaveBeenCalled();
   });
 
-  test('rejects a wallet address mismatch', async () => {
-    BadgePurchase.findOne.mockResolvedValue({ quoteId: 'q1', walletAddress: VALID_ADDRESS, status: 'confirmed' });
-
-    const res = await request(app).post('/api/badge/issue').send({ quoteId: 'q1', walletAddress: 'mall1dqd2t5avk0hfu5mmaq2dgmgydvlv8qhxffymaw' });
-
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe('wallet_address_mismatch');
-  });
-
-  test('is idempotent — a second call for an already-issued purchase returns the same result without re-issuing', async () => {
+  test('is idempotent — an already-issued purchase returns its txHash without re-issuing', async () => {
     BadgePurchase.findOne.mockResolvedValue({ quoteId: 'q1', walletAddress: VALID_ADDRESS, status: 'issued', badgeTxHash: 'HASH1' });
 
     const res = await request(app).post('/api/badge/issue').send({ quoteId: 'q1' });
@@ -160,65 +208,12 @@ describe('POST /api/badge/issue', () => {
     expect(issueBadgeFromMnemonic).not.toHaveBeenCalled();
   });
 
-  test('atomically transitions confirmed -> processing before issuing; a concurrent caller gets 409', async () => {
-    BadgePurchase.findOne.mockResolvedValue({ quoteId: 'q1', walletAddress: VALID_ADDRESS, status: 'confirmed' });
-    BadgePurchase.findOneAndUpdate.mockResolvedValue(null); // another request already claimed it
+  test('404s for an unknown quote', async () => {
+    BadgePurchase.findOne.mockResolvedValue(null);
 
-    const res = await request(app).post('/api/badge/issue').send({ quoteId: 'q1' });
+    const res = await request(app).post('/api/badge/issue').send({ quoteId: 'nope' });
 
-    expect(res.status).toBe(409);
-    expect(BadgePurchase.findOneAndUpdate).toHaveBeenCalledWith(
-      { quoteId: 'q1', status: 'confirmed' },
-      { $set: { status: 'processing' } },
-      { new: true }
-    );
-  });
-
-  test('issues the badge, records the audit trail, and notifies the linked user', async () => {
-    BadgePurchase.findOne.mockResolvedValue({ quoteId: 'q1', walletAddress: VALID_ADDRESS, status: 'confirmed' });
-    const processingDoc = { quoteId: 'q1', walletAddress: VALID_ADDRESS, status: 'processing', save: jest.fn().mockResolvedValue(undefined) };
-    BadgePurchase.findOneAndUpdate.mockResolvedValue(processingDoc);
-    issueBadgeFromMnemonic.mockResolvedValue({ txHash: 'HASH2' });
-    User.findOne.mockReturnValue({ lean: jest.fn().mockResolvedValue({ _id: 'user1', email: 'a@b.com' }) });
-
-    const res = await request(app).post('/api/badge/issue').send({ quoteId: 'q1' });
-
-    expect(res.status).toBe(200);
-    expect(res.body.txHash).toBe('HASH2');
-    expect(processingDoc.status).toBe('issued');
-    expect(BadgeIssuance.create).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user1', walletAddress: VALID_ADDRESS, method: 'purchase', txHash: 'HASH2' })
-    );
-    expect(notifyUser).toHaveBeenCalledWith(
-      expect.objectContaining({ _id: 'user1' }),
-      expect.objectContaining({ title: expect.stringContaining('purchased') })
-    );
-  });
-
-  test('rolls back to confirmed (not stuck at processing) if on-chain issuance fails, so a retry is possible', async () => {
-    BadgePurchase.findOne.mockResolvedValue({ quoteId: 'q1', walletAddress: VALID_ADDRESS, status: 'confirmed' });
-    const processingDoc = { quoteId: 'q1', walletAddress: VALID_ADDRESS, status: 'processing', save: jest.fn().mockResolvedValue(undefined) };
-    BadgePurchase.findOneAndUpdate.mockResolvedValue(processingDoc);
-    issueBadgeFromMnemonic.mockRejectedValue(new Error('chain unreachable'));
-
-    const res = await request(app).post('/api/badge/issue').send({ quoteId: 'q1' });
-
-    expect(res.status).toBe(500);
-    expect(processingDoc.status).toBe('confirmed');
-    expect(BadgeIssuance.create).not.toHaveBeenCalled();
-  });
-
-  test('returns 503 and rolls back to confirmed when OPERATOR_MNEMONIC is missing', async () => {
-    delete process.env.OPERATOR_MNEMONIC;
-    BadgePurchase.findOne.mockResolvedValue({ quoteId: 'q1', walletAddress: VALID_ADDRESS, status: 'confirmed' });
-    const processingDoc = { quoteId: 'q1', walletAddress: VALID_ADDRESS, status: 'processing', save: jest.fn().mockResolvedValue(undefined) };
-    BadgePurchase.findOneAndUpdate.mockResolvedValue(processingDoc);
-
-    const res = await request(app).post('/api/badge/issue').send({ quoteId: 'q1' });
-
-    expect(res.status).toBe(503);
-    expect(processingDoc.status).toBe('confirmed');
-    expect(issueBadgeFromMnemonic).not.toHaveBeenCalled();
+    expect(res.status).toBe(404);
   });
 });
 

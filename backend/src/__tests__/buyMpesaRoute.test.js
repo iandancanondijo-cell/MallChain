@@ -10,7 +10,15 @@ const express = require('express');
 const axios = require('axios');
 
 jest.mock('axios');
-jest.mock('../models/MallcoinPurchase', () => ({ create: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
+// paymentSummary() (used by both /reserve and /mpesa responses) reads the
+// phone back through this static, so the mock has to provide it or every
+// successful quote 500s on the way out.
+jest.mock('../models/MallcoinPurchase', () => ({
+  create: jest.fn(),
+  findOne: jest.fn(),
+  findOneAndUpdate: jest.fn(),
+  decryptPhone: jest.fn(() => ({ phone: '254712345678' })),
+}));
 jest.mock('../models/MallcoinSale', () => ({ create: jest.fn() }));
 jest.mock('../models/B2CPayout', () => ({ create: jest.fn() }));
 jest.mock('../models/WithdrawalRequest', () => ({ create: jest.fn() }));
@@ -43,10 +51,22 @@ jest.mock('../services/sellGateService', () => ({
   checkSellLiquidity: jest.fn(),
   SELL_POOL_ID: 2,
 }));
+// /reserve consults the pool-cap service before quoting. It resolves chain
+// pool values through modules this suite doesn't load, so stub it the same
+// way the buy/sell gates are stubbed — the cap itself has its own tests.
+jest.mock('../services/liquidityPoolCapService', () => ({
+  isPoolCapReached: jest.fn().mockResolvedValue(false),
+  getPoolCapStatus: jest.fn().mockResolvedValue({ reached: false, poolValueKes: 0, capKes: 500000 }),
+  invalidateCache: jest.fn(),
+}));
 jest.mock('../services/mallcoinService', () => ({
   getMarketPrice: jest.fn().mockResolvedValue({ buyPriceKes: 1, sellPriceKes: 1 }),
 }));
+// Only the callback processor is stubbed (this suite asserts on DLQ enqueue
+// behaviour); describeFailure is the real translator, so a route change that
+// starts calling it fails loudly here instead of 500ing in production.
 jest.mock('../services/mpesaCallbackService', () => ({
+  ...jest.requireActual('../services/mpesaCallbackService'),
   processMpesaCallback: jest.fn(),
 }));
 jest.mock('../mallwallet/queue/paymentCallbackQueue', () => ({
@@ -122,7 +142,9 @@ describe('POST /api/buy/mpesa — STK push double-submit guard', () => {
     };
     MallcoinPurchase.findOne.mockResolvedValue(purchase);
     axios.get.mockResolvedValue({ data: { access_token: 'test-token' } });
-    axios.post.mockResolvedValue({ data: { CheckoutRequestID: 'chk-1' } });
+    // Daraja's synchronous acceptance shape: ResponseCode '0' plus a
+    // CheckoutRequestID. Anything else means no prompt was ever delivered.
+    axios.post.mockResolvedValue({ data: { ResponseCode: '0', ResponseDescription: 'Success. The service request has been submitted successfully', CheckoutRequestID: 'chk-1' } });
 
     const res = await request(buildApp())
       .post('/api/buy/mpesa')
@@ -133,6 +155,37 @@ describe('POST /api/buy/mpesa — STK push double-submit guard', () => {
     expect(axios.post).toHaveBeenCalledTimes(1);
     expect(purchase.status).toBe('payment_initiated');
     expect(res.body.duplicate).toBeUndefined();
+  });
+
+  test('HTTP 200 with ResponseCode "1" is a refusal, not an initiated quote', async () => {
+    // Safaricom answers 200 even when it will not deliver the push. Marking
+    // that `payment_initiated` left the UI polling a quote forever and
+    // reporting a cancellation the buyer never made.
+    const purchase = {
+      quoteId: 'quote-1b',
+      status: 'pending',
+      fiatAmount: 100,
+      currency: 'KES',
+      save: jest.fn().mockResolvedValue(undefined),
+    };
+    MallcoinPurchase.findOne.mockResolvedValue(purchase);
+    axios.get.mockResolvedValue({ data: { access_token: 'test-token' } });
+    axios.post.mockResolvedValue({
+      data: { ResponseCode: '1', ErrorMessage: 'Invalid Access Laptop MSISDN', errorCode: '40400' },
+    });
+
+    const res = await request(buildApp())
+      .post('/api/buy/mpesa')
+      .set('Idempotency-Key', 'test-key-1b')
+      .send({ quoteId: 'quote-1b', phone: VALID_PHONE, amount: 100 });
+
+    expect(res.status).toBe(400);
+    // The raw Daraja text is kept as the trailing attribution, but the buyer
+    // reads a merchant-side explanation first — this refusal was never theirs.
+    expect(res.body.error).toMatch(/payment line was not reachable/i);
+    expect(res.body.error).toContain('Invalid Access Laptop MSISDN');
+    expect(purchase.status).toBe('pending');
+    expect(purchase.reason).toMatch(/payment line was not reachable/i);
   });
 
   test('does NOT fire a second STK push for a quote already past pending (double-submit/retry)', async () => {

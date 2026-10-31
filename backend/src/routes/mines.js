@@ -589,8 +589,26 @@ router.post('/submissions/:id/approve', requireAdmin, idempotency({ required: tr
       });
     }
     const minerId = sub.miner_id.toString();
-    activityEvents.emitProofApproved(minerId, { submissionId: sub._id, rewardAmount: finalReward }).catch(() => {});
-    activityEvents.emitMlptsEarned(minerId, { amount: finalReward, source: 'mining_approval', submissionId: sub._id }).catch(() => {});
+    // Template-required field names (campaign_name/reward_amount/
+    // submission_reference, amount/earning_activity/reward_status/
+    // activity_reference) — the previous payloads used camelCase keys the
+    // engine's validateRequired rejected, so these emails never sent.
+    let campaignName = 'Mining task';
+    if (sub.campaign_id) {
+      const camp = await Campaign.findById(sub.campaign_id).select('title').lean().catch(() => null);
+      if (camp?.title) campaignName = camp.title;
+    }
+    activityEvents.emitProofApproved(minerId, {
+      campaign_name: campaignName,
+      reward_amount: finalReward,
+      submission_reference: String(sub._id),
+    }).catch(() => {});
+    activityEvents.emitMlptsEarned(minerId, {
+      amount: finalReward,
+      earning_activity: 'Mining submission approved',
+      reward_status: 'approved',
+      activity_reference: String(sub._id),
+    }).catch(() => {});
     res.json(ok(updated));
   } catch (e) { res.status(500).json(fail(e)); }
 });

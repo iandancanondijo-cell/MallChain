@@ -10,6 +10,7 @@
  */
 
 const redis = require('ioredis');
+const redisFactory = require('../mallwallet/queue/redis');
 const logger = require('../utils/logger');
 const promClient = require('prom-client');
 
@@ -139,11 +140,18 @@ class EventPersistence {
     this.isProcessing = true;
     logger.info('events', 'Starting event stream processing');
 
+    // The BLOCK-ing XREADGROUP below parks its connection for up to 5s per
+    // cycle, and Redis executes each connection's commands strictly in
+    // order — running it on the shared app client stalled every cache
+    // get/set (and therefore every mallcoinService price fetch) behind
+    // those blocking reads. Blocking commands need a dedicated connection.
+    this.consumerRedis = redisFactory();
+
     while (this.isProcessing) {
       try {
         // Read from consumer group
         // Use > to only get new messages, or a specific ID to replay
-        const messages = await this.redis.xreadgroup(
+        const messages = await this.consumerRedis.xreadgroup(
           'GROUP',
           CONSUMER_GROUP,
           'consumer-' + process.pid,
@@ -171,6 +179,11 @@ class EventPersistence {
         // Wait before retrying
         await new Promise(resolve => setTimeout(resolve, 5000));
       }
+    }
+
+    if (this.consumerRedis) {
+      this.consumerRedis.disconnect();
+      this.consumerRedis = null;
     }
   }
 

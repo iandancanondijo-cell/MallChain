@@ -3,6 +3,8 @@ const router = express.Router()
 const logger = require('../utils/logger')
 const axios = require('axios')
 const { getMarketPrice } = require('../services/mallcoinService')
+const { getDynamicConversionRate } = require('../services/conversionRateOracle')
+const { getMallpointPriceKes } = require('../services/economyConstants')
 
 const CHAIN_REST = process.env.CHAIN_REST || 'http://localhost:1317'
 const TOTAL_SUPPLY = 670000000
@@ -107,6 +109,21 @@ router.get('/state', async (req, res) => {
 
     const marketPrice = await getMarketPrice()
     const mlcnsPriceKes = Number(marketPrice?.buyPriceKes || 0.62)
+    const pointPriceKes = getMallpointPriceKes()
+
+    // Live MLPTS→MLCNS conversion from the fiat-pegged oracle (tracks the on-chain
+    // price each block, clamped to on-chain bounds). Replaces the old hardcoded
+    // "1 MP = 3.2 MLCNS" that silently drifted out of sync with the real rate.
+    let conversion = null
+    try {
+      const oracleRate = await getDynamicConversionRate()
+      conversion = {
+        valueRatio: oracleRate.proposedRate / oracleRate.rateScale,
+        mlcnsMidPriceKes: oracleRate.mlcnsMidPriceKes,
+        source: oracleRate.source,
+        clamped: oracleRate.clamped,
+      }
+    } catch (e) { /* oracle unavailable — response signals live:false */ }
 
     const monthlyEmission = getMonthlyEmission(currentMonth)
     const dailyEmission = monthlyEmission / 30
@@ -139,8 +156,8 @@ router.get('/state', async (req, res) => {
             mlcns: mlcnsBalance,
             mallpoints: mallpoints,
             mlcnsPriceKes,
-            totalKesValue: mlcnsBalance * mlcnsPriceKes + mallpoints * 2,
-            valueRatio: 3.2
+            totalKesValue: mlcnsBalance * mlcnsPriceKes + mallpoints * pointPriceKes,
+            valueRatio: conversion ? conversion.valueRatio : (pointPriceKes / mlcnsPriceKes)
           }
         }
       } catch (e) { /* chain query unavailable — fallback used */ }
@@ -152,7 +169,7 @@ router.get('/state', async (req, res) => {
       success: true,
       mlcnsPriceKes,
       market: marketPrice,
-      pointPriceKes: 2,
+      pointPriceKes,
       emission: {
         currentMonth,
         phase: getEmissionPhase(currentMonth),
@@ -179,8 +196,11 @@ router.get('/state', async (req, res) => {
       conversion: {
         badgeHolders: '15th of each month',
         nonBadge: 'December 27th only',
-        rate: '1 MP = 3.2 MLCNS',
-        valueRatio: 3.2
+        rate: conversion ? `1 MP ≈ ${conversion.valueRatio.toFixed(2)} MLCNS` : '1 MP = 3.2 MLCNS',
+        valueRatio: conversion ? conversion.valueRatio : 3.2,
+        live: !!conversion,
+        source: conversion ? conversion.source : 'fallback',
+        clamped: conversion ? conversion.clamped : false,
       },
       wallets: walletBalances,
       user: userBalances,

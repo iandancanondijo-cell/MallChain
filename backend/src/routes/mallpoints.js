@@ -10,19 +10,14 @@ const { creditMlcns } = require('../services/faucetService')
 const {
   getMlptsPerMlcnsScale,
 } = require('../services/mallcoinService')
+const { getMallpointPriceKes } = require('../services/economyConstants')
 const { getDynamicConversionRate } = require('../services/conversionRateOracle')
 const { blindIndex } = require('../utils/fieldEncryption')
-const { addLiquidityToPool } = require('../controllers/liquidityController')
 const { recordLiquidityActivity } = require('../services/liquidityActivityService')
+const { emitMlptsConversionCompleted } = require('../services/activityEvents')
 const { verifyConvertSignature } = require('../mallwallet/security/verifyAdr036')
 const { config } = require('../config')
 const logger = require('../utils/logger')
-// C2: Dead-letter outbox for liquidity-add failures after a successful
-// creditMlcns. Because the credit step already moved real value (treasury
-// minted coins into the user's wallet), we CANNOT roll points back —
-// instead the liquidity failure is retried via BullMQ 3× exponential, then
-// persisted to Mongo convert_dead_letters for operator remediation.
-const { enqueueConvertLiquidityFailure } = require('../mallwallet/queue/convertLiquidityQueue')
 
 // How long a signed convert request stays valid. Short enough that a
 // leaked/logged signature is useless shortly after, long enough to survive
@@ -30,10 +25,7 @@ const { enqueueConvertLiquidityFailure } = require('../mallwallet/queue/convertL
 const CONVERT_SIGNATURE_MAX_AGE_MS = 10 * 60 * 1000
 const ADR036_CONSUMED_TTL_SECONDS = 60 * 60
 
-const pointPrice = () =>
-  (typeof process.env.MALLPOINT_PRICE_KES !== 'undefined' && !isNaN(Number(process.env.MALLPOINT_PRICE_KES)))
-    ? Number(process.env.MALLPOINT_PRICE_KES)
-    : 2
+const pointPrice = () => getMallpointPriceKes()
 
 // GET /api/mallpoints/:address — chain + database Mallpoints
 router.get('/:address', async (req, res) => {
@@ -216,6 +208,7 @@ router.post('/convert', async (req, res) => {
     // Both updates must succeed atomically to prevent balance divergence.
     const session = await mongoose.startSession()
     let updated
+    let convertedUserId = null
     try {
       await session.withTransaction(async () => {
         // Debit MallPointAccount
@@ -231,6 +224,7 @@ router.post('/convert', async (req, res) => {
         // Debit User.mlpts_balance
         const user = await User.findOne({ walletAddress_blind: blindIndex(address) }).session(session)
         if (user) {
+          convertedUserId = user._id.toString()
           await User.updateOne(
             { _id: user._id, mlpts_balance: { $gte: pointsToConvert } },
             { $inc: { mlpts_balance: -pointsToConvert } },
@@ -250,83 +244,33 @@ router.post('/convert', async (req, res) => {
     try {
       const credit = await creditMlcns(address, mlcoins)
 
-      // All Mallpoints mined on the platform eventually convert to MLCNS —
-      // once fiat buying permanently locks (see buyGateService.js), this
-      // becomes the primary way new MLCNS enters circulation, so it needs
-      // to feed the same MLCN/KES pool fiat buys do (mirrors buy.js's
-      // applyLiquidityAfterCredit).
-      //
-      // C2 atomicity: MLCNS credit is an atomic operator-signed mint that
-      // can't be undone without a treasury double-spend (a hard breach
-      // class we already protect via the rollback guard below — L316-330
-      // restores points only if credit FAILS; if it succeeded, points
-      // stay consumed). Liquidity-add however is non-atomic REST → DB →
-      // pool-accounting multi-hop, so partial failures are common.
-      // Strategy here:
-      //   1. If addLiquidityToPool throws → enqueueConvertLiquidityFailure
-      //      to BullMQ convert-liquidity-dlq (3× exponential backoff)
-      //   2. Worker retries; on 3rd failure → write Mongo
-      //      convert_dead_letters for operator remediation
-      //   3. User-visible HTTP response still reports success with a
-      //      liquidity: {queued: true, reason} field so the UI can flag
-      //      "convert settled, liquidity will follow".
-      let liquidityResult = null
-      try {
-        liquidityResult = await addLiquidityToPool({
-          poolId: 2,
-          amount0: mlcoins,
-          amount1: kesValue,
-          userAddress: address,
-        })
-        await recordLiquidityActivity({
-          flow: 'mallpoints_convert',
-          stage: 'liquidity_added',
-          status: 'success',
-          poolId: 2,
-          walletAddress: address,
-          amountMlcns: mlcoins,
-          fiatAmount: kesValue,
-          lpTokens: liquidityResult?.lpTokens,
-          note: 'Liquidity added to pool after a Mallpoints->MLCNS conversion.',
-        })
-      } catch (liqErr) {
-        const firstFailedAt = new Date().toISOString()
-        logger.warn('mallpoints', 'conversion liquidity add failed — enqueued to convert-liquidity-dlq', {
-          error: liqErr.message,
-          address,
-          mlcoins,
-          kesValue,
-        })
-        await recordLiquidityActivity({
-          flow: 'mallpoints_convert',
-          stage: 'liquidity_add_enqueued_dlq',
-          status: 'failed',
-          poolId: 2,
-          walletAddress: address,
-          amountMlcns: mlcoins,
-          fiatAmount: kesValue,
-          reason: liqErr.message,
+      // The MLCN/KES pool is the credited-purchase ledger (see
+      // liquidityController.fetchLedgerPoolReserves) — and a conversion mints
+      // MLCNS against points that carry no new fiat, so it correctly does not
+      // move the pool reserves at all. The previous operator-signed
+      // MsgAddLiquidity could never succeed (unfunded operator account;
+      // MLCNS is an internal x/mlcoin ledger token the bank-coin dex can't
+      // hold) and only ever fed the convert-liquidity DLQ.
+      await recordLiquidityActivity({
+        flow: 'mallpoints_convert',
+        stage: 'liquidity_settled',
+        status: 'success',
+        poolId: 2,
+        walletAddress: address,
+        amountMlcns: mlcoins,
+        fiatAmount: kesValue,
+        note: 'Conversion settled; no pool-reserve change since no new fiat entered (ledger-based pool).',
+      }).catch(() => {})
+      const liquidityResult = { ledgerTracked: true }
+
+      // Email the holder about the completed conversion (fire-and-forget).
+      if (convertedUserId) {
+        emitMlptsConversionCompleted(convertedUserId, {
+          input_amount: pointsToConvert,
+          output_amount: mlcoins,
+          rate: `${(mlcoins / pointsToConvert).toFixed(2)} MLCNS per MLPTS`,
+          conversion_reference: credit?.transfer?.txHash || 'pending',
         }).catch(() => {})
-
-        // C2b: enqueue for 3× exponential retry, dead-letter to Mongo on exhaustion.
-        await enqueueConvertLiquidityFailure({
-          address,
-          mlcoins,
-          kesValue,
-          poolId: 2,
-          firstFailedAt,
-          previousAttempts: 0,
-          originalError: String(liqErr?.message || liqErr),
-        })
-
-        // Mark queued so the caller can distinguish live-added vs queued.
-        liquidityResult = {
-          queued: true,
-          queue: 'convert-liquidity-dlq',
-          retryAttempts: 3,
-          reason: liqErr.message,
-          firstFailedAt,
-        }
       }
 
       return res.json({

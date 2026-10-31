@@ -1,5 +1,6 @@
 const { creditMlcns, getFaucetStatus, fundGas } = require('../services/faucetService');
 const { AppError, ErrorCodes, asyncHandler } = require('../utils/errorHandler');
+const { emitMlcnsTransferReceived, userIdForAddress } = require('../services/activityEvents');
 
 exports.status = asyncHandler(async (_req, res) => {
   const status = await getFaucetStatus();
@@ -19,6 +20,14 @@ exports.requestMlcns = asyncHandler(async (req, res) => {
     // structured `detail` block so the frontend can render the explicit
     // "Faucet not ready — contact admin" card instead of a generic spinner.
     const result = await creditMlcns(address, amountMlcns);
+    // Email the wallet holder that faucet MLCNS landed (fire-and-forget).
+    userIdForAddress(address)
+      .then((uid) => uid && emitMlcnsTransferReceived(uid, {
+        mlcns_amount: amountMlcns ?? result?.transfer?.amountMlcns,
+        sender_display: 'Mallchain Faucet',
+        reference_id: result?.transfer?.txHash || 'pending',
+      }))
+      .catch(() => {});
     return res.json(result);
   } catch (err) {
     if (err && err.code === 'faucet_unfunded') {

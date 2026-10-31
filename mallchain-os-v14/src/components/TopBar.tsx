@@ -168,7 +168,7 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
       )}
       {!isAdminRoute && (st.user.role === 'admin' || st.user.role === 'superadmin') && (
         <a className="chip red" style={{ display: 'flex', alignItems: 'center', gap: 6 }} href="#/admin" title="Go to the admin control center">
-          <ShieldAlert size={13} aria-hidden="true" /> {t('Admin panel')}
+          <ShieldAlert size={13} aria-hidden="true" /> <span className="tb-admin-label">{t('Admin panel')}</span>
         </a>
       )}
       <SocketStatus />

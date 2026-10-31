@@ -16,6 +16,14 @@ import (
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 )
 
+// Base market prices in KES cents. The dynamic pricing engine may raise the
+// price with engagement but never lets it fall below these values — this is the
+// "0.62 floor, live up-only" rule, and doubles as the initial/reset price.
+const (
+	baseBuyPriceCents  uint64 = 62 // 0.62 KES buy
+	baseSellPriceCents uint64 = 58 // 0.58 KES sell
+)
+
 // EndBlocker handles end-of-block operations for dynamic pricing and metrics
 func (k Keeper) EndBlocker(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -185,7 +193,7 @@ func (k Keeper) updateDynamicPricing(ctx context.Context) error {
 	// Apply price impact to market
 	market, err := k.MarketPrice.Get(ctx)
 	if err != nil {
-		market = types.MarketPrice{BuyPrice: 62, SellPrice: 58}
+		market = types.MarketPrice{BuyPrice: baseBuyPriceCents, SellPrice: baseSellPriceCents}
 	}
 
 	// Circuit breaker: cap price change at 10% of current price per update
@@ -232,6 +240,16 @@ func (k Keeper) updateDynamicPricing(ctx context.Context) error {
 		} else {
 			market.SellPrice = 1 // minimum price floor
 		}
+	}
+
+	// "0.62 floor, live up-only": regardless of the engagement-driven movement
+	// above, the price can never sit below the base. This also pulls a drifted
+	// market back to base on the next dynamic-pricing block.
+	if market.BuyPrice < baseBuyPriceCents {
+		market.BuyPrice = baseBuyPriceCents
+	}
+	if market.SellPrice < baseSellPriceCents {
+		market.SellPrice = baseSellPriceCents
 	}
 
 	market.LastUpdateHeight = uint64(sdkCtx.BlockHeight())

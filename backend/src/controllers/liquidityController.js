@@ -87,6 +87,25 @@ async function fetchPoolReserves(base, poolAddress, denom0, denom1, dec0, dec1) 
   }
 }
 
+// Reserves when no dedicated pool wallet is configured: the MLCN/KES pair
+// lives in the credited-purchase ledger, not in any bank account — MLCNS is
+// an x/mlcoin internal-ledger token (MsgTransferMallcoin never touches bank)
+// and the KES-side denom was never minted — so the pool is the sum of every
+// credited buy's real KES (M-Pesa till) + MLCNS pair.
+async function fetchLedgerPoolReserves() {
+  try {
+    const MallcoinPurchase = require('../models/MallcoinPurchase')
+    const [agg] = await MallcoinPurchase.aggregate([
+      { $match: { status: 'credited' } },
+      { $group: { _id: null, mlcns: { $sum: '$amount' }, kes: { $sum: '$fiatAmount' } } },
+    ])
+    return { reserve0: agg?.mlcns || 0, reserve1: agg?.kes || 0 }
+  } catch (err) {
+    console.error('[Liquidity] Purchase-ledger reserve fetch failed:', err.message)
+    return { reserve0: 0, reserve1: 0 }
+  }
+}
+
 // Helper: ensure we have an in-memory pool snapshot
 async function ensurePoolsLoaded() {
   if (pools && pools.length) return pools
@@ -129,10 +148,13 @@ async function fetchPoolsFromBlockchain() {
   try {
     const cleanBase = CHAIN_REST.replace(/\/$/, '')
 
-    // Fetch dynamic inputs from chain
+    // Fetch dynamic inputs from chain (or the purchase ledger when no pool
+    // wallet is configured — see fetchLedgerPoolReserves)
     const [prices, reserves, volume24h] = await Promise.all([
       fetchMarketPrices(),
-      fetchPoolReserves(cleanBase, POOL_ACCOUNT_ADDRESS, POOL_TOKEN0_DENOM, POOL_TOKEN1_DENOM, POOL_TOKEN0_DECIMALS, POOL_TOKEN1_DECIMALS),
+      POOL_ACCOUNT_ADDRESS
+        ? fetchPoolReserves(cleanBase, POOL_ACCOUNT_ADDRESS, POOL_TOKEN0_DENOM, POOL_TOKEN1_DENOM, POOL_TOKEN0_DECIMALS, POOL_TOKEN1_DECIMALS)
+        : fetchLedgerPoolReserves(),
       fetchTradeVolume24h(cleanBase)
     ])
 
@@ -159,6 +181,7 @@ async function fetchPoolsFromBlockchain() {
       fee: LIQ_DEFAULT_FEE,
       totalLiquidity: reserves.reserve0 + reserves.reserve1,
       userPositions: {},
+      reserveSource: POOL_ACCOUNT_ADDRESS ? 'pool-wallet' : 'purchase-ledger',
       priceMlcn,
       priceKes,
       blockchainSource: true,

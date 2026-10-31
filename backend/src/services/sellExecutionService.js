@@ -14,6 +14,17 @@ const { executeSellBurnWorkflow } = require('./sellBurnService');
 const { initiateB2CPayout } = require('./b2cPayoutService');
 const B2CPayout = require('../models/B2CPayout');
 const { recordWithdrawLiquidityActivity } = require('./liquidityActivityService');
+const { emitWithdrawalCompleted, emitWithdrawalFailed, userIdForAddress } = require('./activityEvents');
+
+/**
+ * Email the holder of a wallet address about a withdrawal outcome
+ * (fire-and-forget). A notification failure must never affect settlement.
+ */
+function notifySeller(sellerAddress, emit, data) {
+  userIdForAddress(sellerAddress)
+    .then((uid) => uid && emit(uid, data))
+    .catch(() => {});
+}
 
 function getProviderMode() {
   return config.payment.safaricom.consumerKey && config.payment.safaricom.consumerSecret ? 'live' : 'unconfigured';
@@ -88,6 +99,12 @@ async function executeSellSettlement({ sale, withdrawal, txBytes, amount, phone,
       reason: broadcastResult.reason,
     });
     await sale.save();
+    notifySeller(sellerAddress, emitWithdrawalFailed, {
+      amount: Number(amount),
+      asset: 'MLCNS',
+      user_safe_reason: 'The cash-out transfer could not be processed. Your MLCNS is still in your wallet.',
+      reference_id: withdrawalId,
+    });
     const isNetworkError = !broadcastResult.txHash && !broadcastResult.reason?.includes('code');
     return isNetworkError
       ? { status: 503, body: { error: 'Blockchain broadcast failed', details: broadcastResult.reason } }
@@ -125,6 +142,13 @@ async function executeSellSettlement({ sale, withdrawal, txBytes, amount, phone,
     sellTxHash: txHash,
     fiatAmount: estimatedKes,
     note: 'Signed MLCNS sell transfer broadcasted to Mallchain.',
+  });
+
+  notifySeller(sellerAddress, emitWithdrawalCompleted, {
+    amount: Number(amount),
+    asset: 'MLCNS',
+    tx_status: 'broadcasted',
+    reference_id: txHash || withdrawalId,
   });
 
   const OPERATOR_MNEMONIC = process.env.OPERATOR_MNEMONIC;
@@ -203,12 +227,26 @@ async function executeSellSettlement({ sale, withdrawal, txBytes, amount, phone,
           reason: payoutResult.error,
         }
       );
+      if (!payoutResult.requiresApproval) {
+        notifySeller(sellerAddress, emitWithdrawalFailed, {
+          amount: Number(amount),
+          asset: 'MLCNS',
+          user_safe_reason: 'The Safaricom payout for your cash-out could not be started. Our team has been alerted.',
+          reference_id: withdrawalId,
+        });
+      }
     }
   } catch (payoutErr) {
     logger.error('buy', 'B2C payout error', payoutErr);
     withdrawal.status = 'failed';
     withdrawal.notes = payoutErr.message || 'Safaricom payout error.';
     await withdrawal.save();
+    notifySeller(sellerAddress, emitWithdrawalFailed, {
+      amount: Number(amount),
+      asset: 'MLCNS',
+      user_safe_reason: 'The Safaricom payout for your cash-out could not be started. Our team has been alerted.',
+      reference_id: withdrawalId,
+    });
     await recordWithdrawLiquidityActivity('payout_initiation_failed', withdrawal, {
       status: 'failed',
       saleId,

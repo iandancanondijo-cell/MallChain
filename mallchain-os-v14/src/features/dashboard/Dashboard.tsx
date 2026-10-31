@@ -3,8 +3,8 @@ import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, fmtMoney, BarChart, StatusChip, toast } from '../../components/ui';
 import { minesApi, type MinesSubmission, type MinesCampaign, type ReviewerProfile, type WalletTx } from '../../services/minesApi';
 import { stakingApi, type StakingSummary } from '../../services/stakingApi';
-import { priceApi } from '../../services/priceApi';
-import { useFxRate, toDisplayCurrency } from '../../services/currency';
+import { useLivePrice } from '../../hooks/useLivePrice';
+import { useCurrencyConverter } from '../../services/currency';
 import { api } from '../../services/api';
 import { TrendingUp, Wallet, Zap, Shield, ArrowUpRight, ArrowDownLeft, Repeat, Sparkles } from 'lucide-react';
 import { Button, Card, Badge, Heading, Text } from '../../components/shared';
@@ -98,18 +98,11 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
   useStoreVersion();
   const st = store.state;
   const cur = st.prefs.currency;
-  const fxRate = useFxRate(cur);
+  const toDisplay = useCurrencyConverter(cur);
 
   const isWalletConnected = st.wallet.address && st.wallet.address.length > 0;
 
-  const [mallPrice, setMallPrice] = useState<number | null>(null);
-  useEffect(() => {
-    priceApi.getMallPrice().then((res) => {
-      if (res.ok && res.data) setMallPrice(res.data.mid);
-    });
-  }, []);
-
-  const totalValue = (mallPrice !== null ? st.balances.MALL * mallPrice : 0) + st.balances.USD_M;
+  const { midKes } = useLivePrice();
 
   const [submissions, setSubmissions] = useState<MinesSubmission[]>([]);
   const [campaigns, setCampaigns] = useState<MinesCampaign[]>([]);
@@ -145,14 +138,18 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
   const sparkLabels = Object.keys(byDay);
   const spark = sparkLabels.map((k) => byDay[k]);
 
+  const mallKes = midKes !== null ? (st.balances.MALL || 0) * midKes : null;
+
   const portfolioDisplay = (() => {
-    const t = toDisplayCurrency(totalValue || 0, cur, fxRate);
-    return t === null ? '…' : fmtMoney(t, cur);
+    const mallDisp = toDisplay(mallKes, 'KES');
+    const usdDisp = toDisplay(st.balances.USD_M, 'USD');
+    if (mallDisp === null || usdDisp === null) return '…';
+    return fmtMoney(mallDisp + usdDisp, cur);
   })();
 
   const mallValueDisplay = (() => {
-    if (mallPrice === null) return 'price unavailable';
-    const t = toDisplayCurrency((st.balances.MALL || 0) * mallPrice, cur, fxRate);
+    if (midKes === null) return 'price unavailable';
+    const t = toDisplay(mallKes, 'KES');
     return t === null ? '…' : `≈ ${fmtMoney(t, cur)}`;
   })();
 
@@ -180,7 +177,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
             <span className="dash-hero-num">{portfolioDisplay}</span>
             <span className="dash-hero-meta">
               <span className="chip gold" style={{ fontSize: 10 }}>Network: {st.settings.network}</span>
-              <span style={{ color: 'var(--txt-3)', fontSize: 11 }}>{mallPrice === null ? 'MALL price unavailable' : `MALL @ $${mallPrice.toFixed(4)}`}</span>
+              <span style={{ color: 'var(--txt-3)', fontSize: 11 }}>{midKes === null ? 'MALL price unavailable' : `MALL @ ${fmtMoney(midKes, cur)}`}</span>
             </span>
           </div>
         </div>

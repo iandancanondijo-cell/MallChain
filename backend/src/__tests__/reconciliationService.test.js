@@ -1,20 +1,18 @@
 // Regression coverage for reconciliationService.js's compensateFailedLiquidity.
-// It used to never actually reverse/retry anything — it logged a
-// "compensation attempt" and then always fell back to pending_manual,
-// leaving every detected item stuck for manual review forever. The failure
-// being compensated for is the operator's own add-liquidity transaction
-// (funded by OPERATOR_MNEMONIC, not the user's wallet) failing after the
-// user's MLCNS credit already succeeded — there is nothing to claw back
-// from the user, so the correct fix is retrying the operator's own
-// liquidity-add with the same amounts.
+// The MLCN/KES pool is the credited-purchase ledger itself (see
+// liquidityController.fetchLedgerPoolReserves) — a purchase with status
+// 'credited' is already fully part of the pool, so compensation is pure
+// bookkeeping: mark liquidityAdded, clear the stale on-chain error, resolve
+// the recon record. The old code retried the operator's MsgAddLiquidity,
+// which could never succeed (the operator account was never funded and the
+// x/dex module holds bank coins while MLCNS lives in x/mlcoin's internal
+// ledger), leaving every recon stuck forever.
 jest.mock('../models/MallcoinPurchase', () => ({ findById: jest.fn() }));
-jest.mock('../models/LiquidityReconciliation', () => ({ findOne: jest.fn(), create: jest.fn() }));
-jest.mock('../controllers/liquidityController', () => ({ addLiquidityToPool: jest.fn() }));
+jest.mock('../models/LiquidityReconciliation', () => ({ findOne: jest.fn(), create: jest.fn(), find: jest.fn() }));
 jest.mock('../services/liquidityActivityService', () => ({ recordBuyLiquidityActivity: jest.fn().mockResolvedValue(undefined) }));
 
 const MallcoinPurchase = require('../models/MallcoinPurchase');
 const LiquidityReconciliation = require('../models/LiquidityReconciliation');
-const { addLiquidityToPool } = require('../controllers/liquidityController');
 const { recordBuyLiquidityActivity } = require('../services/liquidityActivityService');
 const { compensateFailedLiquidity, detectFailedLiquidityAdds, runReconciliationJob } = require('../services/reconciliationService');
 
@@ -39,6 +37,7 @@ function fakePurchase(overrides = {}) {
     walletAddress: 'mall1testwalletaddress00000000000000000',
     amount: 50,
     fiatAmount: 31,
+    status: 'credited',
     liquidityAdded: false,
     liquidityError: 'original failure reason',
     save: jest.fn().mockResolvedValue(undefined),
@@ -49,78 +48,89 @@ function fakePurchase(overrides = {}) {
 describe('compensateFailedLiquidity', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  test('skips (returns null) when the item is not in detected status', async () => {
-    const recon = fakeRecon({ status: 'pending_manual' });
-    const result = await compensateFailedLiquidity(recon);
-    expect(result).toBeNull();
-    expect(addLiquidityToPool).not.toHaveBeenCalled();
-    expect(recon.save).not.toHaveBeenCalled();
+  test('skips (returns null) when the item is already compensating or resolved', async () => {
+    const compensating = fakeRecon({ status: 'compensating' });
+    const resolved = fakeRecon({ status: 'resolved' });
+    expect(await compensateFailedLiquidity(compensating)).toBeNull();
+    expect(await compensateFailedLiquidity(resolved)).toBeNull();
+    expect(compensating.save).not.toHaveBeenCalled();
+    expect(resolved.save).not.toHaveBeenCalled();
   });
 
-  test('retries the operator-funded liquidity add with the same amounts, and resolves on success', async () => {
+  test('settles the ledger bookkeeping for a credited purchase and resolves', async () => {
     const recon = fakeRecon();
     const purchase = fakePurchase();
     MallcoinPurchase.findById.mockReturnValue({ catch: () => Promise.resolve(purchase) });
-    addLiquidityToPool.mockResolvedValue({ txHash: 'TXHASH_RETRY', lpTokens: '12.34', shareOfPool: '5.00' });
 
     const result = await compensateFailedLiquidity(recon);
 
-    expect(addLiquidityToPool).toHaveBeenCalledWith({
-      poolId: 2,
-      amount0: 50,
-      amount1: 31,
-      userAddress: 'mall1testwalletaddress00000000000000000',
-    });
     expect(result.status).toBe('resolved');
-    expect(result.compensationTx).toBe('TXHASH_RETRY');
     expect(result.resolvedAt).toBeInstanceOf(Date);
 
-    // The purchase record is brought back in sync with a real liquidity add.
+    // The purchase record is brought in sync with the ledger-reserve view.
     expect(purchase.liquidityAdded).toBe(true);
-    expect(purchase.lpTokens).toBeCloseTo(12.34);
+    expect(purchase.liquidityPoolId).toBe(2);
     expect(purchase.liquidityError).toBeUndefined();
     expect(purchase.save).toHaveBeenCalledTimes(1);
 
     expect(recordBuyLiquidityActivity).toHaveBeenCalledWith(
       'liquidity_add_reconciled',
       purchase,
-      expect.objectContaining({ status: 'success', liquidityTxHash: 'TXHASH_RETRY' })
+      expect.objectContaining({ status: 'success', poolId: 2 })
     );
   });
 
-  test('uses the purchase\'s own liquidityPoolId over the default when set', async () => {
+  test('keeps the purchase\'s own liquidityPoolId over the default when set', async () => {
     const recon = fakeRecon();
     const purchase = fakePurchase({ liquidityPoolId: 7 });
     MallcoinPurchase.findById.mockReturnValue({ catch: () => Promise.resolve(purchase) });
-    addLiquidityToPool.mockResolvedValue({ txHash: 'TX', lpTokens: '1' });
 
     await compensateFailedLiquidity(recon);
 
-    expect(addLiquidityToPool).toHaveBeenCalledWith(expect.objectContaining({ poolId: 7 }));
+    expect(recordBuyLiquidityActivity).toHaveBeenCalledWith(
+      'liquidity_add_reconciled',
+      purchase,
+      expect.objectContaining({ poolId: 7 })
+    );
   });
 
-  test('falls back to pending_manual (not an automatic retry loop) when the retry itself fails', async () => {
+  test('a pending_manual item IS retried by the sweep (job self-heals past failures)', async () => {
+    const recon = fakeRecon({ status: 'pending_manual', reason: 'transient mongo error' });
+    const purchase = fakePurchase();
+    MallcoinPurchase.findById.mockReturnValue({ catch: () => Promise.resolve(purchase) });
+
+    const result = await compensateFailedLiquidity(recon);
+
+    expect(result.status).toBe('resolved');
+    expect(purchase.liquidityAdded).toBe(true);
+  });
+
+  test('falls back to pending_manual when the purchase is no longer credited', async () => {
     const recon = fakeRecon();
-    MallcoinPurchase.findById.mockReturnValue({ catch: () => Promise.resolve(fakePurchase()) });
-    addLiquidityToPool.mockRejectedValue(new Error('OPERATOR_MNEMONIC not configured'));
+    MallcoinPurchase.findById.mockReturnValue({ catch: () => Promise.resolve(fakePurchase({ status: 'refunded' })) });
 
     const result = await compensateFailedLiquidity(recon);
 
     expect(result).toBeNull();
     expect(recon.status).toBe('pending_manual');
-    expect(recon.status).not.toBe('detected'); // must not loop back to auto-retry
-    expect(recon.reason).toBe('OPERATOR_MNEMONIC not configured');
+    expect(recon.reason).toContain('not in credited state');
     expect(recon.resolvedAt).toBeNull();
     expect(recon.save).toHaveBeenCalled();
   });
 
-  test('a pending_manual item from a prior failed retry is never picked up again automatically', async () => {
-    // Simulates a second job run seeing the item this test file's previous
-    // case left behind — it must stay untouched until a human acts on it.
-    const recon = fakeRecon({ status: 'pending_manual', reason: 'OPERATOR_MNEMONIC not configured' });
+  test('falls back to pending_manual (with the new reason) when bookkeeping itself fails', async () => {
+    const recon = fakeRecon();
+    const purchase = fakePurchase();
+    purchase.save.mockRejectedValue(new Error('mongo write failed'));
+    MallcoinPurchase.findById.mockReturnValue({ catch: () => Promise.resolve(purchase) });
+
     const result = await compensateFailedLiquidity(recon);
+
     expect(result).toBeNull();
-    expect(addLiquidityToPool).not.toHaveBeenCalled();
+    expect(recon.status).toBe('pending_manual');
+    expect(recon.reason).toBe('mongo write failed');
+    expect(recon.resolvedAt).toBeNull();
+    expect(recon.save).toHaveBeenCalled();
   });
 });
 
@@ -162,13 +172,42 @@ describe('runReconciliationJob', () => {
     LiquidityReconciliation.findOne.mockResolvedValue(null);
     const created = fakeRecon({ _id: 'recon-new' });
     LiquidityReconciliation.create.mockResolvedValue(created);
+    LiquidityReconciliation.find.mockResolvedValue([]);
     MallcoinPurchase.findById.mockReturnValue({ catch: () => Promise.resolve(fakePurchase()) });
-    addLiquidityToPool.mockResolvedValue({ txHash: 'TX2', lpTokens: '3' });
 
     const result = await runReconciliationJob();
 
     expect(result.detected).toBe(1);
-    expect(addLiquidityToPool).toHaveBeenCalledTimes(1);
+    expect(result.processed).toBe(1);
     expect(created.status).toBe('resolved');
+  });
+
+  test('sweeps pre-existing unresolved records that detection skips', async () => {
+    // detectFailedLiquidityAdds skips purchases that already have a record —
+    // the job must still retry those stale records or they hang forever.
+    MallcoinPurchase.find = jest.fn().mockResolvedValue([]);
+    const stale = fakeRecon({ _id: 'recon-stale', status: 'detected' });
+    LiquidityReconciliation.find.mockResolvedValue([stale]);
+    MallcoinPurchase.findById.mockReturnValue({ catch: () => Promise.resolve(fakePurchase()) });
+
+    const result = await runReconciliationJob();
+
+    expect(result.detected).toBe(0);
+    expect(result.processed).toBe(1);
+    expect(stale.status).toBe('resolved');
+  });
+
+  test('does not compensate the same record twice when detection and the sweep overlap', async () => {
+    const purchase = { _id: 'p1', quoteId: 'q1', txHash: 'TX1', walletAddress: 'mall1x', amount: 10, fiatAmount: 6.2, liquidityError: 'boom' };
+    MallcoinPurchase.find = jest.fn().mockResolvedValue([purchase]);
+    LiquidityReconciliation.findOne.mockResolvedValue(null);
+    const created = fakeRecon({ _id: 'recon-dup' });
+    LiquidityReconciliation.create.mockResolvedValue(created);
+    LiquidityReconciliation.find.mockResolvedValue([fakeRecon({ _id: 'recon-dup' })]);
+    MallcoinPurchase.findById.mockReturnValue({ catch: () => Promise.resolve(fakePurchase()) });
+
+    const result = await runReconciliationJob();
+
+    expect(result.processed).toBe(1);
   });
 });

@@ -199,7 +199,10 @@ const mpesaCallbackSchema = Joi.object({
       CallbackMetadata: Joi.object({
         Item: Joi.array().items(Joi.object({
           Name: Joi.string().required(),
-          Value: Joi.any().required(),
+          // Safaricom sends a valueless {"Name":"Balance"} item on every
+          // successful payment — requiring Value here 400s real money
+          // callbacks and silently leaves purchases uncredited.
+          Value: Joi.any().optional(),
         })).optional(),
       }).optional(),
     }).optional(),

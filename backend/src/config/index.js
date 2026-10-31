@@ -151,6 +151,10 @@ const config = {
       consumerKey: process.env.SAFARICOM_KEY || '',
       consumerSecret: process.env.SAFARICOM_SECRET || '',
       businessShortCode: process.env.BUSINESS_SHORT_CODE || '174379',
+      // 4364003 is the Daraja store/HO number, not a paybill: STK pushes must
+      // settle to the customer-facing till (Safaricom API support, 2026-10-19).
+      // Sandbox 174379 is itself a till, so the fallback keeps sandbox intact.
+      tillNumber: process.env.SAFARICOM_TILL_NUMBER || process.env.BUSINESS_SHORT_CODE || '174379',
       passkey: process.env.PASSKEY || '',
       stkCallbackUrl: appendWebhookToken(
         process.env.CALLBACK_URL ||

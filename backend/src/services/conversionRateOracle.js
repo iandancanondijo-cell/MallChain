@@ -1,13 +1,11 @@
 const { getMarketPrice, getChainParams } = require('./mallcoinService');
 const { getCacheService, CacheService } = require('./cacheService');
+const { getMallpointPriceKes } = require('./economyConstants');
 const logger = require('../utils/logger');
 
 const RATE_SCALE = 1_000_000;
 
-const pointPrice = () =>
-  (typeof process.env.MALLPOINT_PRICE_KES !== 'undefined' && !isNaN(Number(process.env.MALLPOINT_PRICE_KES)))
-    ? Number(process.env.MALLPOINT_PRICE_KES)
-    : 2;
+const pointPrice = () => getMallpointPriceKes();
 
 /**
  * Calculates the dynamic MLPTS→MLCNS conversion rate from fiat prices.

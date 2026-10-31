@@ -10,6 +10,32 @@ const { dispatchEvent } = require('./notificationEngine');
 const { dispatchNotification } = require('./notificationDispatcher');
 const logger = require('../utils/logger');
 
+/**
+ * Resolve the account that owns a wallet address so wallet-activity
+ * notifications reach the holder. walletAddress is encrypted PII, so the
+ * lookup goes through its blind index. Returns null when the address has no
+ * registered holder (e.g. a brand-new recipient wallet) — callers then skip
+ * the notification instead of failing the financial flow.
+ */
+async function userIdForAddress(address) {
+  if (!address) return null;
+  try {
+    const User = require('../models/user');
+    const { blindIndex } = require('../utils/fieldEncryption');
+    const user = await User.findOne({ walletAddress_blind: blindIndex(address) }).select('_id').lean();
+    return user ? user._id.toString() : null;
+  } catch (err) {
+    logger.warn('activityEvents', 'Wallet address lookup failed', { error: err.message });
+    return null;
+  }
+}
+
+/** Shorten an on-chain address for display in a notification body. */
+function displayAddress(address) {
+  const s = String(address || '');
+  return s.length > 18 ? `${s.slice(0, 10)}…${s.slice(-6)}` : s;
+}
+
 // ─── ACCOUNT & ONBOARDING ────────────────────────────────────────────
 
 async function emitAccountCreated(userId, data = {}) {
@@ -544,6 +570,8 @@ async function emitBadgeEvent(userId, eventData) {
 module.exports = {
   // Template-driven event dispatch
   emit,
+  userIdForAddress,
+  displayAddress,
 
   // Account
   emitAccountCreated,

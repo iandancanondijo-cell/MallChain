@@ -1440,6 +1440,15 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .tb-search { display: none; }
   .tb-hamburger, .tb-search-trigger { display: flex; }
   .tb-wallet .lbl { display: none; }
+  /* Collapse the remaining wide items so the row fits a 360px phone.
+     An overflowing topbar expands the mobile layout viewport, which
+     breaks every position:fixed element (modals, animated background). */
+  .topbar { gap: 8px; }
+  .tb-user > div { display: none; }
+  .tb-admin-label { display: none; }
+  .socket-text, .socket-count { display: none; }
+  .tb-settings-panel { min-width: 0; width: calc(100vw - 24px); }
+  .tb-notifications-panel { min-width: 0; width: calc(100vw - 24px); }
   .c-grid { grid-template-columns: 1fr; }
   .calc-hero-row { grid-template-columns: 1fr; }
 
@@ -1475,6 +1484,13 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 
 @media (max-width: 480px) {
   .main { padding: 12px 10px 40px; }
+  /* Keep the topbar bleed aligned with the narrower .main padding —
+     a larger negative margin expands the mobile layout viewport by
+     (margin − padding) per side, which breaks every position:fixed element. */
+  .topbar {
+    padding: calc(10px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) 10px calc(10px + env(safe-area-inset-left));
+    margin: -12px -10px 14px;
+  }
   .stat-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
   .card { padding: 12px; border-radius: 14px; }
   .card-value { font-size: 18px; }

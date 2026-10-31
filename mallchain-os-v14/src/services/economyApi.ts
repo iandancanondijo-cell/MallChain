@@ -37,7 +37,11 @@ export interface EconomyConversion {
   badgeHolders: string;
   nonBadge: string;
   rate: string;
-  valueRatio: string;
+  valueRatio: number;
+  /** True when the rate came from the live fiat-pegged oracle rather than the fallback. */
+  live?: boolean;
+  source?: string;
+  clamped?: boolean;
 }
 
 export interface EconomyUser {

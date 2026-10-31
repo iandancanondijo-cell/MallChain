@@ -760,7 +760,7 @@ export default function Settings() {
   );
 }
 
-type BuyBadgeStep = 'form' | 'awaiting_payment' | 'awaiting_admin' | 'done' | 'rejected';
+type BuyBadgeStep = 'form' | 'awaiting_payment' | 'stalled' | 'awaiting_admin' | 'done' | 'rejected';
 
 function BuyBadgeModal({
   walletAddress,
@@ -784,29 +784,45 @@ function BuyBadgeModal({
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
-  const pollStatus = (quoteId: string) => {
+  const pollStatus = (quoteId: string, timeoutTicks: number, onTimeout: () => void) => {
     if (pollRef.current) clearInterval(pollRef.current);
+    let ticks = 0;
     pollRef.current = setInterval(async () => {
+      ticks += 1;
       const res = await badgeApi.getStatus(quoteId);
-      if (!res.ok || !res.data) return;
-      setQuote(res.data);
-      if (res.data.status === 'awaiting_admin') {
-        setStep('awaiting_admin');
-      } else if (res.data.status === 'issued') {
+      if (res.ok && res.data) {
+        setQuote(res.data);
+        if (res.data.status === 'awaiting_admin') {
+          setStep('awaiting_admin');
+          // Payment landed — admin review has no buyer-side deadline.
+          clearInterval(pollRef.current);
+          pollStatus(quoteId, Infinity, () => {});
+          return;
+        } else if (res.data.status === 'issued') {
+          clearInterval(pollRef.current);
+          setStep('done');
+          setBusy(false);
+          onIssued();
+          return;
+        } else if (res.data.status === 'rejected') {
+          clearInterval(pollRef.current);
+          setRejectReason(res.data.reason || 'Purchase was rejected by admin');
+          setStep('rejected');
+          setBusy(false);
+          return;
+        } else if (res.data.status === 'failed') {
+          clearInterval(pollRef.current);
+          setRejectReason(res.data.reason || 'Payment failed');
+          setStep('rejected');
+          setBusy(false);
+          return;
+        }
+      }
+      // Safaricom is silent when a prompt is never answered, so without this the
+      // modal would sit on "check your phone" indefinitely.
+      if (ticks >= timeoutTicks) {
         clearInterval(pollRef.current);
-        setStep('done');
-        setBusy(false);
-        onIssued();
-      } else if (res.data.status === 'rejected') {
-        clearInterval(pollRef.current);
-        setRejectReason(res.data.reason || 'Purchase was rejected by admin');
-        setStep('rejected');
-        setBusy(false);
-      } else if (res.data.status === 'failed') {
-        clearInterval(pollRef.current);
-        setRejectReason(res.data.reason || 'Payment failed');
-        setStep('rejected');
-        setBusy(false);
+        onTimeout();
       }
     }, 4000);
   };
@@ -827,7 +843,14 @@ function BuyBadgeModal({
 
     const { quoteId } = reserveRes.data;
 
-    if (!stkConfigured) {
+    // The mount-time config fetch may have failed while the backend was down;
+    // re-check once before declaring M-Pesa unavailable.
+    let stkOk = stkConfigured;
+    if (!stkOk) {
+      const cfgRes = await badgeApi.getConfig();
+      if (cfgRes.ok && cfgRes.data?.providerMode === 'live') stkOk = true;
+    }
+    if (!stkOk) {
       toast('Quote reserved, but M-Pesa STK push is not configured in this environment.', false);
       setBusy(false);
       return;
@@ -842,7 +865,11 @@ function BuyBadgeModal({
 
     setStep('awaiting_payment');
     toast('Check your phone for the M-Pesa prompt');
-    pollStatus(quoteId);
+    // 30 × 4s ≈ 2 minutes before we conclude the prompt was never answered.
+    pollStatus(quoteId, 30, () => {
+      setStep('stalled');
+      setBusy(false);
+    });
   };
 
   return (
@@ -877,6 +904,29 @@ function BuyBadgeModal({
           <h2 style={{ margin: '8px 0' }}>Check your phone</h2>
           <div className="muted">Complete the M-Pesa prompt sent to <b>{phone}</b> for {priceKes} KES.</div>
           {quote && <div className="mono" style={{ fontSize: 11, marginTop: 12, opacity: 0.6 }}>Quote {quote.quoteId}</div>}
+          <div className="muted" style={{ marginTop: 10, fontSize: 11, opacity: 0.7 }}>
+            This wait ends after ~2 minutes if the prompt is left unanswered.
+          </div>
+          <div className="modal-actions" style={{ justifyContent: 'center', marginTop: 16 }}>
+            <button className="btn" onClick={() => { clearInterval(pollRef.current); setBusy(false); setStep('form'); }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 'stalled' && (
+        <div style={{ textAlign: 'center', padding: 20 }}>
+          <div style={{ fontSize: 40, opacity: 0.7 }}>⏱</div>
+          <h2 style={{ margin: '8px 0' }}>No payment received</h2>
+          <div className="muted">
+            We did not get a payment from <b>{phone}</b>. The M-Pesa prompt may have expired or been missed — check the handset and try again.
+          </div>
+          {quote && <div className="mono" style={{ fontSize: 11, marginTop: 12, opacity: 0.6 }}>Quote {quote.quoteId}</div>}
+          <div className="modal-actions" style={{ justifyContent: 'center', marginTop: 16 }}>
+            <button className="btn btn-primary" onClick={() => setStep('form')}>Try again</button>
+            <button className="btn" onClick={onClose}>Close</button>
+          </div>
         </div>
       )}
 

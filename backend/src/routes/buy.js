@@ -4,7 +4,6 @@ const express = require('express');
 const router = express.Router();
 const MallcoinPurchase = require('../models/MallcoinPurchase');
 const MallcoinSale = require('../models/MallcoinSale');
-const { addLiquidityToPool } = require('../controllers/liquidityController');
 const { validate, schemas } = require('../middleware/validation');
 const axios = require('axios');
 const crypto = require('crypto');
@@ -18,7 +17,7 @@ const LiquidityReconciliation = require('../models/LiquidityReconciliation');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 const { getMarketPrice } = require('../services/mallcoinService');
 const { createBlockchainBreaker, createPaymentBackoff } = require('../utils/circuitBreaker');
-const { processMpesaCallback } = require('../services/mpesaCallbackService');
+const { processMpesaCallback, describeFailure } = require('../services/mpesaCallbackService');
 const { enqueueFailedCallback } = require('../mallwallet/queue/paymentCallbackQueue');
 const { getBuyGateStatus, requireDirectBuyUnlocked } = require('../services/buyGateService');
 const { checkSellLiquidity } = require('../services/sellGateService');
@@ -38,6 +37,13 @@ const {
   recordBuyLiquidityActivity,
   recordWithdrawLiquidityActivity,
 } = require('../services/liquidityActivityService');
+const {
+  emitMlcnsPurchaseInitiated,
+  emitMlcnsPurchaseSuccessful,
+  emitMlcnsPurchaseFailed,
+  emitWithdrawalRequested,
+  userIdForAddress,
+} = require('../services/activityEvents');
 const { isPoolCapReached, getPoolCapStatus } = require('../services/liquidityPoolCapService');
 
 const {
@@ -45,6 +51,7 @@ const {
   consumerKey: SAFARICOM_KEY,
   consumerSecret: SAFARICOM_SECRET,
   businessShortCode: BUSINESS_SHORT_CODE,
+  tillNumber: MERCHANT_TILL,
   passkey: PASSKEY,
   stkCallbackUrl: CALLBACK_URL,
 } = config.payment.safaricom;
@@ -52,15 +59,19 @@ const {
 const safaricomBreaker = createBlockchainBreaker();
 const paymentBackoff = createPaymentBackoff();
 
-const makePaymentId = () => {
-  // Generate cryptographically random payment ID to prevent enumeration attacks
-  const randomBytes = crypto.randomBytes(16);
-  const randomHex = randomBytes.toString('hex').toUpperCase();
-  return `PAY${randomHex}`;
-};
-
 function isStkConfigured() {
   return Boolean(SAFARICOM_KEY && SAFARICOM_SECRET && PASSKEY && BUSINESS_SHORT_CODE);
+}
+
+/**
+ * Email the holder of a wallet address about a wallet activity (fire-and-forget).
+ * A notification failure — or a wallet with no linked account — must never
+ * affect the payment flow that already succeeded.
+ */
+function notifyHolder(walletAddress, emit, data) {
+  userIdForAddress(walletAddress)
+    .then((uid) => uid && emit(uid, data))
+    .catch(() => {});
 }
 
 function isPayoutConfigured() {
@@ -99,10 +110,10 @@ function buildStkBody(purchase, phone, amount, description) {
     BusinessShortCode: BUSINESS_SHORT_CODE,
     Password: password,
     Timestamp: timestamp,
-    TransactionType: 'CustomerPayBillOnline',
+    TransactionType: 'CustomerBuyGoodsOnline',
     Amount: Number(amount),
     PartyA: phone,
-    PartyB: BUSINESS_SHORT_CODE,
+    PartyB: MERCHANT_TILL,
     PhoneNumber: phone,
     CallBackURL: CALLBACK_URL,
     AccountReference: purchase.mpesaRef || purchase.quoteId,
@@ -172,8 +183,31 @@ async function initiateMpesaRequest(purchase, phone, amount, description) {
     }, 'stkpush');
 
     const resp = stkRes.data || {};
+    // Daraja answers HTTP 200 even when it refuses to deliver the push
+    // (ResponseCode '1' plus an errorCode like 40400 / ER0017). Treating any
+    // 200 as success left the UI polling a quote that would never be paid for.
+    const responseCode = String(resp.ResponseCode ?? resp.responseCode ?? '');
     const checkoutId = resp.CheckoutRequestID || resp.checkoutRequestID || '';
-    const paymentId = checkoutId || makePaymentId();
+    if (responseCode !== '0' || !checkoutId) {
+      // Raw Daraja text ("Invalid Access Laptop MSISDN", "SDK Certifacte
+      // Unauthorised") reads to a buyer like a mistake they made, so put it
+      // through the same translator the async callback uses and keep the
+      // original only as the trailing Safaricom note.
+      const message = describeFailure(resp.ErrorMessage || resp.ResultDesc || '');
+      purchase.reason = message;
+      await purchase.save();
+      notifyHolder(purchase.walletAddress, emitMlcnsPurchaseFailed, {
+        user_safe_reason: message,
+        payment_status: 'not delivered',
+      });
+      const err = new Error(message);
+      err.status = 400;
+      err.expose = true;
+      err.darajaCode = responseCode || undefined;
+      throw err;
+    }
+
+    const paymentId = checkoutId;
 
     addPaymentIdToPurchase(purchase, paymentId);
     purchase.status = 'payment_initiated';
@@ -185,6 +219,12 @@ async function initiateMpesaRequest(purchase, phone, amount, description) {
       providerMode: 'live',
       note: 'Safaricom STK push initiated for buy flow.',
       metadata: { safaricomResponse: resp },
+    });
+    notifyHolder(purchase.walletAddress, emitMlcnsPurchaseInitiated, {
+      mlcns_amount: purchase.amount,
+      payment_amount: purchase.fiatAmount,
+      payment_currency: purchase.currency || 'KES',
+      purchase_status: 'awaiting PIN on your phone',
     });
 
     return { ok: true, paymentId, status: 'payment_initiated', raw: resp, providerMode: 'live' };
@@ -346,32 +386,26 @@ router.get('/config', async (_req, res) => {
   });
 });
 
-async function applyLiquidityAfterCredit(purchase, creditAddress, mlcnsAmount) {
+// The MLCN/KES pool is the credited-purchase ledger itself (see
+// liquidityController.fetchLedgerPoolReserves): a buy that reaches status
+// 'credited' has already added its real KES + MLCNS pair to the pool, so
+// there is no separate on-chain step. The previous x/dex MsgAddLiquidity
+// could never carry the real pair — MLCNS is an internal x/mlcoin ledger
+// token and the KES-side bank denom was never minted — and the operator
+// account was never funded, so it failed on every single purchase.
+async function applyLiquidityAfterCredit(purchase, mlcnsAmount) {
   const fiatAmount = Number(purchase.fiatAmount || 0);
   if (fiatAmount <= 0) return null;
 
-  const liquidityResult = await addLiquidityToPool({
-    poolId: 2,
-    amount0: mlcnsAmount,
-    amount1: fiatAmount,
-    userAddress: creditAddress,
-  });
-
   purchase.liquidityAdded = true;
-  purchase.lpTokens = Number(liquidityResult.lpTokens) || 0;
   purchase.liquidityPoolId = 2;
   await recordBuyLiquidityActivity('liquidity_added', purchase, {
     status: 'success',
     poolId: 2,
-    lpTokens: Number(liquidityResult.lpTokens) || 0,
-    liquidityTxHash: liquidityResult.txHash,
-    note: 'Liquidity was added to the linked pool after fiat buy settlement.',
-    metadata: {
-      shareOfPool: liquidityResult.shareOfPool,
-      userPosition: liquidityResult.userPosition,
-    },
+    note: 'Liquidity tracked via the credited-purchase ledger after fiat buy settlement.',
+    metadata: { mlcnsAmount, fiatAmount },
   });
-  return liquidityResult;
+  return { success: true, ledgerTracked: true };
 }
 
 async function handleReservedCredit({ quoteId, walletAddress, creditMlcns }) {
@@ -441,7 +475,7 @@ async function handleReservedCredit({ quoteId, walletAddress, creditMlcns }) {
 
   let liquidityResult = null;
   try {
-    liquidityResult = await applyLiquidityAfterCredit(purchase, creditAddress, mlcnsAmount);
+    liquidityResult = await applyLiquidityAfterCredit(purchase, mlcnsAmount);
   } catch (liqErr) {
     logger.warn('buy', 'liquidity pool add failed', { error: liqErr.message || String(liqErr) });
     purchase.liquidityAdded = false;
@@ -456,6 +490,15 @@ async function handleReservedCredit({ quoteId, walletAddress, creditMlcns }) {
   }
 
   await purchase.save();
+
+  notifyHolder(creditAddress, emitMlcnsPurchaseSuccessful, {
+    mlcns_amount: mlcnsAmount,
+    payment_amount: purchase.fiatAmount,
+    payment_currency: purchase.currency || 'KES',
+    purchase_reference: result.transfer?.txHash || purchase.mpesaRef,
+    mlcns_balance: result.balance?.availableDisplay,
+  });
+
   return { ok: true, success: true, txHash: result.transfer?.txHash, balance: result.balance, liquidity: liquidityResult };
 }
 
@@ -557,6 +600,11 @@ router.post('/mpesa', limiters.financial, idempotency({ required: true }), requi
     });
   } catch (e) {
     logger.error('buy', { route: req.originalUrl, error: e.message || String(e) });
+    if (e.expose) return res.status(400).json({ error: e.message, darajaCode: e.darajaCode });
+    if (e.status === 503) return res.status(503).json({ error: e.message });
+    if (e.response && e.response.status < 500) {
+      return res.status(400).json({ error: e.response.data?.errorMessage || 'Safaricom rejected the payment request' });
+    }
     res.status(500).json({ error: 'internal error' });
   }
 });
@@ -800,6 +848,13 @@ router.post('/sell', limiters.financial, validate(schemas.sell), async (req, res
       saleId,
       providerMode: isPayoutConfigured() ? 'live' : 'unconfigured',
       note: 'Wallet cash-out registered for pool-linked fiat settlement tracking.',
+    });
+
+    notifyHolder(sellerAddress, emitWithdrawalRequested, {
+      amount: Number(amount),
+      asset: 'MLCNS',
+      destination_short: 'Safaricom M-Pesa',
+      reference_id: withdrawalId,
     });
 
     if (amlCheck.reviewId) {

@@ -5,16 +5,17 @@ const mongoose = require('mongoose')
 const MallPointAccount = require('../models/MallPointAccount')
 const { createLimiter } = require('../middleware/rateLimiter')
 const logger = require('../utils/logger')
-const { addLiquidityToPool } = require('../controllers/liquidityController')
 const { invalidateCache: invalidateCapCache } = require('../services/liquidityPoolCapService')
 const requireAuth = require('../middleware/requireAuth')
 const verifyWebhookToken = require('../middleware/verifyWebhookToken')
-const { getDynamicConversionRate } = require('../services/conversionRateOracle')
 const { getMlptsPerMlcnsScale } = require('../services/mallcoinService')
 const { blindIndex } = require('../utils/fieldEncryption')
+const { getMallpointPriceKes } = require('../services/economyConstants')
+const { describeFailure } = require('../services/mpesaCallbackService')
+const { emitDepositConfirmed } = require('../services/activityEvents')
 
-// Mallpoints price in KES (default 2 KES per MLPTS)
-const MALLPOINT_PRICE_KES = Number(process.env.MALLPOINT_PRICE_KES) || 2
+// Mallpoints price in KES — single source of truth (economyConstants).
+const MALLPOINT_PRICE_KES = getMallpointPriceKes()
 
 // Safaricom Daraja API credentials — canonical env names (config/index.js
 // payment.safaricom uses SAFARICOM_KEY/SAFARICOM_SECRET; this route
@@ -23,6 +24,9 @@ const MALLPOINT_PRICE_KES = Number(process.env.MALLPOINT_PRICE_KES) || 2
 const SAFARICOM_CONSUMER_KEY = process.env.SAFARICOM_KEY
 const SAFARICOM_CONSUMER_SECRET = process.env.SAFARICOM_SECRET
 const SAFARICOM_SHORTCODE = process.env.SAFARICOM_SHORTCODE || '174379'
+// 4364003 is the Daraja store/HO number, not a paybill — STK pushes must
+// settle to the customer-facing till (Safaricom API support, 2026-10-19).
+const SAFARICOM_TILL = process.env.SAFARICOM_TILL_NUMBER || SAFARICOM_SHORTCODE
 const SAFARICOM_PASSKEY = process.env.SAFARICOM_PASSKEY || 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919'
 const SAFARICOM_ENV = process.env.SAFARICOM_ENV || 'sandbox'
 
@@ -235,10 +239,10 @@ router.post('/mpesa', createLimiter({ windowMs: 60*1000, max: 10 }), async (req,
         BusinessShortCode: SAFARICOM_SHORTCODE,
         Password: password,
         Timestamp: timestamp,
-        TransactionType: 'CustomerPayBillOnline',
+        TransactionType: 'CustomerBuyGoodsOnline',
         Amount: Math.round(purchase.amountKes),
         PartyA: normalizedPhone,
-        PartyB: SAFARICOM_SHORTCODE,
+        PartyB: SAFARICOM_TILL,
         PhoneNumber: normalizedPhone,
         CallBackURL: CALLBACK_URL,
         AccountReference: `MLPTS${quoteId.slice(0, 12)}`,
@@ -248,9 +252,17 @@ router.post('/mpesa', createLimiter({ windowMs: 60*1000, max: 10 }), async (req,
 
     const stkData = await stkResponse.json()
 
-    if (stkData.ResponseCode !== '0') {
+    if (stkData.ResponseCode !== '0' || !stkData.CheckoutRequestID) {
+      // HTTP 200 with a non-zero ResponseCode means Daraja refused to route the
+      // prompt at all. Recording it as payment_initiated left the page spinning
+      // on "waiting for payment" for a quote that could never be paid.
+      const message = describeFailure(stkData.ErrorMessage || stkData.ResponseDescription || '')
+      purchase.status = 'failed'
+      purchase.failureReason = message
+      await savePurchase(purchase)
+
       return res.status(400).json({
-        error: stkData.ResponseDescription || 'STK push failed',
+        error: message,
         raw: stkData,
       })
     }
@@ -317,7 +329,7 @@ router.post('/mpesa/callback', express.json(), verifyWebhookToken, async (req, r
     } else {
       // Payment failed
       purchase.status = 'failed'
-      purchase.failureReason = resultDesc
+      purchase.failureReason = describeFailure(resultDesc)
       purchase.callbackData = callbackData
       await savePurchase(purchase)
 
@@ -364,6 +376,7 @@ router.post('/credit', requireAuth(), async (req, res) => {
     // and User.mlpts_balance (used by mines/creatorSpace/referrals).
     // Both updates must succeed atomically to prevent balance divergence.
     let account
+    let creditedUserId = null
     const session = await mongoose.startSession()
     try {
       await session.withTransaction(async () => {
@@ -379,6 +392,7 @@ router.post('/credit', requireAuth(), async (req, res) => {
         const User = require('../models/user')
         const user = await User.findOne({ walletAddress_blind: blindIndex(purchase.address) }).session(session)
         if (user) {
+          creditedUserId = user._id.toString()
           await User.updateOne(
             { _id: user._id },
             { $inc: { mlpts_balance: purchase.mallpointsAmount } },
@@ -402,38 +416,27 @@ router.post('/credit', requireAuth(), async (req, res) => {
       newBalance: account.balance,
     })
 
-    // Add liquidity to the pool: the fiat amount (KES) paired with equivalent MLCNS
-    // This ensures every Mallpoints purchase fills the liquidity pool
+    // The MLCN/KES pool is the credited-purchase ledger (see
+    // liquidityController.fetchLedgerPoolReserves) — there is no on-chain add
+    // to perform here. Note: Mallpoints purchases live in Redis with a
+    // 10-minute TTL, so their fiat is not part of the durable ledger
+    // reserves; this only settles the purchase's own liquidity bookkeeping
+    // instead of reporting a guaranteed x/dex failure (MLCNS is an internal
+    // x/mlcoin ledger token, the KES-side bank denom was never minted, and
+    // the operator account was never funded).
     let liquidityResult = null
     try {
       const fiatAmount = Number(purchase.amountKes || 0)
       if (fiatAmount > 0) {
-        // Calculate the MLCNS equivalent using the live oracle price so the
-        // liquidity pool receives a correct fiat/crypto pair (not amount0: 0).
-        const oracle = await getDynamicConversionRate()
-        const mlcnsAmount = oracle.mlcnsMidPriceKes > 0
-          ? fiatAmount / oracle.mlcnsMidPriceKes
-          : 0
-
-        liquidityResult = await addLiquidityToPool({
-          poolId: 2,
-          amount0: mlcnsAmount,
-          amount1: fiatAmount,
-          userAddress: purchase.address,
-        })
-
         purchase.liquidityAdded = true
-        purchase.liquidityTxHash = liquidityResult.txHash
-        purchase.lpTokens = Number(liquidityResult.lpTokens) || 0
+        liquidityResult = { added: true, ledgerTracked: true }
 
         // Invalidate the cap cache so the next check sees the new pool value
         invalidateCapCache()
 
-        logger.info('mallpoints-purchase', 'liquidity added to pool', {
+        logger.info('mallpoints-purchase', 'liquidity bookkeeping settled', {
           quoteId: purchase.quoteId,
           fiatAmount,
-          lpTokens: liquidityResult.lpTokens,
-          txHash: liquidityResult.txHash,
         })
       }
     } catch (liqErr) {
@@ -443,6 +446,18 @@ router.post('/credit', requireAuth(), async (req, res) => {
       })
       purchase.liquidityAdded = false
       purchase.liquidityError = liqErr.message || String(liqErr)
+    }
+
+    // Email the holder that their MLPTS landed (no MLPTS-purchase template
+    // exists, so reuse the wallet deposit-confirmed template).
+    // Fire-and-forget — never affects a completed credit.
+    if (creditedUserId) {
+      emitDepositConfirmed(creditedUserId, {
+        amount: purchase.mallpointsAmount,
+        asset: 'MLPTS',
+        available_balance: account.balance,
+        tx_hash_short: String(purchase.quoteId || '').slice(0, 12),
+      }).catch(() => {})
     }
 
     return res.json({
@@ -500,7 +515,7 @@ router.get('/status/:quoteId', requireAuth(), async (req, res) => {
             const terminal = /cancelled|expired|fail|timeout|insufficient/i.test(cb.ResultDesc || '')
             if (terminal) {
               purchase.status = 'failed'
-              purchase.failureReason = cb.ResultDesc
+              purchase.failureReason = describeFailure(cb.ResultDesc)
               purchase.callbackData = cb
               await savePurchase(purchase)
             }

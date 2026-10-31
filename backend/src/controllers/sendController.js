@@ -102,9 +102,33 @@ exports.sendMallcoins = async (req, res) => {
   }
 
   logger.info('sendMallcoins', 'Transaction broadcast successfully', { txHash, from, to, amount });
-  const userId = req.user?._id || req.user?.id;
-  if (userId) {
-    activityEvents.emitTransferSent(userId.toString(), { txHash, from, to, amount, denom: 'MLCNS' }).catch(() => {});
+  // Wallet-activity emails for both holders. The previous call passed the
+  // raw payload ({txHash, from, to, denom}) instead of the template's field
+  // names (asset / recipient_display / tx_hash_short), so validateRequired
+  // rejected every dispatch and no transfer email ever reached anyone.
+  // Fire-and-forget: a notification failure must never fail a settled transfer.
+  const senderId = req.user?._id || req.user?.id;
+  if (senderId && txHash) {
+    activityEvents.emitTransferSent(senderId.toString(), {
+      amount,
+      asset: 'MLCNS',
+      recipient_display: activityEvents.displayAddress(to),
+      transaction_status: 'broadcasted',
+      tx_hash_short: `${String(txHash).slice(0, 12)}…`,
+    }).catch(() => {});
+  }
+  if (txHash) {
+    activityEvents.userIdForAddress(to)
+      .then((recipientId) => {
+        if (!recipientId) return;
+        return activityEvents.emitTransferReceived(recipientId, {
+          amount,
+          asset: 'MLCNS',
+          sender_display: activityEvents.displayAddress(from),
+          reference_id: txHash,
+        }).catch(() => {});
+      })
+      .catch(() => {});
   }
   return res.json({
     success: true,
@@ -150,9 +174,18 @@ exports.processPayment = async (req, res) => {
   }
 
   logger.info('processPayment', 'Payment broadcast confirmed', { txHash, buyerAddress, sellerAddress, amountKES });
-  const userId = req.user?._id || req.user?.id;
-  if (userId) {
-    activityEvents.emitTransferSent(userId.toString(), { txHash, from: buyerAddress, to: sellerAddress, amount: amountKES, type: 'payment' }).catch(() => {});
+  // Same template-field fix as sendMallcoins. amountKES is the only amount
+  // this route carries (the MLCNS figure is inside the opaque signed tx),
+  // so the email states it honestly in KES.
+  const payerId = req.user?._id || req.user?.id;
+  if (payerId && txHash) {
+    activityEvents.emitTransferSent(payerId.toString(), {
+      amount: amountKES,
+      asset: 'KES',
+      recipient_display: activityEvents.displayAddress(sellerAddress),
+      transaction_status: 'broadcasted',
+      tx_hash_short: `${String(txHash).slice(0, 12)}…`,
+    }).catch(() => {});
   }
   return res.json({
     success: true,

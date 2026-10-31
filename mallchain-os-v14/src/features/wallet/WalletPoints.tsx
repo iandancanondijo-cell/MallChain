@@ -3,7 +3,7 @@ import { Sparkles, Lock, Unlock, Coins, ArrowRight, CheckCircle2, Loader2, Walle
 import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, toast } from '../../components/ui';
 import { mallpointsApi, type MallpointsBalance } from '../../services/mallpointsApi';
-import { buyApi } from '../../services/buyApi';
+import { useLivePrice } from '../../hooks/useLivePrice';
 import { requestMnemonic } from '../../services/mnemonicAccess';
 
 /** Mallpoints balance + convert-to-Mallcoin (real API, gated by the on-chain conversion window). */
@@ -13,7 +13,7 @@ export default function WalletPoints({ navigate }: { navigate: (p: string) => vo
   const address = st.wallet.address;
 
   const [data, setData] = useState<MallpointsBalance | null>(null);
-  const [mlcnsPriceKes, setMlcnsPriceKes] = useState<number | null>(null);
+  const { buyKes: mlcnsPriceKes } = useLivePrice();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
@@ -33,9 +33,6 @@ export default function WalletPoints({ navigate }: { navigate: (p: string) => vo
 
   useEffect(() => {
     load();
-    buyApi.getConfig().then((r) => {
-      if (r.ok && r.data) setMlcnsPriceKes(r.data.rates.buyPriceKes);
-    });
   }, [load]);
 
   const doConvert = async () => {
