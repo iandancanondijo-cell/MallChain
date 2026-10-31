@@ -17,6 +17,7 @@
 import { wordlists } from 'bip39';
 import { toast } from '../components/ui';
 import { handleNetworkError } from './errorHandler';
+import { config as configApi } from './config';
 import type { ErrorContext } from './errorHandler';
 import { isValidMallAddress } from './wallet';
 
@@ -175,7 +176,11 @@ export function validateEmail(email: string): ValidationResult {
  */
 export async function validateEmailUniqueness(email: string): Promise<ValidationResult> {
   try {
-    const response = await fetch('/api/auth/email-exists', {
+    // Absolute API base (config.apiBaseUrl) — a relative '/api/...' fetch
+    // only resolves against the backend behind the Vite dev proxy; on the
+    // production static host it 404s.
+    const base = configApi.apiBaseUrl.replace(/\/$/, '');
+    const response = await fetch(`${base}/api/auth/email-exists`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),

@@ -64,6 +64,21 @@ function getCacheDuration(req, contentType) {
   // fell through to the 300s default. Match the full original URL instead.
   const path = req.originalUrl || req.path || '';
 
+  // Anything from an authenticated session is user-scoped, must never land in
+  // a shared/browser HTTP cache. req.user is only set by requireAuth — routes
+  // that verify the cookie themselves (/api/auth/me!) or use alternate guards
+  // (creatorAuth on /api/creator-space/balance) don't, so key off the
+  // credential's presence instead. Caching /me for 300s meant a freshly
+  // linked walletAddress (and PIN-hash backfill, KYC level, bans) was hidden
+  // from the frontend for minutes — surfacing as "connect your wallet" on a
+  // connected account and a spurious PIN prompt on every reload.
+  const hasSession = !!req.user
+    || !!req.headers.authorization
+    || /(^|;\s*)auth_token=/.test(req.headers.cookie || '');
+  if (hasSession || path.startsWith('/api/auth')) {
+    return 0;
+  }
+
   // Real-time chain/explorer data: the dashboards poll these every ~10s and
   // blocks arrive every ~5s — any browser caching here freezes the block
   // overview for the whole TTL window. Never cache.

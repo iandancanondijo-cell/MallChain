@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CreditCard, Phone, Coins, CheckCircle2, Loader2, Smartphone, ShoppingBag, ArrowRight, Wallet, AlertTriangle } from 'lucide-react';
+import { CreditCard, Phone, Coins, CheckCircle2, Loader2, Smartphone, ShoppingBag, ArrowRight, Wallet, AlertTriangle, Link2 } from 'lucide-react';
 import { api } from '../services/api';
+import { store } from '../store/store';
+import { authService } from '../services/auth';
 import { useStoreVersion, toast } from '../components/ui';
 
 type Step = 'form' | 'awaiting_payment' | 'stalled' | 'crediting' | 'done';
@@ -40,6 +42,7 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
   const [credited, setCredited] = useState(0);
   const [newBalance, setNewBalance] = useState(0);
   const [balLoaded, setBalLoaded] = useState(false);
+  const [linking, setLinking] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const pollTicksRef = useRef(0);
 
@@ -59,7 +62,28 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
     };
   }, [loadBalance]);
 
+  // The server-side link (user.walletAddress) is what credits a purchase —
+  // but a wallet connected on THIS device whose background link-wallet never
+  // completed (e.g. the PIN prompt was dismissed) used to be misreported as
+  // "No wallet connected". Distinguish the two cases: offer a one-tap
+  // "Link wallet" (PIN-verified signature) when the local wallet is present,
+  // and only send genuinely wallet-less sessions through the connect flow.
   if (balLoaded && !walletAddress) {
+    const localAddress = store.state.wallet.address;
+    const linkWalletNow = async () => {
+      if (!localAddress || linking) return;
+      setLinking(true);
+      // Prompts the wallet PIN, signs the link message, POSTs /api/auth/link-wallet.
+      await authService.linkWallet(localAddress);
+      const res = await api.get<{ ok: boolean; mlpts_balance: number; walletAddress?: string }>('/api/creator-space/balance');
+      if (res.ok && res.data?.walletAddress) {
+        toast('Wallet linked — you can purchase Mallpoints now');
+      } else {
+        toast('Linking was cancelled or failed — try again and enter your PIN', false);
+      }
+      setLinking(false);
+      loadBalance();
+    };
     return (
       <div>
         <div className="wo-hero">
@@ -68,21 +92,35 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
           </div>
           <div className="wo-hero-body">
             <div className="wo-hero-title">Purchase Mallpoints</div>
-            <div className="wo-hero-sub">Connect a wallet to buy MLPTS</div>
+            <div className="wo-hero-sub">{localAddress ? 'Link your wallet to buy MLPTS' : 'Connect a wallet to buy MLPTS'}</div>
           </div>
         </div>
         <div className="wo-card" style={{ maxWidth: 520 }}>
           <div style={{ textAlign: 'center', padding: '32px 16px' }}>
             <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(34, 211, 238, 0.08)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-              <Wallet size={24} style={{ color: 'var(--cyan)', opacity: 0.5 }} />
+              {localAddress ? <Link2 size={24} style={{ color: 'var(--cyan)' }} /> : <Wallet size={24} style={{ color: 'var(--cyan)', opacity: 0.5 }} />}
             </div>
-            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>No wallet connected</div>
-            <div style={{ fontSize: 13, color: 'var(--txt-3)', lineHeight: 1.6, maxWidth: 360, margin: '0 auto' }}>
-              Mallpoints are credited to a Mallchain wallet. Connect one first — purchases without a wallet can't be credited to you.
-            </div>
-            <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={() => navigate('/auth')}>
-              Connect a wallet
-            </button>
+            {localAddress ? (
+              <>
+                <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Wallet connected — one step left</div>
+                <div style={{ fontSize: 13, color: 'var(--txt-3)', lineHeight: 1.6, maxWidth: 360, margin: '0 auto' }}>
+                  This device holds your wallet <span style={{ fontFamily: 'monospace' }}>{localAddress.slice(0, 14)}…</span>, but it isn't linked to your account on the server yet. Link it with your wallet PIN so purchases can be credited.
+                </div>
+                <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={linkWalletNow} disabled={linking}>
+                  {linking ? 'Waiting for PIN…' : 'Link wallet with PIN'}
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>No wallet connected</div>
+                <div style={{ fontSize: 13, color: 'var(--txt-3)', lineHeight: 1.6, maxWidth: 360, margin: '0 auto' }}>
+                  Mallpoints are credited to a Mallchain wallet. Connect one first — purchases without a wallet can't be credited to you.
+                </div>
+                <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={() => navigate('/auth')}>
+                  Connect a wallet
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

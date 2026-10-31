@@ -2,7 +2,7 @@
  * App shell — fixed sidebar + topbar + routed content + global banners +
  * toasts + command palette.
  */
-import { useEffect, useState, Suspense, lazy } from 'react';
+import { useEffect, useState, useRef, Suspense, lazy } from 'react';
 import Sidebar from './components/Sidebar';
 import AnimatedBackground from './components/AnimatedBackground';
 const Admin = lazy(() => import('./features/admin/Admin'));
@@ -71,6 +71,12 @@ export default function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [expandedBanner, setExpandedBanner] = useState<'maintenance' | 'frozen' | null>(null);
   const maintenance = useMaintenanceStatus();
+  // Address whose PIN-verified server link was already completed or attempted
+  // during this page load. The /me boot check seeds it from the server's
+  // stored link, so the background linkWallet effect below never re-prompts
+  // the PIN on plain reloads — it only asks once, when the device holds a
+  // wallet the server hasn't been told about yet.
+  const linkedAddressRef = useRef<string | null>(null);
   
   // Compliance state
   const complianceStatus = useComplianceStatus();
@@ -137,6 +143,7 @@ export default function App() {
               store.state.wallet.accountId = u.walletAddress;
               store.state.wallet.chainId = store.state.wallet.chainId || chain.chainId;
             }
+            if (u.walletAddress) linkedAddressRef.current = u.walletAddress;
             store.commit();
             // subscribeUser() records the intent even if the socket hasn't
             // finished connecting yet, and the 'connect' handler applies it
@@ -201,13 +208,23 @@ export default function App() {
   // that sets st.wallet.address (signup's embedded wallet step, standalone
   // create/import/switch in WalletFlow.tsx) from one place, rather than
   // needing a call at each of those sites. Backend treats re-linking the
-  // same address as a no-op, so this is safe to fire on every change.
+  // same address as a no-op. Guarded per page load: /me already reporting
+  // this exact address means the link exists, so the PIN prompt is raised
+  // only for a genuinely unlinked local wallet — once per reload, never on
+  // every store change (the old unconditional call re-prompted the PIN on
+  // every reload and even on sessions merely seeded from the server).
   useEffect(() => {
-    if (st.user.authed && st.wallet.address) {
+    // Wait for the boot /me check to complete first: the persisted store can
+    // rehydrate with authed+address before /me resolves, and firing the link
+    // during that window prompts the PIN on every plain reload (the server
+    // link already exists — linkedAddressRef only learns that from /me).
+    if (!authInitialized) return;
+    if (st.user.authed && st.wallet.address && st.wallet.address !== linkedAddressRef.current) {
+      linkedAddressRef.current = st.wallet.address;
       authService.linkWallet(st.wallet.address);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [st.user.authed, st.wallet.address]);
+  }, [authInitialized, st.user.authed, st.wallet.address]);
 
   // One-time migration nudge: an account created before PIN-gating existed
   // has its recovery phrase sitting in st.wallet.mnemonic in plaintext (see

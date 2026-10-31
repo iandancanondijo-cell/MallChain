@@ -10,6 +10,8 @@ import { AlertTriangle } from 'lucide-react';
 import { store } from '../store/store';
 import { decryptMnemonic, verifyPin } from '../services/security';
 import { api } from '../services/api';
+import { config } from '../services/config';
+import { authService } from '../services/auth';
 import { mnemonicRequestBus, type MnemonicRequest } from '../services/mnemonicAccess';
 import { Modal } from './ui';
 import PINInput from './PINInput';
@@ -101,15 +103,53 @@ export function PinChallengeHost() {
     setBusy(true);
     
     try {
-      // Verify PIN on server first (rate limiting, lockout protection)
-      const verifyResponse = await fetch('/api/wallet/pin/verify-pin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin }),
-        credentials: 'include',
-      });
+      // Verify PIN on server first (rate limiting, lockout protection).
+      // Deliberately NOT the shared `api` service: its 401 interceptor
+      // force-logs-out the whole session on a mistyped PIN (the endpoint
+      // answers 401 for wrong PINs), which is worse than showing the error.
+      // But it must still match api.ts's URL/CSRF handling: a cookie-authed
+      // POST without X-CSRF-Token is rejected 403 by the backend, and the
+      // relative '/api/...' path only works behind the Vite dev proxy —
+      // against the production static host it 404'd and every attempt,
+      // correct PIN included, was reported as "Incorrect PIN".
+      const base = config.apiBaseUrl.replace(/\/$/, '');
+      const postVerify = async (csrf: string | null) => {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (csrf) headers['X-CSRF-Token'] = csrf;
+        return fetch(`${base}/api/wallet/pin/verify-pin`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ pin }),
+          credentials: 'include',
+        });
+      };
+      let verifyResponse = await postVerify(await authService.getCsrfToken());
+      if (verifyResponse.status === 403) {
+        // The CSRF secret cookie may have rotated mid-session — refresh the
+        // token and retry once (same recovery api.ts's performRequest does),
+        // otherwise this device would report every PIN as wrong.
+        authService.invalidateCsrfToken();
+        verifyResponse = await postVerify(await authService.getCsrfToken());
+        if (verifyResponse.status === 403) {
+          setBusy(false);
+          setError('Security check failed — please reload the page and try again.');
+          return;
+        }
+      }
 
-      const verifyData = await verifyResponse.json();
+      let verifyData: {
+        ok?: boolean; code?: string; valid?: boolean; locked?: boolean;
+        remainingTime?: number; attemptsRemaining?: number; error?: string;
+      } = {};
+      try { verifyData = await verifyResponse.json(); } catch { /* non-JSON body — handled below */ }
+
+      if (!verifyResponse.ok && ![400, 401, 429].includes(verifyResponse.status)) {
+        // 404/5xx/HTML error page etc — the service is unreachable, which is
+        // NOT the user's PIN being wrong, so don't burn an attempt over it.
+        setBusy(false);
+        setError('PIN verification service is unreachable — please try again.');
+        return;
+      }
 
       if (!verifyResponse.ok) {
         // Server-side lockout or too many attempts
