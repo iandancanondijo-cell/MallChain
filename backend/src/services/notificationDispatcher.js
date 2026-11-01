@@ -53,15 +53,44 @@ function isWithinDND(dnd) {
 }
 
 /**
+ * Map a category (plural preference-key, singular enum value, or raw kind)
+ * to the Notification schema's `type` enum
+ * (transaction|security|governance|campaign|badge|marketing|system). Callers
+ * historically passed the plural preference keys ('transactions',
+ * 'badgeAlerts'), which crashed Notification.create with a ValidationError
+ * and silently lost every row — normalize centrally so no caller can hit
+ * that again.
+ */
+const TYPE_BY_CATEGORY = {
+  transactions: 'transaction', transaction: 'transaction', wallet: 'transaction',
+  mlcns: 'transaction', marketplace: 'transaction',
+  campaigns: 'campaign', campaign: 'campaign', mlpts: 'campaign',
+  mining: 'campaign', referrals: 'campaign',
+  badgeAlerts: 'badge', badge: 'badge',
+  governance: 'governance',
+  security: 'security', account: 'security',
+  marketing: 'marketing',
+  system: 'system', network: 'system', support: 'system', administration: 'system',
+};
+
+function toNotificationType(category) {
+  return TYPE_BY_CATEGORY[category] || 'system';
+}
+
+/**
  * Map notification category to preference frequency key.
  */
 function categoryToFrequencyKey(category) {
   const mapping = {
     transaction: 'transactions',
+    transactions: 'transactions',
+    wallet: 'transactions',
     security: 'security',
     governance: 'governance',
     campaign: 'campaigns',
+    campaigns: 'campaigns',
     badge: 'badgeAlerts',
+    badgeAlerts: 'badgeAlerts',
     marketing: 'marketing',
     system: 'security',
   };
@@ -74,9 +103,13 @@ function categoryToFrequencyKey(category) {
  * @param {string} userId - User ID (MongoDB ObjectId string)
  * @param {string} category - Notification category (transaction, security, etc.)
  * @param {Object} payload - { title, message, data? }
+ * @param {Object} [options] - optional { channels: { email, sms, whatsapp, inApp }, pushInApp }.
+ *   `channels` is a per-dispatch gate used by admin broadcasts: a channel is
+ *   only attempted when BOTH the admin requested it and the user's prefs
+ *   enable it. `pushInApp: false` persists the row but skips the socket push.
  * @returns {Promise<{success: boolean, notificationId?: string, channels?: Object}>}
  */
-async function dispatchNotification(userId, category, payload) {
+async function dispatchNotification(userId, category, payload, options = {}) {
   try {
     const user = await User.findById(userId);
     if (!user) {
@@ -102,7 +135,11 @@ async function dispatchNotification(userId, category, payload) {
       return { success: false, error: 'Category disabled' };
     }
 
-    if (prefs.unsubscribedCategories.includes(category)) {
+    // unsubscribedCategories stores the plural preference keys ('marketing',
+    // 'campaigns'); accept either form so a plural category from the route is
+    // still honored.
+    const unsubscribed = prefs.unsubscribedCategories || [];
+    if (unsubscribed.includes(category) || unsubscribed.includes(frequencyKey)) {
       logger.info('notificationDispatcher', 'User unsubscribed from category', { userId, category });
       return { success: false, error: 'Unsubscribed from category' };
     }
@@ -112,50 +149,76 @@ async function dispatchNotification(userId, category, payload) {
       return { success: false, error: 'Do not disturb active' };
     }
 
+    // Per-dispatch channel gate (admin broadcast) — a channel requested as
+    // false here is never attempted, even when user prefs would allow it.
+    const gate = options.channels || {};
+    const gateOpen = (name) => gate[name] !== false;
+
     const channels = {
       email: false,
       sms: false,
       whatsapp: false,
-      inApp: prefs.channels.inApp,
+      inApp: prefs.channels.inApp && gateOpen('inApp'),
     };
+
+    const willEmail = prefs.channels.email && user.email && gateOpen('email');
+    const willSms = prefs.channels.sms && user.phone && gateOpen('sms');
+    const willWhatsapp = prefs.channels.whatsapp && user.phone && gateOpen('whatsapp');
 
     const deliveryStatus = {
-      email: 'skipped',
-      sms: 'skipped',
-      whatsapp: 'skipped',
+      email: willEmail ? 'pending' : 'skipped',
+      sms: willSms ? 'pending' : 'skipped',
+      whatsapp: willWhatsapp ? 'pending' : 'skipped',
     };
 
-    if (prefs.channels.email && user.email) {
-      const emailResult = await sendEmailNotification(user, category, payload);
-      channels.email = true;
-      deliveryStatus.email = emailResult.success ? 'sent' : 'failed';
-    }
+    const notifType = toNotificationType(category);
 
-    if (prefs.channels.sms && user.phone) {
-      const smsResult = await sendSMSNotification(user, category, payload);
-      channels.sms = true;
-      deliveryStatus.sms = smsResult.success ? 'sent' : 'failed';
-    }
-
-    if (prefs.channels.whatsapp && user.phone) {
-      const whatsappResult = await sendWhatsAppNotification(user, category, payload);
-      channels.whatsapp = true;
-      deliveryStatus.whatsapp = whatsappResult.success ? 'sent' : 'failed';
-    }
-
+    // PERSIST FIRST: the Notification row is written before any channel send.
+    // If the process dies mid fan-out (or an outbound provider call throws
+    // outside its try/catch), the in-app bell still has the row. Previously
+    // rows were saved only after all sends completed, so any crash lost the
+    // row while email/SMS had already gone out.
     const notification = new Notification({
       userId,
-      type: category,
+      type: notifType,
       title: payload.title,
       message: payload.message,
       data: payload.data,
-      channels,
-      deliveryStatus,
+      channels: { ...channels },
+      deliveryStatus: { ...deliveryStatus },
     });
 
     await notification.save();
 
-    if (global.io) {
+    if (willEmail) {
+      const emailResult = await sendEmailNotification(user, notifType, payload);
+      channels.email = true;
+      deliveryStatus.email = emailResult.success ? 'sent' : 'failed';
+    }
+
+    if (willSms) {
+      const smsResult = await sendSMSNotification(user, notifType, payload);
+      channels.sms = true;
+      deliveryStatus.sms = smsResult.success ? 'sent' : 'failed';
+    }
+
+    if (willWhatsapp) {
+      const whatsappResult = await sendWhatsAppNotification(user, notifType, payload);
+      channels.whatsapp = true;
+      deliveryStatus.whatsapp = whatsappResult.success ? 'sent' : 'failed';
+    }
+
+    notification.channels = channels;
+    notification.deliveryStatus = deliveryStatus;
+    try {
+      await notification.save();
+    } catch (err) {
+      logger.warn('notificationDispatcher', 'Failed to update delivery status', {
+        notificationId: notification._id, error: err.message,
+      });
+    }
+
+    if (global.io && channels.inApp && options.pushInApp !== false) {
       global.io.to(`user:${userId}`).emit('notification', {
         _id: notification._id,
         type: notification.type,

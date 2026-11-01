@@ -4,7 +4,7 @@ import { useStoreVersion, fmtMoney, StatusChip, Stepper, Modal, toast } from '..
 import { createEscrow, releaseFunds, openDispute, MarketplaceTxError } from '../../services/marketplaceTx';
 import { requestMnemonic } from '../../services/mnemonicAccess';
 
-interface Product { id: string; name: string; seller: string; sellerAddress: string; price: number; rating: number; img: string; cat: string }
+export interface Product { id: string; name: string; seller: string; sellerAddress: string; price: number; rating: number; img: string; cat: string }
 
 // x/marketplace escrow holds real bank-module coins (see
 // x/marketplace/keeper/escrow.go), not the custom MLCNS ledger — so escrow
@@ -28,7 +28,12 @@ const PRODUCTS: Product[] = [];
 const CATS = ['All', 'Food', 'Fashion', 'Home', 'Tech'];
 const SHIP_FLOW = ['processing', 'shipped', 'transit', 'delivered'] as const;
 
-export default function Marketplace({ navigate }: { navigate: (p: string) => void }) {
+/**
+ * `products` defaults to the (currently empty) on-chain-pending catalog; it is
+ * an explicit seam so tests and future callers can drive the checkout flow
+ * with a given catalog without reintroducing hardcoded demo data.
+ */
+export default function Marketplace({ navigate, products = PRODUCTS }: { navigate: (p: string) => void; products?: Product[] }) {
   useStoreVersion();
   const st = store.state;
   const cur = st.prefs.currency;
@@ -40,10 +45,10 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
   const [checkingOut, setCheckingOut] = useState(false);
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
 
-  const list = PRODUCTS.filter((p) => (cat === 'All' || p.cat === cat) && p.name.toLowerCase().includes(q.toLowerCase()));
+  const list = products.filter((p) => (cat === 'All' || p.cat === cat) && p.name.toLowerCase().includes(q.toLowerCase()));
   const inWish = (id: string) => st.marketplace.wishlist.includes(id);
   const inCart = (id: string) => st.marketplace.cart.some((c) => c.id === id);
-  const cartTotal = st.marketplace.cart.reduce((a, c) => a + (PRODUCTS.find((p) => p.id === c.id)?.price || 0) * c.qty, 0);
+  const cartTotal = st.marketplace.cart.reduce((a, c) => a + (products.find((p) => p.id === c.id)?.price || 0) * c.qty, 0);
 
   const toggleWish = (id: string) => {
     st.marketplace.wishlist = inWish(id) ? st.marketplace.wishlist.filter((w) => w !== id) : [...st.marketplace.wishlist, id];
@@ -76,7 +81,7 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
       // signed transaction) per seller.
       const bySeller = new Map<string, Product[]>();
       for (const c of st.marketplace.cart) {
-        const p = PRODUCTS.find((x) => x.id === c.id);
+        const p = products.find((x) => x.id === c.id);
         if (!p) continue;
         const existing = bySeller.get(p.sellerAddress) || [];
         for (let i = 0; i < c.qty; i++) existing.push(p);
@@ -266,7 +271,7 @@ export default function Marketplace({ navigate }: { navigate: (p: string) => voi
         <Modal title="Your cart" onClose={() => setCartOpen(false)}>
           {st.marketplace.cart.length === 0 && <div className="empty" style={{ color: 'var(--txt-3)', padding: 20, textAlign: 'center' }}>Your cart is empty.</div>}
           {st.marketplace.cart.map((c) => {
-            const p = PRODUCTS.find((x) => x.id === c.id);
+            const p = products.find((x) => x.id === c.id);
             return (
               <div key={c.id} className="list-row">
                 <span style={{ fontSize: 20 }}>{p?.img}</span>

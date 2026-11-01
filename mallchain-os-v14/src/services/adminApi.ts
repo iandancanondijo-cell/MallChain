@@ -7,6 +7,7 @@
  */
 import { api } from './api';
 import { type ApiResult } from './api';
+import { config } from './config';
 
 export interface CurrentUser {
   _id: string;
@@ -35,6 +36,7 @@ export interface AdminUser {
   role: 'user' | 'admin' | 'superadmin';
   banned: boolean;
   banReason?: string;
+  adminCategory?: string | null;
   mlpts_balance: number;
   mallcoin_balance: number;
   createdAt: string;
@@ -63,6 +65,33 @@ export interface AdminKycSubmission {
   riskLevel: 'low' | 'medium' | 'high';
   status: 'pending' | 'approved' | 'rejected' | 'review';
   submittedAt: string;
+}
+
+/** A decided KYC record from GET /api/admin/kyc/reviewed. */
+export interface AdminReviewedKyc extends AdminKycSubmission {
+  reviewedAt?: string;
+  reviewedBy?: { _id: string; email: string; username: string | null } | string | null;
+  reviewedScreenshotRef?: string;
+  notes?: string;
+}
+
+/** A decided AML review from GET /api/admin/aml-reviews/reviewed. */
+export interface AdminReviewedAml extends AdminAmlReview {
+  reviewedBy?: { _id: string; email: string; username: string | null } | string | null;
+}
+
+/** Identity bundle returned by GET /api/admin/kyc/user/:userId. */
+export interface AdminKycUserDetail {
+  user: { _id: string; email: string | null; username: string | null; role: string; kycLevel: number; banned: boolean; createdAt: string };
+  kyc: { total: number; latest: { status: string; submittedAt: string; reviewedAt?: string; riskLevel: string; idType: string } | null; history: Array<{ status: string; submittedAt: string; reviewedAt?: string; riskLevel: string; idType: string }> };
+  aml: { total: number; pending: number };
+}
+
+export interface GovernanceStats {
+  total: number;
+  voting: number;
+  passed: number;
+  rejected: number;
 }
 
 export interface AdminAmlReview {
@@ -156,9 +185,58 @@ export interface AuditLogEntry {
   createdAt: string;
 }
 
+// ---- audit-chain integrity (GET/POST /api/admin/integrity/*) ----
+export interface IntegrityDivergence {
+  seq: number;
+  reason: string;
+}
+
+export interface IntegrityStatus {
+  ok: boolean;
+  chain: {
+    length: number;
+    headSeq: number;
+    headHash: string | null;
+    valid: boolean;
+    firstDivergence: IntegrityDivergence | null;
+  };
+  anchors: {
+    mismatch: boolean;
+    chainBroken: boolean;
+    chainIssue: (IntegrityDivergence & { date?: string }) | null;
+    total: number;
+    last: {
+      date: string;
+      headSeq: number;
+      headHash: string;
+      status: string;
+      onChainTxHash: string | null;
+    } | null;
+    lastConfirmedAt: string | null;
+  };
+  mode: 'anchored' | 'unanchored-mode';
+  hmacSecretConfigured: boolean;
+}
+
+export interface IntegrityVerifyResult {
+  ok: boolean;
+  valid: boolean;
+  headSeq: number;
+  headHash: string | null;
+  totalEntries: number;
+  firstDivergence: IntegrityDivergence | null;
+  anchorMismatch: boolean;
+  anchorChain: { broken: boolean; reason?: string; seq?: number; date?: string; totalAnchors?: number };
+  checkedAt: string;
+}
+
 export interface LiquidityActivityItem {
   _id: string;
-  flow: 'buy' | 'withdraw' | 'reconciliation' | 'mallpoints_convert';
+  // Free-form on purpose: the backend enum grows over time (buy, withdraw,
+  // reconciliation, mallpoints_convert + mallpoints_purchase, reward,
+  // transfer, faucet, refund, …). Panels must render unknown flows
+  // gracefully — see LIQUIDITY_FLOW_LABELS in CategoryPage.
+  flow: string;
   stage: string;
   status: 'pending' | 'success' | 'failed' | 'info';
   poolId?: number;
@@ -326,6 +404,26 @@ class AdminApi {
     return api.get('/api/admin/kyc/pending');
   }
 
+  /** Decision history (approved/rejected) with reviewedBy/reviewedAt, paginated. */
+  async listReviewedKyc(params?: { page?: number; limit?: number }): Promise<ApiResult<{ submissions: AdminReviewedKyc[]; total: number; page: number; limit: number }>> {
+    const query: Record<string, string | number> = {};
+    if (params?.page) query.page = params.page;
+    if (params?.limit) query.limit = params.limit;
+    return api.get('/api/admin/kyc/reviewed', Object.keys(query).length ? query : undefined);
+  }
+
+  /** Identity bundle a KYC reviewer needs to expand an applicant row. */
+  async getKycUserDetail(userId: string): Promise<ApiResult<AdminKycUserDetail>> {
+    return api.get(`/api/admin/kyc/user/${encodeURIComponent(userId)}`);
+  }
+
+  async listReviewedAml(params?: { page?: number; limit?: number }): Promise<ApiResult<{ reviews: AdminReviewedAml[]; total: number; page: number; limit: number }>> {
+    const query: Record<string, string | number> = {};
+    if (params?.page) query.page = params.page;
+    if (params?.limit) query.limit = params.limit;
+    return api.get('/api/admin/aml-reviews/reviewed', Object.keys(query).length ? query : undefined);
+  }
+
   // Screenshot proof upload used by every admin review action below.
   // Backend (/api/admin/proof) writes the file under PROOFS_UPLOAD_DIR
   // with the admin's userId as filename prefix; the returned documentRef
@@ -381,8 +479,28 @@ class AdminApi {
     return api.post('/api/mines/campaigns', payload);
   }
 
-  async getAuditLog(limit = 50): Promise<ApiResult<{ logs: AuditLogEntry[] }>> {
-    return api.get('/api/admin/audit', { limit });
+  /** On-chain governance counters — safe for the blockchain category admin
+   *  (requireCategory('blockchain')), unlike /api/admin/dashboard which is
+   *  superadmin-only. */
+  async getGovernanceStats(): Promise<ApiResult<{ ok: boolean; stats: GovernanceStats; proposals: unknown[]; note?: string }>> {
+    return api.get('/api/admin/governance/stats');
+  }
+
+  async getAuditLog(params?: { limit?: number; action?: string; actor?: string; page?: number }): Promise<ApiResult<{ logs: AuditLogEntry[]; total: number; page: number; limit: number }>> {
+    const query: Record<string, string | number> = { limit: params?.limit ?? 50 };
+    if (params?.action) query.action = params.action;
+    if (params?.actor) query.actor = params.actor;
+    if (params?.page) query.page = params.page;
+    return api.get('/api/admin/audit', query);
+  }
+
+  // ============ AUDIT-CHAIN INTEGRITY (superadmin only) ============
+  async getIntegrityStatus(): Promise<ApiResult<IntegrityStatus>> {
+    return api.get('/api/admin/integrity/status');
+  }
+
+  async runIntegrityVerify(): Promise<ApiResult<IntegrityVerifyResult>> {
+    return api.post('/api/admin/integrity/verify', {});
   }
 
   async listBadgePurchases(status?: string): Promise<ApiResult<{ purchases: AdminBadgePurchase[]; total: number }>> {
@@ -409,12 +527,17 @@ class AdminApi {
     return api.post('/api/admin/badges/reject', { quoteId, reason });
   }
 
-  async uploadBadgeDesign(file: File, month: number, year: number): Promise<ApiResult<{ design: BadgeDesignRecord }>> {
+  async uploadBadgeDesign(file: File): Promise<ApiResult<{ design: BadgeDesignRecord }>> {
+    // Backend field name is `image` (uploadBadgeImage.single('image')); the
+    // month/year are taken from the server clock, not the client.
     const fd = new FormData();
-    fd.append('badgeImage', file);
-    fd.append('month', String(month));
-    fd.append('year', String(year));
+    fd.append('image', file);
     return api.upload<{ design: BadgeDesignRecord }>('/api/admin/badges/design', fd);
+  }
+
+  /** Absolute URL for the active badge design image (streams via GET /badges/design/image). */
+  badgeDesignImageUrl(): string {
+    return `${config.apiBaseUrl}/api/admin/badges/design/image?t=${Date.now()}`;
   }
 
   async getBadgeDesign(): Promise<ApiResult<{ design: BadgeDesignRecord | null }>> {
@@ -498,6 +621,18 @@ class AdminApi {
 
   async getTreasuryMetrics(): Promise<ApiResult<{ totals: TreasuryMetricTotal[] }>> {
     return api.get('/api/admin/treasury/metrics');
+  }
+
+  /**
+   * Live escrow deals for the Marketplace window — GET /api/marketplace/escrow
+   * relays the x/marketplace on-chain escrow query (chain REST on :1317).
+   * Public by design (external e-commerce integration), not admin-gated.
+   */
+  async listMarketplaceEscrows(params?: { buyer?: string; seller?: string }): Promise<ApiResult<{ success: boolean; escrows?: unknown[]; error?: string }>> {
+    const query: Record<string, string> = {};
+    if (params?.buyer) query.buyer = params.buyer;
+    if (params?.seller) query.seller = params.seller;
+    return api.get('/api/marketplace/escrow', Object.keys(query).length ? query : undefined);
   }
 
   async getMaintenance(): Promise<ApiResult<MaintenanceState>> {

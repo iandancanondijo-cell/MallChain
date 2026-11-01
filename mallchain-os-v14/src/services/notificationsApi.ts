@@ -56,24 +56,44 @@ export interface TestNotificationResult {
 
 class NotificationsApi {
   /**
-   * List all notifications for the current user
+   * List all notifications for the current user.
+   *
+   * Backend (routes/notifications.js) serves GET /api/notifications — there
+   * is no /me — and its documents use `type`/`message` where this client's
+   * AppNotification contract uses `kind`/`body`. The mapping happens here
+   * so callers (TopBar, MiscViews) stay unchanged.
    */
   async list(): Promise<ApiResult<{ notifications: AppNotification[] }>> {
-    return api.get('/api/notifications/me');
+    const res = await api.get<{ notifications: Array<Record<string, unknown> > }>('/api/notifications', { limit: 50 });
+    if (!res.ok || !res.data) {
+      return { ok: false, error: res.error, code: res.code };
+    }
+    const mapped: AppNotification[] = (res.data.notifications || []).map((n) => ({
+      _id: String(n._id),
+      kind: (n.type as string) || (n.kind as string) || 'system',
+      title: (n.title as string) || '',
+      body: (n.message as string) || (n.body as string) || '',
+      read: !!(n as { read?: boolean }).read,
+      createdAt: (n.createdAt as string) || new Date().toISOString(),
+    }));
+    return { ok: true, data: { notifications: mapped } };
   }
 
   /**
-   * Mark a single notification as read
+   * Mark a single notification as read — backend is PATCH /:id/read
+   * (there is no POST /read/:id).
    */
   async markRead(id: string): Promise<ApiResult<{ ok: boolean }>> {
-    return api.post(`/api/notifications/read/${encodeURIComponent(id)}`, {});
+    const res = await api.patch(`/api/notifications/${encodeURIComponent(id)}/read`);
+    return { ok: res.ok, data: { ok: res.ok }, error: res.error, code: res.code };
   }
 
   /**
-   * Mark all notifications as read
+   * Mark all notifications as read — backend is PATCH /read-all.
    */
   async markAllRead(): Promise<ApiResult<{ ok: boolean }>> {
-    return api.post('/api/notifications/read-all', {});
+    const res = await api.patch('/api/notifications/read-all');
+    return { ok: res.ok, data: { ok: res.ok }, error: res.error, code: res.code };
   }
 
   /**

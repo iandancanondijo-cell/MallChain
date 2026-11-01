@@ -26,6 +26,9 @@ import type {
   AdminCampaign,
   AdminDashboardStats,
   AdminKycSubmission,
+  AdminKycUserDetail,
+  AdminReviewedAml,
+  AdminReviewedKyc,
   AdminStructuringFlag,
   AdminSubmission,
   AdminUser,
@@ -36,12 +39,15 @@ import type {
   ChainStatus,
   ChainValidator,
   DynamicBurnThresholdEntry,
+  GovernanceStats,
   LiquidityActivityItem,
   TreasuryLedgerEntry,
   TreasuryMetricTotal,
 } from '../../../services/adminApi';
 import { fmtNum, Modal, toast } from '../../../components/ui';
 import { store } from '../../../store/store';
+import { config } from '../../../services/config';
+import { AdminErrorBanner, collectErrors, amlAmountLabel, displayPii } from '../adminShared';
 import ReportsAdmin from './ReportsAdmin';
 
 export type Category =
@@ -97,6 +103,18 @@ function formatTokens(t: string): string {
   if (!Number.isFinite(n)) return t || '—';
   return n.toLocaleString();
 }
+
+/** A populated `userId` comes back as an object, but old rows / unfilled
+ *  refs are plain strings — normalize to a display email + raw id. */
+function identityOf(ref: { _id: string; email: string; username: string | null } | string | null | undefined): { email: string; id: string | null } {
+  if (!ref) return { email: '—', id: null };
+  if (typeof ref === 'string') return { email: displayPii(ref), id: ref };
+  return { email: displayPii(ref.email || ref._id) || '—', id: ref._id || null };
+}
+
+/** Why the review screenshot is mandatory — surfaced inline so admins
+ *  understand the compliance flow instead of treating it as UI friction. */
+const SCREENSHOT_WHY = 'Audit compliance: your decision must be backed by a capture of the evidence you reviewed. Without it a review is your word against the record and fails a compliance audit — the backend rejects approve/reject without it. Stored with your admin id and retrievable only by admins.';
 
 export default function CategoryPage({ category }: { category: Category }) {
   const me = store.state.user;
@@ -176,6 +194,7 @@ function UsersAdmin() {
   const [banTarget, setBanTarget] = useState<AdminUser | null>(null);
   const [banReason, setBanReason] = useState('');
   const [loading, setLoading] = useState(true);
+  const [errors, setErrors] = useState<ReturnType<typeof collectErrors>>([]);
 
   const load = async (q?: string) => {
     setLoading(true);
@@ -186,6 +205,7 @@ function UsersAdmin() {
     } else {
       toast(r.error || 'Failed to load users', false);
     }
+    setErrors(collectErrors([['user list', r]]));
     setLoading(false);
   };
 
@@ -218,6 +238,8 @@ function UsersAdmin() {
 
   return (
     <>
+      <AdminErrorBanner errors={errors} />
+
       <div className="card mt">
         <div className="sec-title">
           <h2>Accounts</h2>
@@ -441,7 +463,11 @@ function BlockchainAdmin() {
   const [blocks, setBlocks] = useState<ChainBlock[]>([]);
   const [validators, setValidators] = useState<ChainValidator[]>([]);
   const [bonded, setBonded] = useState('');
-  const [governance, setGovernance] = useState<AdminDashboardStats | null>(null);
+  // /api/admin/governance/stats is requireCategory('blockchain') — works for
+  // the blockchain category admin. /api/admin/dashboard was superadmin-only,
+  // so category admins saw '—' here permanently.
+  const [governance, setGovernance] = useState<GovernanceStats | null>(null);
+  const [errors, setErrors] = useState<ReturnType<typeof collectErrors>>([]);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
@@ -450,7 +476,7 @@ function BlockchainAdmin() {
       adminApi.getChainStatus(),
       adminApi.getChainBlocks(8),
       adminApi.getChainValidators(),
-      adminApi.getDashboard(),
+      adminApi.getGovernanceStats(),
     ]);
     if (s.ok && s.data) setStatus(s.data.status);
     if (b.ok && b.data) setBlocks(b.data.blocks);
@@ -459,6 +485,12 @@ function BlockchainAdmin() {
       setBonded(v.data.bondedTokens);
     }
     if (g.ok && g.data) setGovernance(g.data.stats);
+    setErrors(collectErrors([
+      ['chain status', s],
+      ['recent blocks', b],
+      ['validators', v],
+      ['governance stats', g],
+    ]));
     setLoading(false);
   };
 
@@ -470,6 +502,8 @@ function BlockchainAdmin() {
 
   return (
     <>
+      <AdminErrorBanner errors={errors} />
+
       <div className="stat-grid">
         <div className="card">
           <div className="card-label">Block Height</div>
@@ -495,11 +529,13 @@ function BlockchainAdmin() {
           <div className="card-sub">{bonded ? formatTokens(bonded) : '—'} stake bonded</div>
         </div>
         <div className="card">
-          <div className="card-label">Pending Proposals</div>
+          <div className="card-label">Governance Proposals</div>
           <div className="card-value">
-            {governance ? governance.validators.pending : '—'}
+            {governance ? governance.voting : '—'}
           </div>
-          <div className="card-sub">x/gov proposals open</div>
+          <div className="card-sub">
+            {governance ? `${governance.voting} voting · ${governance.passed} passed · ${governance.rejected} rejected` : 'x/gov proposals open'}
+          </div>
         </div>
       </div>
 
@@ -586,19 +622,23 @@ function BlockchainAdmin() {
 function ValidatorAdmin() {
   const [apps, setApps] = useState<AdminValidatorApplication[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errors, setErrors] = useState<ReturnType<typeof collectErrors>>([]);
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [reviewing, setReviewing] = useState<string | null>(null);
 
-  const load = async (status = 'pending') => {
+  const load = async (status = statusFilter) => {
     setLoading(true);
     const r = await adminApi.listValidatorApplications(status);
     if (r.ok && r.data) setApps(r.data.applications);
+    setErrors(collectErrors([[`validator applications (${status})`, r]]));
     setLoading(false);
   };
 
   useEffect(() => {
-    void load('pending');
-  }, []);
+    void load(statusFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter]);
 
   const review = async (id: string, action: 'approved' | 'rejected') => {
     setReviewing(id);
@@ -618,16 +658,28 @@ function ValidatorAdmin() {
 
   return (
     <div className="card mt">
+      <AdminErrorBanner errors={errors} />
       <div className="sec-title">
-        <h2>Pending validator applications</h2>
-        <span className="sub">{apps.length} pending · x/staking sign-up queue</span>
-        <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => void load('pending')}>
+        <h2>{statusFilter === 'pending' ? 'Pending validator applications' : `${statusFilter} validator applications`}</h2>
+        <span className="sub">{apps.length} shown · x/staking sign-up queue</span>
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          {(['pending', 'approved', 'rejected'] as const).map((s) => (
+            <button
+              key={s}
+              className={`btn btn-sm ${statusFilter === s ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setStatusFilter(s)}
+            >
+              {s}
+            </button>
+          ))}
+        </span>
+        <button className="btn btn-ghost btn-sm" onClick={() => void load(statusFilter)}>
           Refresh
         </button>
       </div>
       {!loading && apps.length === 0 && (
         <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>
-          No pending applications.
+          No {statusFilter} applications.
         </div>
       )}
       {apps.map((a) => (
@@ -677,34 +729,84 @@ function ValidatorAdmin() {
 }
 
 // ============================================================================
-// KYC — /api/admin/kyc/* and /api/admin/aml-reviews/* (category:kyc)
+// KYC — /api/admin/kyc/*, /api/admin/aml-reviews/*, /api/admin/structuring-flags
+// (categories: kyc; structuring flags are shared with treasury)
+//
+// The full compliance flow lives here: pending KYC submissions → pending AML
+// reviews → decision history (Reviewed tab) → structuring flags (same
+// section the treasury window shows, so AML admins see the whole picture).
 // ============================================================================
 
 function KycAdmin() {
-  const [tab, setTab] = useState<'kyc' | 'aml'>('kyc');
+  const [tab, setTab] = useState<'kyc' | 'aml' | 'reviewed' | 'flags'>('kyc');
   const [kyc, setKyc] = useState<AdminKycSubmission[]>([]);
   const [aml, setAml] = useState<AdminAmlReview[]>([]);
+  const [reviewedKyc, setReviewedKyc] = useState<AdminReviewedKyc[]>([]);
+  const [reviewedAml, setReviewedAml] = useState<AdminReviewedAml[]>([]);
+  const [reviewedPage, setReviewedPage] = useState(0);
+  const [reviewedTotal, setReviewedTotal] = useState({ kyc: 0, aml: 0 });
+  const [flags, setFlags] = useState<AdminStructuringFlag[]>([]);
+  const [errors, setErrors] = useState<ReturnType<typeof collectErrors>>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [expandedUser, setExpandedUser] = useState<string | null>(null);
+  const [userDetail, setUserDetail] = useState<Record<string, AdminKycUserDetail | 'loading' | 'error'>>({});
   // Backend (/api/admin/kyc/:id/review) refuses approval/rejection without a
   // screenshotRef that was uploaded by *this* admin. Pick a file per row,
   // upload on click, then send the returned documentRef with the decision.
   const [screenshots, setScreenshots] = useState<Record<string, File | undefined>>({});
 
-  const load = async () => {
-    const [k, a] = await Promise.all([
+  const load = async (page = 0) => {
+    const [k, a, rk, ra, f] = await Promise.all([
       adminApi.listPendingKyc(),
       adminApi.listPendingAmlReviews(),
+      adminApi.listReviewedKyc({ page, limit: 25 }),
+      adminApi.listReviewedAml({ page, limit: 25 }),
+      adminApi.listStructuringFlags(false),
     ]);
     if (k.ok && k.data) setKyc(k.data.submissions);
     if (a.ok && a.data) setAml(a.data.reviews);
+    if (rk.ok && rk.data) {
+      setReviewedKyc((prev) => (page === 0 ? rk.data!.submissions : [...prev, ...rk.data!.submissions]));
+      setReviewedTotal((t) => ({ ...t, kyc: rk.data!.total }));
+    }
+    if (ra.ok && ra.data) {
+      setReviewedAml((prev) => (page === 0 ? ra.data!.reviews : [...prev, ...ra.data!.reviews]));
+      setReviewedTotal((t) => ({ ...t, aml: ra.data!.total }));
+    }
+    if (f.ok && f.data) setFlags(f.data.flags);
+    setReviewedPage(page);
+    setErrors(collectErrors([
+      ['pending KYC submissions', k],
+      ['pending AML reviews', a],
+      ['reviewed KYC decisions', rk],
+      ['reviewed AML decisions', ra],
+      ['structuring flags', f],
+    ]));
   };
 
   useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), 30000);
+    void load(0);
+    const id = setInterval(() => void load(0), 30000);
     return () => clearInterval(id);
   }, []);
+
+  const toggleUserDetail = async (userId: string) => {
+    if (expandedUser === userId) {
+      setExpandedUser(null);
+      return;
+    }
+    setExpandedUser(userId);
+    if (userDetail[userId] && userDetail[userId] !== 'error') return;
+    setUserDetail((m) => ({ ...m, [userId]: 'loading' }));
+    const r = await adminApi.getKycUserDetail(userId);
+    if (r.ok && r.data) {
+      setUserDetail((m) => ({ ...m, [userId]: r.data! }));
+    } else {
+      toast(r.error || 'Failed to load user detail', false);
+      setUserDetail((m) => ({ ...m, [userId]: 'error' }));
+    }
+  };
 
   const reviewKyc = async (id: string, action: 'approved' | 'rejected') => {
     const file = screenshots[id];
@@ -731,7 +833,7 @@ function KycAdmin() {
         const { [id]: _f, ...rest } = m;
         return rest;
       });
-      void load();
+      void load(0);
     } else {
       toast(r.error || 'Failed', false);
     }
@@ -747,41 +849,73 @@ function KycAdmin() {
         const { [id]: _, ...rest } = m;
         return rest;
       });
-      void load();
+      void load(0);
     } else {
       toast(r.error || 'Failed', false);
     }
   };
 
+  const acknowledgeFlag = async (id: string) => {
+    const r = await adminApi.acknowledgeStructuringFlag(id);
+    if (r.ok) {
+      toast('Flag acknowledged');
+      void load(0);
+    } else {
+      toast(r.error || 'Failed', false);
+    }
+  };
+
+  const docUrl = (kycId: string, side: 'front' | 'back' | 'document') =>
+    `${config.apiBaseUrl}/api/kyc/document/${encodeURIComponent(kycId)}?side=${side}`;
+
   return (
     <>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <button
-          className={`btn btn-sm ${tab === 'kyc' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setTab('kyc')}
-        >
-          KYC submissions ({kyc.length})
-        </button>
-        <button
-          className={`btn btn-sm ${tab === 'aml' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setTab('aml')}
-        >
-          AML reviews ({aml.length})
-        </button>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {([
+          ['kyc', `KYC submissions (${kyc.length})`],
+          ['aml', `AML reviews (${aml.length})`],
+          ['reviewed', `Reviewed (${reviewedKyc.length + reviewedAml.length}/${reviewedTotal.kyc + reviewedTotal.aml})`],
+          ['flags', `Structuring flags (${flags.length})`],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            className={`btn btn-sm ${tab === key ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setTab(key)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      {tab === 'kyc' ? (
+      <AdminErrorBanner errors={errors} />
+
+      {tab === 'kyc' && (
         <div className="card">
           <div className="sec-title">
             <h2>KYC submissions</h2>
             <span className="sub">{kyc.length} pending · every 30s</span>
           </div>
           {!kyc.length && <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>No pending submissions.</div>}
-          {kyc.map((k) => (
+          {kyc.map((k) => {
+            const who = identityOf(k.userId);
+            return (
             <div key={k._id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <div>
                   <div className="t">{k.firstName} {k.lastName}</div>
+                  <div className="m tiny">
+                    applicant: {who.email}{' '}
+                    {who.id && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ marginLeft: 6, padding: '2px 8px' }}
+                        onClick={() => void toggleUserDetail(who.id!)}
+                        title="Account status, KYC history and AML count for this user"
+                      >
+                        {expandedUser === who.id ? 'Hide user detail' : 'User detail'}
+                      </button>
+                    )}
+                  </div>
                   <div className="m tiny mono">
                     {k.idType} · {k.idNumber}
                   </div>
@@ -790,11 +924,31 @@ function KycAdmin() {
                   risk: {k.riskLevel}
                 </span>
               </div>
-              {k.idDocumentUrl && (
-                <div className="tiny mono" style={{ marginTop: 4, color: 'var(--txt-3)' }}>
-                  doc: <a href={k.idDocumentUrl} target="_blank" rel="noreferrer">{k.idDocumentUrl.slice(0, 50)}…</a>
+
+              {who.id && expandedUser === who.id && (
+                <div className="card" style={{ padding: 12, marginTop: 8, background: 'rgba(255,255,255,0.03)' }}>
+                  {userDetail[who.id] === 'loading' && <span className="tiny">loading…</span>}
+                  {userDetail[who.id] === 'error' && <span className="tiny" style={{ color: 'var(--danger, #FF7A70)' }}>Couldn't load this user.</span>}
+                  {userDetail[who.id] && userDetail[who.id] !== 'loading' && userDetail[who.id] !== 'error' && (
+                    <div className="tiny" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 6 }}>
+                      <div><b>Account</b><div>{(userDetail[who.id] as AdminKycUserDetail).user.email}</div></div>
+                      <div><b>Status</b><div>{(userDetail[who.id] as AdminKycUserDetail).user.banned ? 'banned' : 'active'} · joined {new Date((userDetail[who.id] as AdminKycUserDetail).user.createdAt).toLocaleDateString()}</div></div>
+                      <div><b>KYC level</b><div>{(userDetail[who.id] as AdminKycUserDetail).user.kycLevel} · {(userDetail[who.id] as AdminKycUserDetail).kyc.total} submission(s)</div></div>
+                      <div><b>AML reviews</b><div>{(userDetail[who.id] as AdminKycUserDetail).aml.total} total · {(userDetail[who.id] as AdminKycUserDetail).aml.pending} pending</div></div>
+                    </div>
+                  )}
                 </div>
               )}
+
+              <div className="tiny mono" style={{ marginTop: 4, color: 'var(--txt-3)' }}>
+                ID documents:{' '}
+                <a href={docUrl(k._id, 'front')} target="_blank" rel="noreferrer">view front</a>
+                {' · '}
+                <a href={docUrl(k._id, 'back')} target="_blank" rel="noreferrer">view back</a>
+                {' · '}
+                <a href={docUrl(k._id, 'document')} target="_blank" rel="noreferrer">legacy single doc</a>
+                <span style={{ marginLeft: 8, color: 'var(--txt-3)' }}>(served by /api/kyc/document — access is audited)</span>
+              </div>
               <textarea
                 className="input mt"
                 rows={2}
@@ -805,6 +959,7 @@ function KycAdmin() {
               <label
                 className="input mt"
                 style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '8px' }}
+                title={SCREENSHOT_WHY}
               >
                 <input
                   type="file"
@@ -819,6 +974,9 @@ function KycAdmin() {
                   {screenshots[k._id]
                     ? `✓ ${screenshots[k._id]!.name}`
                     : 'Review screenshot (PNG/JPG) — required to approve or reject'}
+                  <div className="tiny" style={{ marginTop: 2 }}>
+                    Why: {SCREENSHOT_WHY}
+                  </div>
                 </span>
               </label>
               <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -841,26 +999,37 @@ function KycAdmin() {
                 </span>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
-      ) : (
+      )}
+
+      {tab === 'aml' && (
         <div className="card">
           <div className="sec-title">
             <h2>AML reviews</h2>
-            <span className="sub">{aml.length} pending</span>
+            <span className="sub">{aml.length} pending · triggered by withdrawal cash-out checks</span>
           </div>
           {!aml.length && <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>No pending AML reviews.</div>}
-          {aml.map((r) => (
+          {aml.map((r) => {
+            const who = identityOf(r.userId);
+            return (
             <div key={r._id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
               <div>
                 <div className="t mono">{r.walletAddress}</div>
                 <div className="m tiny">
-                  Triggered at {formatKes(r.triggerAmountKes)} · source: {r.fundsSource}
+                  user: {who.email} · triggered at {amlAmountLabel(r.triggerAmountKes)} · source: {r.fundsSource}
                 </div>
+                {!r.triggerAmountKes && (
+                  <div className="tiny" style={{ color: 'var(--gold, #f3ba2f)' }}>
+                    The client-supplied amount was not recorded on this submission — verify the real
+                    withdrawal amount in the Treasury window before deciding.
+                  </div>
+                )}
                 <div className="m tiny" style={{ marginTop: 4 }}>{r.narrative}</div>
                 {r.documentRef && (
                   <div className="tiny mono" style={{ color: 'var(--txt-3)', marginTop: 4 }}>
-                    ref: {r.documentRef}
+                    ref: <a href={`${config.apiBaseUrl}/api/admin/proof/${encodeURIComponent(r.documentRef)}`} target="_blank" rel="noreferrer">{r.documentRef}</a>
                   </div>
                 )}
               </div>
@@ -891,6 +1060,118 @@ function KycAdmin() {
                 </span>
               </div>
             </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'reviewed' && (
+        <>
+          <div className="card">
+            <div className="sec-title">
+              <h2>Reviewed KYC decisions</h2>
+              <span className="sub">{reviewedKyc.length} of {reviewedTotal.kyc} shown — newest first</span>
+            </div>
+            {!reviewedKyc.length && <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>No KYC decisions recorded yet.</div>}
+            <table className="tbl">
+              <thead>
+                <tr><th>Applicant</th><th>Name</th><th>Decision</th><th>Decided by</th><th>When</th><th>Proof</th><th>Notes</th></tr>
+              </thead>
+              <tbody>
+                {reviewedKyc.map((k) => {
+                  const who = identityOf(k.userId);
+                  const by = identityOf(k.reviewedBy);
+                  return (
+                    <tr key={k._id}>
+                      <td className="tiny">{who.email}</td>
+                      <td>{k.firstName} {k.lastName}</td>
+                      <td>
+                        <span className={`chip ${k.status === 'approved' ? 'green' : 'red'}`}>{k.status}</span>
+                      </td>
+                      <td className="tiny">{by.email}</td>
+                      <td className="tiny">{k.reviewedAt ? new Date(k.reviewedAt).toLocaleString() : '—'}</td>
+                      <td className="tiny">
+                        {k.reviewedScreenshotRef ? (
+                          <a href={`${config.apiBaseUrl}/api/admin/proof/${encodeURIComponent(k.reviewedScreenshotRef)}`} target="_blank" rel="noreferrer">screenshot</a>
+                        ) : '—'}
+                      </td>
+                      <td className="tiny" style={{ maxWidth: 220 }}>{k.notes || '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="card mt">
+            <div className="sec-title">
+              <h2>Reviewed AML decisions</h2>
+              <span className="sub">{reviewedAml.length} of {reviewedTotal.aml} shown</span>
+            </div>
+            {!reviewedAml.length && <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>No AML decisions recorded yet.</div>}
+            <table className="tbl">
+              <thead>
+                <tr><th>User</th><th>Wallet</th><th>Amount</th><th>Decision</th><th>Decided by</th><th>When</th><th>Notes</th></tr>
+              </thead>
+              <tbody>
+                {reviewedAml.map((r) => {
+                  const who = identityOf(r.userId);
+                  const by = identityOf(r.reviewedBy);
+                  return (
+                    <tr key={r._id}>
+                      <td className="tiny">{who.email}</td>
+                      <td className="tiny mono">{r.walletAddress ? `${r.walletAddress.slice(0, 12)}…${r.walletAddress.slice(-6)}` : '—'}</td>
+                      <td className="num tiny">{amlAmountLabel(r.triggerAmountKes)}</td>
+                      <td>
+                        <span className={`chip ${r.status === 'approved' ? 'green' : 'red'}`}>{r.status}</span>
+                      </td>
+                      <td className="tiny">{by.email}</td>
+                      <td className="tiny">{r.reviewedAt ? new Date(r.reviewedAt).toLocaleString() : '—'}</td>
+                      <td className="tiny" style={{ maxWidth: 220 }}>{r.reviewNotes || '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {(reviewedKyc.length < reviewedTotal.kyc || reviewedAml.length < reviewedTotal.aml) && (
+            <button className="btn btn-ghost btn-sm mt" onClick={() => void load(reviewedPage + 1)}>
+              Load more decisions
+            </button>
+          )}
+        </>
+      )}
+
+      {tab === 'flags' && (
+        <div className="card">
+          <div className="sec-title">
+            <h2>Structuring flags</h2>
+            <span className="sub">{flags.length} unacknowledged · also visible in the Treasury window</span>
+          </div>
+          <p className="tiny" style={{ color: 'var(--txt-3)', margin: '0 0 8px' }}>
+            Raised automatically when one wallet's cumulative cash-outs exceed the structuring threshold
+            inside a rolling window. Acknowledging here records the AML review; withdrawal-level detail
+            lives in <a href="#/admin?cat=treasury">the Treasury window</a>.
+          </p>
+          {!flags.length && <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>No active flags.</div>}
+          {flags.map((f) => (
+            <div key={f._id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <div>
+                  <div className="t mono">{f.walletAddress}</div>
+                  <div className="m tiny">
+                    {formatKes(f.cumulativeKes)} in window · {f.relatedWithdrawalIds.length} withdrawals
+                  </div>
+                  <div className="tiny" style={{ color: 'var(--txt-3)' }}>
+                    {new Date(f.windowStartAt).toLocaleString()} → {new Date(f.windowEndAt).toLocaleString()}
+                  </div>
+                </div>
+                <button className="btn btn-ghost btn-sm" onClick={() => void acknowledgeFlag(f._id)}>
+                  Acknowledge
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -911,6 +1192,7 @@ function MiningAdmin() {
   // through /api/admin/proof by *this* admin — without it the backend 400s.
   const [decisionShots, setDecisionShots] = useState<Record<string, File | undefined>>({});
   const [busySub, setBusySub] = useState<string | null>(null);
+  const [errors, setErrors] = useState<ReturnType<typeof collectErrors>>([]);
 
   const load = async () => {
     const [c, s, p, i] = await Promise.all([
@@ -923,6 +1205,12 @@ function MiningAdmin() {
     if (s.ok && s.data) setSubs(s.data.submissions);
     if (p.ok && p.data) setPurchases(p.data.purchases);
     if (i.ok && i.data) setIssuances(i.data.issuances);
+    setErrors(collectErrors([
+      ['mining campaigns', c],
+      ['pending submissions', s],
+      ['badge purchases', p],
+      ['badge issuances', i],
+    ]));
   };
 
   useEffect(() => {
@@ -1011,6 +1299,8 @@ function MiningAdmin() {
 
   return (
     <>
+      <AdminErrorBanner errors={errors} />
+
       <div className="stat-grid">
         <div className="card">
           <div className="card-label">Active campaigns</div>
@@ -1166,6 +1456,7 @@ function TreasuryAdmin() {
   const [metrics, setMetrics] = useState<TreasuryMetricTotal[]>([]);
   const [policies, setPolicies] = useState<BurnPolicyEntry[]>([]);
   const [flags, setFlags] = useState<AdminStructuringFlag[]>([]);
+  const [errors, setErrors] = useState<ReturnType<typeof collectErrors>>([]);
 
   const load = async () => {
     const [w, l, m, p, f] = await Promise.all([
@@ -1180,6 +1471,13 @@ function TreasuryAdmin() {
     if (m.ok && m.data) setMetrics(m.data.totals);
     if (p.ok && p.data) setPolicies(p.data.policies);
     if (f.ok && f.data) setFlags(f.data.flags);
+    setErrors(collectErrors([
+      ['pending withdrawals', w],
+      ['treasury ledger', l],
+      ['treasury metrics', m],
+      ['burn policies', p],
+      ['structuring flags', f],
+    ]));
   };
 
   useEffect(() => {
@@ -1223,6 +1521,8 @@ function TreasuryAdmin() {
 
   return (
     <>
+      <AdminErrorBanner errors={errors} />
+
       <div className="stat-grid">
         <div className="card">
           <div className="card-label">Pending withdrawals</div>
@@ -1288,7 +1588,7 @@ function TreasuryAdmin() {
       <div className="card mt">
         <div className="sec-title">
           <h2>Structuring flags</h2>
-          <span className="sub">{flags.length} unacknowledged</span>
+          <span className="sub">{flags.length} unacknowledged · <a href="#/admin?cat=kyc">AML reviews live in the KYC window</a></span>
         </div>
         {!flags.length && <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>No active flags.</div>}
         {flags.map((f) => (
@@ -1377,48 +1677,143 @@ function TreasuryAdmin() {
 }
 
 // ============================================================================
-// MARKETPLACE — scoped placeholder. The marketplace routes (escrow/listings)
-// live on /api/marketplace which is user-facing, not admin-gated. From the
-// admin panel we surface what this category is meant to watch over: deals
-// in flight, escrow state, dispute queues. For now we offer admins a
-// read-only window into the treasury ledger (which captures marketplace
-// burns) and a clear note about its scope.
+// MARKETPLACE — escrow state read live from the chain relay
+// (/api/marketplace/escrow → x/marketplace on :1317) plus the treasury burn
+// ledger. There is no separate admin-gated marketplace endpoint on the
+// backend; the on-chain escrow query is the real record of deals in flight.
+// Dispute/listing queues are not implemented in x/marketplace yet, so the
+// panel says so honestly instead of showing blanks.
 // ============================================================================
+
+interface ChainEscrow {
+  id?: string;
+  escrowId?: string;
+  buyer?: string;
+  seller?: string;
+  amount?: { denom?: string; amount?: string } | string;
+  status?: string;
+  state?: string;
+  createdAt?: string;
+  openedAt?: string;
+}
 
 function MarketplaceAdmin() {
   const [ledger, setLedger] = useState<TreasuryLedgerEntry[]>([]);
+  const [escrows, setEscrows] = useState<ChainEscrow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [escrowError, setEscrowError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
     setLoading(true);
     setError(null);
-    const r = await adminApi.getTreasuryLedger({ activity: 'burn', limit: 30 });
+    const [r, e] = await Promise.all([
+      adminApi.getTreasuryLedger({ activity: 'burn', limit: 30 }),
+      adminApi.listMarketplaceEscrows(),
+    ]);
     if (r.ok && r.data) {
       setLedger(r.data.entries);
     } else {
       setError(r.error || 'Failed to load burn ledger');
+    }
+    if (e.ok && e.data) {
+      setEscrows((e.data.escrows || []) as ChainEscrow[]);
+      setEscrowError(null);
+    } else {
+      setEscrows([]);
+      setEscrowError(e.error || 'Escrow query unavailable (chain REST offline?)');
     }
     setLoading(false);
   };
 
   useEffect(() => {
     void load();
+    const id = setInterval(() => void load(), 30000);
+    return () => clearInterval(id);
   }, []);
+
+  const escrowCount = (s?: string) => (s || '').toLowerCase();
 
   return (
     <>
       <div className="card">
         <div className="sec-title">
           <h2>Marketplace category</h2>
-          <span className="sub">burn events tied to marketplace purchases</span>
+          <span className="sub">escrow deals on-chain + burn events from marketplace purchases</span>
         </div>
         <p className="tiny" style={{ color: 'var(--txt-3)' }}>
-          This admin window watches the marketplace. End-user listing flows run on{' '}
-          <code>/api/marketplace</code> and don't surface here. The treasury ledger
-          captures every marketplace burn — that's the canonical signal this admin
-          needs to act on.
+          Deals settle through on-chain escrow (x/marketplace), surfaced live below. Listing creation
+          and dispute transactions run on <code>/api/marketplace</code> user-side; this window is the
+          admin read surface. Dispute/listing <em>queues</em> aren't implemented on-chain yet — no
+          marketplace transaction data exists for them, so there is nothing to show there beyond an
+          honest "coming soon".
         </p>
+      </div>
+
+      <div className="stat-grid mt">
+        <div className="card">
+          <div className="card-label">Escrows in flight</div>
+          <div className="card-value">{escrows.filter((e) => !['released', 'refunded', 'closed', 'completed'].includes(escrowCount(e.status || e.state))).length}</div>
+          <div className="card-sub">from x/marketplace chain query</div>
+        </div>
+        <div className="card">
+          <div className="card-label">Escrows (total)</div>
+          <div className="card-value">{escrows.length}</div>
+          <div className="card-sub">all statuses on the chain</div>
+        </div>
+        <div className="card">
+          <div className="card-label">Marketplace burns</div>
+          <div className="card-value">{ledger.length}</div>
+          <div className="card-sub">treasury ledger entries (latest 30)</div>
+        </div>
+      </div>
+
+      <div className="card mt">
+        <div className="sec-title">
+          <h2>Escrow deals</h2>
+          <span className="sub">{loading ? 'loading…' : escrowError ? 'unavailable' : `${escrows.length} on-chain`}</span>
+          <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => void load()}>Refresh</button>
+        </div>
+        {escrowError && (
+          <div style={{ color: 'var(--danger, #FF7A70)', padding: '8px 0' }}>{escrowError}</div>
+        )}
+        {!escrowError && !escrows.length && !loading && (
+          <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>
+            No escrow deals recorded yet — the marketplace opens an on-chain escrow for each purchase.
+          </div>
+        )}
+        {escrows.length > 0 && (
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Buyer</th>
+                <th>Seller</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {escrows.slice(0, 50).map((e, i) => (
+                <tr key={e.id || e.escrowId || i}>
+                  <td className="tiny mono">{e.id || e.escrowId || '—'}</td>
+                  <td className="tiny mono">{e.buyer ? `${e.buyer.slice(0, 12)}…${e.buyer.slice(-6)}` : '—'}</td>
+                  <td className="tiny mono">{e.seller ? `${e.seller.slice(0, 12)}…${e.seller.slice(-6)}` : '—'}</td>
+                  <td className="num tiny">
+                    {typeof e.amount === 'object' && e.amount
+                      ? `${e.amount.amount ?? '—'} ${e.amount.denom ?? ''}`
+                      : (e.amount as string) || '—'}
+                  </td>
+                  <td>
+                    <span className="chip gold">{e.status || e.state || 'unknown'}</span>
+                  </td>
+                  <td className="tiny">{(e.createdAt || e.openedAt) ? timeAgo(e.createdAt || e.openedAt!) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="card mt">
@@ -1432,7 +1827,9 @@ function MarketplaceAdmin() {
           </div>
         )}
         {!error && !loading && !ledger.length && (
-          <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>No burn events recorded.</div>
+          <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>
+            No burn events recorded yet — marketplace purchase burns land here once deals settle.
+          </div>
         )}
         {!error && ledger.length > 0 && (
         <table className="tbl">
@@ -1468,8 +1865,33 @@ function MarketplaceAdmin() {
 // /api/admin/treasury/metrics so a category admin only has the MLPTS lens.
 // ============================================================================
 
+// The backend LiquidityPoolActivity `flow` enum grows (mallpoints_purchase,
+// reward, transfer, faucet, refund were added alongside the original
+// buy/withdraw/reconciliation/mallpoints_convert). Keep a friendly label for
+// every known flow, but never hardcode the *rendered set*: unknown flows fall
+// back to a prettified raw value so the panel can't silently hide new data.
+const LIQUIDITY_FLOW_LABELS: Record<string, string> = {
+  buy: 'Mallcoin buy (M-Pesa in)',
+  withdraw: 'Withdrawal (M-Pesa out)',
+  reconciliation: 'Reconciliation',
+  mallpoints_convert: 'Mallpoints → Mallcoin conversion',
+  mallpoints_purchase: 'Mallpoints purchase',
+  reward: 'Reward payout',
+  transfer: 'Wallet transfer',
+  faucet: 'Faucet',
+  refund: 'Refund',
+};
+
+function flowLabel(flow: string): string {
+  if (LIQUIDITY_FLOW_LABELS[flow]) return LIQUIDITY_FLOW_LABELS[flow];
+  return flow.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
 function MlptsAdmin() {
   const [items, setItems] = useState<LiquidityActivityItem[]>([]);
+  const [flowFilter, setFlowFilter] = useState<string>('all');
+  const [flowsSeen, setFlowsSeen] = useState<string[]>([]);
+  const [errors, setErrors] = useState<ReturnType<typeof collectErrors>>([]);
   const [metrics, setMetrics] = useState<TreasuryMetricTotal[]>([]);
   // Every MLPTS→MLCNS conversion collection, not just whatever shares the
   // latest-25 page with buy/withdraw noise — /api/liquidity/activity filters
@@ -1478,20 +1900,38 @@ function MlptsAdmin() {
 
   const load = async () => {
     const [l, c, m] = await Promise.all([
-      adminApi.listLiquidityActivity({ limit: 25 }),
+      adminApi.listLiquidityActivity(flowFilter === 'all' ? { limit: 50 } : { flow: flowFilter, limit: 50 }),
       adminApi.listLiquidityActivity({ flow: 'mallpoints_convert', limit: 500 }),
       adminApi.getTreasuryMetrics(),
     ]);
-    if (l.ok && l.data) setItems(l.data.items);
+    if (l.ok && l.data) {
+      setItems(l.data.items);
+      if (flowFilter === 'all') {
+        setFlowsSeen((prev) => Array.from(new Set([...prev, ...l.data!.items.map((i) => i.flow)])));
+      }
+    }
     if (c.ok && c.data) setConversions({ items: c.data.items, total: c.data.total });
     if (m.ok && m.data) setMetrics(m.data.totals);
+    setErrors(collectErrors([
+      ['liquidity activity', l],
+      ['conversion ledger', c],
+      ['treasury metrics', m],
+    ]));
   };
 
   useEffect(() => {
     void load();
     const id = setInterval(() => void load(), 30000);
     return () => clearInterval(id);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flowFilter]);
+
+  // Filter options = the known enum ∪ flows actually observed in the data —
+  // so new backend flow types are filterable as soon as they appear.
+  const flowOptions = useMemo(
+    () => Array.from(new Set([...Object.keys(LIQUIDITY_FLOW_LABELS), ...flowsSeen])),
+    [flowsSeen]
+  );
 
   const mallpointsConversion = useMemo(
     () =>
@@ -1508,6 +1948,8 @@ function MlptsAdmin() {
 
   return (
     <>
+      <AdminErrorBanner errors={errors} />
+
       <div className="stat-grid">
         <div className="card">
           <div className="card-label">MLPTS converted (all-time)</div>
@@ -1569,9 +2011,21 @@ function MlptsAdmin() {
       <div className="card mt">
         <div className="sec-title">
           <h2>Liquidity activity</h2>
-          <span className="sub">latest 25 entries · admin-only</span>
+          <span className="sub">latest 50 entries · admin-only</span>
+          <select
+            className="input"
+            style={{ marginLeft: 'auto', width: 'auto', padding: '6px 10px', fontSize: 12 }}
+            value={flowFilter}
+            onChange={(e) => setFlowFilter(e.target.value)}
+            title="Filter by transaction flow type"
+          >
+            <option value="all">All flows</option>
+            {flowOptions.map((f) => (
+              <option key={f} value={f}>{flowLabel(f)}</option>
+            ))}
+          </select>
         </div>
-        {!items.length && <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>No liquidity events yet.</div>}
+        {!items.length && <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>No liquidity events yet{flowFilter !== 'all' ? ` for flow "${flowLabel(flowFilter)}"` : ''}.</div>}
         <table className="tbl">
           <thead>
             <tr>
@@ -1586,7 +2040,9 @@ function MlptsAdmin() {
           <tbody>
             {items.map((i) => (
               <tr key={i._id}>
-                <td>{i.flow}</td>
+                <td>
+                  <span className="chip gold" title={i.flow}>{flowLabel(i.flow)}</span>
+                </td>
                 <td>{i.stage}</td>
                 <td>
                   <span

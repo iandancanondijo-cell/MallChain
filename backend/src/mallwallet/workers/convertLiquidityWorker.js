@@ -1,3 +1,18 @@
+/**
+ * @deprecated — RETIRED, NOT STARTED ANYMORE (index.js no longer requires
+ * this file). This worker retried the operator's on-chain MsgAddLiquidity
+ * for the Mallpoints convert flow, but that add can never succeed: the
+ * operator account was never funded and MLCNS is an internal x/mlcoin
+ * ledger token the x/dex bank-coin module cannot hold (see the long-form
+ * notes in routes/mallpoints.js and services/reconciliationService.js).
+ * The convert flow now settles liquidity directly in the Mongo ledger
+ * ('mallpoints_convert' rows) and nothing enqueues to the
+ * 'convert-liquidity-dlq' BullMQ queue anymore (no callers of
+ * enqueueConvertLiquidityFailure remain). The file is kept only so the
+ * historical `convert_dead_letters` Mongo collection can be inspected
+ * against the original handler logic; delete it once the backlog is
+ * triaged.
+ */
 const { Worker } = require('bullmq')
 const { getBullMQConnection } = require('../queue/redis')
 const mongoose = require('mongoose')

@@ -8,6 +8,7 @@ const {
   isValidAddress,
 } = require('../services/mallcoinService');
 const { signAndBroadcastTransfer } = require('../services/mallcoinTxBuilder');
+const { recordTransferActivity } = require('../services/liquidityActivityService');
 const activityEvents = require('../services/activityEvents');
 const { config } = require('../config');
 
@@ -102,6 +103,32 @@ exports.sendMallcoins = async (req, res) => {
   }
 
   logger.info('sendMallcoins', 'Transaction broadcast successfully', { txHash, from, to, amount });
+
+  // Pool-ledger coverage: every confirmed P2P MLCNS transfer lands in the
+  // liquidity activity ledger as an informational row (affectsReserves:
+  // false — peer-to-peer movement shifts no fiat into or out of the pool).
+  // Fire-and-forget: a ledger write failure must never fail a settled
+  // transfer; the miss is logged instead.
+  const transferActorId = req.user?._id || req.user?.id;
+  try {
+    Promise.resolve(recordTransferActivity({
+      from,
+      to,
+      amountMlcns: amount,
+      txHash,
+      userId: transferActorId ? String(transferActorId) : undefined,
+      stage: 'p2p_transfer_broadcasted',
+    })).catch((ledgerErr) => logger.warn('sendMallcoins', 'pool-activity ledger write failed (non-fatal)', {
+      txHash,
+      error: ledgerErr.message || String(ledgerErr),
+    }));
+  } catch (hookErr) {
+    logger.warn('sendMallcoins', 'pool-activity ledger hook failed (non-fatal)', {
+      txHash,
+      error: hookErr?.message || String(hookErr),
+    });
+  }
+
   // Wallet-activity emails for both holders. The previous call passed the
   // raw payload ({txHash, from, to, denom}) instead of the template's field
   // names (asset / recipient_display / tx_hash_short), so validateRequired
@@ -198,6 +225,35 @@ exports.processPayment = async (req, res) => {
 };
 
 /**
+ * Belt-and-braces lookup used when the single-tx REST GET misses: this node's
+ * REST tx-LIST endpoint rejects queries (see the tx-history fix), but the RPC
+ * :26657/tx_search index does serve `tx.hash=` queries — same pattern
+ * blockchainTxController.js uses. Returns null on a genuine miss; throws on
+ * node unreachability so the caller can decide how to degrade.
+ */
+async function lookupTxViaRpcSearch(txHash) {
+  const rpcUrl = `${CHAIN_RPC.replace(/\/$/, '')}/tx_search`;
+  const { data } = await axios.get(rpcUrl, {
+    params: { query: `"tx.hash='0x${String(txHash).toUpperCase()}'"`, per_page: 1 },
+    timeout: 3000,
+  });
+  const item = data?.result?.txs?.[0];
+  if (!item) return null;
+  // Tendermint 0.33 nests the DeliverTxResult under `result`, CometBFT under
+  // `tx_result`; `code` is omitted when 0 in some versions.
+  const txResult = item.tx_result || item.result || {};
+  return {
+    height: String(item.height ?? txResult.height ?? ''),
+    code: txResult.code ?? 0,
+    gasUsed: txResult.gas_used,
+    gasWanted: txResult.gas_wanted,
+    timestamp: txResult.timestamp,
+    rawLog: txResult.log,
+    events: txResult.events || [],
+  };
+}
+
+/**
  * Get transaction status from blockchain
  * GET /api/send/status/:txHash
  */
@@ -233,6 +289,30 @@ exports.getTransactionStatus = async (req, res) => {
     });
   } catch (e) {
     if (e.response?.status === 404) {
+      // REST miss — the tx is either genuinely unindexed yet or this node's
+      // REST single-tx route is lagging its index. One RPC tx_search pass
+      // before declaring "pending" so the frontend's confirmation poll can
+      // still resolve instead of burning its budget. Non-fatal: any failure
+      // here just falls through to the pending answer.
+      let rpcTx = null;
+      try {
+        rpcTx = await lookupTxViaRpcSearch(txHash);
+      } catch (fallbackErr) {
+        logger.warn('getTransactionStatus', 'RPC tx_search fallback failed', {
+          txHash,
+          error: fallbackErr.message || String(fallbackErr),
+        });
+      }
+      if (rpcTx) {
+        logger.info('getTransactionStatus', 'Transaction resolved via RPC tx_search fallback', { txHash, height: rpcTx.height });
+        return res.json({
+          success: true,
+          hash: txHash,
+          status: rpcTx.code === 0 ? 'confirmed' : 'failed',
+          source: 'rpc_tx_search',
+          ...rpcTx,
+        });
+      }
       logger.warn('getTransactionStatus', 'Transaction not found yet', { txHash });
       return res.json({
         success: false,

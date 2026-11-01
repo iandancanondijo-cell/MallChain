@@ -196,6 +196,33 @@ async function handlePayoutCallback(callbackData) {
         : resultDesc || 'Safaricom payout failed.';
     await withdrawal.save();
 
+    // Terminal payout transitions were silent to users: the callback moved the
+    // withdrawal to completed/failed but nothing told them. Fire-and-forget
+    // via the template engine (wallet.withdrawal_completed requires amount,
+    // asset, tx_status, reference_id; wallet.withdrawal_failed requires
+    // amount, asset, user_safe_reason, reference_id). A notification failure
+    // must never affect callback acknowledgement.
+    const { emitWithdrawalCompleted, emitWithdrawalFailed, userIdForAddress, userSafeReason } = require('./activityEvents');
+    userIdForAddress(withdrawal.walletAddress)
+      .then((uid) => {
+        if (!uid) return undefined;
+        if (resultCode === 0) {
+          return emitWithdrawalCompleted(uid, {
+            amount: Number(withdrawal.amountMlcns),
+            asset: 'MLCNS',
+            tx_status: 'completed',
+            reference_id: payoutRef || withdrawal.withdrawalId,
+          });
+        }
+        return emitWithdrawalFailed(uid, {
+          amount: Number(withdrawal.amountMlcns),
+          asset: 'MLCNS',
+          user_safe_reason: userSafeReason(resultDesc, 'The Safaricom payout for your withdrawal could not be completed. Our team has been alerted.'),
+          reference_id: payoutRef || withdrawal.withdrawalId,
+        });
+      })
+      .catch(() => {});
+
     await recordWithdrawLiquidityActivity(
       resultCode === 0 ? 'payout_completed' : 'payout_failed',
       withdrawal,

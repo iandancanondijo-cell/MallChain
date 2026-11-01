@@ -8,6 +8,7 @@ import { minesApi, type MinesProfile } from '../../services/minesApi';
 import { settingsApi, type UserSettingsData, type ContactInfo } from '../../services/settingsApi';
 import { kycApi, type KycStatusResponse } from '../../services/kycApi';
 import { api } from '../../services/api';
+import { authService } from '../../services/auth';
 import { badgeApi, type BadgeConfig, type BadgeQuote } from '../../services/badgeApi';
 import { SessionManager } from './components/SessionManager';
 import { LoginActivityComponent } from './components/LoginActivity';
@@ -73,6 +74,21 @@ export default function Settings() {
   const [phone, setPhone] = useState('');
   const [saving, setSaving] = useState(false);
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  // Explicit server-side wallet link (POST /api/auth/link-wallet) triggered
+  // from the "Wallet" status row when a local address exists but the backend
+  // hasn't confirmed the link — raises the PIN challenge itself.
+  const [linkingWallet, setLinkingWallet] = useState(false);
+  const linkWalletNow = async () => {
+    if (!st.wallet.address || linkingWallet) return;
+    setLinkingWallet(true);
+    const res = await authService.linkWallet(st.wallet.address);
+    setLinkingWallet(false);
+    if (res.ok) {
+      toast('Wallet linked to your account');
+    } else if (res.reason !== 'pin_cancelled') {
+      toast(res.reason || 'Could not link your wallet', false);
+    }
+  };
   const [kyc, setKyc] = useState<KycStatusResponse | null>(null);
   const [docModal, setDocModal] = useState<{ blobUrl: string; loading: boolean } | null>(null);
 
@@ -304,7 +320,18 @@ export default function Settings() {
           </div>
           <div className="flag-row" style={{ flex: '1 1 200px' }}>
             <div className="desc"><div className="t">Wallet</div><div className="m">Mallchain address</div></div>
-            <span className="chip" style={{ color: st.wallet.address ? 'var(--green)' : 'var(--txt-3)' }}>{st.wallet.address ? '✓ Connected' : 'Not connected'}</span>
+            {/* "Connected" is reserved for a server-confirmed link — a locally
+                present address alone still gets 403 wallet_not_linked from
+                /api/send/*, so don't claim Connected for it. */}
+            {st.wallet.linkedOnServer ? (
+              <span className="chip" style={{ color: 'var(--green)' }}>✓ Connected</span>
+            ) : st.wallet.address ? (
+              <button className="link-btn" onClick={linkWalletNow} disabled={linkingWallet}>
+                {linkingWallet ? 'Linking…' : 'Link wallet'}
+              </button>
+            ) : (
+              <span className="chip" style={{ color: 'var(--txt-3)' }}>Not connected</span>
+            )}
           </div>
           <div className="flag-row" style={{ flex: '1 1 200px' }}>
             <div className="desc"><div className="t">Mallchain badge</div><div className="m">7-day activity streak, or buy it</div></div>

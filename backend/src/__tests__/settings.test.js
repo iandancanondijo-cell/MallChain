@@ -96,3 +96,70 @@ describe('settings routes', () => {
     expect(UserSettings.deleteOne).toHaveBeenCalledWith({ userId: 'user1' });
   });
 });
+
+describe('settings social-account routes', () => {
+  let app;
+  let settings;
+
+  beforeAll(() => {
+    app = express();
+    app.use(express.json());
+    app.use('/api/settings', settingsRoutes);
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    settings = fakeSettings({ socialAccounts: [] });
+    UserSettings.findOne.mockResolvedValue(settings);
+  });
+
+  test('GET empty → POST reddit → GET shows it → DELETE → GET empty', async () => {
+    const get0 = await request(app).get('/api/settings/social');
+    expect(get0.status).toBe(200);
+    expect(get0.body).toEqual({ ok: true, data: [] });
+
+    const post = await request(app).post('/api/settings/social/reddit').send({ handle: '@Ian_' });
+    expect(post.status).toBe(200);
+    // leading '@' stripped, envelope matches settingsApi.updateSocialAccount
+    expect(post.body).toEqual({ ok: true, data: { platform: 'reddit', handle: 'Ian_', connected: true } });
+    expect(settings.save).toHaveBeenCalled();
+
+    const get1 = await request(app).get('/api/settings/social');
+    expect(get1.body.data).toHaveLength(1);
+    expect(get1.body.data[0]).toMatchObject({ platform: 'reddit', handle: 'Ian_', connected: true });
+
+    const del = await request(app).delete('/api/settings/social/reddit');
+    expect(del.status).toBe(200);
+    expect(del.body).toEqual({ ok: true, data: { removed: true } });
+
+    const get2 = await request(app).get('/api/settings/social');
+    expect(get2.body.data).toEqual([]);
+  });
+
+  test('POST rejects unknown platforms, empty handles and >100-char handles', async () => {
+    const bad = await request(app).post('/api/settings/social/myspace').send({ handle: 'x' });
+    expect(bad.status).toBe(400);
+    expect(bad.body.ok).toBe(false);
+
+    const empty = await request(app).post('/api/settings/social/reddit').send({ handle: '   ' });
+    expect(empty.status).toBe(400);
+
+    const long = await request(app).post('/api/settings/social/reddit').send({ handle: 'a'.repeat(101) });
+    expect(long.status).toBe(400);
+
+    expect(settings.socialAccounts).toHaveLength(0);
+  });
+
+  test('POST upserts an already-connected platform instead of duplicating it', async () => {
+    settings.socialAccounts.push({ platform: 'reddit', handle: 'old', connected: true });
+    await request(app).post('/api/settings/social/reddit').send({ handle: 'new' });
+    expect(settings.socialAccounts).toHaveLength(1);
+    expect(settings.socialAccounts[0].handle).toBe('new');
+  });
+
+  test('DELETE of a not-connected platform returns 404 with envelope error', async () => {
+    const res = await request(app).delete('/api/settings/social/github');
+    expect(res.status).toBe(404);
+    expect(res.body.ok).toBe(false);
+  });
+});

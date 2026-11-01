@@ -38,9 +38,16 @@ jest.mock('../middleware/tokenDenylist', () => ({
 jest.mock('../utils/activityTracker', () => ({
   markActiveToday: jest.fn(),
 }));
+// Pool-ledger coverage hook: sendMallcoins records a confirmed P2P transfer
+// in the liquidity activity ledger (informational row, non-fatal). Mock the
+// service so no model/metrics graph loads and the call is assertable.
+jest.mock('../services/liquidityActivityService', () => ({
+  recordTransferActivity: jest.fn(),
+}));
 
 const axios = require('axios');
 const mallcoinService = require('../services/mallcoinService');
+const { recordTransferActivity } = require('../services/liquidityActivityService');
 const { errorHandler } = require('../utils/errorHandler');
 const sendRoutes = require('../routes/send');
 const User = require('../models/user');
@@ -102,6 +109,7 @@ describe('sendController — real mall1... address flow (regression for a81288e)
 
   beforeEach(() => {
     jest.resetAllMocks();
+    recordTransferActivity.mockResolvedValue({});
     app = buildApp();
   });
 
@@ -128,6 +136,43 @@ describe('sendController — real mall1... address flow (regression for a81288e)
         expect.objectContaining({ tx_bytes: VALID_TX_BYTES }),
         expect.any(Object)
       );
+    });
+
+    test('records the confirmed transfer in the pool activity ledger (informational row)', async () => {
+      setupAuthAndWallet();
+      axios.post.mockResolvedValue({
+        data: { tx_response: { txhash: 'ABC123', code: 0 } },
+      });
+
+      const res = await request(app).post('/api/send/mallcoins')
+        .set(authHeader())
+        .send({ from: ADDR_A, to: ADDR_B, amount: 100, txBytes: VALID_TX_BYTES });
+
+      expect(res.status).toBe(200);
+      expect(recordTransferActivity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: ADDR_A,
+          to: ADDR_B,
+          amountMlcns: 100,
+          txHash: 'ABC123',
+          stage: 'p2p_transfer_broadcasted',
+        })
+      );
+    });
+
+    test('transfer still succeeds when the pool ledger write fails (non-fatal)', async () => {
+      setupAuthAndWallet();
+      axios.post.mockResolvedValue({
+        data: { tx_response: { txhash: 'ABC999', code: 0 } },
+      });
+      recordTransferActivity.mockRejectedValue(new Error('mongo down'));
+
+      const res = await request(app).post('/api/send/mallcoins')
+        .set(authHeader())
+        .send({ from: ADDR_A, to: ADDR_B, amount: 100, txBytes: VALID_TX_BYTES });
+
+      expect(res.status).toBe(200);
+      expect(res.body.txHash).toBe('ABC999');
     });
 
     test('rejects unauthenticated requests (B4: auth required)', async () => {
@@ -356,6 +401,81 @@ describe('sendController — real mall1... address flow (regression for a81288e)
 
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({ success: false, status: 'pending' });
+    });
+
+    test('falls back to RPC tx_search when the REST single-tx route misses', async () => {
+      const notFound = new Error('Not Found');
+      notFound.response = { status: 404 };
+      axios.get.mockImplementation((url) => {
+        if (String(url).includes('/tx_search')) {
+          return Promise.resolve({
+            data: {
+              result: {
+                txs: [
+                  {
+                    height: '612',
+                    hash: 'ABC123',
+                    tx_result: { code: 0, gas_used: '50000', gas_wanted: '60000', events: [{ type: 'message', attributes: [] }] },
+                  },
+                ],
+              },
+            },
+          });
+        }
+        return Promise.reject(notFound);
+      });
+
+      const res = await request(app).get('/api/send/status/ABC123ABC123ABC123ABC123ABC123ABC123ABC1');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        success: true,
+        status: 'confirmed',
+        height: '612',
+        source: 'rpc_tx_search',
+      });
+      expect(axios.get).toHaveBeenCalledWith(
+        expect.stringContaining('/tx_search'),
+        expect.objectContaining({
+          params: expect.objectContaining({
+            query: expect.stringContaining("tx.hash='0xABC123"),
+          }),
+        })
+      );
+    });
+
+    test('stays pending when both REST and the tx_search fallback miss', async () => {
+      const notFound = new Error('Not Found');
+      notFound.response = { status: 404 };
+      axios.get.mockImplementation((url) => {
+        if (String(url).includes('/tx_search')) {
+          return Promise.resolve({ data: { result: { txs: [] } } });
+        }
+        return Promise.reject(notFound);
+      });
+
+      const res = await request(app).get('/api/send/status/ABC123ABC123ABC123ABC123ABC123ABC123ABC1');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ success: false, status: 'pending' });
+    });
+
+    test('tx_search code!=0 is surfaced as failed, not pending', async () => {
+      const notFound = new Error('Not Found');
+      notFound.response = { status: 404 };
+      axios.get.mockImplementation((url) => {
+        if (String(url).includes('/tx_search')) {
+          return Promise.resolve({
+            data: { result: { txs: [{ height: '613', tx_result: { code: 5, log: 'out of gas', events: [] } }] } },
+          });
+        }
+        return Promise.reject(notFound);
+      });
+
+      const res = await request(app).get('/api/send/status/ABC123ABC123ABC123ABC123ABC123ABC123ABC1');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ success: true, status: 'failed', code: 5, height: '613' });
     });
   });
 

@@ -3,7 +3,7 @@ import { store } from '../../store/store';
 import { isRateLimited, getRateLimitErrorMessage, resetRateLimit } from '../../services/rateLimit';
 import { config } from '../../services/config';
 
-export type Result = { ok: boolean; message?: string };
+export type Result = { ok: boolean; message?: string; /** Set on a 423 login_cooldown response — seconds until sign-in is allowed again. */ cooldownSeconds?: number };
 export type SignInData = { email: string; password: string; remember: boolean };
 export type SignUpData = { email: string; password: string; referral: string };
 
@@ -67,6 +67,10 @@ export const authApi = {
       if (res.ok) {
         // Reset rate limit on success
         resetRateLimit(rateLimitKey);
+        // Cooldown is over as far as the server is concerned — drop any
+        // stale client-side countdown so AuthPage never shows it again after
+        // a successful sign-in.
+        authService.clearCooldown();
 
         const loginBody = await res.json();
         if (typeof loginBody?.expiresAt === 'number') {
@@ -101,6 +105,13 @@ export const authApi = {
       }
 
       const error = await res.json();
+      // Session-expiry cooldown (backend middleware/sessionCooldown.js):
+      // structured 423 — arm the client countdown from the server's own
+      // remaining seconds and let AuthPage render the lockout card.
+      if (res.status === 423 && error?.error === 'login_cooldown' && typeof error.retryAfterSeconds === 'number') {
+        authService.setCooldownUntil(Date.now() + error.retryAfterSeconds * 1000);
+        return { ok: false, message: error.error, cooldownSeconds: error.retryAfterSeconds };
+      }
       return { ok: false, message: error.error || "Login failed" };
     } catch (err) {
       return { ok: false, message: "Network error. Please try again." };

@@ -43,7 +43,9 @@ describe('Complete Authentication Flow Integration Test (Task 4.6)', () => {
   beforeAll(async () => {
     // Use JWT_SECRET from jest.setup.js
     JWT_SECRET = process.env.JWT_SECRET;
-    process.env.SESSION_TTL_MIN = '120';
+    // Session policy (2026-11): 30-minute sessions; expiry arms a 15-minute
+    // login cooldown (see sessionCooldown.test.js for the cooldown gates).
+    process.env.SESSION_TTL_MIN = '30';
 
     // Create test user data
     testPassword = 'TestPassword123!';
@@ -131,6 +133,20 @@ describe('Complete Authentication Flow Integration Test (Task 4.6)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  // The expired-token tests arm the real cooldown keys for the shared test
+  // userId via the (fail-open) sessionCooldown Redis calls — clear them so
+  // no other suite on this machine inherits a phantom 15-minute lockout.
+  afterAll(async () => {
+    try {
+      const Redis = require('ioredis');
+      const r = new Redis({ host: process.env.REDIS_HOST || '127.0.0.1', port: Number(process.env.REDIS_PORT || 6379), connectTimeout: 1000, maxRetriesPerRequest: 0, enableOfflineQueue: false });
+      await r.del(`login_cooldown:user:${testUser._id}`, `session:current:${testUser._id}`);
+      await r.quit();
+    } catch {
+      /* Redis absent in this environment — nothing was armed anyway */
+    }
   });
 
   describe('Complete Auth Flow: Login → Store Token → Access Protected Route', () => {
@@ -308,8 +324,11 @@ describe('Complete Authentication Flow Integration Test (Task 4.6)', () => {
       expect(response.body.error).toBe('invalid token');
     });
 
-    test('protected route returns 401 with expired token', async () => {
-      // Create token that expired 1 hour ago
+    test('protected route returns 401 session_expired with an expired token', async () => {
+      // Create token that expired 1 hour ago — under the session policy a
+      // signature-valid expired token means the 30-minute session ended:
+      // 401 {error:'session_expired', cooldownMinutes} + 15-minute login
+      // cooldown armed server-side (middleware/sessionCooldown.js).
       const expiredToken = jwt.sign(
         { userId: testUser._id, username: testUser.username },
         JWT_SECRET,
@@ -321,7 +340,8 @@ describe('Complete Authentication Flow Integration Test (Task 4.6)', () => {
         .set('Authorization', `Bearer ${expiredToken}`)
         .expect(401);
 
-      expect(response.body.error).toBe('invalid token');
+      expect(response.body.error).toBe('session_expired');
+      expect(response.body.cooldownMinutes).toBe(15);
     });
 
     test('protected route returns 401 when token user not found in database', async () => {
@@ -537,8 +557,9 @@ describe('Complete Authentication Flow Integration Test (Task 4.6)', () => {
 
       const decoded = jwt.verify(response.body.token, JWT_SECRET);
       
-      // Verify expiration is set to SESSION_TTL_MIN (120 minutes = 7200 seconds)
-      const expectedExp = decoded.iat + (120 * 60);
+      // Verify expiration is set to SESSION_TTL_MIN (30 minutes = 1800
+      // seconds — the platform-security session policy)
+      const expectedExp = decoded.iat + (30 * 60);
       expect(decoded.exp).toBeCloseTo(expectedExp, -1); // Allow 10 second tolerance
     });
 
@@ -647,12 +668,16 @@ describe('Complete Authentication Flow Integration Test (Task 4.6)', () => {
       );
 
       // Step 3: Try to access protected route with expired token → 401
+      // session_expired (+ the server arms the 15-minute login cooldown;
+      // this suite's inline login route does not check it — the real
+      // controller's cooldown gate is covered in sessionCooldown.test.js).
       const failedResponse = await request(app)
         .get('/api/profile')
         .set('Authorization', `Bearer ${expiredToken}`)
         .expect(401);
 
-      expect(failedResponse.body.error).toBe('invalid token');
+      expect(failedResponse.body.error).toBe('session_expired');
+      expect(failedResponse.body.cooldownMinutes).toBe(15);
 
       // Step 4: User re-logs in
       const reLoginResponse = await request(app)

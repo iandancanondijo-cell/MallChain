@@ -7,12 +7,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { api } from './api';
 import { sendMallcoinTransfer, MallcoinTxError } from './mallcoinTx';
 
-vi.mock('./api', () => ({
-  api: {
-    get: vi.fn(),
-    post: vi.fn(),
-  },
-}));
+vi.mock('./api', async (importOriginal) => {
+  // Only the `api` singleton's methods are stubbed; RateLimitError must stay
+  // the REAL class so the instanceof checks in mallcoinTx/txConfirmation keep
+  // working when the module graph loads this mock.
+  const actual = await importOriginal<typeof import('./api')>();
+  return {
+    ...actual,
+    api: {
+      get: vi.fn(),
+      post: vi.fn(),
+    },
+  };
+});
 
 // A real, funded genesis wallet mnemonic would sign for a mall1... address that
 // doesn't match this arbitrary test mnemonic's derived address — which is exactly

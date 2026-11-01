@@ -145,6 +145,16 @@ export interface AppState {
     pinHash: string;
     /** The real, canonical mnemonic storage — PIN-encrypted (services/security.ts encryptMnemonic). Decrypted on demand via requestMnemonic(), never held in plaintext in the store. */
     pinEncryptedMnemonic: string;
+    /**
+     * True only when the backend has CONFIRMED that this exact local wallet
+     * address is linked to the signed-in account (User.walletAddress) —
+     * seeded from GET /api/auth/me at boot and set by a successful
+     * POST /api/auth/link-wallet (services/auth.ts linkWallet). A locally
+     * present address is NOT enough: /api/send/* rejects broadcasts with
+     * 403 wallet_not_linked unless the server link exists, so the "Connected"
+     * badges key off this flag, not just st.wallet.address.
+     */
+    linkedOnServer: boolean;
   };
   marketplace: {
     cart: Array<{ id: string; qty: number }>;
@@ -341,7 +351,7 @@ function emptyState(): AppState {
     activity: [],
     prefs: { accent: 'gold', currency: detectDefaultCurrency(), lang: 'EN' },
     settings: { theme: 'dark', network: config.network },
-    wallet: { address: '', accountId: '', chainId: '', mnemonic: '', createdAt: 0, requests: [], pinHash: '', pinEncryptedMnemonic: '' },
+    wallet: { address: '', accountId: '', chainId: '', mnemonic: '', createdAt: 0, requests: [], pinHash: '', pinEncryptedMnemonic: '', linkedOnServer: false },
     marketplace: { cart: [], wishlist: [], orders: [] },
     staking: { delegated: 0, apy: 0, pendingUnstake: 0, cooldownEnds: null, history: [] },
     governance: { proposals: [] },

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, toast } from '../../components/ui';
 import { devhubApi, type DevApiKey } from '../../services/devhubApi';
+import { config } from '../../services/config';
+
+/** Node bundles are published by the backend under /downloads/node/. */
+const NODE_DOWNLOAD_BASE = `${config.apiBaseUrl.replace(/\/$/, '')}/downloads/node`;
 
 /** Developer Hub — real API-key management (backend/src/routes/devhub.js). */
 export default function DevHub() {
@@ -70,6 +74,17 @@ export default function DevHub() {
     { lang: 'cURL', code: `curl http://localhost:4000/api/wallet/mall1… \\\n  -H "Authorization: Bearer <token>"` },
   ];
 
+  const nodeSnippets = [
+    {
+      lang: 'Verify download',
+      code: `unzip mallchain-node-v48052ec8.zip && cd mallchain-node-v48052ec8-linux-amd64\nsha256sum -c SHA256SUMS.txt   # every file must report OK`,
+    },
+    {
+      lang: 'Verify chain data yourself',
+      code: `# your own node, your own truth — no mallchain.com backend involved\nRPC="http://127.0.0.1:26657"; API="http://127.0.0.1:1317"\ncurl -s $RPC/status | jq '.result.sync_info'          # height + latest_app_hash\ncurl -s $API/cosmos/staking/v1beta1/validators | jq '.validators|length'\ncurl -s $API/cosmos/bank/v1beta1/supply | jq          # real supply, straight from state`,
+    },
+  ];
+
   return (
     <div>
       <div className="view-head"><h1 className="text-gradient">Developer Hub</h1><span className="sub">build on Mallchain</span></div>
@@ -110,6 +125,38 @@ export default function DevHub() {
             <button className="btn btn-primary" onClick={createKey}>Create key</button>
           </div>
         </div>
+      </div>
+
+      <div className="card mt card-glow bg-gradient-card">
+        <div className="sec-title"><h2>Run a Node</h2><span className="sub">don't trust, verify</span></div>
+        <div className="tiny" style={{ lineHeight: 1.8, marginBottom: 12 }}>
+          Anyone in the world can run a Mallchain validator or full node on their own PC. A node needs
+          <b> only</b> the chain binary, <span className="mono">genesis.json</span> and a peer list — never our
+          Express backend or MongoDB (those are the web app's off-chain API layer, not consensus). Your node
+          re-executes every block itself and checks app hashes, so you verify the ledger instead of trusting it.
+          <br />
+          <b>In the bundle:</b> <span className="mono">marketplaced</span> + <span className="mono">gen-node-home</span> binaries (linux/amd64 &amp; arm64, statically linked),
+          verified <span className="mono">genesis.json</span>, config templates (correct ports, gRPC safely disabled), real peer ID, <span className="mono">INSTALL.md</span>, <span className="mono">PEERS.md</span>, <span className="mono">CREATE_VALIDATOR.sh</span>, <span className="mono">VERSION.txt</span> and <span className="mono">SHA256SUMS.txt</span>.
+        </div>
+        <div className="row">
+          <a className="btn btn-primary" href={`${NODE_DOWNLOAD_BASE}/amd64.zip`} download>Download node bundle (linux/amd64)</a>
+          <a className="btn btn-primary" href={`${NODE_DOWNLOAD_BASE}/arm64.zip`} download>Download node bundle (linux/arm64)</a>
+          <a className="btn btn-ghost" href={`${NODE_DOWNLOAD_BASE}/full.zip`} download>Combined zip</a>
+          <a className="btn btn-ghost" href={`${NODE_DOWNLOAD_BASE}/sha256sums.txt`}>SHA256 checksums</a>
+          <a className="btn btn-ghost" href={`${NODE_DOWNLOAD_BASE}/docs`} target="_blank" rel="noreferrer">Setup guide</a>
+        </div>
+        <div className="tiny mono" style={{ marginTop: 10, opacity: 0.75 }}>
+          Per-arch bundles ≈ 49 MB (amd64) / 44 MB (arm64), combined ≈ 89 MB · v48052ec8 · served live by the
+          backend at <span className="mono">{NODE_DOWNLOAD_BASE}/</span> (index lists checksums and sizes).
+          If a route 404s the bundle is missing from <span className="mono">backend/build/validator-bundle/zips/</span>;
+          rebuild with <span className="mono">scripts/build-validator-bundle.sh</span>.
+        </div>
+        {nodeSnippets.map((s) => (
+          <div key={s.lang} className="code-block">
+            <div className="code-head"><span className="chip">{s.lang}</span><button className="btn btn-ghost btn-sm" onClick={() => copy(s.code)}>{copied === s.code ? '✓ copied' : 'Copy'}</button></div>
+            <pre>{s.code}</pre>
+          </div>
+        ))}
       </div>
 
       <div className="card mt card-glow bg-gradient-card">

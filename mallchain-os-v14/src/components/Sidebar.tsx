@@ -18,7 +18,7 @@ import {
   ShoppingBag, Layers, Scale, Vote, SlidersHorizontal, Compass, Megaphone,
   CheckCircle, DollarSign, Trophy, BarChart3, ShieldCheck, Lock, Shield,
   ClipboardEdit, User, Search, MessageCircle, Link as LinkIcon, FileCode,
-  Code, Briefcase, Settings as SettingsIcon, PieChart, GraduationCap, Sparkles,
+  Code, Briefcase, Settings as SettingsIcon, PieChart, GraduationCap, Sparkles, Server,
 } from 'lucide-react';
 import { store, type AppState } from '../store/store';
 import { useStoreVersion } from './ui';
@@ -100,6 +100,7 @@ const GROUPS: NavGroup[] = [
     title: 'Validators',
     items: [
       { label: 'Become a Validator', path: '/validators', icon: Shield },
+      { label: 'Run a Node', path: '/run-node', icon: Server },
       { label: 'Apply', path: '/validators/apply', icon: ClipboardEdit },
       { label: 'Leaderboard', path: '/validators/leaderboard', icon: Trophy },
       { label: 'My Application', path: '/validators/profile', icon: User },

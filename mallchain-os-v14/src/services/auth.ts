@@ -22,10 +22,30 @@ import { requestMnemonic } from './mnemonicAccess';
 /** Exported so storeSync.ts can recognize this key in cross-tab 'storage' events without duplicating the literal. */
 export const SESSION_KEY = 'session';
 
+/**
+ * Post-expiry sign-in cooldown (platform security policy: 30-minute session
+ * → logout → 15 minutes before signing in again, showing the remaining
+ * time). Client-side mirror only — the server's 423 login_cooldown response
+ * is authoritative; this drives the AuthPage countdown so the user sees the
+ * lockout the moment the session ends instead of after a rejected attempt.
+ * Kept in its OWN localStorage key because clearSession()/logout() delete
+ * SESSION_KEY wholesale (and the cooldown must survive exactly that).
+ */
+export const COOLDOWN_KEY = 'login_cooldown_until';
+export const DEFAULT_COOLDOWN_MINUTES = 15;
+
 interface SessionMeta {
   /** Unix seconds — when the backend expects the auth cookie to expire. */
   authedUntil: number;
 }
+
+/** Outcome of linkWallet() — see its doc comment. `reason` is machine-readable (`pin_cancelled`, `not_signed_in`, a backend error string…) for logging; callers show their own human message. */
+export type LinkWalletResult = { ok: true } | { ok: false; reason: string };
+
+/** Outcome of getServerWalletLink(): `address` is the account's server-side linked wallet, or null when none is linked. */
+export type ServerWalletLinkResult =
+  | { ok: true; address: string | null }
+  | { ok: false; reason: string };
 
 /** Must match backend/src/mallwallet/security/verifyAdr036.js's linkWalletMessage() exactly. */
 function linkWalletMessage(address: string, timestamp: string): string {
@@ -68,6 +88,51 @@ class AuthService {
       return typeof parsed?.authedUntil === 'number' ? parsed : null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * The raw `authedUntil` (unix seconds) from the session marker, WITHOUT
+   * the expiry-driven clear that isAuthenticated() performs — callers
+   * (handle401Error, storeSync) need to distinguish "the session ended on
+   * schedule" from "the server rejected a still-unexpired token" before the
+   * marker is wiped.
+   */
+  getAuthedUntil(): number | null {
+    return this.readSession()?.authedUntil ?? null;
+  }
+
+  /** Cooldown end (epoch ms) from localStorage, or null. Past values are cleared. */
+  getCooldownUntil(): number | null {
+    try {
+      const raw = localStorage.getItem(COOLDOWN_KEY);
+      if (!raw) return null;
+      const until = Number(raw);
+      if (!Number.isFinite(until)) return null;
+      if (until <= Date.now()) {
+        localStorage.removeItem(COOLDOWN_KEY);
+        return null;
+      }
+      return until;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Arm the client-side cooldown countdown (takes epoch ms). */
+  setCooldownUntil(untilMs: number): void {
+    try {
+      localStorage.setItem(COOLDOWN_KEY, String(untilMs));
+    } catch (error) {
+      console.warn('[Auth] Failed to persist cooldown marker:', (error as Error).message);
+    }
+  }
+
+  clearCooldown(): void {
+    try {
+      localStorage.removeItem(COOLDOWN_KEY);
+    } catch {
+      /* non-critical */
     }
   }
 
@@ -121,11 +186,14 @@ class AuthService {
   /**
    * Silently renews the session — POSTs to /api/auth/refresh, which issues
    * a fresh httpOnly cookie server-side, and updates the local
-   * `{authedUntil}` marker from the real expiresAt it returns. Call this
-   * once the session enters its expiring-soon window (see
-   * isSessionExpiringSoon()) rather than waiting for a 401 to force a full
-   * re-login. storeSync.ts's periodic check is what actually triggers this
-   * in practice.
+   * `{authedUntil}` marker from the real expiresAt it returns.
+   *
+   * NOTE (session policy 2026-11): kept for explicit, user-initiated
+   * renewal only. storeSync.ts's automatic call from its periodic check was
+   * removed — silently sliding the session forever defeated the
+   * 30-minute-session / 15-minute-cooldown security policy. The backend
+   * re-stamps its current-session marker on refresh, which is what prevents
+   * a later natural expiry (or stale tabs) from locking the wrong session.
    *
    * Concurrent callers share one in-flight request instead of each firing
    * their own refresh.
@@ -219,15 +287,23 @@ class AuthService {
    * The backend requires an ADR-036 signature proving control of `address`
    * (a well-formed address alone used to be enough, letting anyone link a
    * stranger's address to their own account). Prompts for the wallet PIN via
-   * requestMnemonic() to produce it; if the user cancels or no PIN challenge
-   * host is mounted, this just no-ops like any other failure here — linking
-   * is best-effort background sync, never something that should block the UI.
+   * requestMnemonic() to produce it — unless a `mnemonic` was already
+   * decrypted by the caller (avoids double PIN prompts in flows like
+   * WalletSend that need the phrase anyway).
+   *
+   * Returns a discriminated result instead of swallowing failures: callers
+   * that genuinely need the link to exist (Send, badge purchase) can await
+   * this and surface `{ ok: false, reason }` to the user; App.tsx's
+   * best-effort background sync simply logs the failure. On success, marks
+   * `store.state.wallet.linkedOnServer` so the "Connected" badges and the
+   * pre-send check stop re-verifying.
    */
-  async linkWallet(address: string): Promise<void> {
-    if (!address || !this.isAuthenticated()) return;
+  async linkWallet(address: string, opts?: { mnemonic?: string }): Promise<LinkWalletResult> {
+    if (!address) return { ok: false, reason: 'no_wallet_address' };
+    if (!this.isAuthenticated()) return { ok: false, reason: 'not_signed_in' };
     try {
-      const mnemonic = await requestMnemonic();
-      if (!mnemonic) return;
+      const mnemonic = opts?.mnemonic ?? (await requestMnemonic());
+      if (!mnemonic) return { ok: false, reason: 'pin_cancelled' };
 
       // @cosmjs/amino + @cosmjs/encoding are ~250 KB gzipped and only needed
       // when the user actually links an on-chain wallet — pulling them in
@@ -247,14 +323,44 @@ class AuthService {
       const signDoc = makeSignDoc([msg], { gas: '0', amount: [] }, '', '', 0, 0);
       const { signature } = await wallet.signAmino(address, signDoc);
 
-      await api.post('/api/auth/link-wallet', {
+      const res = await api.post('/api/auth/link-wallet', {
         address,
         timestamp,
         pubKey: signature.pub_key.value,
         signature: signature.signature,
       });
+      if (!res.ok) {
+        const reason = res.error || 'link_rejected_by_server';
+        console.warn('[Auth] link-wallet rejected:', reason);
+        return { ok: false, reason };
+      }
+      if (store.state.wallet.address === address) {
+        store.state.wallet.linkedOnServer = true;
+        store.commit();
+      }
+      return { ok: true };
     } catch (error) {
       console.warn('[Auth] Failed to link wallet address:', (error as Error).message);
+      return { ok: false, reason: (error as Error).message };
+    }
+  }
+
+  /**
+   * Ask the backend which wallet address is currently linked to the signed-in
+   * account (GET /api/auth/me → user.walletAddress). This is the only
+   * authoritative check — /api/send/* relays reject broadcasts whose `from`
+   * isn't the account's server-side linked address (403 wallet_not_linked).
+   * Never throws: an unreachable/c rejected backend comes back as
+   * `{ ok: false, reason }` so callers can distinguish "server says unlinked"
+   * from "couldn't confirm at all".
+   */
+  async getServerWalletLink(): Promise<ServerWalletLinkResult> {
+    try {
+      const res = await api.get<{ user?: { walletAddress?: string | null } }>('/api/auth/me');
+      if (!res.ok) return { ok: false, reason: res.error || 'Could not confirm the wallet link with the server' };
+      return { ok: true, address: res.data?.user?.walletAddress ?? null };
+    } catch (error) {
+      return { ok: false, reason: (error as Error).message };
     }
   }
 

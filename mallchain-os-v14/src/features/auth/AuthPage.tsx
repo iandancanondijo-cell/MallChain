@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } f
 import Particles from "./Particles";
 import Ring from "./Ring";
 import { authApi } from "./authApi";
+import { authService } from "../../services/auth";
 import "./auth.css";
 
 type Mode = "login" | "register";
@@ -24,6 +25,35 @@ function readMode(): Mode {
 
 function readRef(): string {
   return readQuery().get("ref") ?? "";
+}
+
+/** Seconds remaining on the sign-in cooldown, from the persisted marker; null when not locked out. */
+function readCooldownSeconds(): number | null {
+  const until = authService.getCooldownUntil();
+  if (until === null) return null;
+  return Math.max(0, Math.ceil((until - Date.now()) / 1000));
+}
+
+/** mm:ss rendering for the cooldown countdown. */
+function formatCountdown(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * Cooldown carried in the URL by the Google OAuth redirect
+ * (`#/auth?mode=login&cooldown=SECONDS`, see authController.googleCallback).
+ * Persisted to the marker so a reload keeps counting down from the server's
+ * value; corrected again by any 423 login_cooldown response.
+ */
+function adoptCooldownFromQuery(): void {
+  const raw = readQuery().get("cooldown");
+  if (!raw) return;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    authService.setCooldownUntil(Date.now() + Math.floor(seconds) * 1000);
+  }
 }
 
 function calcPwStrength(pw: string): PwStrength | null {
@@ -166,6 +196,21 @@ export default function AuthPage() {
   const [errors, setErrors] = useState<Errors>({});
   const [busy, setBusy] = useState(false);
 
+  // Session policy (2026-11): after a 30-minute session ends the account is
+  // locked out for a 15-minute cooldown. While the countdown runs, the login
+  // form is replaced by a lockout card showing the REMAINING time live.
+  const [cooldownSeconds, setCooldownSeconds] = useState<number | null>(() => {
+    adoptCooldownFromQuery();
+    return readCooldownSeconds();
+  });
+
+  useEffect(() => {
+    const tick = () => setCooldownSeconds(readCooldownSeconds());
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
   // sign in
   const [inEmail, setInEmail] = useState("");
   const [inPass, setInPass] = useState("");
@@ -186,6 +231,10 @@ export default function AuthPage() {
       if (ref) setReferral(ref);
       setErrors({});
       setStatus(null);
+      // Google OAuth lockout redirect (#/auth?mode=login&cooldown=...) can
+      // land here while the page is already mounted — adopt it.
+      adoptCooldownFromQuery();
+      setCooldownSeconds(readCooldownSeconds());
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
@@ -211,7 +260,15 @@ export default function AuthPage() {
     setBusy(true);
     try {
       const r = await authApi.signIn({ email: inEmail.trim(), password: inPass, remember });
-      r.ok ? done("Signed in. Welcome back.") : fail(r.message ?? "Email or password is incorrect. Check them and try again.");
+      if (r.cooldownSeconds && r.cooldownSeconds > 0) {
+        // Structured 423 login_cooldown — the countdown card takes over from
+        // the generic error line, showing the server's remaining time.
+        setCooldownSeconds(Math.ceil(r.cooldownSeconds));
+      } else if (!r.ok) {
+        fail(r.message ?? "Email or password is incorrect. Check them and try again.");
+      } else {
+        done("Signed in. Welcome back.");
+      }
     } catch {
       fail("We could not reach the network. Check your connection and try again.");
     } finally {
@@ -315,7 +372,9 @@ export default function AuthPage() {
           </button>
         </div>
 
-        {isLogin ? (
+        {isLogin && cooldownSeconds !== null ? (
+          <CooldownCard seconds={cooldownSeconds} />
+        ) : isLogin ? (
           <form onSubmit={onSignIn} noValidate>
             <Heading a="Welcome" b="back." sub="Sign in to your commerce hub." />
 
@@ -344,7 +403,7 @@ export default function AuthPage() {
             <div className="row">
               <label className="chk">
                 <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-                Remember me on this device
+                Keep me signed in on this device until the 30-minute session ends
               </label>
               <a
                 href="#/auth?mode=login"
@@ -476,6 +535,24 @@ function Heading({ a, b, sub }: { a: string; b: ReactNode; sub: string }) {
         {a} <em>{b}</em>
       </h1>
       <p className="sub">{sub}</p>
+    </div>
+  );
+}
+
+/**
+ * Post-expiry lockout card (session policy: 30-minute session → 15-minute
+ * sign-in cooldown). Re-renders every second from AuthPage's countdown timer
+ * so the user always sees the REMAINING time; the sign-in form returns
+ * automatically when it reaches zero.
+ */
+function CooldownCard({ seconds }: { seconds: number }) {
+  return (
+    <div className="cooldown-card" role="alert" aria-live="polite" style={{ textAlign: "center", padding: "2.5rem 0.5rem" }}>
+      <Heading a="Security" b="cooldown." sub="For platform security your session ended. You can sign in again in" />
+      <p style={{ fontSize: "2rem", fontWeight: 700, margin: "1rem 0", fontVariantNumeric: "tabular-nums" }}>
+        {formatCountdown(seconds)}
+      </p>
+      <p className="hint">Signing in resumes automatically when the countdown reaches zero. New account creation is unaffected.</p>
     </div>
   );
 }

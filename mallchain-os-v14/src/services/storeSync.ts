@@ -37,7 +37,7 @@
  */
 
 import { store, OS_KEY, type AppState } from '../store/store';
-import { authService, SESSION_KEY } from './auth';
+import { authService, SESSION_KEY, DEFAULT_COOLDOWN_MINUTES } from './auth';
 
 const SYNC_INTERVAL_MS = 3000; // Check session validity every 3 seconds
 
@@ -87,19 +87,26 @@ export class StoreSync {
    */
   private syncAuthStateFromSession = (): void => {
     try {
+      // Session policy (2026-11): 30 minutes of use → hard logout → 15-minute
+      // sign-in cooldown. The old silent auto-renew (refreshSession() fired
+      // from here whenever <10 minutes remained) defeated that policy by
+      // sliding the session forever, so it is REMOVED — the manual
+      // authService.refreshSession() remains available for explicit use.
+      // When the local marker simply reaches its expiry while this tab still
+      // believes it is authed, that is the scheduled end of the session:
+      // mirror the server's cooldown client-side (the 423 the server returns
+      // if the user tries to sign in early is the authoritative correction).
+      const rawAuthedUntil = authService.getAuthedUntil();
+      if (rawAuthedUntil !== null && rawAuthedUntil * 1000 <= Date.now() && store.state.user.authed) {
+        authService.setCooldownUntil(Date.now() + DEFAULT_COOLDOWN_MINUTES * 60_000);
+      }
+
       const isAuth = authService.isAuthenticated();
 
       if (isAuth) {
         if (!store.state.user.authed) {
           store.state.user.authed = true;
           store.commit();
-        }
-        // Proactively renew before the session actually expires, rather
-        // than waiting for a 401 mid-action to force a full re-login.
-        // authService.refreshSession() dedupes concurrent calls, so it's
-        // safe to just ask on every 3s tick while inside this window.
-        if (authService.isSessionExpiringSoon(600)) {
-          authService.refreshSession();
         }
       } else {
         if (store.state.user.authed) {

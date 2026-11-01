@@ -1449,3 +1449,434 @@
     width: 100%;
   }
 }
+
+/* ── Ecosystem rebuild (2026-11): hero identity, sections, live status,
+   node strip, footer. Reuses the glassmorphism tokens above. ── */
+
+/* section eyebrow — small tracked caps above each h2 */
+.landing-page .eyebrow {
+  display: block;
+  font: 800 13px/1 'Bricolage Grotesque', sans-serif;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--l-gold);
+  margin: 0 0 18px;
+}
+
+/* hero eyebrow + display title (kept compatible with the fixed ring at 47.6vh) */
+.landing-page .hero-eyebrow {
+  font: 800 clamp(12px, 1.6vw, 15px)/1 'Bricolage Grotesque', sans-serif;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--l-gold);
+  margin: 0 0 22px;
+}
+
+.landing-page .hero-eyebrow span {
+  color: var(--l-dim);
+  margin: 0 6px;
+}
+
+.landing-page .hero-title {
+  font-family: 'Bricolage Grotesque', 'Arial Black', system-ui, sans-serif;
+  font-weight: 800;
+  font-size: clamp(38px, 7.6vw, 84px);
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+  max-width: 13em;
+  margin: 0 auto 6px;
+}
+
+.landing-page .hero-title em {
+  font-style: normal;
+  background: linear-gradient(135deg, var(--l-gold) 0%, var(--l-mint) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* the typewriter tagline sits directly under the display title; give the
+   hero a touch more top room now there is a title above it */
+.landing-page .hero .sub {
+  font-size: clamp(22px, 4.4vw, 40px);
+}
+
+/* intro supporting statements — deck's trust strip, as inline chips */
+.landing-page .stmts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  margin: 44px 0 0;
+  color: #c9cde0;
+  font: 700 15px/1.4 'Bricolage Grotesque', sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.landing-page .stmts span::before {
+  content: '\25C6';
+  color: var(--l-gold);
+  margin-right: 10px;
+}
+
+/* ecosystem tile extras */
+.landing-page .tile .go {
+  display: block;
+  margin-top: 14px;
+  color: var(--c);
+  font: 700 15px/1 'Bricolage Grotesque', sans-serif;
+}
+
+.landing-page .tile-live {
+  font-size: 14px;
+  color: var(--l-dim);
+}
+
+/* status pills */
+.landing-page .pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 11px;
+  border-radius: 999px;
+  border: 1px solid;
+  font: 700 11px/1.6 system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.landing-page .pill.live {
+  color: var(--l-mint);
+  border-color: rgba(92, 242, 192, 0.4);
+  background: rgba(92, 242, 192, 0.08);
+}
+
+.landing-page .pill.soon {
+  color: var(--l-gold);
+  border-color: rgba(255, 200, 61, 0.4);
+  background: rgba(255, 200, 61, 0.08);
+}
+
+.landing-page .pill.dev {
+  color: var(--l-dim);
+  border-color: var(--l-line);
+  background: rgba(243, 241, 234, 0.05);
+}
+
+.landing-page .step h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* live network status table */
+.landing-page .status-wrap {
+  margin-top: 48px;
+  border: 1px solid var(--l-line);
+  border-radius: 26px;
+  overflow: hidden;
+  background:
+    radial-gradient(500px 200px at 50% 0%, rgba(61, 99, 255, 0.08), transparent 70%),
+    rgba(10, 12, 32, 0.62);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.landing-page .status-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--l-line);
+  color: var(--l-dim);
+  font-size: 15px;
+}
+
+.landing-page .status-head b {
+  color: var(--l-paper);
+}
+
+/* horizontal scroll container: keeps the table from forcing page-level
+   overflow on narrow phones */
+.landing-page .status-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.landing-page table.status {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  font-size: 16px;
+}
+
+.landing-page table.status th,
+.landing-page table.status td {
+  text-align: left;
+  padding: 15px 24px;
+  border-bottom: 1px solid var(--l-line);
+  vertical-align: middle;
+}
+
+.landing-page table.status th {
+  font: 700 12px/1 system-ui, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--l-dim);
+}
+
+.landing-page table.status tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.landing-page table.status td.svc {
+  font: 700 16px/1.3 'Bricolage Grotesque', sans-serif;
+  white-space: nowrap;
+}
+
+.landing-page table.status td.det {
+  color: var(--l-dim);
+  font-size: 14px;
+}
+
+.landing-page table.status td.det b {
+  color: var(--l-paper);
+}
+
+.landing-page .status-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 24px;
+  border-top: 1px solid var(--l-line);
+  color: #5a6081;
+  font-size: 13px;
+}
+
+.landing-page .status-refresh {
+  border: 1px solid var(--l-line);
+  border-radius: 999px;
+  background: rgba(243, 241, 234, 0.06);
+  color: var(--l-paper);
+  font: 700 13px/1 system-ui, sans-serif;
+  padding: 9px 18px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.landing-page .status-refresh:hover {
+  border-color: var(--l-gold);
+  color: var(--l-gold);
+}
+
+.landing-page .status-refresh:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* developers box */
+.landing-page .devbox {
+  text-align: center;
+  padding: clamp(36px, 6vw, 80px) clamp(20px, 4vw, 48px);
+  border: 1px solid rgba(125, 149, 255, 0.3);
+  border-radius: 36px;
+  background:
+    radial-gradient(520px 240px at 50% 0%, rgba(61, 99, 255, 0.16), transparent 70%),
+    rgba(10, 12, 32, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.landing-page .devbox h2 {
+  margin: 0 auto;
+}
+
+.landing-page .devbox h2::after {
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(90deg, transparent, var(--l-blue), transparent);
+}
+
+.landing-page .devbox h2 em {
+  font-style: normal;
+  background: linear-gradient(135deg, #7d95ff 0%, var(--l-mint) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.landing-page .devbox .eyebrow {
+  color: #7d95ff;
+}
+
+.landing-page .devbox .cta {
+  margin-top: 14px;
+}
+
+/* run-a-node strip */
+.landing-page .landing-node {
+  border: 1px solid rgba(255, 200, 61, 0.28);
+  border-radius: 36px;
+  padding: clamp(28px, 5vw, 60px);
+  background:
+    radial-gradient(460px 220px at 18% 0%, rgba(255, 200, 61, 0.12), transparent 70%),
+    rgba(10, 12, 32, 0.62);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 0 90px -40px rgba(255, 200, 61, 0.35);
+}
+
+.landing-page .landing-node .lead {
+  margin-top: 18px;
+}
+
+.landing-page .landing-node .cta {
+  justify-content: flex-start;
+  margin-top: 32px;
+}
+
+.landing-page .landing-node .note {
+  margin: 26px 0 0;
+  color: var(--l-dim);
+  font-size: 15px;
+  max-width: 52em;
+}
+
+.landing-page .lk.inline {
+  display: inline;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--l-gold);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* final CTA motto line */
+.landing-page .fin-motto {
+  margin-top: 40px;
+  font: 700 13px/1.6 system-ui, sans-serif;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--l-dim);
+}
+
+/* footer — replaces the single-line credit strip */
+.landing-page footer.foot {
+  text-align: left;
+  color: var(--l-paper);
+  font-size: 15px;
+  margin-top: 110px;
+  border-top: 1px solid var(--l-line);
+  padding: 0 16px calc(30px + env(safe-area-inset-bottom, 0px));
+  background: rgba(4, 5, 13, 0.55);
+}
+
+.landing-page .foot-grid {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr 1fr 1fr;
+  gap: 36px;
+  max-width: 1100px;
+  margin: auto;
+  padding: 60px 6px 40px;
+}
+
+.landing-page .foot-brand .landing-logo {
+  font-size: 21px;
+}
+
+.landing-page .foot-brand p {
+  margin: 16px 0 0;
+  color: var(--l-dim);
+  font-size: 14px;
+  max-width: 30em;
+  line-height: 1.6;
+}
+
+.landing-page .foot-col h4 {
+  margin: 0 0 14px;
+  font: 800 13px/1 'Bricolage Grotesque', sans-serif;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--l-paper);
+}
+
+.landing-page .foot-col .lk {
+  display: block;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 10px 0;
+  text-align: left;
+  color: var(--l-dim);
+  font: 400 15px/1.4 system-ui, sans-serif;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.landing-page .foot-col .lk:hover {
+  color: var(--l-gold);
+}
+
+.landing-page .foot-risk {
+  max-width: 1112px;
+  margin: auto;
+  padding: 6px 6px 22px;
+  color: #5a6081;
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--l-line);
+}
+
+.landing-page .foot-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  max-width: 1112px;
+  margin: auto;
+  padding-top: 22px;
+  color: #5a6081;
+  font-size: 13px;
+}
+
+@media (max-width: 850px) {
+  .landing-page .foot-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 30px 16px;
+  }
+}
+
+@media (max-width: 560px) {
+  .landing-page .foot-grid {
+    grid-template-columns: 1fr;
+    padding: 44px 4px 28px;
+  }
+
+  .landing-page .hero .sub {
+    margin-bottom: 26px;
+  }
+
+  .landing-page .status-head,
+  .landing-page .status-foot {
+    padding: 14px 16px;
+  }
+
+  .landing-page table.status th,
+  .landing-page table.status td {
+    padding: 12px 16px;
+  }
+
+  .landing-page .landing-node .cta {
+    justify-content: stretch;
+  }
+}
+

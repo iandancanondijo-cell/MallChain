@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { sendMallcoinTransfer, MallcoinTxError } from '../../services/mallcoinTx';
+import { RateLimitError, markPinChallengeLocked } from '../../services/api';
 import { isValidMallAddress } from '../../services/wallet';
 import { faucetApi } from '../../services/faucetApi';
 import { requestMnemonic } from '../../services/mnemonicAccess';
+import { authService } from '../../services/auth';
 import { useWizard } from '../../hooks/useWizard';
 import { useWalletData } from '../../hooks/useWalletData';
 import { loadAddressBook } from '../../services/addressBookStore';
 import {
   ArrowUpRight, Send, CheckCircle2, AlertTriangle, Shield,
-  ArrowRight, User, Hash, Coins, Zap, ChevronRight, ExternalLink
+  ArrowRight, User, Hash, Coins, Zap, ChevronRight, ExternalLink, Link2
 } from 'lucide-react';
 
 const SEND_STEPS = ['recipient', 'review', 'authorize', 'broadcast'] as const;
@@ -54,6 +56,49 @@ export default function WalletSend() {
   const [busy, setBusy] = useState(false);
   const [txHash, setTxHash] = useState('');
   const [gasError, setGasError] = useState(false);
+  // Confirmation truth for the Sent step: what waitForConfirmation actually
+  // resolved with (block height / timestamp), or that the broadcast settled
+  // but confirmation timed out (confirmed: false — honest "still pending"
+  // copy, never a failure).
+  const [confirmation, setConfirmation] = useState<{
+    confirmed: boolean;
+    height?: string;
+    timestamp?: string;
+  } | null>(null);
+  // Backend 429 (financialLimiter/readLimiter): epoch ms until which the send
+  // is throttled. While it runs the Authorize button is disabled with a live
+  // countdown and the PIN modal must NOT open or accept input — retrying
+  // would re-prompt the PIN and burn attempt budgets for a request that
+  // cannot succeed.
+  const [rateLimitedUntil, setRateLimitedUntil] = useState(0);
+  const [rateLimitRemaining, setRateLimitRemaining] = useState(0);
+
+  useEffect(() => {
+    if (rateLimitedUntil <= Date.now()) {
+      setRateLimitRemaining(0);
+      return;
+    }
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((rateLimitedUntil - Date.now()) / 1000));
+      setRateLimitRemaining(remaining);
+      if (remaining === 0) {
+        setRateLimitedUntil(0);
+        markPinChallengeLocked(0, '');
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [rateLimitedUntil]);
+
+  const rateLimitClock = (seconds: number) =>
+    `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  // Sign-step state for the server-side wallet-link fix: `needsLink` shows
+  // the human "link your wallet" prompt with its own button; linkRetriedRef
+  // caps the automatic link-and-retry after a 403 wallet_not_linked at
+  // exactly ONE attempt.
+  const [needsLink, setNeedsLink] = useState(false);
+  const linkRetriedRef = useRef(false);
 
   const validAddr = isValidMallAddress(addr);
   const max = st.balances.MALL;
@@ -70,43 +115,153 @@ export default function WalletSend() {
     wizard.next();
   };
 
+  const LINK_REQUIRED_MESSAGE =
+    "Your wallet isn't linked to your account yet. Confirm your PIN to link it, then try again.";
+
+  /** True for the backend's requireWalletOwnership 403 (send.js `wallet_not_linked`). */
+  const isWalletNotLinkedError = (e: unknown): boolean =>
+    e instanceof MallcoinTxError &&
+    (e.code === 'wallet_not_linked' || /wallet_not_linked|not linked/i.test(e.message));
+
+  /** Signs + broadcasts + records the transfer. Throws on failure; caller handles it. */
+  const broadcast = async (mnemonic: string) => {
+    const result = await sendMallcoinTransfer({
+      mnemonic,
+      fromAddress: st.wallet.address,
+      toAddress: addr,
+      amountMlcns: parseFloat(amount),
+    });
+    store.applyTx({
+      type: 'send', amount: parseFloat(amount), asset: 'MALL', kind: 'debit', to: addr, fee,
+      note: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
+      notifTitle: `Sent ${amount} MALL`, notifKind: 'tx', notifCategory: 'transactions',
+      activityText: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
+    });
+    setTxHash(result.txHash);
+    setConfirmation({ confirmed: result.confirmed !== false, height: result.height, timestamp: result.timestamp });
+    // A send that got this far proves the limiter window has passed — clear any
+    // stale rate-limit state so the next authorize isn't gated.
+    setRateLimitedUntil(0);
+    setRateLimitRemaining(0);
+    markPinChallengeLocked(0, '');
+    setBusy(false);
+    toast(
+      result.confirmed === false
+        ? 'Broadcast succeeded — confirmation still pending'
+        : result.height
+          ? `Confirmed on-chain at height ${result.height}`
+          : 'Transaction confirmed on-chain'
+    );
+    wizard.next();
+  };
+
   const authorize = async () => {
     if (!st.wallet.pinEncryptedMnemonic || !st.wallet.address) {
       toast('No wallet loaded — import or create a wallet first', false);
       return;
     }
+    // Hard gate: while the backend rate limit runs, the PIN challenge must
+    // not even open — no re-prompting, no burned PIN attempts on requests
+    // that cannot succeed.
+    if (rateLimitedUntil > Date.now()) return;
     const mnemonic = await requestMnemonic();
     if (!mnemonic) return;
 
     setBusy(true);
     setErr('');
     setGasError(false);
+    setNeedsLink(false);
+    linkRetriedRef.current = false;
+
+    const address = st.wallet.address;
+
+    // POST /api/send/mallcoins rejects with 403 wallet_not_linked unless the
+    // account's server-side link (User.walletAddress, only ever set by
+    // POST /api/auth/link-wallet) matches this exact address. The App.tsx
+    // background auto-link is fire-and-forget and its failures were silent —
+    // so verify against the server here and, if the link is missing, complete
+    // it explicitly (reusing the PIN-decrypted mnemonic — no second prompt)
+    // before broadcasting.
+    if (!st.wallet.linkedOnServer) {
+      const me = await authService.getServerWalletLink();
+      if (me.ok && me.address === address) {
+        store.state.wallet.linkedOnServer = true;
+        store.commit();
+      } else {
+        const link = await authService.linkWallet(address, { mnemonic });
+        if (!link.ok) {
+          setBusy(false);
+          if (link.reason !== 'pin_cancelled') {
+            // The needsLink card renders the message itself — don't also set
+            // `err` or it would show twice.
+            setNeedsLink(true);
+          }
+          return;
+        }
+      }
+    }
+
     try {
-      const result = await sendMallcoinTransfer({
-        mnemonic,
-        fromAddress: st.wallet.address,
-        toAddress: addr,
-        amountMlcns: parseFloat(amount),
-      });
-      store.applyTx({
-        type: 'send', amount: parseFloat(amount), asset: 'MALL', kind: 'debit', to: addr, fee,
-        note: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
-        notifTitle: `Sent ${amount} MALL`, notifKind: 'tx', notifCategory: 'transactions',
-        activityText: `Sent ${amount} MALL to ${addr.slice(0, 10)}…`,
-      });
-      setTxHash(result.txHash);
-      setBusy(false);
-      toast('Transaction broadcast — pending confirmation');
-      wizard.next();
+      await broadcast(mnemonic);
     } catch (e) {
-      setBusy(false);
+      if (e instanceof RateLimitError) {
+        // 429 (broadcast limiter or persistent status-limiter 429s): show the
+        // exact cool-down window and gate the PIN UI — this is NOT a failure
+        // and must not render like one.
+        setBusy(false);
+        const until = Date.now() + e.retryAfterSeconds * 1000;
+        setRateLimitedUntil(until);
+        markPinChallengeLocked(until, e.message);
+        return;
+      }
       if (e instanceof MallcoinTxError && e.code === 'NO_ON_CHAIN_HISTORY') {
+        setBusy(false);
         setGasError(true);
         return;
       }
+      if (isWalletNotLinkedError(e)) {
+        // The pre-check passed but the server still says unlinked (e.g. the
+        // /me read raced a link rotation). Exactly ONE explicit
+        // link-and-retry; anything beyond that goes to the user as a clear
+        // message with its own link button.
+        if (!linkRetriedRef.current) {
+          linkRetriedRef.current = true;
+          store.state.wallet.linkedOnServer = false;
+          store.commit();
+          const link = await authService.linkWallet(address, { mnemonic });
+          if (link.ok) {
+            try {
+              await broadcast(mnemonic);
+              return;
+            } catch {
+              // retry's broadcast failed again — fall through to the prompt
+            }
+          }
+        }
+        setBusy(false);
+        setNeedsLink(true);
+        return;
+      }
+      setBusy(false);
       const message = e instanceof MallcoinTxError || e instanceof Error ? e.message : 'Failed to send';
       setErr(message);
       toast(message, false);
+    }
+  };
+
+  /** "Link wallet" button in the Sign-step error prompt: awaits linkWallet (raises the PIN challenge itself). */
+  const linkNow = async () => {
+    if (!st.wallet.address) return;
+    setBusy(true);
+    const link = await authService.linkWallet(st.wallet.address);
+    setBusy(false);
+    if (link.ok) {
+      setNeedsLink(false);
+      setErr('');
+      toast('Wallet linked to your account — you can send again');
+    } else if (link.reason !== 'pin_cancelled') {
+      // needsLink card stays up with its message; just report why it failed.
+      toast(link.reason, false);
     }
   };
 
@@ -126,6 +281,13 @@ export default function WalletSend() {
 
   if (step === 'broadcast') {
     const amt = parseFloat(amount);
+    const confirmed = !!confirmation?.confirmed;
+    const height = confirmation?.height;
+    const heroTitle = confirmed
+      ? height
+        ? `Sent — confirmed on-chain at height ${height}`
+        : 'Sent — confirmed on-chain'
+      : 'Sent — broadcast to network';
     return (
       <div className="wo-page">
         <div className="wo-hero">
@@ -133,8 +295,14 @@ export default function WalletSend() {
             <CheckCircle2 size={24} style={{ color: 'var(--green)' }} />
           </div>
           <div className="wo-hero-body">
-            <h1 className="wo-hero-title text-gradient">Transaction Broadcast</h1>
-            <div className="wo-hero-sub">Your transfer is pending confirmation on-chain</div>
+            <h1 className="wo-hero-title text-gradient">{heroTitle}</h1>
+            <div className="wo-hero-sub">
+              {confirmed
+                ? height
+                  ? `Block ${height}${confirmation?.timestamp ? ` · ${confirmation.timestamp}` : ''}`
+                  : 'Your transfer is included in a block'
+                : 'Confirmation is still pending — the last block has not sealed yet'}
+            </div>
           </div>
         </div>
 
@@ -144,9 +312,21 @@ export default function WalletSend() {
               <CheckCircle2 size={28} />
             </div>
             <div className="wo-status-title">Sent {amt} MALL</div>
-            <div className="wo-status-text">
-              Your transaction has been submitted to the network and is awaiting confirmation.
-            </div>
+            {confirmed ? (
+              <div className="wo-status-text">
+                {height
+                  ? `Your transaction was included in block ${height} and is confirmed on-chain.`
+                  : 'Your transaction is confirmed on-chain.'}
+              </div>
+            ) : (
+              <div className="wo-info wo-info--tip" role="status" style={{ maxWidth: 460 }}>
+                <AlertTriangle size={14} className="wo-info-icon" />
+                <span>
+                  Broadcast succeeded — confirmation still pending; funds may already have
+                  arrived. Check Transactions.
+                </span>
+              </div>
+            )}
             {txHash && (
               <div className="wo-hash" style={{ maxWidth: 360 }}>
                 {txHash}
@@ -154,8 +334,12 @@ export default function WalletSend() {
             )}
           </div>
           <div className="wo-actions" style={{ marginTop: 16 }}>
-            <button className="btn btn-ghost" onClick={() => { wizard.reset(); navigate('/explorer'); }}>
-              <ExternalLink size={13} style={{ marginRight: 6 }} /> Explorer
+            <button className="btn btn-ghost" onClick={() => { wizard.reset(); navigate(txHash ? `/explorer?tx=${txHash}` : '/explorer'); }}>
+              <ExternalLink size={13} style={{ marginRight: 6 }} />
+              {txHash ? `View tx ${txHash.slice(0, 10)}… in Explorer` : 'Explorer'}
+            </button>
+            <button className="btn btn-ghost" onClick={() => { wizard.reset(); navigate('/transactions'); }}>
+              Transactions
             </button>
             <button className="btn btn-primary" onClick={() => { wizard.reset(); navigate('/wallet'); }}>
               Back to Wallet
@@ -374,6 +558,20 @@ export default function WalletSend() {
               <span>You'll be asked for your PIN to unlock your recovery phrase and sign this transaction securely.</span>
             </div>
 
+            {rateLimitRemaining > 0 && (
+              <div className="wo-info wo-info--error" style={{ marginBottom: 12 }} role="alert">
+                <AlertTriangle size={14} className="wo-info-icon" />
+                <span>Too many sends — try again in {rateLimitClock(rateLimitRemaining)}</span>
+              </div>
+            )}
+
+            {busy && (
+              <div className="wo-info wo-info--tip" style={{ marginBottom: 12 }} role="status">
+                <Zap size={14} className="wo-info-icon" />
+                <span>Broadcast — validating in next block (~5s)</span>
+              </div>
+            )}
+
             {err && (
               <div className="wo-info wo-info--error" style={{ marginBottom: 12 }}>
                 <AlertTriangle size={14} className="wo-info-icon" />
@@ -393,9 +591,21 @@ export default function WalletSend() {
               </div>
             )}
 
+            {needsLink && (
+              <div className="wo-card wo-card--warning" style={{ marginBottom: 12, padding: 14 }}>
+                <div style={{ fontSize: 13, color: 'var(--txt-2)', marginBottom: 10 }}>
+                  {LINK_REQUIRED_MESSAGE}
+                </div>
+                <button className="btn btn-primary btn-sm" disabled={busy} onClick={linkNow}>
+                  {busy && <span className="wo-spinner" style={{ width: 14, height: 14, marginRight: 6, display: 'inline-block' }} />}
+                  <Link2 size={12} style={{ marginRight: 4 }} /> Link wallet now
+                </button>
+              </div>
+            )}
+
             <div className="wo-actions">
               <button className="btn btn-ghost" onClick={() => wizard.back()}>Back</button>
-              <button className="btn btn-primary" disabled={busy} onClick={authorize}>
+              <button className="btn btn-primary" disabled={busy || rateLimitRemaining > 0} onClick={authorize}>
                 {busy && <span className="wo-spinner" style={{ width: 14, height: 14, marginRight: 6, display: 'inline-block' }} />}
                 <Shield size={14} style={{ marginRight: 6 }} /> Authorize & broadcast
               </button>

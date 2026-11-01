@@ -8,6 +8,20 @@ const User = require('../models/user');
 const totp = require('../utils/totp');
 const { limiters } = require('../middleware/rateLimiter');
 const { config } = require('../config');
+const { appendAuditEvent } = require('../services/auditChainService');
+
+// Tamper-evident chain audit for privileged account-security changes (2FA,
+// password, security flags). Non-fatal + serialized inside the service, so
+// calling without await is safe; payloads are stored as hashes only.
+function chainSecurityAudit(req, action, payload = {}) {
+  const u = req.user || {};
+  return appendAuditEvent(
+    { id: String(u._id || u.id || 'unknown'), role: String(u.role || 'user') },
+    action,
+    `user:${u._id || u.id || 'unknown'}`,
+    payload
+  );
+}
 
 function ok(data) { return { ok: true, data }; }
 function fail(err) {
@@ -48,6 +62,9 @@ router.put('/', auth, async (req, res) => {
     if (req.body.privacy) Object.assign(settings.privacy, req.body.privacy);
     if (req.body.display) Object.assign(settings.display, req.body.display);
 
+    if (req.body.security || req.body.privacy) {
+      chainSecurityAudit(req, 'settings_bulk_update', { sections: [req.body.security && 'security', req.body.privacy && 'privacy'].filter(Boolean) });
+    }
     await settings.save();
     res.json(ok(settings));
   } catch (e) {
@@ -229,6 +246,84 @@ router.post('/contact/whatsapp/opt-out', auth, async (req, res) => {
   }
 });
 
+// ── Social accounts ──
+// Platform enum must match mallchain-os-v14/src/features/settings/components/
+// SocialAccounts.tsx SOCIAL_PLATFORMS ids exactly.
+const SOCIAL_PLATFORMS = [
+  'twitter', 'discord', 'telegram', 'reddit', 'github',
+  'youtube', 'twitch', 'linkedin', 'tiktok', 'instagram',
+];
+
+function sanitizeHandle(raw) {
+  if (typeof raw !== 'string') return null;
+  // Strip control characters, trim surrounding whitespace, drop leading '@'
+  // (users habitually paste "@handle"; we store the bare username).
+  const handle = raw.replace(/[\u0000-\u001f\u007f]/g, '').trim().replace(/^@+/, '').trim();
+  if (!handle || handle.length > 100) return null;
+  return handle;
+}
+
+// GET /api/settings/social - List connected social accounts
+router.get('/social', auth, async (req, res) => {
+  try {
+    const settings = await getOrCreateSettings(req.user._id);
+    res.json(ok(settings.socialAccounts || []));
+  } catch (e) {
+    res.status(500).json(fail(e));
+  }
+});
+
+// POST /api/settings/social/:platform - Connect/upsert one platform's handle
+router.post('/social/:platform', auth, async (req, res) => {
+  try {
+    const platform = String(req.params.platform || '').toLowerCase();
+    if (!SOCIAL_PLATFORMS.includes(platform)) {
+      return res.status(400).json(fail(`Unsupported platform: ${platform}. Allowed: ${SOCIAL_PLATFORMS.join(', ')}`));
+    }
+    const handle = sanitizeHandle(req.body.handle);
+    if (handle === null) {
+      return res.status(400).json(fail('handle is required and must be a non-empty string of at most 100 characters'));
+    }
+
+    const settings = await getOrCreateSettings(req.user._id);
+    let account = (settings.socialAccounts || []).find((a) => a.platform === platform);
+    if (account) {
+      account.handle = handle;
+      account.connected = true;
+      account.lastConnected = new Date();
+    } else {
+      settings.socialAccounts.push({ platform, handle, connected: true, lastConnected: new Date() });
+    }
+    await settings.save();
+
+    res.json(ok({ platform, handle, connected: true }));
+  } catch (e) {
+    res.status(500).json(fail(e));
+  }
+});
+
+// DELETE /api/settings/social/:platform - Disconnect a social account
+router.delete('/social/:platform', auth, async (req, res) => {
+  try {
+    const platform = String(req.params.platform || '').toLowerCase();
+    if (!SOCIAL_PLATFORMS.includes(platform)) {
+      return res.status(400).json(fail(`Unsupported platform: ${platform}`));
+    }
+
+    const settings = await getOrCreateSettings(req.user._id);
+    const idx = (settings.socialAccounts || []).findIndex((a) => a.platform === platform);
+    if (idx === -1) {
+      return res.status(404).json(fail(`No ${platform} account connected`));
+    }
+    settings.socialAccounts.splice(idx, 1);
+    await settings.save();
+
+    res.json(ok({ removed: true }));
+  } catch (e) {
+    res.status(500).json(fail(e));
+  }
+});
+
 // PUT /api/settings/security - Security settings
 router.put('/security', auth, async (req, res) => {
   try {
@@ -239,6 +334,7 @@ router.put('/security', auth, async (req, res) => {
       if (req.body[field] !== undefined) settings.security[field] = req.body[field];
     });
 
+    chainSecurityAudit(req, 'settings_security_update', { fields: allowedFields.filter((f) => req.body[f] !== undefined) });
     await settings.save();
     res.json(ok(settings.security));
   } catch (e) {
@@ -324,6 +420,7 @@ router.post('/security/2fa/setup', auth, async (req, res) => {
     const secret = totp.generateSecret();
     settings.security.twoFactorPendingSecret = secret;
     await settings.save();
+    chainSecurityAudit(req, 'settings_2fa_setup', {});
 
     res.json(ok({
       secret,
@@ -363,6 +460,7 @@ router.post('/security/2fa/enable', auth, limiters.strict, async (req, res) => {
     settings.security.twoFactorEnabled = true;
     settings.security.twoFactorEnabledAt = new Date();
     await settings.save();
+    chainSecurityAudit(req, 'settings_2fa_enable', { backupCodeCount: backupCodes.length });
 
     // Backup codes are only ever returned this once — only their hashes are stored.
     res.json(ok({ enabled: true, backupCodes }));
@@ -399,6 +497,7 @@ router.post('/security/2fa/disable', auth, limiters.strict, async (req, res) => 
     settings.security.twoFactorSecret = undefined;
     settings.security.twoFactorBackupCodeHashes = undefined;
     await settings.save();
+    chainSecurityAudit(req, 'settings_2fa_disable', { viaBackupCode: !validTotp && validBackup });
 
     res.json(ok({ enabled: false }));
   } catch (e) {
@@ -428,6 +527,7 @@ router.post('/security/change-password', auth, limiters.strict, async (req, res)
 
     user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
+    chainSecurityAudit(req, 'settings_password_change', {});
 
     res.json(ok({ changed: true }));
   } catch (e) {

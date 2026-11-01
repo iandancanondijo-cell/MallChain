@@ -6,6 +6,7 @@ import { stakingApi, type StakingSummary } from '../../services/stakingApi';
 import { useLivePrice } from '../../hooks/useLivePrice';
 import { useCurrencyConverter } from '../../services/currency';
 import { api } from '../../services/api';
+import { authService } from '../../services/auth';
 import { TrendingUp, Wallet, Zap, Shield, ArrowUpRight, ArrowDownLeft, Repeat, Sparkles } from 'lucide-react';
 import { Button, Card, Badge, Heading, Text } from '../../components/shared';
 import './Dashboard.css';
@@ -109,6 +110,19 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
 
   const isWalletConnected = st.wallet.address && st.wallet.address.length > 0;
 
+  // "Connected" is shown only when the backend confirmed the account↔wallet
+  // link (required by /api/send/*); a local-only address gets a clickable
+  // "Link wallet" chip that runs the PIN-verified link flow.
+  const [linkingWallet, setLinkingWallet] = useState(false);
+  const linkWalletNow = async () => {
+    if (!st.wallet.address || linkingWallet) return;
+    setLinkingWallet(true);
+    const res = await authService.linkWallet(st.wallet.address);
+    setLinkingWallet(false);
+    if (res.ok) toast('Wallet linked to your account');
+    else if (res.reason !== 'pin_cancelled') toast(res.reason || 'Could not link your wallet', false);
+  };
+
   const { midKes } = useLivePrice();
 
   const [submissions, setSubmissions] = useState<MinesSubmission[]>([]);
@@ -184,6 +198,15 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
             <span className="dash-hero-num">{portfolioDisplay}</span>
             <span className="dash-hero-meta">
               <span className="chip gold" style={{ fontSize: 10 }}>Network: {st.settings.network}</span>
+              {isWalletConnected && (
+                st.wallet.linkedOnServer ? (
+                  <span className="chip green" style={{ fontSize: 10 }}>Connected</span>
+                ) : (
+                  <button className="chip" style={{ fontSize: 10, color: 'var(--gold)' }} onClick={linkWalletNow} disabled={linkingWallet} title="Confirm your PIN to link this wallet to your account">
+                    {linkingWallet ? 'Linking…' : 'Link wallet'}
+                  </button>
+                )
+              )}
               <span style={{ color: 'var(--txt-3)', fontSize: 11 }}>{midKes === null ? 'MALL price unavailable' : `MALL @ ${fmtMoney(midKes, cur)}`}</span>
             </span>
           </div>

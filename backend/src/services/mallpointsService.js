@@ -168,6 +168,38 @@ async function syncMallPointAccount(walletAddress, amount, session, opts = {}) {
     { upsert: true, session, new: true }
   );
 
+  // Pool-ledger coverage: every MLPTS value movement (mining/task rewards,
+  // admin credit/deduct in routes/mines.js, referral payouts, creator-space,
+  // task-assignment escrow, EDU rewards, review-service awards) funnels
+  // through this GATE-61 chokepoint, so recording here makes all of them
+  // visible in the liquidity activity ledger — as one design rather than
+  // one hook per caller (which would also double-record). Informational by
+  // definition: MLPTS accruals are not fiat-backed pool changes
+  // (affectsReserves: false, see models/LiquidityPoolActivity.js).
+  // Fire-and-forget and non-fatal: a ledger miss must never break the
+  // caller's balance transaction. Note this runs inside the caller's Mongo
+  // transaction, so a later rollback can leave an orphan informational row —
+  // acceptable for a non-reserve audit ledger (reserves are unaffected).
+  // Require lazily to keep the service graph cycle-free at load time.
+  try {
+    const { recordRewardActivity } = require('./liquidityActivityService');
+    Promise.resolve(recordRewardActivity({
+      walletAddress,
+      amountMlpts: amount,
+      userId: opts.userId || undefined,
+      stage: opts.flow || 'mlpts_balance_sync',
+      note: opts.note,
+    })).catch((ledgerErr) => logger.warn('gate61-sync', 'pool-activity ledger write failed (non-fatal)', {
+      userId: opts.userId || null,
+      flow: opts.flow || null,
+      error: ledgerErr.message || String(ledgerErr),
+    }));
+  } catch (hookErr) {
+    logger.warn('gate61-sync', 'pool-activity ledger hook failed (non-fatal)', {
+      error: hookErr?.message || String(hookErr),
+    });
+  }
+
   logger.info('gate61-sync', 'MallPointAccount synchronized', {
     userId: opts.userId || null,
     flow: opts.flow || null,

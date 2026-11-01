@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { store } from '../../store/store';
-import { useStoreVersion, fmtNum, fmtMoney } from '../../components/ui';
+import { useStoreVersion, fmtNum, fmtMoney, toast } from '../../components/ui';
 import { useWalletData } from '../../hooks/useWalletData';
 import { useLivePrice } from '../../hooks/useLivePrice';
 import { useCurrencyConverter, type FiatUnit } from '../../services/currency';
+import { authService } from '../../services/auth';
 import { LoadingState } from '../../components/LoadingState';
 import {
   ArrowUpRight, ArrowDownLeft, CreditCard, Building2, Sparkles,
@@ -39,6 +41,19 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
   const { midKes, pointPriceKes } = useLivePrice();
 
   const isWalletConnected = walletAddress && walletAddress.length > 0;
+
+  // Honest link status: st.wallet.address only proves this device holds a
+  // wallet; "Connected" means the backend confirmed (or just completed) the
+  // account↔address link that /api/send/* requires.
+  const [linkingWallet, setLinkingWallet] = useState(false);
+  const linkWalletNow = async () => {
+    if (!walletAddress || linkingWallet) return;
+    setLinkingWallet(true);
+    const res = await authService.linkWallet(walletAddress);
+    setLinkingWallet(false);
+    if (res.ok) toast('Wallet linked to your account');
+    else if (res.reason !== 'pin_cancelled') toast(res.reason || 'Could not link your wallet', false);
+  };
 
   const realBalance = balance || {
     address: walletAddress,
@@ -157,6 +172,13 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
                     <Clock size={10} style={{ marginRight: 3 }} />{getWalletAge()} old
                   </span>
                   <span className="chip gold" style={{ fontSize: 10 }}>{cur}</span>
+                  {st.wallet.linkedOnServer
+                    ? <span className="chip green" style={{ fontSize: 10 }}>Connected</span>
+                    : (
+                      <button className="chip" style={{ fontSize: 10, color: 'var(--gold)' }} onClick={linkWalletNow} disabled={linkingWallet} title="Confirm your PIN to link this wallet to your account">
+                        {linkingWallet ? 'Linking…' : 'Link wallet'}
+                      </button>
+                    )}
                   {balance && <span className="chip green" style={{ fontSize: 10 }}>Live</span>}
                 </>
               ) : (

@@ -88,6 +88,36 @@ function decryptWithdrawalRequestPhone(request) {
 }
 
 const WithdrawalRequestModel = mongoose.model('WithdrawalRequest', WithdrawalRequestSchema);
+
+// Pool-ledger coverage: a withdrawal settled by refunding the user (the only
+// writer today is adminPanel.js's POST /withdrawals/:id/resolve, but a
+// model-level hook catches every transition to 'refunded' wherever it comes
+// from) must be visible in the liquidity activity ledger. Informational row
+// (affectsReserves: false): the sell never settled, so reserves were never
+// debited and there is nothing to credit back in reserve terms.
+// Non-fatal: a ledger write failure must never break the withdrawal save.
+// No phone is passed — this.phone is already ciphertext here and would
+// double-encrypt; the row is keyed by withdrawalId instead.
+WithdrawalRequestSchema.post('save', function recordRefundActivityOnTransition() {
+  if (this.status === 'refunded' && this.isModified('status')) {
+    // Lazy require: keeps the model module graph light and cycle-free at
+    // load time (liquidityActivityService pulls the metrics registry).
+    try {
+      const { recordRefundActivity } = require('../services/liquidityActivityService');
+      recordRefundActivity('withdrawal_refunded', this, {
+        note: this.notes || 'Failed withdrawal refunded to the user.',
+      }).catch((ledgerErr) => {
+        console.warn(
+          '[WithdrawalRequest] pool-activity ledger write failed (non-fatal):',
+          ledgerErr?.message || ledgerErr
+        );
+      });
+    } catch (requireErr) {
+      console.warn('[WithdrawalRequest] refund ledger hook failed (non-fatal):', requireErr?.message || requireErr);
+    }
+  }
+});
+
 WithdrawalRequestModel.decryptPhone = decryptWithdrawalRequestPhone;
 
 module.exports = WithdrawalRequestModel;

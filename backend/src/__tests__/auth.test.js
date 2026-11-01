@@ -223,11 +223,27 @@ describe('Authentication Middleware Tests', () => {
     });
   });
 
-  describe('Error handling for expired tokens', () => {
-    test('returns 401 for expired JWT token', async () => {
+  describe('Error handling for expired tokens (session policy: expiry → session_expired + cooldown)', () => {
+    // Signature-valid but expired = the 30-minute session ended: requireAuth
+    // responds 401 {error:'session_expired', cooldownMinutes:15} and arms the
+    // 15-minute login cooldown (middleware/sessionCooldown.js).
+    const POLICY_USER_ID = '507f1f77bcf86cd799439011';
+
+    afterAll(async () => {
+      try {
+        const Redis = require('ioredis');
+        const r = new Redis({ host: process.env.REDIS_HOST || '127.0.0.1', port: Number(process.env.REDIS_PORT || 6379), connectTimeout: 1000, maxRetriesPerRequest: 0, enableOfflineQueue: false });
+        await r.del(`login_cooldown:user:${POLICY_USER_ID}`, `session:current:${POLICY_USER_ID}`);
+        await r.quit();
+      } catch {
+        /* Redis absent — the fail-open arming wrote nothing */
+      }
+    });
+
+    test('returns 401 session_expired for expired JWT token', async () => {
       // Generate an expired token (expired 1 hour ago)
       const expiredToken = jwt.sign(
-        { userId: '507f1f77bcf86cd799439011', username: 'testuser' },
+        { userId: POLICY_USER_ID, username: 'testuser' },
         JWT_SECRET,
         { expiresIn: '-1h' }
       );
@@ -237,13 +253,14 @@ describe('Authentication Middleware Tests', () => {
         .set('Authorization', `Bearer ${expiredToken}`);
 
       expect(response.status).toBe(401);
-      expect(response.body.error).toBe('invalid token');
+      expect(response.body.error).toBe('session_expired');
+      expect(response.body.cooldownMinutes).toBe(15);
     });
 
-    test('expired token error is caught and returns 401', async () => {
+    test('expired token error is caught and returns 401 session_expired', async () => {
       // Create a token that expires in 1 second
       const token = jwt.sign(
-        { userId: '507f1f77bcf86cd799439011', username: 'testuser' },
+        { userId: POLICY_USER_ID, username: 'testuser' },
         JWT_SECRET,
         { expiresIn: '0s' }
       );
@@ -256,7 +273,7 @@ describe('Authentication Middleware Tests', () => {
         .set('Authorization', `Bearer ${token}`);
 
       expect(response.status).toBe(401);
-      expect(response.body.error).toBe('invalid token');
+      expect(response.body.error).toBe('session_expired');
     });
   });
 

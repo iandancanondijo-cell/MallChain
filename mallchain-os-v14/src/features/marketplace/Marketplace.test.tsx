@@ -28,6 +28,17 @@ vi.mock('../../services/mnemonicAccess', () => ({
 const BUYER_ADDRESS = 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg';
 const MNEMONIC = Array(12).fill('abandon').join(' ');
 
+// The hardcoded demo catalog was intentionally removed from Marketplace.tsx in
+// 4106262f (hardcoded-data cleanup; the page now shows "Coming Soon" until the
+// real marketplace API endpoint is wired up). The checkout/escrow path itself
+// is unchanged and still real, so the tests inject a catalog through the
+// component's `products` seam instead of relying on hardcoded data.
+// Seller addresses are real genesis addresses, mirroring the old demo catalog.
+const DEMO_PRODUCTS = [
+  { id: 'prod-1', name: 'Nairobi Roast Coffee — 500g', seller: 'Safari Beans Co.', sellerAddress: 'mall1y2tvfjcm6p23cgmzn3gw3y87wznxexzca4lc7l', price: 32.5, rating: 4.8, img: '☕', cat: 'Food' },
+  { id: 'prod-2', name: 'Maasai Beaded Bracelet', seller: 'Maa Crafts', sellerAddress: 'mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6', price: 14.0, rating: 4.9, img: '📿', cat: 'Fashion' },
+];
+
 describe('Marketplace checkout', () => {
   beforeEach(() => {
     store.reset();
@@ -42,7 +53,7 @@ describe('Marketplace checkout', () => {
   test('adding a product and checking out builds and broadcasts a real MsgCreateEscrow, not a local simulation', async () => {
     vi.mocked(createEscrow).mockResolvedValue({ txHash: 'ESCROWTXHASH', escrowId: 'escrow-1' });
 
-    render(<Marketplace navigate={() => {}} />);
+    render(<Marketplace navigate={() => {}} products={DEMO_PRODUCTS} />);
 
     const firstProductCard = screen.getAllByText('Add to cart')[0].closest('.c-card') as HTMLElement;
     const productName = within(firstProductCard).getByText(/./, { selector: '.nm' }).textContent;
@@ -72,7 +83,7 @@ describe('Marketplace checkout', () => {
     store.state.wallet.pinEncryptedMnemonic = '';
     store.commit();
 
-    render(<Marketplace navigate={() => {}} />);
+    render(<Marketplace navigate={() => {}} products={DEMO_PRODUCTS} />);
 
     fireEvent.click(screen.getAllByText('Add to cart')[0]);
     fireEvent.click(screen.getByText(/🛒 Cart \(1\)/));
@@ -84,7 +95,7 @@ describe('Marketplace checkout', () => {
   test('a failed escrow broadcast leaves the cart intact instead of silently clearing it', async () => {
     vi.mocked(createEscrow).mockRejectedValue(new Error('insufficient funds'));
 
-    render(<Marketplace navigate={() => {}} />);
+    render(<Marketplace navigate={() => {}} products={DEMO_PRODUCTS} />);
 
     fireEvent.click(screen.getAllByText('Add to cart')[0]);
     fireEvent.click(screen.getByText(/🛒 Cart \(1\)/));

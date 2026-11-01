@@ -10,6 +10,7 @@ const { DirectSecp256k1Wallet, DirectSecp256k1HdWallet } = require('@cosmjs/prot
 const Redis = require('ioredis');
 const { redisTlsOptions } = require('../utils/redisTlsOptions');
 const logger = require('../utils/logger');
+const { recordFaucetActivity } = require('./liquidityActivityService');
 
 const IS_TEST_ENV = process.env.NODE_ENV === 'test';
 const isProduction = process.env.NODE_ENV === 'production';
@@ -311,6 +312,29 @@ async function creditMlcns(address, amountMlcns = DEFAULT_MLCNS) {
   }
 
   await setCooldown(address);
+
+  // Pool-ledger coverage: every faucet grant is recorded in the liquidity
+  // activity ledger as an informational row (affectsReserves: false — a
+  // dev/test MLCNS grant moves no fiat into or out of the pool).
+  // Fire-and-forget: a ledger miss must never fail an already-broadcast
+  // faucet credit.
+  try {
+    Promise.resolve(recordFaucetActivity({
+      address,
+      amountMlcns: amount,
+      txHash: transfer?.txHash,
+      stage: 'faucet_credited',
+      metadata: { gasFundingTxHash: gasFunding?.txHash || null },
+    })).catch((ledgerErr) => logger.warn('faucet', 'pool-activity ledger write failed (non-fatal)', {
+      address,
+      error: ledgerErr?.message || String(ledgerErr),
+    }));
+  } catch (hookErr) {
+    logger.warn('faucet', 'pool-activity ledger hook failed (non-fatal)', {
+      address,
+      error: hookErr?.message || String(hookErr),
+    });
+  }
 
   const balance = await getWalletBalance(address);
 

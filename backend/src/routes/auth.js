@@ -116,6 +116,59 @@ router.post('/login-username',
 router.get('/me', asyncHandler(authCtrl.me));
 
 /**
+ * GET /api/auth/compliance-status
+ * Per-user compliance snapshot used by the frontend's ComplianceGates
+ * (useComplianceStatus hook). Returns exactly the ComplianceStatus shape
+ * the client already consumes: kycStatus/amlStatus/geographicRestriction.
+ *
+ * Data sources (the real ones, not the legacy /api/compliance/status
+ * mocks): latest KYC record from models/kyc.js drives kycStatus; any
+ * pending WithdrawalAmlReview flips amlStatus to 'under_review' and a
+ * rejected one to 'flagged'. Geographic restriction follows the same
+ * Cloudflare header + RESTRICTED_COUNTRIES list as compliance.js.
+ */
+router.get('/compliance-status', auth, asyncHandler(async (req, res) => {
+  const User = require('../models/user');
+  const KYC = require('../models/kyc');
+  const WithdrawalAmlReview = require('../models/WithdrawalAmlReview');
+
+  const userId = req.user?._id || req.user?.id;
+  const user = await User.findById(userId).select('kycLevel tosAcceptedAt privacyAcceptedAt createdAt').lean();
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const kyc = await KYC.findOne({ userId, status: { $ne: 'draft' } }).select('status riskLevel reviewedAt').sort({ submittedAt: -1 }).lean();
+  const kycStatus = kyc?.status === 'approved' || (user.kycLevel || 0) >= 2
+    ? 'approved'
+    : kyc?.status === 'rejected'
+      ? 'rejected'
+      : kyc
+        ? 'pending'
+        : 'unverified';
+
+  const pendingAml = await WithdrawalAmlReview.countDocuments({ userId, status: 'pending' });
+  const rejectedAml = await WithdrawalAmlReview.countDocuments({ userId, status: 'rejected' });
+  const amlStatus = rejectedAml > 0 ? 'flagged' : pendingAml > 0 ? 'under_review' : 'clear';
+
+  const clientCountry = req.headers['cf-ipcountry'] || 'UNKNOWN';
+  const restrictedList = (process.env.RESTRICTED_COUNTRIES || '').split(',').map((c) => c.trim().toUpperCase()).filter(Boolean);
+  const geographicRestriction = restrictedList.includes(String(clientCountry).toUpperCase());
+
+  return res.json({
+    ok: true,
+    kycLevel: user.kycLevel || 0,
+    kycStatus,
+    amlStatus,
+    geographicRestriction,
+    restrictedReason: geographicRestriction
+      ? `Mallchain services are not available in ${clientCountry}`
+      : undefined,
+    tosAccepted: !!user.tosAcceptedAt,
+    privacyAccepted: !!user.privacyAcceptedAt,
+    lastVerified: Date.now(),
+  });
+}));
+
+/**
  * POST /api/auth/link-wallet — associate the logged-in account with an
  * on-chain address (see authController.js's linkWallet for the full
  * rationale). Frontend calls this once after wallet creation/import.

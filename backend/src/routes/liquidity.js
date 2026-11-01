@@ -3,6 +3,7 @@ const router = express.Router()
 const ctrl = require('../controllers/liquidityController')
 const LiquidityPoolActivity = require('../models/LiquidityPoolActivity')
 const { requireAdmin } = require('../middleware/adminAuth')
+const { requireCategory } = require('../middleware/categoryAccess')
 const logger = require('../utils/logger')
 
 // GET /api/liquidity/pools
@@ -38,8 +39,11 @@ router.post('/remove', requireAdmin, ctrl.removeLiquidity)
 router.get('/position', ctrl.getUserPosition)
 
 // GET /api/liquidity/activity — financial ledger detail (quote/wallet/amount
-// per stage); admin-only, matching every other admin-panel financial view.
-router.get('/activity', requireAdmin, async (req, res) => {
+// per stage). Category-scoped: the liquidity pool activity ledger is the MLPTS
+// category's financial view, so gate it with requireAdmin + requireCategory
+// ('mlpts') — the same pairing adminPanel.js uses (router-level requireAdmin,
+// per-route category check; superadmins pass automatically).
+router.get('/activity', requireAdmin, requireCategory('mlpts'), async (req, res) => {
   try {
     const {
       flow,

@@ -97,6 +97,17 @@ const UserSettingsSchema = new Schema({
     defaultView: { type: String, default: 'dashboard' },
     itemsPerPage: { type: Number, default: 20 },
   },
+
+  // Connected social accounts (Profile & Settings → Social Accounts section).
+  // One entry per platform; platform is validated against the frontend's enum
+  // in routes/settings.js before writing.
+  socialAccounts: [{
+    platform: { type: String, required: true },
+    handle: { type: String, required: true, maxlength: 100 },
+    connected: { type: Boolean, default: true },
+    url: { type: String },
+    lastConnected: { type: Date },
+  }],
 }, {
   timestamps: { createdAt: false, updatedAt: 'updatedAt' },
 });

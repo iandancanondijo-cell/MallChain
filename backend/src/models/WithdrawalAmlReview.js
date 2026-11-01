@@ -60,6 +60,14 @@ function decryptAmlPii(review) {
   for (const field of ENCRYPTED_FIELDS) {
     if (plain[field] != null) plain[field] = decryptField(plain[field]);
   }
+  // Populate+lean copies stored-encrypted User emails verbatim — decrypt
+  // the populated refs so admin history views don't show ciphertext.
+  for (const ref of ['userId', 'reviewedBy']) {
+    const pop = plain[ref];
+    if (pop && typeof pop === 'object' && typeof pop.email === 'string' && pop.email) {
+      pop.email = decryptField(pop.email);
+    }
+  }
   return plain;
 }
 

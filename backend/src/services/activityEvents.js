@@ -36,6 +36,24 @@ function displayAddress(address) {
   return s.length > 18 ? `${s.slice(0, 10)}…${s.slice(-6)}` : s;
 }
 
+/**
+ * Sanitize free-text admin/provider notes before they are rendered into a
+ * user-facing notification (templates use `user_safe_reason`). Admin notes
+ * can contain internal jargon, angles brackets (HTML/JSON fragments) or
+ * arbitrarily long text — strip control characters and angle brackets,
+ * collapse whitespace, cap the length, and fall back to a safe generic
+ * message when nothing usable remains.
+ */
+function userSafeReason(value, fallback = 'Our review team could not approve this request as submitted. Review the guidance in your account and resubmit if corrections are available.') {
+  const s = String(value == null ? '' : value)
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+  return s || fallback;
+}
+
 // ─── ACCOUNT & ONBOARDING ────────────────────────────────────────────
 
 async function emitAccountCreated(userId, data = {}) {
@@ -112,12 +130,20 @@ async function emitWithdrawalRequested(userId, data) {
   return emit('wallet.withdrawal_requested', userId, data);
 }
 
+async function emitWithdrawalProcessing(userId, data) {
+  return emit('wallet.withdrawal_processing', userId, data);
+}
+
 async function emitWithdrawalCompleted(userId, data) {
   return emit('wallet.withdrawal_completed', userId, data);
 }
 
 async function emitWithdrawalFailed(userId, data) {
   return emit('wallet.withdrawal_failed', userId, data);
+}
+
+async function emitComplianceAlert(userId, data) {
+  return emit('security.compliance_alert', userId, data);
 }
 
 async function emitTransferReceived(userId, data) {
@@ -572,6 +598,7 @@ module.exports = {
   emit,
   userIdForAddress,
   displayAddress,
+  userSafeReason,
 
   // Account
   emitAccountCreated,
@@ -594,6 +621,7 @@ module.exports = {
   emitDepositConfirmed,
   emitDepositFailed,
   emitWithdrawalRequested,
+  emitWithdrawalProcessing,
   emitWithdrawalCompleted,
   emitWithdrawalFailed,
   emitTransferReceived,
@@ -667,6 +695,7 @@ module.exports = {
   emitKycApproved,
   emitKycRejected,
   emitTransferHeld,
+  emitComplianceAlert,
 
   // Governance
   emitProposalCreated,

@@ -59,6 +59,7 @@ const Admin = lazy(() => import('./features/admin/advanced/AdminApp'));
 const Settings = lazy(() => import('./features/settings/Settings'));
 const Contracts = lazy(() => import('./features/contracts/Contracts'));
 const DevHub = lazy(() => import('./features/devhub/DevHub'));
+const RunANode = lazy(() => import('./features/node/RunANode'));
 const Economy = lazy(() => import('./features/economy/Economy'));
 const Edu = lazy(() => import('./features/edu/Edu'));
 const SearchResults = lazy(() => import('./features/search/SearchResults'));
@@ -137,6 +138,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/settings', title: 'Profile & Settings', render: () => <Settings /> },
   { path: '/contracts', title: 'Smart Contracts', render: () => <Contracts /> },
   { path: '/devhub', title: 'Developer Hub', render: () => <DevHub /> },
+  { path: '/run-node', title: 'Run a Node', render: (n) => <RunANode navigate={n} /> },
   { path: '/careers', title: 'Careers', render: () => <Careers /> },
   { path: '/learning', title: 'Learning', render: () => <Learning /> },
   { path: '/social-tasks', title: 'Social Tasks', render: () => <SocialTasks /> },
@@ -157,7 +159,7 @@ export function matchRoute(path: string, isAuthenticated: boolean = true, role: 
   // /wallet is included so users can connect/create a wallet before logging in.
   // /admin is NOT here — unauthenticated users hitting /admin get redirected to /auth
   // so there is ONE login portal across the whole platform.
-  const publicRoutes = ['/landing', '/auth', '/login', '/dmca', '/wallet', '/wallet/connect'];
+  const publicRoutes = ['/landing', '/auth', '/login', '/dmca', '/wallet', '/wallet/connect', '/run-node'];
   const isAdmin = role === 'admin' || role === 'superadmin';
 
   const denyIfAdminOnly = (routePath: string): RouteDef | null => {

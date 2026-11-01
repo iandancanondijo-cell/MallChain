@@ -140,6 +140,17 @@ function decryptKycPii(kyc) {
   for (const field of ENCRYPTED_FIELDS) {
     if (plain[field] != null) plain[field] = decryptField(plain[field]);
   }
+  // .lean()+populate() copies the User doc's email as stored AT REST —
+  // encrypted. Admin views render userId.email / reviewedBy.email directly,
+  // so decrypt the populated refs too or reviewers see raw ciphertext.
+  // decryptField passes non-prefixed values through unchanged (legacy
+  // plaintext stays plaintext).
+  for (const ref of ['userId', 'reviewedBy']) {
+    const pop = plain[ref];
+    if (pop && typeof pop === 'object' && typeof pop.email === 'string' && pop.email) {
+      pop.email = decryptField(pop.email);
+    }
+  }
   return plain;
 }
 

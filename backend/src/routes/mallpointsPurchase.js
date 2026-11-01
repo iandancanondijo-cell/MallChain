@@ -12,6 +12,7 @@ const { getMlptsPerMlcnsScale } = require('../services/mallcoinService')
 const { blindIndex } = require('../utils/fieldEncryption')
 const { getMallpointPriceKes } = require('../services/economyConstants')
 const { describeFailure } = require('../services/mpesaCallbackService')
+const { recordMallpointsPurchaseActivity } = require('../services/liquidityActivityService')
 const { emitDepositConfirmed } = require('../services/activityEvents')
 
 // Mallpoints price in KES — single source of truth (economyConstants).
@@ -446,6 +447,25 @@ router.post('/credit', requireAuth(), async (req, res) => {
       })
       purchase.liquidityAdded = false
       purchase.liquidityError = liqErr.message || String(liqErr)
+    }
+
+    // Pool-ledger coverage: an MLPTS purchase brings real M-Pesa fiat into
+    // the economy, but Mallpoints purchases live in Redis (10-min TTL) and
+    // the durable pool reserves are the credited-MallcoinPurchase ledger —
+    // so this is recorded as an informational row (affectsReserves: false).
+    // Non-fatal by design: a ledger miss must never break the credit.
+    try {
+      await Promise.resolve(recordMallpointsPurchaseActivity('mallpoints_credited', purchase, {
+        note: 'MLPTS purchased via M-Pesa; informational — pool reserves track credited MallcoinPurchases only.',
+      })).catch((ledgerErr) => logger.warn('mallpoints-purchase', 'pool-activity ledger write failed (non-fatal)', {
+        quoteId: purchase.quoteId,
+        error: ledgerErr.message || String(ledgerErr),
+      }))
+    } catch (hookErr) {
+      logger.warn('mallpoints-purchase', 'pool-activity ledger hook failed (non-fatal)', {
+        quoteId: purchase.quoteId,
+        error: hookErr?.message || String(hookErr),
+      })
     }
 
     // Email the holder that their MLPTS landed (no MLPTS-purchase template

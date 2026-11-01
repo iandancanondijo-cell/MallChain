@@ -489,6 +489,11 @@ module.exports = {
   removeLiquidity,
   getUserPosition,
   addLiquidityToPool,
+  // Exported for tests + the reconciliation job: reserves are the
+  // credited-MallcoinPurchase aggregation only — LiquidityPoolActivity rows
+  // (especially the informational flows: reward/transfer/faucet/refund/
+  // mallpoints_purchase) never feed reserve math.
+  fetchLedgerPoolReserves,
   // routes/adminPanel.js's POST /api/admin/reconcile calls this directly
   // (liquidityController.fetchPoolsFromBlockchain()) — it was missing from
   // this export list, so every reconcile request threw

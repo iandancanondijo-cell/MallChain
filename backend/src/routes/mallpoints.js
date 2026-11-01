@@ -14,6 +14,7 @@ const { getMallpointPriceKes } = require('../services/economyConstants')
 const { getDynamicConversionRate } = require('../services/conversionRateOracle')
 const { blindIndex } = require('../utils/fieldEncryption')
 const { recordLiquidityActivity } = require('../services/liquidityActivityService')
+const { appendAuditEvent } = require('../services/auditChainService')
 const { emitMlptsConversionCompleted } = require('../services/activityEvents')
 const { verifyConvertSignature } = require('../mallwallet/security/verifyAdr036')
 const { config } = require('../config')
@@ -273,6 +274,22 @@ router.post('/convert', async (req, res) => {
           conversion_reference: credit?.transfer?.txHash || 'pending',
         }).catch(() => {})
       }
+
+      // Tamper-evident ledger: a conversion moves real value (points ->
+      // minted MLCNS), so its settlement is chain-audited with the wallet
+      // as actor (no req.user here — the ADR-036 signature proves ownership
+      // of `address`, which is exactly the identity worth recording).
+      appendAuditEvent(
+        { id: String(address), role: 'wallet-holder' },
+        'mallpoints_conversion_settled',
+        `wallet:${address}`,
+        {
+          userId: convertedUserId ? String(convertedUserId) : null,
+          convertedPoints: pointsToConvert,
+          mallcoins: mlcoins,
+          creditTxHash: credit?.transfer?.txHash || null,
+        }
+      )
 
       return res.json({
         ok: true,

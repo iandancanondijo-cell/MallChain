@@ -4,7 +4,11 @@
 // SecuritySettings' "Sign Out Everywhere" button did the exact same
 // single-device local clear despite its name, revoking nothing on any
 // other device holding a token for that account.
+// Session policy (2026-11): SESSION_TTL_MIN=30 (30-minute sessions; the
+// expiry itself is covered by sessionCooldown.test.js — this suite stays
+// about revocation).
 process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long!!!';
+process.env.SESSION_TTL_MIN = '30';
 
 const request = require('supertest');
 const express = require('express');
@@ -18,9 +22,17 @@ jest.mock('../middleware/tokenDenylist', () => ({
   revokeToken: jest.fn().mockResolvedValue(undefined),
   revokeAllUserTokens: jest.fn().mockResolvedValue(undefined),
 }));
+// Keep signToken()'s current-session stamping hermetic (real Redis not
+// required to run this suite); the stamping/cooldown behavior itself is
+// covered in sessionCooldown.test.js.
+jest.mock('../middleware/sessionCooldown', () => ({
+  stampCurrentSession: jest.fn().mockResolvedValue(undefined),
+  handleExpiredToken: jest.fn().mockResolvedValue(false),
+}));
 
 const User = require('../models/user');
 const { isRevoked, revokeToken, revokeAllUserTokens } = require('../middleware/tokenDenylist');
+const { stampCurrentSession } = require('../middleware/sessionCooldown');
 const auth = require('../middleware/auth');
 const authCtrl = require('../controllers/authController');
 
@@ -121,6 +133,15 @@ describe('POST /api/auth/refresh', () => {
     expect(decoded.userId).toBe('u1');
     expect(decoded.jti).not.toBe('jti-old');
     expect(decoded.exp).toBe(res.body.expiresAt);
+    // Session policy: refresh-rotated tokens follow SESSION_TTL_MIN (30 here),
+    // not the old 120-minute default — a manual refresh is the only thing
+    // that can extend a session now (storeSync's silent auto-refresh was
+    // removed for exactly this reason).
+    expect(decoded.exp - decoded.iat).toBe(30 * 60);
+    // Rotation must RE-STAMP session:current:{userId} with the new exp —
+    // that stamp is what stops stale tabs' older expired tokens from
+    // arming the login cooldown against the replaced session.
+    expect(stampCurrentSession).toHaveBeenCalledWith('u1', res.body.expiresAt);
 
     // The pre-rotation token must be revoked immediately, not left to
     // expire naturally — same reasoning as an explicit logout.

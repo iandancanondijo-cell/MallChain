@@ -186,7 +186,19 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  /* Android Chrome auto inflates/deflates text when it thinks the page is
+     a desktop layout; pinning the adjust factor keeps type scale exactly
+     as authored at every viewport. Transparent tap highlight removes the
+     grey flash that made glass surfaces look broken on phones. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
+
+/* Mobile safety net: media can never be wider than the viewport, so an
+   oversized image/video can no longer expand the layout viewport and make
+   phones render the page "like desktop" (Chrome then suggests Desktop site). */
+img, video, canvas { max-width: 100%; }
 
 a { color: var(--accent); text-decoration: none; transition: color var(--duration-fast) var(--ease); }
 a:hover { color: var(--gold-2); text-decoration: underline; }
@@ -1449,10 +1461,33 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .side-item { min-height: 42px; }
   .side-group-title { min-height: 36px; }
   .btn-sm, .btn--sm { min-height: 40px; }
+  /* thumb-friendly hit areas, round 2 — inline text buttons and chips
+     measured 15–29px tall on a Pixel (addr chip, section links, segmented
+     tabs, toast/modal/panel close "×", link-btn) */
+  .wallet-addr-chip { min-height: 40px; padding: 8px 12px; white-space: normal; }
+  .sec-link-btn { min-height: 40px; padding: 8px; }
+  .seg { min-height: 36px; }
+  .link-btn { min-height: 40px; padding: 10px 0; }
+  .modal-close { min-width: 40px; min-height: 40px; display: flex; align-items: center; justify-content: center; }
+  .panel-close { min-width: 36px; min-height: 36px; display: flex; align-items: center; justify-content: center; }
+  .toast .t-close { padding: 10px 8px; margin: -10px -8px -10px 0; }
+  .check input { width: 20px; height: 20px; }
+  /* Generic dropdown panels keep min-width:320px, which is the entire
+     viewport on 320px phones — drop the floor and clamp to the viewport.
+     (tb-settings/tb-notifications already override themselves above.) */
+  .panel { min-width: 0; max-width: min(380px, calc(100vw - 24px)); }
+  /* Long hex hashes/addresses are unbreakable strings and widen their row
+     past the viewport; let them wrap instead of forcing horizontal scroll. */
+  .mono, .flow-row .hash { overflow-wrap: anywhere; word-break: break-all; }
+  .flow-row { flex-wrap: wrap; }
   /* Collapse the remaining wide items so the row fits a 360px phone.
      An overflowing topbar expands the mobile layout viewport, which
-     breaks every position:fixed element (modals, animated background). */
-  .topbar { gap: 8px; }
+     breaks every position:fixed element (modals, animated background).
+     flex-wrap is the graceful fallback: if any chip (long balance, admin
+     badge, maintenance banner) still outgrows the row, the topbar wraps
+     onto a second sticky row instead of pushing page width past the
+     viewport. */
+  .topbar { gap: 8px; flex-wrap: wrap; row-gap: 6px; }
   .tb-user > div { display: none; }
   .tb-admin-label { display: none; }
   .socket-text, .socket-count { display: none; }
@@ -1510,6 +1545,15 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .grid-2, .grid-3 { gap: 8px; }
   .btn { padding: 8px 14px; font-size: 12px; }
   .chip { font-size: 10px; padding: 3px 8px; }
+}
+
+/* ≤400px (small Android phones): the topbar is at budget. The network
+   status pill carries no text there and the dot duplicates the bell
+   row's signal, so drop it to buy width for the wallet balance. */
+@media (max-width: 400px) {
+  .topbar .socket-status { display: none; }
+  .tb-wallet { padding: 6px 8px; }
+  .topbar { gap: 6px; }
 }
 
 /* ── inline text-styled button ── */

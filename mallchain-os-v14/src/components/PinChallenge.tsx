@@ -9,7 +9,7 @@ import { useEffect, useState, useRef } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { store } from '../store/store';
 import { decryptMnemonic, verifyPin } from '../services/security';
-import { api } from '../services/api';
+import { api, getPinChallengeLock } from '../services/api';
 import { config } from '../services/config';
 import { authService } from '../services/auth';
 import { mnemonicRequestBus, type MnemonicRequest } from '../services/mnemonicAccess';
@@ -31,6 +31,15 @@ export function PinChallengeHost() {
 
   useEffect(() => {
     const fn = (req: MnemonicRequest) => {
+      // Rate-limit gate (see services/api.ts markPinChallengeLocked): while a
+      // recent 429 cool-down is running, the PIN UI must NOT open — the
+      // request is rejected without touching this component's local state.
+      // (WalletSend also short-circuits before calling requestMnemonic; this
+      // is the belt-and-braces half of "the PIN UI must not accept input".)
+      if (getPinChallengeLock().locked) {
+        req.resolve(null);
+        return;
+      }
       setPending(req);
       setPin('');
       setError(null);
@@ -76,6 +85,16 @@ export function PinChallengeHost() {
   };
 
   const submit = async () => {
+    // Rate-limit cool-down that started while this modal was already open:
+    // refuse the input without burning a PIN attempt or hitting the verify
+    // endpoint — the request cannot do anything useful while limited anyway.
+    const rateLock = getPinChallengeLock();
+    if (rateLock.locked) {
+      setError(
+        `PIN entry locked — ${rateLock.reason || 'too many recent operations'} (retry in ${rateLock.retryAfterSeconds}s)`
+      );
+      return;
+    }
     if (lockedUntil) {
       setError(`Too many failed attempts. Try again in ${remainingSeconds}s.`);
       return;

@@ -3,6 +3,7 @@ const router = express.Router();
 const { rotationManager, ROTATION_POLICIES } = require('../utils/secretRotation');
 const { requireAdmin } = require('../middleware/adminAuth');
 const logger = require('../utils/logger');
+const { appendAuditEvent } = require('../services/auditChainService');
 
 router.get('/rotation/status', requireAdmin, (req, res) => {
   const status = rotationManager.getStatus();
@@ -32,6 +33,15 @@ router.post('/rotation/rotate/:type', requireAdmin, async (req, res) => {
     });
 
     const newSecret = await rotationManager.forceRotate(type);
+
+    // Secret rotation is a privileged, silently-destructive action — it
+    // permanently evidences who rotated what in the hash chain.
+    appendAuditEvent(
+      { id: String(req.user?._id || req.user?.id || 'admin'), role: String(req.user?.role || 'admin') },
+      'secret_rotation',
+      `secret:${type}`,
+      { type }
+    );
 
     res.json({
       success: true,

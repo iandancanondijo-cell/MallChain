@@ -14,7 +14,9 @@ const schemas = require('../utils/validationSchemas');
 const idempotency = require('../middleware/idempotency');
 const { config } = require('../config');
 const { recordWithdrawLiquidityActivity } = require('../services/liquidityActivityService');
+const { emitWithdrawalRequested, userIdForAddress } = require('../services/activityEvents');
 const { requireAdmin } = require('../middleware/adminAuth');
+const { appendAuditEvent } = require('../services/auditChainService');
 
 function autoPayoutEnabled() {
   return config.payment.safaricom.autoPayoutEnabled;
@@ -114,12 +116,35 @@ router.post('/mpesa', requireAdmin, idempotency({ required: true }), validateReq
       notes: 'Awaiting settlement review before fiat payout.',
       settlementMode: 'review',
     });
+    // Tamper-evident chain audit: this endpoint can trigger a REAL Safaricom
+    // B2C payout when auto-payout is on — privileged money-moving action.
+    // Phone is PII and deliberately excluded; the rest is hash-only anyway.
+    appendAuditEvent(
+      { id: String(req.user?._id || req.user?.id || 'admin'), role: String(req.user?.role || 'admin') },
+      'withdrawal_request_created',
+      `withdrawal:${withdrawalId}`,
+      { walletAddress, amountMlcns, amountKes, currency, autoPayoutEnabled: autoPayoutEnabled() }
+    );
     await recordWithdrawLiquidityActivity('withdraw_request_created', withdrawal, {
       status: 'pending',
       providerMode:
         config.payment.safaricom.consumerKey && config.payment.safaricom.consumerSecret ? 'live' : 'unconfigured',
       note: 'Manual withdrawal request created for fiat settlement review.',
     });
+
+    // The request was silent to the wallet holder (this route is staff-filed
+    // on the customer's behalf). Same convention as buy.js's /sell: resolve
+    // the holder from the wallet address and emit wallet.withdrawal_requested
+    // fire-and-forget — required fields amount, asset, destination_short,
+    // reference_id; a missing one makes dispatchEvent reject the event.
+    userIdForAddress(walletAddress)
+      .then((uid) => uid && emitWithdrawalRequested(uid, {
+        amount: Number(amountMlcns),
+        asset: 'MLCNS',
+        destination_short: 'Safaricom M-Pesa',
+        reference_id: withdrawalId,
+      }))
+      .catch(() => {});
 
     if (!autoPayoutEnabled()) {
       return res.status(202).json({

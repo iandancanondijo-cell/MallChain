@@ -5,6 +5,7 @@ const Tx = require('../../models/transaction')
 const register = require('../monitoring/prometheus')
 const logger = require('../../utils/logger')
 const { broadcastTransaction } = require('../../services/transactionService')
+const { recordTransferActivity } = require('../../services/liquidityActivityService')
 const { emitTransactionEvent, emitTransferReceived, emitTransferFailed, userIdForAddress } = require('../../services/activityEvents')
 
 const CHAIN_REST = process.env.CHAIN_REST || 'http://127.0.0.1:1317'
@@ -31,6 +32,29 @@ async function handleRelay(job) {
   tx.txHash = txHash || null
   tx.updatedAt = Date.now()
   await tx.save()
+
+  // Pool-ledger coverage: relayed P2P transfers are informational rows
+  // (affectsReserves: false) — see models/LiquidityPoolActivity.js.
+  // Non-fatal: a ledger miss never fails the relay job.
+  try {
+    Promise.resolve(recordTransferActivity({
+      from: tx.from,
+      to: tx.to,
+      amountMlcns: tx.amount,
+      denom: tx.denom,
+      txHash,
+      userId: tx.userId ? String(tx.userId) : undefined,
+      stage: 'p2p_transfer_relayed',
+    })).catch((ledgerErr) => logger.warn('transactionWorker', 'pool-activity ledger write failed (non-fatal)', {
+      txId: tx._id,
+      error: ledgerErr?.message || String(ledgerErr),
+    }))
+  } catch (hookErr) {
+    logger.warn('transactionWorker', 'pool-activity ledger hook failed (non-fatal)', {
+      txId: tx._id,
+      error: hookErr?.message || String(hookErr),
+    })
+  }
 
   txJobCounter.inc({ status: 'completed' })
   return { txHash }
@@ -122,6 +146,30 @@ async function handleBroadcast(job) {
         txHash: tx.txHash,
         height: tx.blockHeight
       })
+    }
+
+    // Pool-ledger coverage: confirmed broadcast P2P transfers get an
+    // informational row (affectsReserves: false). Non-fatal by design.
+    if (tx.status === 'confirmed') {
+      try {
+        Promise.resolve(recordTransferActivity({
+          from: tx.from,
+          to: tx.to,
+          amountMlcns: tx.amount,
+          denom: tx.denom,
+          txHash: tx.txHash,
+          userId: tx.userId ? String(tx.userId) : undefined,
+          stage: 'p2p_transfer_confirmed',
+        })).catch((ledgerErr) => logger.warn('transactionWorker', 'pool-activity ledger write failed (non-fatal)', {
+          txId: tx._id,
+          error: ledgerErr?.message || String(ledgerErr),
+        }))
+      } catch (hookErr) {
+        logger.warn('transactionWorker', 'pool-activity ledger hook failed (non-fatal)', {
+          txId: tx._id,
+          error: hookErr?.message || String(hookErr),
+        })
+      }
     }
 
     if (tx.status === 'confirmed' && tx.userId) {

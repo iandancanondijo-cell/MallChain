@@ -3,9 +3,11 @@ import { store } from '../../../store/store';
 import { useStoreVersion } from '../../../components/ui';
 import CategoryPage from '../categories/CategoryPage';
 import ReportsAdmin from '../categories/ReportsAdmin';
+import PlatformAdmin from '../categories/PlatformAdmin';
 
 // View state model:
 //   'home'     — superadmin only: chooser modal listing all categories
+//   'platform' — superadmin only: system-wide operations window
 //   <category> — a single category window (works for any role, scoped server-side)
 //
 // The prior 'specialised' view (advanced/console.ts) was removed as part of
@@ -16,10 +18,26 @@ import ReportsAdmin from '../categories/ReportsAdmin';
 //
 // URL hash drives routing. Examples:
 //   #/admin?cat=kyc → KYC category window
+//   #/admin?cat=platform → superadmin Platform window
 //   #/admin         → Home chooser for superadmin, direct category for category admin
-type AdminView = 'home' | 'users' | 'blockchain' | 'validator' | 'kyc' | 'mining' | 'treasury' | 'marketplace' | 'mlpts' | 'reports';
+type AdminView = 'home' | 'users' | 'blockchain' | 'validator' | 'kyc' | 'mining' | 'treasury' | 'marketplace' | 'mlpts' | 'reports' | 'platform';
 
-const CATEGORIES: AdminView[] = ['users', 'blockchain', 'validator', 'kyc', 'mining', 'treasury', 'marketplace', 'mlpts', 'reports'];
+const CATEGORIES: AdminView[] = ['users', 'blockchain', 'validator', 'kyc', 'mining', 'treasury', 'marketplace', 'mlpts', 'reports', 'platform'];
+
+// What each window covers — shown as one-liners in the chooser so an admin
+// can study and go across all parts of Mallchain without guessing.
+export const CATEGORY_DESCRIPTIONS: Record<Exclude<AdminView, 'home'>, { title: string; sub: string }> = {
+  users: { title: 'Users Admin', sub: 'Account search, ban/unban, and provisioning new category admins' },
+  blockchain: { title: 'Blockchain Admin', sub: 'Block height, chain health, validators and governance proposals' },
+  validator: { title: 'Validator Admin', sub: 'Validator sign-up applications — approve or reject the active set' },
+  kyc: { title: 'KYC & AML Admin', sub: 'Identity submissions, AML reviews, decision history, structuring flags' },
+  mining: { title: 'Mining Admin', sub: 'Campaigns, task submissions awaiting payout, badge issuance' },
+  treasury: { title: 'Treasury Admin', sub: 'Withdrawal payouts, treasury ledger, burn policies, AML flags' },
+  marketplace: { title: 'Marketplace Admin', sub: 'On-chain escrow deals and marketplace burn events' },
+  mlpts: { title: 'MLPTS & Liquidity Admin', sub: 'Mallpoints↔Mallcoin conversions and every liquidity pool flow' },
+  reports: { title: 'Reports Admin', sub: 'Read and action escalation reports from category admins' },
+  platform: { title: 'Platform Control', sub: 'Superadmin only: maintenance pause, broadcasts, audit log, reconciliation, roles, badge design' },
+};
 
 function parseHashView(): AdminView | null {
   const hash = window.location.hash || '';
@@ -99,8 +117,6 @@ export default function AdminApp() {
     );
   }
 
-  const isReportsCategory = view === 'reports';
-
   return (
     <>
       <div className="adm-actions">
@@ -111,10 +127,12 @@ export default function AdminApp() {
         )}
         <a className="btn btn-ghost btn-sm" href="#/">Exit admin</a>
       </div>
-      {isReportsCategory ? (
+      {view === 'reports' ? (
         <ReportsAdmin />
+      ) : view === 'platform' ? (
+        <PlatformAdmin />
       ) : (
-        <CategoryPage category={view as Exclude<AdminView, 'home' | 'reports'>} />
+        <CategoryPage category={view as Exclude<AdminView, 'home' | 'reports' | 'platform'>} />
       )}
     </>
   );
@@ -139,16 +157,12 @@ function Chooser({
   }
 
   const cats: Array<{ id: AdminView; title: string; sub: string }> = [
-    { id: 'users', title: 'Users Admin', sub: 'Search, ban/unban, role assignment' },
-    { id: 'blockchain', title: 'Blockchain Admin', sub: 'Block height, validators, chain health' },
-    { id: 'validator', title: 'Validator Admin', sub: 'Applications, approvals, active set' },
-    { id: 'kyc', title: 'KYC Admin', sub: 'Pending submissions, AML reviews' },
-    { id: 'mining', title: 'Mining Admin', sub: 'Campaigns, submissions, badges' },
-    { id: 'treasury', title: 'Treasury Admin', sub: 'Withdrawals, ledger, AML flags' },
-    { id: 'marketplace', title: 'Marketplace Admin', sub: 'Burn events from marketplace activity' },
-    { id: 'mlpts', title: 'MLPTS Admin', sub: 'Conversion, pools, M-Pesa inflows' },
-    { id: 'reports', title: 'Reports Admin', sub: 'Read reports from category admins' },
-  ];
+    'platform', 'users', 'blockchain', 'validator', 'kyc', 'mining', 'treasury', 'marketplace', 'mlpts', 'reports',
+  ].map((id) => ({
+    id: id as AdminView,
+    title: CATEGORY_DESCRIPTIONS[id as Exclude<AdminView, 'home'>].title,
+    sub: CATEGORY_DESCRIPTIONS[id as Exclude<AdminView, 'home'>].sub,
+  }));
 
   return (
     <div style={{ padding: '40px 20px', maxWidth: 1100, margin: '0 auto' }}>

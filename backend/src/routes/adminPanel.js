@@ -4,6 +4,10 @@ const logger = require('../utils/logger')
 const mongoose = require('mongoose');
 const User = require('../models/user');
 const AuditLog = require('../models/AuditLog');
+const AuditChain = require('../models/AuditChain');
+const AnchorRegistry = require('../models/AnchorRegistry');
+const { appendAuditEvent } = require('../services/auditChainService');
+const { verifyAuditChain } = require('../services/auditChainVerify');
 const ValidatorApplication = require('../models/ValidatorApplication');
 const KYC = require('../models/kyc');
 const WithdrawalAmlReview = require('../models/WithdrawalAmlReview');
@@ -13,12 +17,13 @@ const LiquidityReconciliation = require('../models/LiquidityReconciliation');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 const { initiateB2CPayout } = require('../services/b2cPayoutService');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/adminAuth');
-const { requireCategory } = require('../middleware/categoryAccess');
+const { requireCategory, requireAnyCategory } = require('../middleware/categoryAccess');
 const activityEvents = require('../services/activityEvents');
 const { invalidateCachedUser } = require('../middleware/authCache');
 const { BurnPolicy, DynamicBurnThreshold } = require('../models/BurnPolicy');
 const TreasuryLedger = require('../models/TreasuryLedger');
 const { notify } = require('../services/notify');
+const { dispatchNotification } = require('../services/notificationDispatcher');
 const MaintenanceMode = require('../models/MaintenanceMode');
 const { invalidateCache: invalidateMaintenanceCache } = require('../middleware/maintenanceMode');
 const Campaign = require('../models/Campaign');
@@ -92,6 +97,10 @@ router.post('/bootstrap', limiters.strict, async (req, res) => {
     delete publicUser.password;
 
     await AuditLog.create({ action: 'admin_bootstrap', actor: email, details: 'First superadmin created via bootstrap', outcome: 'success' });
+    // Hash-chained ledger too — bootstrap is THE most privileged action in
+    // the system (mints a superadmin) and must be permanently evidenced.
+    // Only the sha256 of {email} lands in the chain; no PII stored.
+    appendAuditEvent({ id: String(user._id), role: 'superadmin' }, 'admin_bootstrap', `user:${user._id}`, { email });
 
     return res.json({ ok: true, user: publicUser, message: 'Superadmin created successfully' });
   } catch (err) {
@@ -115,6 +124,17 @@ async function auditLog(action, actor, details, outcome = 'success') {
   } catch (e) {
     logger.error('adminPanel', 'audit log failed', e);
   }
+}
+
+// ============ TAMPER-EVIDENT CHAIN AUDIT ============
+// appendAuditEvent is internally non-fatal (logs, never throws) and
+// serialized (module-level queue), so calling it fire-and-forget keeps the
+// hash-chain order exact without adding a DB round-trip to the response
+// path. Distinct `admin_*` action names per privileged mutation.
+function chainAudit(req, action, target, payload) {
+  const u = req.user || {};
+  const actor = { id: String(u._id || u.id || 'anonymous'), role: String(u.role || (u.email ? 'admin' : 'system')) };
+  return appendAuditEvent(actor, action, target, payload);
 }
 
 // ============ DASHBOARD ============
@@ -238,6 +258,7 @@ router.put('/users/:id/role', requireSuperAdmin, limiters.strict, async (req, re
     await invalidateCachedUser(req.params.id);
 
     await auditLog('user_role_change', req.user, { targetUserId: req.params.id, newRole: role });
+    chainAudit(req, 'admin_user_role_change', `user:${req.params.id}`, { newRole: role });
     notify(user._id, { kind: 'system', title: 'Account role updated', body: `Your account role is now ${role}` });
     return res.json({ ok: true, user });
   } catch (err) {
@@ -258,6 +279,7 @@ router.put('/users/:id/ban', requireCategory('users'), limiters.strict, async (r
     await invalidateCachedUser(req.params.id);
 
     await auditLog('user_ban', req.user, { targetUserId: req.params.id, banned: !!banned, reason });
+    chainAudit(req, 'admin_user_ban', `user:${req.params.id}`, { banned: !!banned, reason: reason || null });
     notify(user._id, {
       kind: 'system',
       title: banned ? 'Account banned' : 'Account unbanned',
@@ -279,6 +301,7 @@ router.delete('/users/:id', requireSuperAdmin, limiters.strict, async (req, res)
     // email is encrypted at rest — decrypt for the audit log
     const decryptedEmail = user.email ? decryptField(user.email) : user.email;
     await auditLog('user_delete', req.user, { targetUserId: req.params.id, email: decryptedEmail });
+    chainAudit(req, 'admin_user_delete', `user:${req.params.id}`, { email: decryptedEmail, role: user.role });
     return res.json({ ok: true, user });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -330,6 +353,7 @@ router.post('/validators/applications/:id/review', requireCategory('validator'),
     await application.save();
 
     await auditLog('validator_review', req.user, { applicationId: req.params.id, action, applicantAddress: application.applicantAddress });
+    chainAudit(req, 'admin_validator_review', `validatorApplication:${req.params.id}`, { action, applicantAddress: application.applicantAddress });
     return res.json({ ok: true, application });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -366,6 +390,75 @@ router.get('/kyc/pending', requireCategory('kyc'), async (req, res) => {
     // approve/reject decisions.
     await auditLog('kyc_pending_view', req.user, { resultCount: submissions.length });
     return res.json({ ok: true, submissions, total });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Reviewed KYC decisions (approved/rejected) — the "history" side of the
+// KYC/AML window. Pending list above only shows status pending/review, so
+// without this endpoint an admin can never see what was already decided,
+// by whom, or with what note/screenshot proof.
+router.get('/kyc/reviewed', requireCategory('kyc'), async (req, res) => {
+  try {
+    const { page = 0, limit = 25 } = req.query;
+    const safeLimit = Math.min(Math.max(Number(limit) || 25, 1), 200);
+    const skip = Math.max(Number(page) || 0, 0) * safeLimit;
+    const query = { status: { $in: ['approved', 'rejected'] } };
+
+    const [rawSubmissions, total] = await Promise.all([
+      KYC.find(query)
+        .populate('userId', 'email username')
+        .populate('reviewedBy', 'email username')
+        .sort({ reviewedAt: -1, submittedAt: -1 })
+        .skip(skip)
+        .limit(safeLimit)
+        .lean(),
+      KYC.countDocuments(query),
+    ]);
+
+    const submissions = rawSubmissions.map((s) => KYC.decryptKycPii(s));
+    await auditLog('kyc_reviewed_view', req.user, { resultCount: submissions.length });
+    return res.json({ ok: true, submissions, total, page: Number(page) || 0, limit: safeLimit });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Minimal identity detail for the KYC window's "who is this applicant"
+// expansion. Scoped to requireCategory('kyc') — the full /users/:id view
+// stays behind the users category, this returns only what a KYC reviewer
+// needs (account status, kycLevel, latest decisions) without exposing
+// balances or unrelated profile data.
+router.get('/kyc/user/:userId', requireCategory('kyc'), async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId)
+      .select('email username role kycLevel banned createdAt lastSeenAt')
+      .lean();
+    if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
+
+    const [kycRecords, amlRecords] = await Promise.all([
+      KYC.find({ userId: user._id }).select('status submittedAt reviewedAt riskLevel idType').sort({ submittedAt: -1 }).lean(),
+      WithdrawalAmlReview.find({ userId: user._id }).select('status submittedAt reviewedAt').sort({ submittedAt: -1 }).lean(),
+    ]);
+
+    await auditLog('kyc_user_view', req.user, { targetUserId: String(user._id) });
+    return res.json({
+      ok: true,
+      user: {
+        _id: user._id,
+        email: user.email ? decryptField(user.email) : null,
+        username: user.username || null,
+        role: user.role,
+        kycLevel: user.kycLevel,
+        banned: !!user.banned,
+        createdAt: user.createdAt,
+      },
+      kyc: { total: kycRecords.length, latest: kycRecords[0] || null, history: kycRecords },
+      aml: { total: amlRecords.length, pending: amlRecords.filter((r) => r.status === 'pending').length },
+    });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
@@ -414,12 +507,27 @@ router.post('/kyc/:id/review', requireCategory('kyc'), limiters.strict, async (r
 
     if (action === 'approved') {
       await User.findByIdAndUpdate(kyc.userId, { kycLevel: 2 });
-      activityEvents.emitKycApproved(String(kyc.userId), { kycId: kyc._id }).catch(() => {});
+      // Template security.kyc_approved requires `kyc_level` — passing only
+      // kycId made dispatchEvent reject the event ("Missing required
+      // fields") so users were never told their KYC passed.
+      activityEvents.emitKycApproved(String(kyc.userId), {
+        kyc_level: 'Level 2',
+        kycId: String(kyc._id),
+        referenceId: String(kyc._id),
+      }).catch((err) => logger.warn('adminPanel', 'KYC approval notification dispatch failed', { error: err.message }));
     } else {
-      activityEvents.emitKycRejected(String(kyc.userId), { kycId: kyc._id, reason: notes }).catch(() => {});
+      // Template security.kyc_rejected requires `user_safe_reason` — a
+      // sanitized, user-presentable version of the admin notes, never the
+      // raw internal note.
+      activityEvents.emitKycRejected(String(kyc.userId), {
+        user_safe_reason: activityEvents.userSafeReason(notes),
+        kycId: String(kyc._id),
+        referenceId: String(kyc._id),
+      }).catch((err) => logger.warn('adminPanel', 'KYC rejection notification dispatch failed', { error: err.message }));
     }
 
     await auditLog('kyc_review', req.user, { kycId: req.params.id, action, applicantId: String(kyc.userId), screenshotRef: safeName });
+    chainAudit(req, 'admin_kyc_review', `kyc:${req.params.id}`, { action, applicantId: String(kyc.userId), screenshotRef: safeName });
     return res.json({ ok: true, kyc });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -458,6 +566,36 @@ router.get('/aml-reviews/pending', requireCategory('kyc'), async (req, res) => {
   }
 });
 
+// Reviewed AML decisions — companion to /aml-reviews/pending, same
+// rationale as /kyc/reviewed: admins need the decision history, not just
+// the queue.
+router.get('/aml-reviews/reviewed', requireCategory('kyc'), async (req, res) => {
+  try {
+    const { page = 0, limit = 25 } = req.query;
+    const safeLimit = Math.min(Math.max(Number(limit) || 25, 1), 200);
+    const skip = Math.max(Number(page) || 0, 0) * safeLimit;
+    const query = { status: { $in: ['approved', 'rejected'] } };
+
+    const [rawReviews, total] = await Promise.all([
+      WithdrawalAmlReview.find(query)
+        .populate('userId', 'email username')
+        .populate('reviewedBy', 'email username')
+        .sort({ reviewedAt: -1, submittedAt: -1 })
+        .skip(skip)
+        .limit(safeLimit)
+        .lean(),
+      WithdrawalAmlReview.countDocuments(query),
+    ]);
+
+    const reviews = rawReviews.map((r) => WithdrawalAmlReview.decryptAmlPii(r));
+    await auditLog('aml_reviewed_view', req.user, { resultCount: reviews.length });
+    return res.json({ ok: true, reviews, total, page: Number(page) || 0, limit: safeLimit });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
 router.post('/aml-reviews/:id/review', requireCategory('kyc'), limiters.strict, async (req, res) => {
   try {
     const { action, notes } = req.body;
@@ -474,7 +612,22 @@ router.post('/aml-reviews/:id/review', requireCategory('kyc'), limiters.strict, 
     review.reviewNotes = notes || '';
     await review.save();
 
+    // AML decisions were previously silent — the applicant had to poll the
+    // compliance window to find out. security.compliance_alert requires
+    // alert_type + required_action; the user-facing action text is built
+    // server-side, the raw admin note only appears (sanitized) for rejections.
+    if (review.userId) {
+      activityEvents.emitComplianceAlert(String(review.userId), {
+        alert_type: 'Withdrawal AML review',
+        required_action: action === 'approved'
+          ? 'Enhanced due diligence cleared — you can proceed with your withdrawal.'
+          : activityEvents.userSafeReason(notes, 'Additional documentation or clarification is required before this withdrawal can proceed. You may resubmit from the compliance window.'),
+        referenceId: String(review._id),
+      }).catch((err) => logger.warn('adminPanel', 'AML decision notification dispatch failed', { error: err.message }));
+    }
+
     await auditLog('aml_review', req.user, { reviewId: req.params.id, action, userId: String(review.userId) });
+    chainAudit(req, 'admin_aml_review', `amlReview:${req.params.id}`, { action, userId: String(review.userId) });
     return res.json({ ok: true, review: WithdrawalAmlReview.decryptAmlPii(review) });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -483,7 +636,11 @@ router.post('/aml-reviews/:id/review', requireCategory('kyc'), limiters.strict, 
 });
 
 // ============ STRUCTURING FLAGS ============
-router.get('/structuring-flags', requireCategory('treasury'), async (req, res) => {
+// Treasury AND KYC/AML categories both need these: the flags are raised
+// from withdrawal activity (treasury's domain) but acknowledged as part of
+// the AML compliance flow (kyc's window). requireAnyCategory keeps the
+// other categories out.
+router.get('/structuring-flags', requireAnyCategory(['treasury', 'kyc']), async (req, res) => {
   try {
     const { acknowledged, page = 0, limit = 50 } = req.query;
     const query = {};
@@ -508,7 +665,7 @@ router.get('/structuring-flags', requireCategory('treasury'), async (req, res) =
   }
 });
 
-router.post('/structuring-flags/:id/acknowledge', requireCategory('treasury'), limiters.strict, async (req, res) => {
+router.post('/structuring-flags/:id/acknowledge', requireAnyCategory(['treasury', 'kyc']), limiters.strict, async (req, res) => {
   try {
     const flag = await WithdrawalStructuringFlag.findById(req.params.id);
     if (!flag) return res.status(404).json({ ok: false, error: 'Structuring flag not found' });
@@ -522,6 +679,7 @@ router.post('/structuring-flags/:id/acknowledge', requireCategory('treasury'), l
     await flag.save();
 
     await auditLog('structuring_flag_acknowledge', req.user, { flagId: req.params.id, walletAddress: flag.walletAddress });
+    chainAudit(req, 'admin_structuring_flag_acknowledge', `structuringFlag:${req.params.id}`, { walletAddress: flag.walletAddress });
     return res.json({ ok: true, flag });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -552,6 +710,7 @@ router.post('/treasury/policies', requireCategory('treasury'), limiters.strict, 
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
     await auditLog('treasury_policy_update', req.user, { activity, burnPercentage });
+    chainAudit(req, 'admin_treasury_policy_update', `burnPolicy:${activity}`, { activity, burnPercentage, enabled: policy.enabled });
     return res.json({ ok: true, policy });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -563,6 +722,7 @@ router.delete('/treasury/policies/:activity', requireCategory('treasury'), limit
   try {
     const result = await BurnPolicy.deleteOne({ activity: req.params.activity });
     await auditLog('treasury_policy_delete', req.user, { activity: req.params.activity });
+    chainAudit(req, 'admin_treasury_policy_delete', `burnPolicy:${req.params.activity}`, { deleted: result.deletedCount === 1 });
     return res.json({ ok: true, deleted: result.deletedCount === 1 });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -592,6 +752,7 @@ router.post('/treasury/dynamic-thresholds', requireCategory('treasury'), limiter
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
     await auditLog('treasury_threshold_update', req.user, { activity, supplyThreshold, burnPercentage });
+    chainAudit(req, 'admin_treasury_threshold_update', `dynamicBurnThreshold:${activity}:${supplyThreshold}`, { activity, supplyThreshold, burnPercentage });
     return res.json({ ok: true, threshold });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -603,6 +764,7 @@ router.delete('/treasury/dynamic-thresholds/:id', requireCategory('treasury'), l
   try {
     const result = await DynamicBurnThreshold.deleteOne({ _id: req.params.id });
     await auditLog('treasury_threshold_delete', req.user, { id: req.params.id });
+    chainAudit(req, 'admin_treasury_threshold_delete', `dynamicBurnThreshold:${req.params.id}`, { deleted: result.deletedCount === 1 });
     return res.json({ ok: true, deleted: result.deletedCount === 1 });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -749,6 +911,7 @@ router.post('/mining/submissions/:id/approve', requireCategory('mining'), limite
     }
 
     await auditLog('mining_submission_approve', req.user, { submissionId: req.params.id, rewardAmount, screenshotRef: safeName });
+    chainAudit(req, 'admin_mining_submission_approve', `submission:${req.params.id}`, { minerId: String(sub.miner_id), rewardAmount: rewardAmount || 0, screenshotRef: safeName });
     return res.json({ ok: true, submission: updated });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -785,6 +948,7 @@ router.post('/mining/submissions/:id/reject', requireCategory('mining'), limiter
     if (!row) return res.status(404).json({ ok: false, error: 'submission not found' });
 
     await auditLog('mining_submission_reject', req.user, { submissionId: req.params.id, note, screenshotRef: safeName });
+    chainAudit(req, 'admin_mining_submission_reject', `submission:${req.params.id}`, { note: note || null, screenshotRef: safeName });
     return res.json({ ok: true, submission: row });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -802,6 +966,7 @@ router.post('/proof', requireAdmin, uploadProof.single('proof'), async (req, res
   try {
     if (!req.file) return res.status(400).json({ ok: false, error: 'proof file is required (PNG or JPG)' });
     await auditLog('admin_proof_upload', req.user, { filename: req.file.filename, size: req.file.size });
+    chainAudit(req, 'admin_proof_upload', `proof:${req.file.filename}`, { size: req.file.size });
     return res.json({ ok: true, documentRef: req.file.filename });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -838,6 +1003,7 @@ router.put('/mining/campaigns/:id', requireCategory('mining'), limiters.strict, 
     const row = await Campaign.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true }).lean();
     if (!row) return res.status(404).json({ ok: false, error: 'campaign not found' });
     await auditLog('mining_campaign_update', req.user, { campaignId: req.params.id });
+    chainAudit(req, 'admin_mining_campaign_update', `campaign:${req.params.id}`, { updatedFields: Object.keys(updates) });
     return res.json({ ok: true, campaign: row });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -918,6 +1084,7 @@ router.post('/reconciliation/run', requireCategory('treasury'), limiters.strict,
     const { runReconciliationJob } = require('../services/reconciliationService');
     const result = await runReconciliationJob();
     await auditLog('system_reconciliation_run', req.user, 'Reconciliation job triggered');
+    chainAudit(req, 'admin_reconciliation_run', 'reconciliation:job', { detected: result?.detected, resolved: result?.resolved });
     return res.json({ ok: true, result });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -971,6 +1138,7 @@ router.post('/reconciliation/:id/resolve', requireCategory('treasury'), limiters
     await item.save();
 
     await auditLog('reconciliation_resolved', req.user, { reconciliationId: item._id.toString(), note: item.resolutionNote });
+    chainAudit(req, 'admin_reconciliation_resolved', `reconciliation:${item._id}`, { note: item.resolutionNote });
     return res.json({ ok: true, item });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -1001,6 +1169,17 @@ router.get('/withdrawals', requireCategory('treasury'), async (req, res) => {
   }
 });
 
+// Withdrawal status transitions used to be silent to users: the request is
+// keyed by walletAddress (there is no userId on WithdrawalRequest), so resolve
+// the holder via activityEvents.userIdForAddress and emit through the template
+// engine fire-and-forget — a notification failure must never break or fail an
+// admin payout action (same pattern as notifySeller in sellExecutionService).
+function notifyWithdrawalHolder(walletAddress, emit, data) {
+  activityEvents.userIdForAddress(walletAddress)
+    .then((uid) => uid && emit(uid, data))
+    .catch((err) => logger.warn('adminPanel', 'Withdrawal notification dispatch failed', { error: err && err.message }));
+}
+
 // Re-attempts the Safaricom B2C payout for a withdrawal whose prior attempt
 // failed — the same call routes/withdraw.js and routes/buy.js's /sell make
 // on the original request, just triggered manually instead of automatically.
@@ -1023,6 +1202,21 @@ router.post('/withdrawals/:id/retry', requireCategory('treasury'), limiters.stri
       withdrawal.notes = payoutResult.error || 'Retried payout initiation failed.';
       await withdrawal.save();
       await auditLog('withdrawal_retry', req.user, { withdrawalId: withdrawal.withdrawalId, outcome: 'failed', reason: withdrawal.notes }, 'failure');
+      chainAudit(req, 'admin_withdrawal_retry', `withdrawal:${withdrawal.withdrawalId}`, { outcome: 'failed', reason: withdrawal.notes });
+      // A cap-rejection (requiresApproval) is not a dead end — the payout is
+      // still going ahead manually — so only the hard-failure path tells the
+      // user the withdrawal failed (matches sellExecutionService).
+      if (!payoutResult.requiresApproval) {
+        // wallet.withdrawal_failed requires amount, asset, user_safe_reason,
+        // reference_id — anything less is rejected by dispatchEvent with
+        // "Missing required fields" and the user is never told.
+        notifyWithdrawalHolder(withdrawal.walletAddress, activityEvents.emitWithdrawalFailed, {
+          amount: Number(withdrawal.amountMlcns),
+          asset: 'MLCNS',
+          user_safe_reason: activityEvents.userSafeReason(withdrawal.notes),
+          reference_id: withdrawal.withdrawalId,
+        });
+      }
       return res.status(payoutResult.requiresApproval ? 202 : 502).json({ ok: payoutResult.requiresApproval, withdrawal });
     }
 
@@ -1032,6 +1226,13 @@ router.post('/withdrawals/:id/retry', requireCategory('treasury'), limiters.stri
     await withdrawal.save();
 
     await auditLog('withdrawal_retry', req.user, { withdrawalId: withdrawal.withdrawalId, outcome: 'reinitiated', payoutRef: payoutResult.payoutRef });
+    chainAudit(req, 'admin_withdrawal_retry', `withdrawal:${withdrawal.withdrawalId}`, { outcome: 'reinitiated', payoutRef: payoutResult.payoutRef, amountMlcns: withdrawal.amountMlcns });
+    // wallet.withdrawal_processing requires amount, asset, reference_id.
+    notifyWithdrawalHolder(withdrawal.walletAddress, activityEvents.emitWithdrawalProcessing, {
+      amount: Number(withdrawal.amountMlcns),
+      asset: 'MLCNS',
+      reference_id: payoutResult.payoutRef || withdrawal.withdrawalId,
+    });
     return res.json({ ok: true, withdrawal });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -1064,6 +1265,32 @@ router.post('/withdrawals/:id/resolve', requireCategory('treasury'), limiters.st
     await withdrawal.save();
 
     await auditLog('withdrawal_resolved', req.user, { withdrawalId: withdrawal.withdrawalId, outcome, note: withdrawal.notes });
+    chainAudit(req, 'admin_withdrawal_resolved', `withdrawal:${withdrawal.withdrawalId}`, { outcome, note: withdrawal.notes });
+
+    // Tell the user how their failed withdrawal was settled. 'completed' = the
+    // payout did reach them (manually) → wallet.withdrawal_completed (requires
+    // amount, asset, tx_status, reference_id). 'refunded' = funds were sent
+    // back through another channel rather than the payout succeeding — that is
+    // a compliance/settlement notice, so security.compliance_alert (requires
+    // alert_type, required_action) is the matching template; there is no
+    // withdrawal_refunded template in the catalogue.
+    if (outcome === 'completed') {
+      notifyWithdrawalHolder(withdrawal.walletAddress, activityEvents.emitWithdrawalCompleted, {
+        amount: Number(withdrawal.amountMlcns),
+        asset: 'MLCNS',
+        tx_status: 'completed',
+        reference_id: withdrawal.withdrawalId,
+      });
+    } else {
+      notifyWithdrawalHolder(withdrawal.walletAddress, activityEvents.emitComplianceAlert, {
+        alert_type: 'Withdrawal settlement update',
+        required_action: activityEvents.userSafeReason(
+          withdrawal.notes,
+          'Your failed withdrawal was refunded through an alternate channel. No action is required from you.'
+        ),
+        referenceId: withdrawal.withdrawalId,
+      });
+    }
     return res.json({ ok: true, withdrawal });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -1156,6 +1383,7 @@ router.post('/badges/grant', requireSuperAdmin, limiters.strict, async (req, res
     }
 
     await auditLog('badge_admin_grant', req.user, { walletAddress, txHash: result.txHash });
+    chainAudit(req, 'admin_badge_grant', `wallet:${walletAddress}`, { txHash: result.txHash, badgeType: 'gold' });
     return res.json({ ok: true, txHash: result.txHash });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -1180,6 +1408,7 @@ router.post('/badges/purchases/:quoteId/void', requireCategory('mining'), limite
     await purchase.save();
 
     await auditLog('badge_purchase_void', req.user, { quoteId: req.params.quoteId, reason });
+    chainAudit(req, 'admin_badge_purchase_void', `badgePurchase:${req.params.quoteId}`, { reason: reason || null });
     return res.json({ ok: true, purchase: purchase.toObject() });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -1250,6 +1479,7 @@ router.post('/badges/approve', requireCategory('mining'), limiters.strict, async
       }
 
       await auditLog('badge_admin_approve', req.user, { quoteId, walletAddress, txHash: result.txHash });
+      chainAudit(req, 'admin_badge_approve', `badgePurchase:${quoteId}`, { walletAddress, txHash: result.txHash });
       return res.json({ ok: true, txHash: result.txHash });
     } catch (issueErr) {
       purchase.status = 'awaiting_admin';
@@ -1293,6 +1523,7 @@ router.post('/badges/reject', requireCategory('mining'), limiters.strict, async 
     }
 
     await auditLog('badge_admin_reject', req.user, { quoteId, reason });
+    chainAudit(req, 'admin_badge_reject', `badgePurchase:${quoteId}`, { reason: reason || null });
     return res.json({ ok: true, purchase: purchase.toObject() });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -1318,6 +1549,7 @@ router.post('/badges/design', requireCategory('mining'), limiters.strict, upload
     });
 
     await auditLog('badge_design_upload', req.user, { designId: design._id, filename: req.file.filename });
+    chainAudit(req, 'admin_badge_design_upload', `badgeDesign:${design._id}`, { filename: req.file.filename });
     return res.json({ ok: true, design });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -1464,6 +1696,12 @@ router.get('/chain/validators', requireCategory('blockchain'), async (_req, res)
 });
 
 // ============ BROADCAST NOTIFICATIONS ============
+// Fan-out goes through notificationDispatcher.dispatchNotification per user —
+// NOT a raw Notification.insertMany. A bulk insert bypassed notification
+// preferences, unsubscribes, do-not-disturb windows, and the email/SMS/
+// WhatsApp channel sends entirely: every non-banned user got an in-app row no
+// matter what they had disabled, and the admin's channel checkboxes were
+// ignored. The dispatcher persists the row itself, so nothing is lost here.
 router.post('/notifications/broadcast', requireSuperAdmin, limiters.strict, async (req, res) => {
   try {
     const { title, message, type, channels } = req.body || {};
@@ -1471,31 +1709,63 @@ router.post('/notifications/broadcast', requireSuperAdmin, limiters.strict, asyn
       return res.status(400).json({ ok: false, error: 'title and message are required' });
     }
 
-    const Notification = require('../models/Notification');
+    // `type` already carries a singular Notification enum value; the
+    // dispatcher's toNotificationType() normalizes it regardless.
     const validTypes = ['transaction', 'security', 'governance', 'campaign', 'badge', 'marketing', 'system'];
     const notifType = validTypes.includes(type) ? type : 'system';
 
+    // Per-dispatch channel gate semantics preserved from the old row shape:
+    // in-app on unless explicitly false; email/sms/whatsapp only when the
+    // admin explicitly requested them (the dispatcher treats `!== false` as
+    // open, so "not requested" must become an explicit false here).
+    const channelGate = {
+      email: channels?.email === true,
+      sms: channels?.sms === true,
+      whatsapp: channels?.whatsapp === true,
+      inApp: channels?.inApp !== false,
+    };
+
     const users = await User.find({ banned: { $ne: true } }).select('_id').lean();
-    const notifications = users.map((u) => ({
-      userId: u._id,
-      type: notifType,
-      title,
-      message,
-      channels: {
-        email: channels?.email || false,
-        sms: channels?.sms || false,
-        whatsapp: channels?.whatsapp || false,
-        inApp: channels?.inApp !== false,
-      },
-    }));
+    const recipientIds = users.map((u) => String(u._id));
 
-    if (notifications.length > 0) {
-      await Notification.insertMany(notifications);
-    }
+    await auditLog('notification_broadcast', req.user, { title, recipientCount: recipientIds.length, type: notifType });
+    chainAudit(req, 'admin_notification_broadcast', 'broadcast', { title, message, type: notifType, recipientCount: recipientIds.length });
 
-    await auditLog('notification_broadcast', req.user, { title, recipientCount: notifications.length, type: notifType });
+    // Respond immediately with the queued count — a broadcast to hundreds of
+    // users would otherwise hold the request open through the whole fan-out
+    // (each dispatch awaits prefs lookup + provider sends). dispatchedCount/
+    // skippedCount are queued-count-only here; per-user outcomes are logged
+    // when the async fan-out completes.
+    //
+    // Scheduled BEFORE the response return (code after `return` inside the
+    // handler never runs): sequential loop = a natural concurrency guard of 1,
+    // per-user try/catch so one bad recipient can never stall or crash the
+    // rest of the fan-out.
+    setImmediate(async () => {
+      let dispatched = 0;
+      let skipped = 0;
+      for (const userId of recipientIds) {
+        try {
+          const result = await dispatchNotification(userId, notifType, { title, message }, { channels: channelGate });
+          if (result?.success) dispatched += 1;
+          else skipped += 1;
+        } catch (err) {
+          skipped += 1;
+          logger.warn('adminPanel', 'Broadcast dispatch failed for user', { userId, error: err.message || String(err) });
+        }
+      }
+      logger.info('adminPanel', 'Broadcast fan-out complete', {
+        type: notifType, queued: recipientIds.length, dispatched, skipped,
+      });
+    });
 
-    return res.json({ ok: true, recipientCount: notifications.length });
+    return res.status(202).json({
+      ok: true,
+      queuedCount: recipientIds.length,
+      recipientCount: recipientIds.length,
+      dispatchedCount: recipientIds.length,
+      skippedCount: 0,
+    });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
@@ -1555,6 +1825,7 @@ router.post('/maintenance', requireSuperAdmin, limiters.strict, async (req, res)
     invalidateMaintenanceCache();
 
     await auditLog('maintenance_mode_change', req.user, { global, scope, paused, reason }, 'success');
+    chainAudit(req, 'admin_maintenance_change', 'maintenance:singleton', { global: global ?? null, scope: scope ?? null, paused: paused ?? null, reason: reason ?? null });
 
     return res.json({
       ok: true,
@@ -1633,6 +1904,8 @@ router.post('/reports', limiters.strict, async (req, res) => {
       body: body.trim(),
     });
 
+    chainAudit(req, 'admin_report_created', `report:${report._id}`, { subject: report.subject, fromCategory: report.fromCategory });
+
     return res.json({ ok: true, report });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -1686,6 +1959,7 @@ router.patch('/reports/:id/read', requireSuperAdmin, async (req, res) => {
       report.status = 'read';
       report.readAt = new Date();
       await report.save();
+      chainAudit(req, 'admin_report_read', `report:${report._id}`, {});
     }
     return res.json({ ok: true, report });
   } catch (err) {
@@ -1713,6 +1987,7 @@ router.patch('/reports/:id/action', requireSuperAdmin, async (req, res) => {
       report.repliedAt = new Date();
     }
     await report.save();
+    chainAudit(req, 'admin_report_actioned', `report:${report._id}`, { replied: Boolean(report.superadminReply) });
     return res.json({ ok: true, report });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -1760,6 +2035,7 @@ router.post('/users', requireSuperAdmin, limiters.strict, async (req, res) => {
     });
 
     await auditLog('category_admin_created', req.user, { createdEmail: email, category: adminCategory });
+    chainAudit(req, 'admin_category_admin_created', `user:${user._id}`, { category: adminCategory, email });
 
     return res.json({
       ok: true,
@@ -1798,6 +2074,7 @@ router.patch('/users/:id/category', requireSuperAdmin, limiters.strict, async (r
     user.adminCategory = adminCategory;
     await user.save();
     await auditLog('category_admin_reassigned', req.user, { userEmail: decryptField(user.email) || user.email, from: oldCategory, to: adminCategory });
+    chainAudit(req, 'admin_category_admin_reassigned', `user:${req.params.id}`, { from: oldCategory, to: adminCategory });
 
     return res.json({
       ok: true,
@@ -1806,6 +2083,127 @@ router.patch('/users/:id/category', requireSuperAdmin, limiters.strict, async (r
         email: decryptField(user.email) || user.email,
         adminCategory: user.adminCategory,
       },
+    });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// ============ TAMPER-EVIDENT AUDIT CHAIN (superadmin) ============
+// Paginated listing so an auditor UI can walk the hash chain; entries only
+// ever contain ids, action names, and hashes — no PII is stored (payloads
+// are sha256-of-canonical-JSON only).
+router.get('/audit-chain', requireSuperAdmin, async (req, res) => {
+  try {
+    const { page = 0, limit = 50, action, actorId, seqFrom, seqTo } = req.query;
+    const query = {};
+    if (action) query.action = action;
+    if (actorId) query['actor.id'] = String(actorId);
+    if (seqFrom !== undefined || seqTo !== undefined) {
+      query.seq = {};
+      if (seqFrom !== undefined) query.seq.$gte = Number(seqFrom);
+      if (seqTo !== undefined) query.seq.$lte = Number(seqTo);
+    }
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const skip = Math.max(Number(page) || 0, 0) * safeLimit;
+    const [entries, total] = await Promise.all([
+      AuditChain.find(query).sort({ seq: -1 }).skip(skip).limit(safeLimit).lean(),
+      AuditChain.countDocuments(query),
+    ]);
+    return res.json({ ok: true, entries, total, page: Number(page) || 0, limit: safeLimit });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// Recompute-and-compare integrity check of the whole hash chain plus
+// cross-check against on-chain anchors (jobs/auditChainAnchor.js). Returns
+// the first divergent seq if the DB was tampered with, and per-anchor
+// matchesChain/confirmed status. from/to filter the anchors list only —
+// recomputation always starts from genesis (a partial verify proves
+// nothing).
+router.get('/audit-chain/verify', requireSuperAdmin, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const result = await verifyAuditChain({
+      from: from !== undefined ? from : undefined,
+      to: to !== undefined ? to : undefined,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// ============ INTEGRITY (superadmin only) ============
+// The two endpoints behind the Platform window's "Integrity" section.
+// GET /integrity/status is the cheap at-a-glance view: chain length, head
+// hash, latest anchor, and a verify summary. POST /integrity/verify forces
+// a full recompute from genesis (the status endpoint reuses the same
+// walk, but callers may want the explicit action + fresh timestamps).
+// Both are requireSuperAdmin — chain internals (head hashes, anchor tx
+// hashes) are themselves evidence and should not be readable by category
+// admins, who are subjects of the chain, not its auditors.
+router.get('/integrity/status', requireSuperAdmin, async (req, res) => {
+  try {
+    const [result, lastAnchor, lastConfirmedAnchor] = await Promise.all([
+      verifyAuditChain(),
+      AnchorRegistry.findOne().sort({ _id: -1 }).lean(),
+      AnchorRegistry.findOne({ status: 'confirmed' }).sort({ _id: -1 }).lean(),
+    ]);
+
+    const hmacSecretPresent = Boolean(process.env.ANCHOR_HMAC_SECRET);
+    // 'unanchored-mode': either ANCHOR_HMAC_SECRET is missing (anchor rows
+    // chain but are unsigned) or nothing has ever confirmed on-chain. The
+    // chain is still tamper-EVIDENT internally; it is not externally
+    // witnessed — see the plain-language card in the Platform window.
+    const unanchoredMode = !hmacSecretPresent || !lastConfirmedAnchor;
+
+    return res.json({
+      ok: true,
+      chain: {
+        length: result.totalEntries,
+        headSeq: result.headSeq,
+        headHash: result.headHash,
+        valid: result.valid,
+        firstDivergence: result.firstDivergence,
+      },
+      anchors: {
+        mismatch: result.anchorMismatch,
+        chainBroken: Boolean(result.anchorChain && result.anchorChain.broken),
+        chainIssue: result.anchorChain && result.anchorChain.broken ? result.anchorChain : null,
+        total: Array.isArray(result.anchors) ? result.anchors.length : 0,
+        last: lastAnchor
+          ? { date: lastAnchor.anchorDate, headSeq: lastAnchor.headSeq, headHash: lastAnchor.headHash, status: lastAnchor.status, onChainTxHash: lastAnchor.onChainTxHash || null }
+          : null,
+        lastConfirmedAt: lastConfirmedAnchor ? lastConfirmedAnchor.createdAt : null,
+      },
+      mode: unanchoredMode ? 'unanchored-mode' : 'anchored',
+      hmacSecretConfigured: hmacSecretPresent,
+    });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+router.post('/integrity/verify', requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await verifyAuditChain();
+    return res.json({
+      ok: true,
+      valid: result.valid,
+      headSeq: result.headSeq,
+      headHash: result.headHash,
+      totalEntries: result.totalEntries,
+      firstDivergence: result.firstDivergence,
+      anchorMismatch: result.anchorMismatch,
+      anchorChain: result.anchorChain,
+      checkedAt: new Date().toISOString(),
     });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });

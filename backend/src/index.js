@@ -210,6 +210,12 @@ app.use(cors({
   // Without this, Authorization: Bearer headers are blocked by browser
   // Task 3.5: credentials: true enables Authorization header passing from frontend
   credentials: true,
+  // Rate-limit awareness: 429 responses from the send routes carry Retry-After
+  // (+ RateLimit-* policy headers), which the frontend reads to disable the
+  // PIN UI for exactly the cool-down window. Browsers hide every non-simple
+  // response header on cross-origin reads unless it is explicitly exposed
+  // here — without this, api.ts would see the 429 but never its Retry-After.
+  exposedHeaders: ['RateLimit', 'RateLimit-Policy', 'Retry-After'],
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
@@ -771,6 +777,12 @@ app.use('/api/rewards', rewardsRoutes);
 app.use('/api/address', addressMapRoutes);
 app.use('/api/search', limiters.standard, searchRoutes);
 
+// Public node-download bundles (landing-page CTAs hit ${API_BASE}/downloads/node/...).
+// Mounted outside /api on purpose: no auth, no API limiter, same-origin with the
+// backend origin. Artifacts come from scripts/build-validator-bundle.sh.
+const downloadsRoutes = require('./routes/downloads');
+app.use('/downloads', downloadsRoutes);
+
 // Global error handling middleware
 app.use(errorHandler())
 
@@ -804,12 +816,15 @@ async function startBackgroundWorkers() {
 
     require('./mallwallet/workers/transactionWorker');
     require('./mallwallet/workers/paymentCallbackWorker');
-    // C2: Mallpoints convert-flow liquidity dead-letter outbox worker.
-    // Retries pool liquidity adds that failed after a successful creditMlcns.
-    // After 3 exponential retries, failed jobs are written to the Mongo
-    // convert_dead_letters collection for operator remediation (the user's
-    // MLCNS credit never rolls back post-success, so we can't silently drop).
-    require('./mallwallet/workers/convertLiquidityWorker');
+    // C2 RETIRED: the convert-liquidity-dlq BullMQ worker
+    // (mallwallet/workers/convertLiquidityWorker.js) is no longer started —
+    // it only ever retried the dead operator on-chain MsgAddLiquidity, which
+    // can never succeed (unfunded operator account; MLCNS is an internal
+    // x/mlcoin ledger token the bank-coin dex can't hold — see comments in
+    // routes/mallpoints.js). The convert flow now settles liquidity in the
+    // Mongo ledger directly ('mallpoints_convert' rows), and nothing enqueues
+    // to the queue anymore (grep: no enqueueConvertLiquidityFailure callers).
+    // The file is kept, marked deprecated, for dead-letter forensics.
     // Recurring scan releasing withdrawals held in queued_liquidity once
     // the MLCN/KES pool's reserve recovers enough to cover them — see
     // withdrawalLiquidityQueueService.js. Schedules its own repeatable job.
@@ -1284,6 +1299,21 @@ io.on('connection', socket => {
     // ever depletes. No-ops harmlessly until scripts/delegate-treasury.js has
     // bonded some treasury stake to a validator.
     require('./jobs/treasuryRewardsSweeper').start();
+
+    // Hourly liquidity-pool reconciliation (see jobs/liquidityReconciliation.js):
+    // previously runReconciliationJob was only reachable via
+    // POST /api/admin/reconciliation/run, so failed liquidity bookkeeping
+    // lingered until an operator noticed. The cron run makes discrepancies
+    // self-heal; skipped entirely when DISABLE_CRON=1.
+    require('./jobs/liquidityReconciliation').start();
+
+    // Daily on-chain anchoring of the tamper-evident audit ledger's head
+    // hash (see jobs/auditChainAnchor.js): broadcasts a tx whose memo
+    // commits to the current AuditChain head, so even a raw-DBA rewrite of
+    // MongoDB is contradicted by a public on-chain witness. Skipped when
+    // DISABLE_CRON=1; degrades to logged anchor intents when no system
+    // signer mnemonic is configured.
+    require('./jobs/auditChainAnchor').start();
 
     // Cleanup on shutdown
     process.on('SIGINT', () => {

@@ -18,6 +18,7 @@ const { computeCampaignRate, clampMultiplier, MIN_CAMPAIGN_MULTIPLIER, MAX_CAMPA
 const { markActiveToday } = require('../utils/activityTracker');
 const { syncMallPointAccount, requireWalletAddress } = require('../services/mallpointsService');
 const { uploadProof, PROOFS_UPLOAD_DIR } = require('../middleware/upload');
+const { appendAuditEvent } = require('../services/auditChainService');
 const fs = require('fs');
 const path = require('path');
 
@@ -44,7 +45,24 @@ function ok(data) { return { ok: true, data }; }
 function fail(err, context = {}) {
   // Log full error internally with context
   logger.error('API error', { error: err.message || err, stack: err.stack, ...context });
-  // Return generic message to client to avoid information leakage
+  // Surface actual validation messages to the client (frontend reads `error`
+  // key via minesApi unwrap()). Unexpected/internal errors stay generic to
+  // avoid information leakage.
+  if (typeof err === 'string') return { ok: false, error: err };
+  if (err && err.name === 'ValidationError') {
+    const details = Object.values(err.errors || {})
+      .map((v) => v.message)
+      .filter(Boolean)
+      .join('; ');
+    return { ok: false, error: details || err.message || 'Invalid request' };
+  }
+  if (err && err.name === 'CastError') {
+    return { ok: false, error: `Invalid value for "${err.path}"` };
+  }
+  // Mongoose duplicate-key / other errors with a safe, purpose-written message
+  if (err && err.name === 'MongoServerError' && err.code === 11000) {
+    return { ok: false, error: 'Duplicate value for a unique field' };
+  }
   return { ok: false, error: 'Invalid request' };
 }
 // For expected, safe-to-show rejections (validation, business-rule limits) —
@@ -110,9 +128,18 @@ router.get('/leaderboard', async (_req, res) => {
 });
 
 // Authenticated endpoints
+// Tamper-evident chain audit for the admin-privileged mutations in this
+// file (campaign CRUD, submission review, balance credit/deduct). The
+// append is non-fatal and serialized inside the service.
+function chainMinesAudit(req, action, target, payload = {}) {
+  const u = req.user || {};
+  return appendAuditEvent({ id: String(u._id || u.id || 'admin'), role: String(u.role || 'admin') }, action, target, payload);
+}
+
 router.post('/campaigns', requireAdmin, async (req, res) => {
   try {
     const row = await Campaign.create(req.body);
+    chainMinesAudit(req, 'mines_campaign_created', `campaign:${row._id}`, { title: req.body?.title ?? null });
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }
 });
@@ -217,6 +244,7 @@ router.put('/campaigns/:id', requireAdmin, async (req, res) => {
     }
     const row = await Campaign.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true }).lean();
     if (!row) return res.status(404).json(fail('campaign not found'));
+    chainMinesAudit(req, 'mines_campaign_updated', `campaign:${req.params.id}`, { updatedFields: Object.keys(updates) });
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }
 });
@@ -609,6 +637,7 @@ router.post('/submissions/:id/approve', requireAdmin, idempotency({ required: tr
       reward_status: 'approved',
       activity_reference: String(sub._id),
     }).catch(() => {});
+    chainMinesAudit(req, 'mines_submission_approved', `submission:${req.params.id}`, { minerId: sub.miner_id.toString(), rewardAmount: finalReward });
     res.json(ok(updated));
   } catch (e) { res.status(500).json(fail(e)); }
 });
@@ -625,6 +654,7 @@ router.post('/submissions/:id/reject', requireAdmin, async (req, res) => {
     if (row.miner_id) {
       activityEvents.emitProofRejected(row.miner_id.toString(), { submissionId: req.params.id, note }).catch(() => {});
     }
+    chainMinesAudit(req, 'mines_submission_rejected', `submission:${req.params.id}`, { note: note || null });
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }
 });
@@ -658,6 +688,7 @@ router.post('/balance/credit', idempotency({ required: true }), requireAdmin, as
         userId,
         flow: 'admin_balance_credit',
       });
+      chainMinesAudit(req, 'admin_mlpts_credit', `user:${userId}`, { amount, currency: 'MLPTS' });
     });
     res.json(ok({ success: true }));
   } catch (e) { res.status(500).json(fail(e, { operation: 'balance_credit' })); }
@@ -694,6 +725,7 @@ router.post('/balance/deduct', idempotency({ required: true }), requireAdmin, as
         userId,
         flow: 'admin_balance_deduct',
       });
+      chainMinesAudit(req, 'admin_mlpts_deduct', `user:${userId}`, { amount, currency: 'MLPTS' });
     });
     res.json(ok({ success: true }));
   } catch (e) { res.status(500).json(fail(e, { operation: 'balance_deduct' })); }

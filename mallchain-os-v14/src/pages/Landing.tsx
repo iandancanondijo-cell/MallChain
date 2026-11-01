@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStoreVersion } from '../components/ui';
 import { store } from '../store/store';
 import { useLivePrice } from '../hooks/useLivePrice';
+import { config } from '../services/config';
 import '../styles/landing.css';
 
 interface LandingProps {
@@ -76,30 +77,6 @@ const IC: Record<string, IconSpec[]> = {
   ]),
 };
 
-const PATHS = [
-  { title: 'Buy it', body: 'Get MLCNS with M-Pesa. No exchange account and no card needed.', band: 0, color: '#FFC83D' },
-  { title: 'Sell it', body: 'Sell MLCNS, or list goods and services on the marketplace.', band: 1, color: '#FF4A3D' },
-  { title: 'Build it', body: 'Launch campaigns, run a validator, or build on the open Cosmos SDK.', band: 2, color: '#7d95ff' },
-  { title: 'Study it', body: 'Learn how consensus, staking and governance work by taking part.', band: 3, color: '#5CF2C0' },
-];
-
-const ROLES = [
-  { title: 'Create a campaign', body: 'Bring a content link and a budget in Mallpoints. Reviewers check the engagement.', color: '#FFC83D' },
-  { title: 'List on the Mallchain Marketplace', body: 'Offer goods and services on the marketplace for a broader reach, open to every wallet on the network.', color: '#FF4A3D' },
-  { title: 'Run a validator', body: 'Process transactions and help the chain reach consensus.', color: '#7d95ff' },
-  { title: 'Review engagement', body: 'Stake Mallcoin and verify campaigns on-chain.', color: '#5CF2C0' },
-  { title: 'Stake', body: 'Lock Mallcoin to take part in running the network.', color: '#FFC83D' },
-  { title: 'Vote', body: 'Decide on governance proposals that shape how the network evolves.', color: '#FF4A3D' },
-  { title: 'Build on the stack', body: 'The Cosmos SDK is open. Study it, fork it, make your own chain.', color: '#7d95ff' },
-  { title: 'Learn by doing', body: 'Use a live network to see blocks, votes and liquidity first-hand.', color: '#5CF2C0' },
-];
-
-const TECH = [
-  { title: 'Cosmos SDK', body: 'An open framework for building blockchains. Mallchain is built on it.', color: '#FFC83D' },
-  { title: 'CometBFT', body: 'The consensus engine. Validators use it to agree on each new block.', color: '#7d95ff' },
-  { title: 'On-chain liquidity', body: 'Trades draw from liquidity pools that live on the chain and can be inspected.', color: '#5CF2C0' },
-];
-
 const ICON_SETS: { set: string; label: string }[] = [
   { set: 'create', label: 'Create' },
   { set: 'build', label: 'Build' },
@@ -111,18 +88,81 @@ const ICON_SETS: { set: string; label: string }[] = [
 // In-page anchors. Hash links would fight the hash router, so nav items
 // scrollIntoView by element id instead.
 const NAV_LINKS: { id: string; label: string }[] = [
-  { id: 'mpesa', label: 'M-Pesa' },
-  { id: 'paths', label: 'Ways in' },
-  { id: 'build', label: 'Build' },
-  { id: 'study', label: 'Study' },
-  { id: 'validate', label: 'Validate' },
+  { id: 'ecosystem', label: 'Ecosystem' },
+  { id: 'network-status', label: 'Network Status' },
+  { id: 'developers', label: 'Developers' },
+  { id: 'run-node', label: 'Run a Node' },
+  { id: 'join', label: 'Join' },
 ];
 
-const MPESA_STEPS = [
-  { title: 'Make an account', body: 'Sign up and create (or import) a wallet in one flow. The recovery phrase stays yours.' },
-  { title: 'Pick an amount', body: 'Choose how much KSH to turn into MLCNS and give the Safaricom number that will pay.' },
-  { title: 'Accept the push', body: 'Your phone asks for your M-Pesa PIN. Once it clears, MLCNS is credited on-chain — send it, stake it or spend it.' },
+// Ecosystem pillars — the four components of the Mallchain ecosystem.
+const ECOSYSTEM = [
+  {
+    title: 'Mallchain Network',
+    body: 'The underlying blockchain infrastructure powering transactions, digital assets and applications across the ecosystem.',
+    color: '#FFC83D',
+    link: 'Explore the network',
+    to: 'network-status',
+  },
+  {
+    title: 'Mallcoin (MLCNS)',
+    body: "The ecosystem's native digital currency, designed to support value exchange and blockchain-based economic activity.",
+    color: '#7d95ff',
+    link: 'See live status',
+    to: 'network-status',
+  },
+  {
+    title: 'Mallpoints (MLPTS)',
+    body: 'A digital rewards and participation asset designed to support eligible activities within the Mallchain ecosystem.',
+    color: '#5CF2C0',
+    link: 'See live status',
+    to: 'network-status',
+  },
+  {
+    title: 'The Market Place',
+    body: 'A digital commerce platform connecting buyers, sellers, creators and other participants.',
+    color: '#FF4A3D',
+    link: 'Open the marketplace',
+    to: '/marketplace',
+  },
 ];
+
+// "One Ecosystem. Multiple Opportunities." — what you can do.
+const OPPORTUNITIES = [
+  { title: 'Build on Mallchain', body: 'Create applications, websites, games and blockchain-powered projects.', color: '#FFC83D' },
+  { title: 'Digital Wallets', body: 'Manage supported digital assets and blockchain transactions.', color: '#7d95ff' },
+  { title: 'Digital Commerce', body: 'Participate in a connected marketplace economy.', color: '#5CF2C0' },
+  { title: 'Creator Economy', body: 'Connect creators, campaigns and eligible participation activities.', color: '#FF4A3D' },
+  { title: 'Smart Contracts', body: 'Develop programmable applications and blockchain-based services.', color: '#3D63FF' },
+  { title: 'Digital Payments', body: 'Explore supported digital payment and value-transfer services.', color: '#FFC83D' },
+];
+
+// Infrastructure statements. `state` stays honest: only what genuinely runs
+// today is claimed live; the rest is marked as in development.
+const INFRA = [
+  { title: 'Independent blockchain architecture', state: 'live', body: 'Mallchain runs its own network on Cosmos SDK with CometBFT consensus — independently verifiable, and you can run a node to check it yourself.' },
+  { title: 'On-chain transactions', state: 'live', body: 'Wallet transfers and marketplace settlements are recorded on-chain with real block heights and transaction hashes.' },
+  { title: 'Digital wallet & payments', state: 'live', body: 'Create, import, send, receive and swap supported assets from the in-app wallet.' },
+  { title: 'Connected marketplace', state: 'live', body: 'Buyers, sellers and creators transact in one commerce layer built on the network.' },
+  { title: 'Smart contract infrastructure', state: 'dev', body: 'Programmable contract tooling is under active development for the ecosystem.' },
+  { title: 'Open node distribution', state: 'dev', body: 'Packaged node setups with full documentation and SHA256 verification are rolling out — see the Run a Node section.' },
+];
+
+// Why Mallchain — the four principles.
+const PRINCIPLES = [
+  { title: 'Innovation', body: 'Making room for new digital ideas and technological possibilities.', color: '#FFC83D' },
+  { title: 'Accessibility', body: 'Building digital experiences that are easier to understand and use.', color: '#7d95ff' },
+  { title: 'Connectivity', body: 'Connecting applications, people and digital services.', color: '#5CF2C0' },
+  { title: 'Development', body: 'Continuously expanding the capabilities of the ecosystem.', color: '#FF4A3D' },
+];
+
+// Node download targets — served by the backend under /downloads/node/.
+const API_BASE = config.apiBaseUrl.replace(/\/$/, '');
+const NODE_DOWNLOADS = [
+  { label: 'Download Node Setup (x86_64)', href: `${API_BASE}/downloads/node/amd64.zip` },
+  { label: 'Download Node Setup (arm64)', href: `${API_BASE}/downloads/node/arm64.zip` },
+];
+const NODE_DOCS_INDEX = `${API_BASE}/downloads/node/`;
 
 // Auto-contrast glyph color for a chip background (WCAG relative luminance)
 function iconFg(hex: string): string {
@@ -243,15 +283,65 @@ function Typewriter({ text }: { text: string }) {
   );
 }
 
+// ── Live network status ──────────────────────────────────────────────────
+// Every row below the fixed product-status ones is fetched from public
+// backend endpoints on an interval (same cadence as useLivePrice). Nothing
+// here is a hardcoded number: when an endpoint is unreachable the row says
+// so, it never invents a value.
+
+const STATUS_POLL_MS = 30 * 1000;
+
+interface LiveNet {
+  chainId: string | null;
+  moniker: string | null;
+  height: number | null;
+  totalTxs: number | null;
+  avgBlockTime: number | null;
+  nodeVersion: string | null;
+  explorerLive: boolean;
+  chainReachable: boolean;
+  fetchedAt: number | null;
+}
+
+const LIVE_IDLE: LiveNet = {
+  chainId: null,
+  moniker: null,
+  height: null,
+  totalTxs: null,
+  avgBlockTime: null,
+  nodeVersion: null,
+  explorerLive: false,
+  chainReachable: false,
+  fetchedAt: null,
+};
+
+async function getJson<T>(path: string): Promise<T | null> {
+  try {
+    const res = await fetch(`${API_BASE}${path}`, { headers: { Accept: 'application/json' } });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    // Fail soft on the public landing page: an unreachable backend just means
+    // the status table reports "unreachable" — no toasts, no thrown errors.
+    return null;
+  }
+}
+
+function Pill({ tone, children }: { tone: 'live' | 'soon' | 'dev'; children: React.ReactNode }) {
+  return <span className={`pill ${tone}`}>{children}</span>;
+}
+
 export default function Landing({ navigate }: LandingProps) {
   useStoreVersion();
 
   const st = store.state;
   const price = useLivePrice();
 
-  const [activeBand, setActiveBand] = useState(-1);
   const [doorOpen, setDoorOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const [live, setLive] = useState<LiveNet>(LIVE_IDLE);
+  const [liveLoading, setLiveLoading] = useState(true);
 
   const ringRef = useRef<HTMLDivElement>(null);
   const pupilRef = useRef<SVGGElement>(null);
@@ -274,14 +364,6 @@ export default function Landing({ navigate }: LandingProps) {
     navigate('/auth?mode=login');
   }, [navigate]);
 
-  // M-Pesa purchase is the landing page's primary action. Authed users go
-  // straight to the buy flow; everyone else starts at signup, and the buy
-  // page itself is reached from the wallet once they have an account.
-  const goBuyMpesa = useCallback(() => {
-    if (store.state.user.authed) navigate('/wallet/buy');
-    else navigate('/auth?mode=register');
-  }, [navigate]);
-
   const scrollToSection = useCallback((id: string) => {
     setMenuOpen(false);
     document.getElementById(id)?.scrollIntoView({
@@ -289,18 +371,6 @@ export default function Landing({ navigate }: LandingProps) {
       block: 'start',
     });
   }, [reducedMotion]);
-
-  const handlePathClick = useCallback((band: number) => {
-    setActiveBand(band);
-    setTimeout(() => setActiveBand(-1), 1600);
-    // "Buy it" is the M-Pesa path — send people to the actual purchase flow
-    // (or signup) instead of a generic register page.
-    if (band === 0) {
-      goBuyMpesa();
-      return;
-    }
-    goSignup();
-  }, [goSignup, goBuyMpesa]);
 
   // Scroll reveal via IntersectionObserver
   useEffect(() => {
@@ -342,6 +412,46 @@ export default function Landing({ navigate }: LandingProps) {
     });
     return () => observers.forEach((io) => io.disconnect());
   }, []);
+
+  // Live network status: fetch on mount, then poll on the same cadence as
+  // useLivePrice. The refresh button re-runs the same loader.
+  const loadLive = useCallback(async () => {
+    const [health, stats, blocks] = await Promise.all([
+      getJson<{ chainId?: string; moniker?: string; latestHeight?: string | number }>('/api/blockchain/health'),
+      getJson<{ height?: number; totalTxs?: number | null; averageBlockTime?: number | null; nodeVersion?: string }>('/api/blockchain/stats'),
+      getJson<{ blocks?: unknown[] }>('/api/explorer/blocks?limit=5'),
+    ]);
+    const height =
+      typeof stats?.height === 'number' ? stats.height
+      : typeof health?.latestHeight === 'number' ? health.latestHeight
+      : health?.latestHeight != null ? Number(health.latestHeight)
+      : null;
+    setLive({
+      chainId: health?.chainId ?? null,
+      moniker: health?.moniker ?? null,
+      height: Number.isFinite(height) ? height : null,
+      totalTxs: typeof stats?.totalTxs === 'number' ? stats.totalTxs : null,
+      avgBlockTime: typeof stats?.averageBlockTime === 'number' ? stats.averageBlockTime : null,
+      nodeVersion: stats?.nodeVersion ?? null,
+      explorerLive: Array.isArray(blocks?.blocks) && (blocks?.blocks?.length ?? 0) > 0,
+      chainReachable: !!health || !!stats,
+      fetchedAt: Date.now(),
+    });
+    setLiveLoading(false);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!cancelled) await loadLive();
+    };
+    load();
+    const id = window.setInterval(load, STATUS_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [loadLive]);
 
   // Ring parallax + pupil pointer tracking (disabled on mobile to prevent Android compositor flicker)
   useEffect(() => {
@@ -410,23 +520,12 @@ export default function Landing({ navigate }: LandingProps) {
     };
   }, [reducedMotion]);
 
-  // Band highlighting on path hover
-  useEffect(() => {
-    const bands = bandsRef.current;
-    if (bands.length === 0) return;
-
-    bands.forEach((c, i) => {
-      const dim = activeBand < 0 || i === activeBand;
-      c.style.opacity = dim ? '1' : '0.1';
-    });
-  }, [activeBand]);
+  const setScrollRef = (idx: number) => (el: SVGGElement | null) => {
+    if (el) scrollLayersRef.current[idx] = el;
+  };
 
   const setBandRef = (idx: number) => (el: SVGCircleElement | null) => {
     if (el) bandsRef.current[idx] = el;
-  };
-
-  const setScrollRef = (idx: number) => (el: SVGGElement | null) => {
-    if (el) scrollLayersRef.current[idx] = el;
   };
 
   return (
@@ -496,8 +595,8 @@ export default function Landing({ navigate }: LandingProps) {
                 <button className="bt" onClick={() => goTo('/')}>Open dashboard</button>
               ) : (
                 <>
-                  <button className="bt g" onClick={goLogin}>Login</button>
-                  <button className="bt" onClick={goBuyMpesa}>Buy MLCNS</button>
+                  <button className="bt g" onClick={goLogin}>Launch App</button>
+                  <button className="bt" onClick={goSignup}>Create account</button>
                 </>
               )}
             </div>
@@ -529,9 +628,8 @@ export default function Landing({ navigate }: LandingProps) {
                 <button className="bt" onClick={() => { setMenuOpen(false); goTo('/'); }}>Open dashboard</button>
               ) : (
                 <>
-                  <button className="bt" onClick={() => { setMenuOpen(false); goBuyMpesa(); }}>Buy MLCNS with M-Pesa</button>
-                  <button className="bt g" onClick={() => { setMenuOpen(false); goLogin(); }}>Login</button>
-                  <button className="bt g" onClick={() => { setMenuOpen(false); goSignup(); }}>Create account</button>
+                  <button className="bt" onClick={() => { setMenuOpen(false); goSignup(); }}>Create account</button>
+                  <button className="bt g" onClick={() => { setMenuOpen(false); goLogin(); }}>Launch App</button>
                 </>
               )}
             </div>
@@ -542,11 +640,14 @@ export default function Landing({ navigate }: LandingProps) {
       <main>
         {/* Hero */}
         <header className="hero">
-          <h1 className="vh">Mallchain</h1>
-          <p className="sub"><Typewriter text="An open network you can use, create on, and learn from." /></p>
+          <p className="hero-eyebrow rv">Mallchain <span aria-hidden="true">·</span> Blockchain Ecosystem</p>
+          <h1 className="hero-title rv">
+            Build Beyond Limits. <em>Power the Future.</em>
+          </h1>
+          <p className="sub"><Typewriter text="One Network. Endless Possibilities." /></p>
           <div className="cta">
-            <button className="bt" onClick={goBuyMpesa}>
-              Buy MLCNS with M-Pesa <span aria-hidden="true">&rarr;</span>
+            <button className="bt" onClick={() => scrollToSection('ecosystem')}>
+              Explore the Mallchain ecosystem <span aria-hidden="true">&rarr;</span>
             </button>
             {st.user.authed ? (
               <button className="bt g" onClick={() => goTo('/')}>Open dashboard</button>
@@ -562,137 +663,280 @@ export default function Landing({ navigate }: LandingProps) {
           </div>
         </header>
 
-        {/* M-Pesa purchase lane */}
-        <section id="mpesa">
+        {/* Intro */}
+        <section id="about">
           <div className="w">
-            <h2 className="rv">Pay with M-Pesa. Receive on-chain.</h2>
+            <p className="eyebrow rv">Introducing Mallchain</p>
+            <h2 className="rv">A blockchain built for more than transactions.</h2>
             <p className="lead rv">
-              No exchange account, no card, no crypto jargon. Type an amount, take the STK push on your
-              phone, and MLCNS arrives in your wallet from the chain
-              {price.buyKes != null ? (
-                <> — <span className="rate">right now 1 MLCNS ≈ KSh {price.buyKes.toFixed(2)}</span>, priced live from the network.</>
-              ) : (
-                ', priced live from the network.'
-              )}
+              Mallchain is an independent blockchain ecosystem designed to power digital commerce,
+              decentralized applications, payments and a new generation of digital opportunities.
             </p>
-            <div className="steps">
-              {MPESA_STEPS.map((s, idx) => (
-                <div
-                  key={s.title}
-                  className="step rv"
-                  style={{ '--rv-delay': `${idx * 0.12}s` } as React.CSSProperties}
+            <p className="lead rv">
+              From blockchain-powered payments and digital assets to decentralized applications and
+              digital commerce, Mallchain provides the foundation for building, connecting and
+              exchanging value.
+            </p>
+            <div className="stmts rv">
+              <span>Independent network</span>
+              <span>Shared digital economy</span>
+              <span>Open developer infrastructure</span>
+            </div>
+          </div>
+        </section>
+
+        {/* Ecosystem */}
+        <section id="ecosystem">
+          <div className="w">
+            <p className="eyebrow rv">The Ecosystem</p>
+            <h2 className="rv">One network. Multiple possibilities.</h2>
+            <p className="lead rv">Discover the core components that make up the Mallchain digital ecosystem.</p>
+            <div className="roles">
+              {ECOSYSTEM.map((c, idx) => (
+                <a
+                  key={c.title}
+                  className="tile rv"
+                  style={{ '--c': c.color, '--rv-delay': `${idx * 0.05}s` } as React.CSSProperties}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (c.to.startsWith('/')) goTo(c.to);
+                    else scrollToSection(c.to);
+                  }}
                 >
-                  <b>{idx + 1}</b>
-                  <h3>{s.title}</h3>
-                  <p>{s.body}</p>
+                  <em />
+                  <h3>{c.title}</h3>
+                  <p>{c.body}</p>
+                  {c.title.startsWith('Mallcoin') && price.midKes != null && (
+                    <p className="tile-live">
+                      Live network price: <span className="rate">1 MLCNS ≈ KSh {price.midKes.toFixed(2)}</span>
+                    </p>
+                  )}
+                  {c.title.startsWith('Mallpoints') && price.pointPriceKes != null && (
+                    <p className="tile-live">
+                      Live network price: <span className="rate">1 MLPTS ≈ KSh {price.pointPriceKes.toFixed(2)}</span>
+                    </p>
+                  )}
+                  <span className="go">{c.link} &rarr;</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Opportunities */}
+        <section id="opportunities">
+          <div className="w">
+            <p className="eyebrow rv">What you can do</p>
+            <h2 className="rv">One ecosystem. Multiple opportunities.</h2>
+            <p className="lead rv">Explore the capabilities and experiences Mallchain is designed to support.</p>
+            <div className="three">
+              {OPPORTUNITIES.map((o, idx) => (
+                <div
+                  key={o.title}
+                  className="t rv"
+                  style={{ '--c': o.color, '--rv-delay': `${idx * 0.08}s` } as React.CSSProperties}
+                >
+                  <em />
+                  <h3><Lettered text={o.title} /></h3>
+                  <p><Lettered text={o.body} from={o.title.length} /></p>
                 </div>
               ))}
             </div>
-            <div className="cta mpesa-cta rv">
-              <button className="bt" onClick={goBuyMpesa}>
-                {st.user.authed ? 'Buy now with M-Pesa' : 'Start with M-Pesa'} <span aria-hidden="true">&rarr;</span>
-              </button>
-            </div>
           </div>
         </section>
 
-        {/* Paths */}
-        <section>
+        {/* Infrastructure */}
+        <section id="network">
           <div className="w">
-            <h2 className="rv">Take part your way.</h2>
-            <p className="lead rv">Mallchain is a choice, not a requirement. Use it, make something on it, or just learn how it works.</p>
-            <div className="paths rv" id="paths">
-              {PATHS.map((p) => (
-                <a
-                  key={p.title}
-                  className="p"
-                  style={{ '--c': p.color } as React.CSSProperties}
-                  data-b={p.band}
-                  onClick={(e) => { e.preventDefault(); handlePathClick(p.band); }}
-                  onMouseEnter={() => setActiveBand(p.band)}
-                  onMouseLeave={() => setActiveBand(-1)}
-                  onFocus={() => setActiveBand(p.band)}
-                  onBlur={() => setActiveBand(-1)}
-                >
-                  <h3>{p.title}</h3>
-                  <p>{p.body}</p>
-                  <i>&rarr;</i>
-                </a>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Roles */}
-        <section id="build">
-          <div className="w">
-            <h2 className="rv">Everyone has a seat.</h2>
-            <p className="lead rv">A network stays useful when more people create, build and review on it. Pick a role.</p>
-            <div className="roles">
-              {ROLES.map((r, idx) => (
-                <a
-                  key={r.title}
-                  className="tile rv"
-                  style={{ '--c': r.color, '--rv-delay': `${idx * 0.05}s` } as React.CSSProperties}
-                  onClick={(e) => { e.preventDefault(); goSignup(); }}
-                >
-                  <em />
-                  <h3>{r.title}</h3>
-                  <p>{r.body}</p>
-                </a>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Tech */}
-        <section id="study">
-          <div className="w">
-            <h2 className="rv">Open parts. Open to study.</h2>
-            <p className="lead rv">Every layer uses widely adopted, open technology, so what you learn here carries to other projects.</p>
-            <div className="three">
-              {TECH.map((t, idx) => (
+            <p className="eyebrow rv">The Technology</p>
+            <h2 className="rv">Infrastructure designed for the digital economy.</h2>
+            <p className="lead rv">
+              Mallchain is being developed as an independent blockchain network intended to support
+              digital transactions, programmable applications and an expanding developer ecosystem.
+              The statements below reflect what runs today — anything still being built is marked as
+              in development.
+            </p>
+            <div className="steps">
+              {INFRA.map((f, idx) => (
                 <div
-                  key={t.title}
+                  key={f.title}
+                  className="step rv"
+                  style={{ '--rv-delay': `${idx * 0.09}s` } as React.CSSProperties}
+                >
+                  <b>{idx + 1}</b>
+                  <h3><span className={`pill ${f.state === 'live' ? 'live' : 'dev'}`}>{f.state === 'live' ? 'Live' : 'In development'}</span> {f.title}</h3>
+                  <p>{f.body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Why Mallchain */}
+        <section id="why">
+          <div className="w">
+            <p className="eyebrow rv">Our Foundation</p>
+            <h2 className="rv">Why Mallchain?</h2>
+            <p className="lead rv">More than a blockchain — a growing digital ecosystem built around innovation and connectivity.</p>
+            <div className="three">
+              {PRINCIPLES.map((p, idx) => (
+                <div
+                  key={p.title}
                   className="t rv"
                   style={
                     {
-                      '--c': t.color,
-                      '--rv-delay': `${idx * 0.22}s`,
-                      '--rv-tx': idx === 0 ? '-64px' : idx === 2 ? '64px' : '0px',
+                      '--c': p.color,
+                      '--rv-delay': `${idx * 0.12}s`,
+                      '--rv-tx': idx === 0 ? '-48px' : idx === 3 ? '48px' : '0px',
                     } as React.CSSProperties
                   }
                 >
                   <em />
-                  <h3><Lettered text={t.title} /></h3>
-                  <p><Lettered text={t.body} from={t.title.length} /></p>
+                  <h3><Lettered text={p.title} /></h3>
+                  <p><Lettered text={p.body} from={p.title.length} /></p>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-        {/* Trust / review lane */}
-        <section id="validate">
-          <div className="w trust">
-            <div>
-              <h2 className="rv">Reviewed in the open.</h2>
-              <p className="lead rv">Staked, reputation-weighted reviewers check campaign engagement on-chain. Real activity is accepted and low-effort activity is rejected.</p>
+        {/* Developers */}
+        <section id="developers">
+          <div className="w">
+            <div className="devbox rv">
+              <p className="eyebrow">For developers &amp; builders</p>
+              <h2>Your ideas. Your applications. <em>Your network.</em></h2>
+              <p className="fin-lead">
+                Build on Mallchain. Explore blockchain infrastructure, developer tooling and
+                opportunities to create the next generation of digital applications.
+              </p>
+              <div className="cta">
+                <button className="bt" onClick={() => goTo('/devhub')}>
+                  Open the Developer Hub <span aria-hidden="true">&rarr;</span>
+                </button>
+                <a className="bt g" href={NODE_DOCS_INDEX} target="_blank" rel="noreferrer">Node documentation</a>
+              </div>
             </div>
-            <div className="lane rv">
-              <svg viewBox="0 0 520 240" role="img" aria-label="Real engagement passes the reviewers and is accepted. A bot is rejected.">
-                <path d="M10 66H510M10 176H510" stroke="rgba(243,241,234,.3)" strokeWidth="3" strokeDasharray="2 12" strokeLinecap="round" />
-                <rect x="215" y="18" width="90" height="204" rx="20" fill="rgba(255,200,61,.14)" stroke="#FFC83D" strokeWidth="2.5" />
-                <text x="260" y="116" textAnchor="middle">Staked</text>
-                <text x="260" y="140" textAnchor="middle">reviewers</text>
-                <g className="ok1"><circle cx="20" cy="66" r="14" fill="#5CF2C0" /></g>
-                <g className="bad">
-                  <rect x="6" y="162" width="28" height="28" rx="7" fill="#FF4A3D" />
-                  <path d="M14 171l12 12M26 171l-12 12" stroke="#04050D" strokeWidth="3" strokeLinecap="round" />
-                </g>
-                <text x="396" y="58" style={{ fill: '#5CF2C0' }}>Accepted</text>
-                <text x="396" y="206" style={{ fill: '#FF4A3D' }}>Rejected</text>
-              </svg>
+          </div>
+        </section>
+
+        {/* Run a node */}
+        <section id="run-node">
+          <div className="w">
+            <div className="landing-node rv">
+              <p className="eyebrow">Independence you can verify</p>
+              <h2>Run a node. Verify the chain yourself.</h2>
+              <p className="lead">
+                Mallchain is not a black box. Anyone can download a packaged node setup, run it and
+                independently validate and verify the chain — compare block heights and app hashes
+                with any other node on the network.
+              </p>
+              <div className="cta">
+                {NODE_DOWNLOADS.map((d) => (
+                  <a key={d.href} className="bt" href={d.href} target="_blank" rel="noreferrer">
+                    {d.label} <span aria-hidden="true">&darr;</span>
+                  </a>
+                ))}
+                <a className="bt g" href={NODE_DOCS_INDEX} target="_blank" rel="noreferrer">Docs index</a>
+              </div>
+              <p className="note">
+                Each bundle ships with full setup documentation and SHA256 checksums, so you can
+                verify exactly what you downloaded before running it. A step-by-step in-app guide
+                lives under <button className="lk inline" onClick={() => goTo('/run-node')}>Run a Node</button>.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Live network status */}
+        <section id="network-status">
+          <div className="w">
+            <p className="eyebrow rv">Transparency &amp; reliability</p>
+            <h2 className="rv">Network &amp; ecosystem status.</h2>
+            <p className="lead rv">
+              Chain metrics below are fetched live from Mallchain's public API every 30 seconds —
+              when an endpoint can't be reached, the row says so instead of showing a made-up number.
+            </p>
+            <div className="status-wrap rv">
+              <div className="status-head">
+                <span>
+                  {liveLoading ? 'Checking the network…' : live.chainReachable
+                    ? <>Live from <b>{live.chainId ?? 'mallchain'}</b>{live.moniker && live.moniker !== 'unknown' ? ` · node ${live.moniker}` : ''}</>
+                    : 'API unreachable right now — retry below.'}
+                </span>
+              </div>
+              <div className="status-scroll">
+                <table className="status">
+                  <thead>
+                    <tr>
+                      <th scope="col">Service</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="svc">Mallchain Network</td>
+                      <td>{live.chainReachable ? <Pill tone="live">Live</Pill> : <Pill tone="soon">Unreachable</Pill>}</td>
+                      <td className="det">
+                        {live.height != null
+                          ? <>Block height <b>#{live.height.toLocaleString()}</b>{live.nodeVersion ? ` · node ${live.nodeVersion}` : ''}</>
+                          : live.chainReachable ? 'Height unavailable' : 'Could not reach /api/blockchain/health'}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="svc">Block time</td>
+                      <td>{live.avgBlockTime != null ? <Pill tone="live">Live</Pill> : <Pill tone="soon">Measuring</Pill>}</td>
+                      <td className="det">{live.avgBlockTime != null ? <>≈ {live.avgBlockTime.toFixed(2)}s, measured on-chain</> : 'Not enough blocks sampled yet'}</td>
+                    </tr>
+                    <tr>
+                      <td className="svc">Total transactions</td>
+                      <td>{live.totalTxs != null ? <Pill tone="live">Live</Pill> : <Pill tone="soon">Unavailable</Pill>}</td>
+                      <td className="det">{live.totalTxs != null ? <>{live.totalTxs.toLocaleString()} indexed on-chain</> : 'Tx index not reachable'}</td>
+                    </tr>
+                    <tr>
+                      <td className="svc">Blockchain Explorer</td>
+                      <td>{live.explorerLive ? <Pill tone="live">Live</Pill> : <Pill tone="soon">Coming soon</Pill>}</td>
+                      <td className="det">{live.explorerLive ? 'Recent blocks are streaming from the explorer API' : 'Explorer feed is not responding — blocks are still verifiable on-chain'}</td>
+                    </tr>
+                    <tr>
+                      <td className="svc">Mallchain Wallet</td>
+                      <td><Pill tone="live">Live</Pill></td>
+                      <td className="det">In-app: create, send, receive, swap — sign in to use it</td>
+                    </tr>
+                    <tr>
+                      <td className="svc">The Market Place</td>
+                      <td><Pill tone="live">Live</Pill></td>
+                      <td className="det">In-app commerce layer connecting buyers, sellers and creators</td>
+                    </tr>
+                    <tr>
+                      <td className="svc">Mallcoin (MLCNS) price</td>
+                      <td>{price.midKes != null ? <Pill tone="live">Live</Pill> : <Pill tone="soon">Unavailable</Pill>}</td>
+                      <td className="det">{price.midKes != null ? <><span className="rate">1 MLCNS ≈ KSh {price.midKes.toFixed(2)}</span> — read from the on-chain market</> : 'Economy feed not responding'}</td>
+                    </tr>
+                    <tr>
+                      <td className="svc">Smart contracts / SDKs</td>
+                      <td><Pill tone="dev">In development</Pill></td>
+                      <td className="det">Contract tooling and developer SDKs are being built out</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div className="status-foot">
+                <span>
+                  {live.fetchedAt ? <>Last checked {new Date(live.fetchedAt).toLocaleTimeString()} · refreshes every 30s</> : 'First check in progress…'}
+                </span>
+                <button
+                  className="status-refresh"
+                  onClick={() => {
+                    setLiveLoading(true);
+                    void loadLive();
+                  }}
+                  disabled={liveLoading}
+                >
+                  Refresh now
+                </button>
+              </div>
             </div>
           </div>
         </section>
@@ -711,7 +955,69 @@ export default function Landing({ navigate }: LandingProps) {
           </div>
         </section>
 
-        <footer>Mallchain. Built on Cosmos SDK and CometBFT.</footer>
+        {/* Final CTA */}
+        <section className="fin" id="join">
+          <p className="eyebrow rv">The future is connected</p>
+          <h2 className="rv">The next generation of digital possibilities starts here.</h2>
+          <p className="fin-lead rv">Discover the network. Explore the ecosystem. Become part of what we're building.</p>
+          <div className="cta rv">
+            <button className="bt" onClick={goSignup}>
+              Join the Mallchain Ecosystem <span aria-hidden="true">&rarr;</span>
+            </button>
+            {st.user.authed && (
+              <button className="bt g" onClick={() => goTo('/')}>Open dashboard</button>
+            )}
+          </div>
+          <p className="fin-motto rv">Build. Connect. Participate. Innovate.</p>
+        </section>
+
+        {/* Footer */}
+        <footer className="foot">
+          <div className="foot-grid">
+            <div className="foot-brand">
+              <div className="landing-logo" onClick={() => goTo('/landing')}>
+                <img src="/mallchain.svg" alt="Mallchain" className="landing-logo-mark" />
+                Mallchain
+              </div>
+              <p>
+                Mallchain is an independent blockchain ecosystem focused on digital commerce,
+                blockchain infrastructure, programmable applications and connected digital
+                experiences. One Network. Endless Possibilities.
+              </p>
+            </div>
+            <div className="foot-col">
+              <h4>Ecosystem</h4>
+              <button className="lk" onClick={() => scrollToSection('ecosystem')}>Mallchain Network</button>
+              <button className="lk" onClick={() => scrollToSection('ecosystem')}>Mallcoin (MLCNS)</button>
+              <button className="lk" onClick={() => scrollToSection('ecosystem')}>Mallpoints (MLPTS)</button>
+              <button className="lk" onClick={() => goTo('/marketplace')}>The Market Place</button>
+            </div>
+            <div className="foot-col">
+              <h4>Resources</h4>
+              <button className="lk" onClick={() => scrollToSection('developers')}>Developers</button>
+              <button className="lk" onClick={() => goTo('/run-node')}>Run a Node</button>
+              <a className="lk" href={NODE_DOCS_INDEX} target="_blank" rel="noreferrer">Node downloads</a>
+              <button className="lk" onClick={() => goTo('/explorer')}>Network Explorer</button>
+              <button className="lk" onClick={() => scrollToSection('network-status')}>Network Status</button>
+            </div>
+            <div className="foot-col">
+              <h4>Company</h4>
+              <button className="lk" onClick={() => scrollToSection('about')}>About Mallchain</button>
+              <button className="lk" onClick={() => goTo('/help')}>Help Center</button>
+              <button className="lk" onClick={() => goTo('/dmca')}>DMCA / Risk Disclosures</button>
+              <button className="lk" onClick={goLogin}>Launch App</button>
+            </div>
+          </div>
+          <p className="foot-risk">
+            Digital assets carry risk and their value can go down as well as up. Nothing on this
+            page is financial advice, and no outcome or return is guaranteed. Privacy policy and
+            terms of service are presented for acceptance inside the app during registration.
+          </p>
+          <div className="foot-bottom">
+            <span>© {new Date().getFullYear()} Mallchain. All rights reserved.</span>
+            <span>Build. Connect. Participate. Innovate.</span>
+          </div>
+        </footer>
       </main>
 
       {/* Interactive door */}

@@ -33,9 +33,17 @@ jest.mock('../config', () => ({
     },
   },
 }));
+// linkWallet's replay-protection check hits Redis for every request
+// (TEST_MODE isn't set in this suite), so the mocked client needs both the
+// NX `set` the handler awaits and the `quit` its finally block calls —
+// without `quit` the handler throws a TypeError and both tests that reach
+// this block 500 instead of returning their 401/200.
 jest.mock('../mallwallet/queue/redis', () => {
   const mockRedis = {
+    // 'OK' = the NX key was fresh (not a replay). Tests needing the replay
+    // path override with mockResolvedValueOnce(null).
     set: jest.fn().mockResolvedValue('OK'),
+    quit: jest.fn().mockResolvedValue(undefined),
   };
   return jest.fn(() => mockRedis);
 });
@@ -53,6 +61,7 @@ process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long!!!';
 const User = require('../models/user');
 const { getUserBadgeInfo } = require('../services/badgeService');
 const { verifyLinkWalletSignature } = require('../mallwallet/security/verifyAdr036');
+const getMockRedis = require('../mallwallet/queue/redis');
 const auth = require('../middleware/auth');
 const authController = require('../controllers/authController');
 
@@ -63,12 +72,20 @@ function authHeader(userId = 'user-1') {
   return { Authorization: `Bearer ${token}` };
 }
 
-// The `auth` middleware looks the caller up by id (separately from
-// linkWallet's own User.findByIdAndUpdate call below) to populate req.user.
+// The `auth` middleware and linkWallet itself both resolve the caller via
+// User.findById(userId).select('-password'). linkWallet then mutates
+// walletAddress and calls doc.save() (find→set→save, deliberately not
+// findByIdAndUpdate, so the model's pre-save hook fires and computes
+// walletAddress_blind / encrypts the address at rest) — so the resolved
+// doc must carry a save() mock. Returns the doc so tests can assert on it.
 function mockAuthenticatedUser(userId = 'user-1') {
-  User.findById.mockReturnValue({
-    select: jest.fn().mockResolvedValue({ _id: userId, email: 'a@b.com' }),
-  });
+  const doc = {
+    _id: userId,
+    email: 'a@b.com',
+    save: jest.fn().mockResolvedValue(undefined),
+  };
+  User.findById.mockReturnValue({ select: jest.fn().mockResolvedValue(doc) });
+  return doc;
 }
 
 describe('POST /api/auth/link-wallet', () => {
@@ -149,11 +166,31 @@ describe('POST /api/auth/link-wallet', () => {
     expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
   });
 
+  test('rejects a replayed signature when the redis NX key already exists', async () => {
+    verifyLinkWalletSignature.mockReturnValue(true);
+    // NX SET returns null when the key is already present — signature reuse.
+    getMockRedis().set.mockResolvedValueOnce(null);
+
+    const res = await request(app)
+      .post('/api/auth/link-wallet')
+      .set(authHeader())
+      .send({
+        address: VALID_ADDRESS,
+        timestamp: new Date().toISOString(),
+        pubKey: 'fake-pubkey-b64',
+        signature: 'fake-signature-b64',
+      });
+
+    expect(res.status).toBe(401);
+    // Rejected before signature verification even runs...
+    expect(verifyLinkWalletSignature).not.toHaveBeenCalled();
+    // ...and nothing is written.
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
   test('links a valid address to the authenticated user once ownership is verified', async () => {
     verifyLinkWalletSignature.mockReturnValue(true);
-    User.findByIdAndUpdate.mockReturnValue({
-      select: jest.fn().mockResolvedValue({ _id: 'user-1', walletAddress: VALID_ADDRESS }),
-    });
+    const userDoc = mockAuthenticatedUser('user-1');
 
     const res = await request(app)
       .post('/api/auth/link-wallet')
@@ -170,11 +207,10 @@ describe('POST /api/auth/link-wallet', () => {
     expect(verifyLinkWalletSignature).toHaveBeenCalledWith(
       expect.objectContaining({ address: VALID_ADDRESS, pubKeyBase64: 'fake-pubkey-b64', signatureBase64: 'fake-signature-b64' })
     );
-    expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
-      'user-1',
-      { walletAddress: VALID_ADDRESS },
-      { new: true }
-    );
+    // Persisted via find→set→save (pre-save hook path), NOT findByIdAndUpdate.
+    expect(userDoc.walletAddress).toBe(VALID_ADDRESS);
+    expect(userDoc.save).toHaveBeenCalledTimes(1);
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
   });
 });
 

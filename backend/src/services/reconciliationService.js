@@ -143,9 +143,25 @@ async function runReconciliationJob() {
     for (const recon of queue) {
       await compensateFailedLiquidity(recon);
     }
+    // compensateFailedLiquidity resolves to the recon doc on success and
+    // null when the item stayed unresolved — re-read statuses to report an
+    // honest checked/resolved/unresolved summary for the hourly cron job
+    // (src/jobs/liquidityReconciliation.js).
+    const resolved = queue.filter((r) => r.status === 'resolved').length;
+    const unresolvedCount = queue.length - resolved;
 
-    logger.info('[Reconciliation] Job completed');
-    return { detected: detected.length, processed: queue.length };
+    logger.info('[Reconciliation] Job completed', {
+      checked: queue.length,
+      resolved,
+      unresolved: unresolvedCount,
+    });
+    return {
+      detected: detected.length,
+      processed: queue.length,
+      checked: queue.length,
+      resolved,
+      unresolved: unresolvedCount,
+    };
   } catch (err) {
     logger.error('[Reconciliation] Job failed', { error: err.message || err });
     return { error: err.message };

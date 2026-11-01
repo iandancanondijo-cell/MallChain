@@ -14,11 +14,11 @@ import { calculateFee, GasPrice } from '@cosmjs/stargate';
 import { toBase64, fromBase64 } from '@cosmjs/encoding';
 import { TxRaw } from 'cosmjs-types/cosmos/tx/v1beta1/tx';
 import { SignMode } from 'cosmjs-types/cosmos/tx/signing/v1beta1/signing';
-import { api } from './api';
+import { api, RateLimitError } from './api';
 import { chain } from './config';
 import { estimateGas } from './gasEstimation';
 import { broadcastWithRetry } from './broadcastWithRetry';
-import { waitForConfirmation } from './txConfirmation';
+import { waitForConfirmation, TxConfirmationError } from './txConfirmation';
 import { MSG_TRANSFER_MALLCOIN, createMlcoinRegistry } from './mlcoinProto';
 
 const MLCNS_DECIMALS = 6;
@@ -131,9 +131,15 @@ export interface SendMallcoinResult {
   from: string;
   to: string;
   amount: number;
+  /** False when the tx was broadcast but confirmation polling timed out — funds may still have landed; the caller must present this as "pending", never as a failure. Omitted (treated as confirmed) by legacy callers/mocks. */
+  confirmed?: boolean;
+  /** Block height the tx was included at (only when confirmed). */
+  height?: string;
+  /** Node-reported inclusion timestamp (only when confirmed). */
+  timestamp?: string;
 }
 
-/** Signs and broadcasts a real MALL transfer. Throws MallcoinTxError with a user-facing message on failure. */
+/** Signs and broadcasts a real MALL transfer. Throws MallcoinTxError with a user-facing message on failure, or RateLimitError when the backend answers 429. */
 export async function sendMallcoinTransfer(opts: {
   mnemonic: string;
   fromAddress: string;
@@ -152,15 +158,38 @@ export async function sendMallcoinTransfer(opts: {
       txBytes,
     });
   } catch (err) {
+    // Rate limiting is actionable state (cool-down window), not a send
+    // failure — keep it typed so the caller can gate the PIN UI on it.
+    if (err instanceof RateLimitError) throw err;
     throw new MallcoinTxError(err instanceof Error ? err.message : 'Transaction failed during broadcast');
   }
 
-  await waitForConfirmation(data.txHash);
+  // Confirmation polling: an honest timeout does NOT mean the transfer
+  // failed — the broadcast already settled into CheckTx. Return it as
+  // confirmed:false so the Sent step can say exactly that instead of
+  // throwing a failure the user can't act on.
+  let confirmed = true;
+  let height: string | undefined;
+  let timestamp: string | undefined;
+  try {
+    const confirmation = await waitForConfirmation(data.txHash);
+    height = confirmation.height;
+    timestamp = confirmation.timestamp;
+  } catch (err) {
+    if (err instanceof TxConfirmationError && err.kind === 'timeout') {
+      confirmed = false;
+    } else {
+      throw err;
+    }
+  }
 
   return {
     txHash: data.txHash,
     from: opts.fromAddress,
     to: opts.toAddress,
     amount: opts.amountMlcns,
+    confirmed,
+    height,
+    timestamp,
   };
 }

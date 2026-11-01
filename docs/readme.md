@@ -113,6 +113,13 @@ This project is evolving toward a modern blockchain architecture with the follow
 
 See `docs/2026_blockchain_enhancements.md` for the full feature roadmap and implementation guidance.
 
+## Guides
+
+- [Run a node / become a validator (worldwide setup guide)](validator-setup/README.md)
+- [Node operator reference](user-guides/10-run-a-blockchain-node.md) ·
+  [Become a validator](user-guides/09-become-a-validator.md) ·
+  [Validator/node trust model](VALIDATOR_TRUST_MODEL.md)
+
 ## Learn more
 
 - [Ignite CLI](https://ignite.com/cli)

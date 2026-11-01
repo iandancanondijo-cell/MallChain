@@ -10,7 +10,7 @@
 
 import { toast } from '../components/ui';
 import type { ApiResult } from './api';
-import { authService } from './auth';
+import { authService, DEFAULT_COOLDOWN_MINUTES } from './auth';
 
 /**
  * Error context describing what operation failed
@@ -162,12 +162,27 @@ export function handle401Error(context: ErrorContext, onRedirect?: () => void): 
     return;
   }
 
+  // Session policy (2026-11): backend respond 401 {error:'session_expired',
+  // cooldownMinutes} when the 30-minute session lapses, and arms a 15-minute
+  // sign-in cooldown. api.ts (frozen) discards the 401 body before calling
+  // this — so instead of reading cooldownMinutes we detect the same event
+  // locally: a marker whose authedUntil has already passed means the session
+  // ended on schedule, i.e. exactly the condition the server just locked us
+  // out for. We then mirror the cooldown client-side (default 15 min; the
+  // server's 423 on any early sign-in is authoritative and corrects it) and
+  // land the user on /auth where the countdown card renders.
+  const authedUntil = authService.getAuthedUntil();
+  const endedByPolicy = authedUntil !== null && authedUntil * 1000 <= Date.now();
+  if (endedByPolicy) {
+    authService.setCooldownUntil(Date.now() + DEFAULT_COOLDOWN_MINUTES * 60_000);
+  }
+
   // Clear the local session marker immediately, synchronously — a 401 means
   // the session is already invalid, so the UI must not keep assuming it's
   // authenticated while we wait for the toast to display.
   authService.clearSession();
 
-  toast('Your session has expired. Redirecting to login...', false);
+  toast(endedByPolicy ? 'Your session ended. Sign in again after the security cooldown.' : 'Your session has expired. Redirecting to login...', false);
 
   // Give time for the toast to display, then finish logging out: reset the
   // store (so no stale balances/wallet/etc. linger past the forced logout)
@@ -177,7 +192,14 @@ export function handle401Error(context: ErrorContext, onRedirect?: () => void): 
   // presumably dead) cookie server-side. `onRedirect` is an optional extra
   // hook for callers that need to react to the logout (e.g. tests).
   setTimeout(() => {
-    authService.logout();
+    if (endedByPolicy) {
+      // logout(navigate) is always invoked with '/landing' — ignore it and
+      // send a policy-locked session straight to the sign-in page, where
+      // the cooldown countdown renders.
+      authService.logout(() => { window.location.hash = '/auth'; });
+    } else {
+      authService.logout();
+    }
     onRedirect?.();
   }, 1000);
 }

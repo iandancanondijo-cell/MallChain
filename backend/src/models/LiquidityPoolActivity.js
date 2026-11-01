@@ -9,11 +9,41 @@ const ENCRYPTED_FIELDS = ['phone'];
 
 const LiquidityPoolActivitySchema = new mongoose.Schema(
   {
+    // Every value movement in the economy lands here as one or more rows.
+    //
+    // RESERVE SEMANTICS (important): only flows that genuinely move
+    // fiat-backed liquidity into/out of the pool participate in reserve
+    // accounting — 'buy' adds reserves, 'withdraw' subtracts, and
+    // 'reconciliation'/'mallpoints_convert' settle existing bookkeeping.
+    // The pool reserves themselves are the credited-MallcoinPurchase ledger
+    // aggregation (see liquidityController.fetchLedgerPoolReserves), so
+    // reserve math never reads this table — but the affectsReserves flag
+    // below documents which rows correspond to real pool in/out movements
+    // versus purely informational audit rows ('mallpoints_purchase',
+    // 'reward', 'transfer', 'faucet', 'refund'): MLPTS accruals, P2P MLCNS
+    // transfers, faucet grants and refund records make value visible in the
+    // ledger without claiming a reserve change.
     flow: {
       type: String,
-      enum: ['buy', 'withdraw', 'reconciliation', 'mallpoints_convert'],
+      enum: [
+        'buy',
+        'withdraw',
+        'reconciliation',
+        'mallpoints_convert',
+        'mallpoints_purchase',
+        'reward',
+        'transfer',
+        'faucet',
+        'refund',
+      ],
       required: true,
     },
+    // True when the row represents a genuine fiat-backed in/out of pool
+    // liquidity (buy / withdraw / reconciliation settlements). False for
+    // informational rows (reward, transfer, faucet, refund,
+    // mallpoints_purchase) so they can never be mistaken for reserve moves.
+    affectsReserves: { type: Boolean, default: false },
+    userId: { type: String },
     stage: { type: String, required: true },
     status: {
       type: String,

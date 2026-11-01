@@ -1,4 +1,4 @@
-import { api } from './api';
+import { api, RateLimitError } from './api';
 
 interface BroadcastResponse {
   success: boolean;
@@ -29,6 +29,12 @@ export async function broadcastWithRetry(
     }
 
     if (!isNetworkError(res) || attempt === MAX_RETRIES) {
+      // A 429 from financialLimiter carries the cool-down window — throw it
+      // typed so the UI can disable the PIN gate instead of showing an error
+      // (and re-prompting a PIN that burns attempts on every retry).
+      if (res.code === 429 && res.rateLimit) {
+        throw new RateLimitError(res.rateLimit.message, res.rateLimit.retryAfterSeconds);
+      }
       const errorMsg = res.data?.error || res.error || 'Transaction failed during broadcast';
       throw new Error(errorMsg);
     }

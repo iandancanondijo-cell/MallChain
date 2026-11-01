@@ -1,7 +1,7 @@
 const request = require('supertest');
 const express = require('express');
 
-jest.mock('../models/user', () => ({ findOne: jest.fn(), findById: jest.fn() }));
+jest.mock('../models/user', () => ({ findOne: jest.fn(), findById: jest.fn(), decryptUserPii: (u) => u }));
 jest.mock('../models/AuditLog', () => ({ create: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../models/ValidatorApplication', () => ({}));
 jest.mock('../models/kyc', () => ({}));
@@ -9,7 +9,9 @@ jest.mock('../models/TaskSubmission', () => ({}));
 jest.mock('../models/LiquidityReconciliation', () => ({}));
 jest.mock('../models/WithdrawalRequest', () => ({}));
 jest.mock('../middleware/adminAuth', () => ({
-  requireAdmin: (req, res, next) => { req.user = { _id: 'admin1', email: 'admin@x.com', role: 'admin' }; next(); },
+  // adminCategory: 'mining' — badge purchase/issuance/void routes are guarded
+  // by requireCategory('mining'); grant stays superadmin-only (mock below).
+  requireAdmin: (req, res, next) => { req.user = { _id: 'admin1', email: 'admin@x.com', role: 'admin', adminCategory: 'mining' }; next(); },
   requireSuperAdmin: (req, res, next) => next(),
 }));
 jest.mock('../models/BurnPolicy', () => ({ BurnPolicy: {}, DynamicBurnThreshold: {} }));

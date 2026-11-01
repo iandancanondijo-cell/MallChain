@@ -492,15 +492,35 @@ describe('API Service - Real Backend Mode', () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 429,
+        headers: { get: (name: string) => (name.toLowerCase() === 'retry-after' ? '37' : null) },
         json: async () => ({ error: 'Rate limit exceeded, try again later' }),
       });
 
       const result = await api.post('/api/tx', {});
 
+      // 429s now surface a typed rateLimit (Retry-After parsed into seconds)
+      // so callers can gate the PIN UI on the exact cool-down window.
       expect(result).toEqual({
         ok: false,
         code: 429,
         error: 'Rate limit exceeded, try again later',
+        rateLimit: { kind: 'rate_limited', retryAfterSeconds: 37, message: 'Rate limit exceeded, try again later' },
+      });
+    });
+
+    it('defaults the 429 cool-down to 60s when Retry-After is missing', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        json: async () => ({ error: 'Too many requests. Please try again later.' }),
+      });
+
+      const result = await api.get('/api/tx');
+
+      expect(result.rateLimit).toEqual({
+        kind: 'rate_limited',
+        retryAfterSeconds: 60,
+        message: 'Too many requests. Please try again later.',
       });
     });
   });

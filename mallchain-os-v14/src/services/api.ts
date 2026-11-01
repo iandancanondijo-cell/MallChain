@@ -39,6 +39,50 @@ export interface ApiResult<T = unknown> {
   code?: number;
   /** Structured extra context on an error response (e.g. rule-specific fields on a 4xx) — see performRequest's errorResult below. */
   details?: unknown;
+  /** Present when the server answered 429 — the parsed Retry-After header (seconds) plus the failure message, so callers can surface a real countdown instead of a generic error. Requires the backend CORS `exposedHeaders` to include Retry-After. */
+  rateLimit?: RateLimitInfo;
+}
+
+export interface RateLimitInfo {
+  kind: 'rate_limited';
+  retryAfterSeconds: number;
+  message: string;
+}
+
+/**
+ * Thrown (instead of a generic Error) by the send/broadcast services when the
+ * backend rate limiter answers 429, so UI can distinguish "slow down, here is
+ * the exact cool-down window" from a real failure.
+ */
+export class RateLimitError extends Error {
+  kind = 'rate_limited' as const;
+  retryAfterSeconds: number;
+  constructor(message: string, retryAfterSeconds: number) {
+    super(message);
+    this.name = 'RateLimitError';
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+/**
+ * Global "PIN entry locked" gate. WalletSend sets it when the send routes
+ * answer 429 (financialLimiter); <PinChallengeHost/> consults it so the PIN
+ * UI neither opens nor accepts input while the cool-down runs — the user's
+ * explicit requirement — and a mistyped-PIN attempt can't be burned against
+ * the 3-attempt budget while the real problem is rate limiting.
+ */
+let pinLockUntilMs = 0;
+let pinLockReason = '';
+
+export function markPinChallengeLocked(untilMs: number, reason = ''): void {
+  pinLockUntilMs = untilMs;
+  pinLockReason = reason;
+}
+
+export function getPinChallengeLock(): { locked: boolean; retryAfterSeconds: number; reason: string } {
+  const remainingMs = pinLockUntilMs - Date.now();
+  if (remainingMs <= 0) return { locked: false, retryAfterSeconds: 0, reason: '' };
+  return { locked: true, retryAfterSeconds: Math.ceil(remainingMs / 1000), reason: pinLockReason };
 }
 
 class Api {
@@ -224,11 +268,30 @@ class Api {
         // confirmed live on a Send broadcast failure.
         const rawError = (json as { error?: string | { message?: string } } | null)?.error;
         const errorMessage = typeof rawError === 'string' ? rawError : rawError?.message;
+        // 429: parse Retry-After (seconds form) so callers get the real
+        // cool-down window instead of a failure-flavoured blob. The backend's
+        // CORS config exposes the header (index.js exposedHeaders); when a
+        // proxy strips it anyway, fall back to a conservative 60s.
+        let rateLimit: RateLimitInfo | undefined;
+        if (res.status === 429) {
+          const retryAfterRaw = res.headers?.get?.('retry-after');
+          const retryAfterParsed = retryAfterRaw ? Number(retryAfterRaw) : NaN;
+          const retryAfterSeconds =
+            Number.isFinite(retryAfterParsed) && retryAfterParsed > 0
+              ? Math.ceil(retryAfterParsed)
+              : 60;
+          rateLimit = {
+            kind: 'rate_limited',
+            retryAfterSeconds,
+            message: errorMessage || 'Too many requests. Please try again later.',
+          };
+        }
         const errorResult = {
           ok: false,
           code: res.status,
           error: errorMessage || `HTTP ${res.status}`,
           details: (json as { details?: unknown } | null)?.details,
+          ...(rateLimit ? { rateLimit } : {}),
         };
         
         // Log error for debugging (don't show toast for all errors - let caller decide)

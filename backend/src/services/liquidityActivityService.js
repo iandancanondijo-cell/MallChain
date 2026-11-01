@@ -24,6 +24,13 @@ function plaintextPhone(doc) {
 async function recordLiquidityActivity(entry) {
   const payload = compactObject({
     flow: entry.flow,
+    // See the RESERVE SEMANTICS comment in models/LiquidityPoolActivity.js:
+    // reserve-moving flows (buy/withdraw/reconciliation settlements) pass
+    // affectsReserves: true; informational flows (reward/transfer/faucet/
+    // refund/mallpoints_purchase) leave it false so pool reserve accounting
+    // is never confused by ledger rows that don't move fiat.
+    affectsReserves: entry.affectsReserves ?? false,
+    userId: entry.userId,
     stage: entry.stage,
     status: entry.status || 'info',
     poolId: entry.poolId,
@@ -58,6 +65,8 @@ async function recordLiquidityActivity(entry) {
 async function recordBuyLiquidityActivity(stage, purchase, overrides = {}) {
   return recordLiquidityActivity({
     flow: 'buy',
+    // A credited buy adds fiat-backed liquidity to the pool.
+    affectsReserves: overrides.affectsReserves ?? true,
     stage,
     status: overrides.status || 'info',
     poolId: overrides.poolId ?? purchase?.liquidityPoolId,
@@ -85,6 +94,8 @@ async function recordBuyLiquidityActivity(stage, purchase, overrides = {}) {
 async function recordWithdrawLiquidityActivity(stage, source, overrides = {}) {
   return recordLiquidityActivity({
     flow: 'withdraw',
+    // A settled withdrawal subtracts fiat-backed liquidity from the pool.
+    affectsReserves: overrides.affectsReserves ?? true,
     stage,
     status: overrides.status || 'info',
     poolId: overrides.poolId,
@@ -106,8 +117,133 @@ async function recordWithdrawLiquidityActivity(stage, source, overrides = {}) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Informational ledger wrappers — every value movement that does NOT change
+// pool reserves (see RESERVE SEMANTICS in models/LiquidityPoolActivity.js).
+// These exist so the activity ledger shows every movement; all pass
+// affectsReserves: false and all callers must treat them as non-fatal
+// best-effort writes (`.catch(log)` — a ledger miss never breaks the
+// user-facing flow).
+// ---------------------------------------------------------------------------
+
+// MLPTS bought with real M-Pesa fiat. The fiat lands but Mallpoints
+// purchases live in Redis (10-min TTL), so they never appear in the
+// credited-MallcoinPurchase reserve aggregation — recorded as informational.
+async function recordMallpointsPurchaseActivity(stage, purchase, overrides = {}) {
+  return recordLiquidityActivity({
+    flow: 'mallpoints_purchase',
+    affectsReserves: false,
+    stage,
+    status: overrides.status || 'success',
+    quoteId: overrides.quoteId ?? purchase?.quoteId,
+    paymentId: overrides.paymentId ?? purchase?.paymentId,
+    walletAddress: overrides.walletAddress ?? purchase?.address,
+    phone: overrides.phone ?? plaintextPhone(purchase),
+    currency: overrides.currency ?? 'KES',
+    fiatAmount: overrides.fiatAmount ?? purchase?.amountKes ?? purchase?.amountKES,
+    provider: 'safaricom_mpesa',
+    note: overrides.note,
+    metadata: {
+      asset: 'MLPTS',
+      mallpointsAmount: purchase?.mallpointsAmount,
+      ...(overrides.metadata || {}),
+    },
+  });
+}
+
+// MLPTS accrual/debit: mining & task rewards, admin credit/deduct, referral
+// payouts, creator-space, EDU rewards — everything that flows through the
+// GATE-61 syncMallPointAccount chokepoint. amountMlpts is signed (positive =
+// credit, negative = debit).
+async function recordRewardActivity(entry = {}) {
+  return recordLiquidityActivity({
+    flow: 'reward',
+    affectsReserves: false,
+    stage: entry.stage || 'mlpts_balance_sync',
+    status: entry.status || 'success',
+    userId: entry.userId,
+    walletAddress: entry.walletAddress,
+    currency: entry.currency || 'MLPTS',
+    note: entry.note,
+    reason: entry.reason,
+    metadata: {
+      mlptsAmount: entry.amountMlpts,
+      refId: entry.refId,
+      ...(entry.metadata || {}),
+    },
+  });
+}
+
+// P2P MLCNS transfer confirmed on chain (send flow). Informational: it moves
+// MLCNS between wallets but no fiat enters or leaves the pool.
+async function recordTransferActivity(entry = {}) {
+  return recordLiquidityActivity({
+    flow: 'transfer',
+    affectsReserves: false,
+    stage: entry.stage || 'p2p_transfer_confirmed',
+    status: entry.status || 'success',
+    userId: entry.userId,
+    walletAddress: entry.from ?? entry.walletAddress,
+    amountMlcns: entry.amountMlcns ?? entry.amount,
+    creditTxHash: entry.txHash ?? entry.creditTxHash,
+    note: entry.note,
+    metadata: {
+      recipient: entry.to,
+      denom: entry.denom || 'MLCNS',
+      ...(entry.metadata || {}),
+    },
+  });
+}
+
+// Faucet MLCNS grant (dev/test funding). Informational: no fiat involved.
+async function recordFaucetActivity(entry = {}) {
+  return recordLiquidityActivity({
+    flow: 'faucet',
+    affectsReserves: false,
+    stage: entry.stage || 'faucet_credited',
+    status: entry.status || 'success',
+    userId: entry.userId,
+    walletAddress: entry.address ?? entry.walletAddress,
+    amountMlcns: entry.amountMlcns ?? entry.amount,
+    creditTxHash: entry.txHash ?? entry.creditTxHash,
+    note: entry.note,
+    metadata: entry.metadata,
+  });
+}
+
+// A failed withdrawal that was settled by refunding the user (admin resolve
+// path). Informational: the sell never settled, so pool reserves were never
+// debited and there is nothing to credit back in reserve terms.
+async function recordRefundActivity(stage, source, overrides = {}) {
+  return recordLiquidityActivity({
+    flow: 'refund',
+    affectsReserves: false,
+    stage,
+    status: overrides.status || 'success',
+    withdrawalId: overrides.withdrawalId ?? source?.withdrawalId,
+    saleId: overrides.saleId ?? source?.saleId,
+    payoutRef: overrides.payoutRef ?? source?.payoutRef,
+    walletAddress: overrides.walletAddress ?? source?.walletAddress,
+    // NB: never pass source.phone here — at this point it is already
+    // encrypted at rest and would double-encrypt (see plaintextPhone above).
+    // Refund rows key on withdrawalId instead.
+    currency: overrides.currency ?? source?.currency ?? 'KES',
+    amountMlcns: overrides.amountMlcns ?? source?.amountMlcns,
+    fiatAmount: overrides.fiatAmount ?? source?.amountKes,
+    provider: overrides.provider ?? source?.payoutProvider,
+    note: overrides.note ?? source?.notes,
+    reason: overrides.reason,
+    metadata: overrides.metadata,
+  });
+}
+
 module.exports = {
   recordLiquidityActivity,
   recordBuyLiquidityActivity,
   recordWithdrawLiquidityActivity,
+  recordMallpointsPurchaseActivity,
+  recordRewardActivity,
+  recordTransferActivity,
+  recordFaucetActivity,
+  recordRefundActivity,
 };

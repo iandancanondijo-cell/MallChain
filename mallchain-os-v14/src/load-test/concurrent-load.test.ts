@@ -197,7 +197,7 @@ async function simulateUserSession(
         break;
       case 2:
         // Fetch validator list
-        result = await makeApiRequest('/api/validators');
+        result = await makeApiRequest('/api/validators/list');
         break;
       default:
         result = await makeApiRequest('/api/health');
@@ -536,7 +536,7 @@ describe('Load Test: Concurrent Users', () => {
     // Make requests to various endpoints
     const results = await Promise.all(
       Array.from({ length: concurrentRequests }).map((_, index) => {
-        const endpoints = ['/api/health', '/api/validators', '/api/explorer/blocks?limit=1'];
+        const endpoints = ['/api/health', '/api/validators/list', '/api/explorer/blocks?limit=1'];
         const endpoint = endpoints[index % endpoints.length];
         return makeApiRequest(endpoint);
       })

@@ -152,10 +152,15 @@ describe('API Service - Error Handling Integration', () => {
         json: async () => ({ error: 'Unauthorized' }),
       } as any);
 
-      // Mock window.location with delay
+      // Mock window.location with delay. handle401Error() first inspects
+      // window.location.hash (added in 4106262f: admin routes have their own
+      // auth system and must not trigger the main-app session clear), so the
+      // mock has to carry a real `hash` — a bare object without it throws
+      // "Cannot read properties of undefined (reading 'replace')" before
+      // clearSession() ever runs.
       const originalLocation = window.location;
       delete (window as any).location;
-      const locationMock = { href: '' };
+      const locationMock = { href: '', hash: '' };
       window.location = locationMock as any;
 
       await api.get('/test');

@@ -144,6 +144,12 @@ export default function App() {
               store.state.wallet.chainId = store.state.wallet.chainId || chain.chainId;
             }
             if (u.walletAddress) linkedAddressRef.current = u.walletAddress;
+            // Server-confirmed linkage for the "Connected" badges and the
+            // pre-send link check: true only when the account's linked
+            // address equals the wallet this device holds (the seeding just
+            // above guarantees equality in the freshly-seeded case).
+            store.state.wallet.linkedOnServer =
+              !!u.walletAddress && u.walletAddress === store.state.wallet.address;
             store.commit();
             // subscribeUser() records the intent even if the socket hasn't
             // finished connecting yet, and the 'connect' handler applies it
@@ -220,11 +226,34 @@ export default function App() {
         store.state.wallet.address = addr;
         store.state.wallet.accountId = addr;
         store.state.wallet.chainId = store.state.wallet.chainId || chain.chainId;
+        // Seeded straight from the server's own link — it exists by definition.
+        store.state.wallet.linkedOnServer = true;
         store.commit();
       }
       linkedAddressRef.current = addr;
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authInitialized, st.user.authed]);
+
+  // Session policy (2026-11): warn once, 60 seconds before the 30-minute
+  // session ends. Polls the local session marker every 10s and fires exactly
+  // one toast per session end value (authedUntil) — a manual refresh issues
+  // a new authedUntil, which re-arms the warning for the new expiry instead
+  // of spamming the same one.
+  useEffect(() => {
+    if (!authInitialized || !st.user.authed) return;
+    let warnedFor: number | null = null;
+    const id = window.setInterval(() => {
+      const endsAt = authService.getAuthedUntil();
+      if (endsAt === null) return;
+      const remainingMs = endsAt * 1000 - Date.now();
+      if (remainingMs > 0 && remainingMs <= 60_000 && warnedFor !== endsAt) {
+        warnedFor = endsAt;
+        toastKind('Your session ends in 1 minute — save your work; sign-in reopens after a 15-minute security cooldown.', 'warning');
+      }
+    }, 10_000);
+    return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authInitialized, st.user.authed]);
 
@@ -246,7 +275,20 @@ export default function App() {
     if (!authInitialized) return;
     if (st.user.authed && st.wallet.address && st.wallet.address !== linkedAddressRef.current) {
       linkedAddressRef.current = st.wallet.address;
-      authService.linkWallet(st.wallet.address);
+      // Still best-effort (never blocks the UI), but linkWallet now reports
+      // the outcome: on success it sets wallet.linkedOnServer itself; on
+      // failure we record it so downstream checks (WalletSend) re-verify
+      // instead of trusting a stale "Connected".
+      authService.linkWallet(st.wallet.address).then((res) => {
+        if (res.ok) return;
+        if (store.state.wallet.linkedOnServer) {
+          store.state.wallet.linkedOnServer = false;
+          store.commit();
+        }
+        if (res.reason !== 'pin_cancelled') {
+          console.warn('[App] Background wallet link failed:', res.reason);
+        }
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authInitialized, st.user.authed, st.wallet.address]);

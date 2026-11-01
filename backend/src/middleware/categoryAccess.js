@@ -45,4 +45,28 @@ function requireCategory(category) {
   };
 }
 
-module.exports = { requireCategory };
+/**
+ * Variant of `requireCategory` for endpoints that legitimately serve more
+ * than one category (e.g. structuring flags: they're raised from withdrawal
+ * activity [treasury] but reviewed as part of the AML/compliance flow [kyc]).
+ * Passes if the caller is a superadmin, or an admin whose adminCategory is
+ * any one of `categories`.
+ */
+function requireAnyCategory(categories) {
+  const list = Array.isArray(categories) ? categories : [categories];
+  return function anyCategoryMiddleware(req, res, next) {
+    if (!req.user) {
+      return res.status(401).json({ error: 'auth required' });
+    }
+    if (req.user.role === 'superadmin') return next();
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'admin role required' });
+    }
+    if (!list.includes(req.user.adminCategory)) {
+      return res.status(403).json({ error: 'category access denied' });
+    }
+    return next();
+  };
+}
+
+module.exports = { requireCategory, requireAnyCategory };

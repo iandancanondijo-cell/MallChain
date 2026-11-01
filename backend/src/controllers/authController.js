@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const totp = require('../utils/totp');
 const { config } = require('../config');
 const { revokeToken, revokeAllUserTokens, isRevoked } = require('../middleware/tokenDenylist');
+const { stampCurrentSession, checkLoginCooldown, handleExpiredToken, cooldownMinutes } = require('../middleware/sessionCooldown');
 const getRedis = require('../mallwallet/queue/redis');
 const { blindIndex, decryptField } = require('../utils/fieldEncryption');
 const activityEvents = require('../services/activityEvents');
@@ -112,6 +113,10 @@ function signToken(user) {
   // every other token this user holds.
   // P1 ISSUE #1 WORKAROUND: Reduce default SESSION_TTL_MIN from 120 to 120 minutes
   // (recommended 2 hours for financial app, but allowing override)
+  // Platform security policy (2026-11): deployment sets SESSION_TTL_MIN=30 —
+  // 30 minutes of use, then the session hard-ends and login enters a 15-minute
+  // cooldown (see middleware/sessionCooldown.js). The 30-minute clamp floor
+  // below intentionally matches the policy.
   const sessionTtlMin = parseInt(process.env.SESSION_TTL_MIN || '120', 10);
   // Clamp to reasonable bounds: minimum 30 min, maximum 480 min (8 hours)
   // This prevents misconfiguration from creating security holes
@@ -128,7 +133,14 @@ function signToken(user) {
     getJwtSecret(),
     { expiresIn: `${clampedTtl}m` }
   );
-  return { token, sessionTtlMin: clampedTtl, expiresAt: Math.floor(Date.now() / 1000) + clampedTtl * 60 };
+  const expiresAt = Math.floor(Date.now() / 1000) + clampedTtl * 60;
+  // Record this token's exp as the user's CURRENT session (fail-open,
+  // best-effort — see middleware/sessionCooldown.js). Every issue path
+  // (register, login, refresh rotation, googleCallback) goes through here,
+  // which is what lets requireAuth ignore expired tokens from stale tabs
+  // whose exp predates the newest stamp instead of re-locking the account.
+  stampCurrentSession(String(user._id), expiresAt).catch(() => {});
+  return { token, sessionTtlMin: clampedTtl, expiresAt };
 }
 
 // The JWT itself now lives ONLY in an httpOnly cookie — never in a JSON
@@ -286,6 +298,22 @@ exports.login = async (req, res) => {
     await recordFailedLogin(email);
     return res.status(400).json({ error: 'invalid credentials' });
   }
+
+  // Session-expiry cooldown (middleware/sessionCooldown.js). ORDERING: the
+  // key is userId-based because email is encrypted at rest — the only way
+  // to resolve an identifier pre-auth is this email_blind lookup, so the
+  // cooldown is checked AFTER the user is found but BEFORE password
+  // verification. Unknown emails therefore never surface cooldown state
+  // (they get the same plain 'invalid credentials' as any wrong account),
+  // which is the desired information leak posture.
+  const cooldown = await checkLoginCooldown(String(u._id));
+  if (cooldown.locked) {
+    if (cooldown.reason === 'lockout_check_unavailable') {
+      return res.status(503).json({ error: 'service temporarily unavailable, please retry in a moment', retryAfterSeconds: cooldown.retryAfterSeconds });
+    }
+    return res.status(423).json({ error: 'login_cooldown', retryAfterSeconds: cooldown.retryAfterSeconds });
+  }
+
   if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
 
   const ok = await bcrypt.compare(password, u.password);
@@ -352,6 +380,15 @@ exports.loginUsername = async (req, res) => {
 
   const u = await User.findOne({ username });
   if (!u) { await recordFailedLogin(username); return res.status(400).json({ error: 'invalid credentials' }); }
+  // Same post-lookup / pre-credential cooldown gate as login() above
+  // (username signups are keyed to the same userId-based cooldown key).
+  const cooldown = await checkLoginCooldown(String(u._id));
+  if (cooldown.locked) {
+    if (cooldown.reason === 'lockout_check_unavailable') {
+      return res.status(503).json({ error: 'service temporarily unavailable, please retry in a moment', retryAfterSeconds: cooldown.retryAfterSeconds });
+    }
+    return res.status(423).json({ error: 'login_cooldown', retryAfterSeconds: cooldown.retryAfterSeconds });
+  }
   if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
   const ok = await bcrypt.compare(password, u.password);
   if (!ok) { await recordFailedLogin(username); return res.status(400).json({ error: 'invalid credentials' }); }
@@ -405,6 +442,11 @@ exports.me = async (req, res) => {
     // trusting it silently thereafter.
     return res.json({ user: publicUser, expiresAt: decoded.exp })
   } catch (e) {
+    // Natural TTL expiry gets the same session_expired treatment (and
+    // cooldown arming) as requireAuth.js — /me is what the frontend calls on
+    // hydration, so an expired cookie must surface the policy, not a generic
+    // 'invalid token'.
+    if (e && e.name === 'TokenExpiredError' && await handleExpiredToken(req, res, token)) return;
     return res.status(401).json({ error: 'invalid token' })
   }
 };
@@ -500,11 +542,24 @@ exports.googleCallback = async (req, res) => {
   const email = normalizeEmail((profile.emails && profile.emails[0] && profile.emails[0].value) || `${profile.id}@google`);
   let user = await User.findOne({ googleId: profile.id });
   if (!user) {
+    // New Google signup — the cooldown policy never applies to fresh
+    // accounts (same as register/registerUsername).
     user = await User.create({ email, googleId: profile.id });
     // GET /google (routes/auth.js) echoes the referral code through as the
     // OAuth `state` param — Google returns it verbatim on the callback.
     const referralCode = typeof req.query.state === 'string' ? req.query.state : undefined;
     await assignReferralCode(user, referralCode);
+  } else {
+    // Returning Google login — same cooldown gate as login()/loginUsername().
+    // No credential to withhold here, so on lock we bounce back to the auth
+    // page with the remaining seconds in the hash query; AuthPage reads
+    // `cooldown=` and shows the countdown card.
+    const cooldown = await checkLoginCooldown(String(user._id));
+    if (cooldown.locked) {
+      const frontend = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const seconds = cooldown.retryAfterSeconds || cooldownMinutes() * 60;
+      return res.redirect(`${frontend}/#/auth?mode=login&cooldown=${seconds}`);
+    }
   }
   const { token, sessionTtlMin } = signToken(user);
   setAuthCookie(res, token, sessionTtlMin);
@@ -531,8 +586,12 @@ exports.logout = async (req, res) => {
 };
 
 // POST /api/auth/refresh — issues a fresh session cookie (new JWT, new
-// exp, new jti) for an already-authenticated caller, so a session can stay
-// silently alive past SESSION_TTL_MIN without forcing a full re-login.
+// exp, new jti) for an already-authenticated caller. Retained for explicit,
+// user-initiated use only: the frontend's silent auto-refresh loop was
+// removed for the 30-min-session/15-min-cooldown security policy, so the
+// session now hard-ends at SESSION_TTL_MIN unless this is called on purpose.
+// signToken() re-stamps session:current:{userId} with the new exp (that is
+// what keeps stale tabs' expired tokens from re-arming the cooldown).
 // req.user/req.tokenPayload come from the shared auth middleware, so this
 // gets the same cookie/CSRF/denylist/banned-user handling as every other
 // protected route for free. The old jti is revoked immediately (not left

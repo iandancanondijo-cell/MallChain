@@ -11,6 +11,7 @@ const User = require('../models/user');
 const { markActiveToday } = require('../utils/activityTracker');
 const { getCachedUser, setCachedUser } = require('./authCache');
 const { isRevoked } = require('./tokenDenylist');
+const { handleExpiredToken } = require('./sessionCooldown');
 const { csrfProtection } = require('./csrf');
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -153,6 +154,14 @@ function requireAuth(role) {
 
       next();
     } catch (err) {
+      // Session-expiry policy (middleware/sessionCooldown.js): a
+      // signature-valid token that merely passed its exp means the 30-minute
+      // session ended — arm the 15-minute login cooldown (only if this token
+      // is the user's most recent session, so stale tabs can't re-lock) and
+      // tell the client exactly that. handleExpiredToken re-verifies the
+      // signature itself, so forged 'expired' tokens fall through to the
+      // generic 401 below like any other invalid token.
+      if (err && err.name === 'TokenExpiredError' && await handleExpiredToken(req, res, token)) return;
       console.error(err);
       return res.status(401).json({ error: 'invalid token' });
     }
