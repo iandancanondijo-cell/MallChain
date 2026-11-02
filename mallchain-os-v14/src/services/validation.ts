@@ -180,11 +180,13 @@ export async function validateEmailUniqueness(email: string): Promise<Validation
     // only resolves against the backend behind the Vite dev proxy; on the
     // production static host it 404s.
     const base = configApi.apiBaseUrl.replace(/\/$/, '');
-    const response = await fetch(`${base}/api/auth/email-exists`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
+    // Backend exposes this as GET /api/auth/email-exists?email=… (see
+    // routes/auth.js). The previous POST-to-a-GET-route call 404'd, and the
+    // catch below swallowed it, so the "already registered" pre-check silently
+    // never ran and users only learned about a duplicate on submit.
+    const response = await fetch(
+      `${base}/api/auth/email-exists?email=${encodeURIComponent(email.trim().toLowerCase())}`
+    );
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);

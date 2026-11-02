@@ -2211,4 +2211,41 @@ router.post('/integrity/verify', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// Live pending-task counts per actionable category (validator / kyc / treasury
+// / mining), from the same queries the notifier emails and the panel lists.
+// A category admin sees only their own category; a super admin sees all. Lets
+// an admin see "what's waiting on me" without waiting for the hourly email.
+router.get('/pending-tasks/summary', requireAdmin, async (req, res) => {
+  try {
+    const notifier = require('../jobs/pendingTaskNotifier');
+    const snapshot = await notifier.computePendingSnapshot();
+    const isSuper = req.user.role === 'superadmin';
+    const byCategory = isSuper
+      ? snapshot.byCategory
+      : (snapshot.byCategory[req.user.adminCategory] ? { [req.user.adminCategory]: snapshot.byCategory[req.user.adminCategory] } : {});
+    const total = Object.values(byCategory).reduce((sum, c) => sum + (c.total || 0), 0);
+    return res.json({ ok: true, byCategory, total });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
+// On-demand run of the pending-task email notifier (super admin). By default it
+// honours the changed-counts/reminder cooldown; `force: true` (query or body)
+// re-mails every admin with open queues regardless — the check-this-works path
+// and the manual ops nudge. Returns the per-run sent/skipped/failed tally.
+router.post('/pending-tasks/notify', requireSuperAdmin, limiters.strict, async (req, res) => {
+  try {
+    const force = req.query.force === 'true' || req.body?.force === true;
+    const notifier = require('../jobs/pendingTaskNotifier');
+    const result = await notifier.runPendingTaskNotify({ force });
+    await auditLog('pending_tasks_notify_run', req.user, { force, sent: result.sent, skipped: result.skipped, failed: result.failed });
+    return res.json({ ok: true, force, grandTotal: result.snapshot.grandTotal, sent: result.sent, skipped: result.skipped, failed: result.failed });
+  } catch (err) {
+    logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
+    return res.status(500).json({ ok: false, error: 'internal error' });
+  }
+});
+
 module.exports = router;

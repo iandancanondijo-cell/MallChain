@@ -1315,6 +1315,14 @@ io.on('connection', socket => {
     // signer mnemonic is configured.
     require('./jobs/auditChainAnchor').start();
 
+    // Hourly pending-task email digests to the category admins who own each
+    // open queue (validator / kyc / treasury / mining), plus a combined digest
+    // to every super admin — see jobs/pendingTaskNotifier.js. Counts mirror the
+    // adminPanel.js pending filters exactly, and a changed-counts/reminder
+    // cooldown keeps "always notify" responsive to new work without re-mailing
+    // an unchanged queue every hour. Skipped when DISABLE_CRON=1.
+    require('./jobs/pendingTaskNotifier').start();
+
     // Cleanup on shutdown
     process.on('SIGINT', () => {
       logger.info('Shutting down...')

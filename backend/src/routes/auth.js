@@ -29,15 +29,27 @@ const { asyncHandler } = require('../utils/errorHandler');
  * 
  * Middleware stack:
  * - Limit to 100KB payload (email + password shouldn't exceed this)
- * - Prevent NoSQL injection in email/password fields
  * - Sanitize inputs (remove HTML tags)
  * - Validate email format, password strength (uppercase, lowercase, numbers)
+ * - THEN the auth rate limiter, so a rejected request only counts as an auth
+ *   attempt once it is well-formed.
+ *
+ * Ordering note (registration "rate limit exceeded" fix): limiters.auth used to
+ * run FIRST. With skipSuccessfulRequests it only exempts 2xx responses, so every
+ * 400 from validateInput (a mistyped/guessed email, weak password) was counted
+ * against the 5-per-15-min-per-IP auth budget — a handful of honest typos would
+ * lock a new user out with 429 before they ever entered a correct email. Running
+ * the limiter AFTER validation means malformed requests short-circuit at 400 and
+ * never draw from the budget; only genuine, well-formed register/login attempts
+ * (successes exempt, real failures counted) do. Brute-force protection is
+ * unchanged, since an attacker still has to send schema-valid requests to reach
+ * the controller at all.
  */
 router.post('/register',
-  limiters.auth,
   limitPayloadSize(0.1),
   sanitizeInputs,
   validateInput(schemas.auth.register),
+  limiters.auth,
   asyncHandler(authCtrl.register)
 );
 
@@ -73,10 +85,10 @@ router.get('/email-exists',
  * - Token sent to client for storage in localStorage
  */
 router.post('/login',
-  limiters.auth,
   limitPayloadSize(0.1),
   sanitizeInputs,
   validateInput(schemas.auth.login),
+  limiters.auth,
   asyncHandler(authCtrl.login)
 );
 
@@ -85,11 +97,11 @@ router.post('/login',
  * Alternative registration with username instead of email
  */
 router.post('/register-username',
-  limiters.auth,
   limitPayloadSize(0.1),
   preventNoSQLInjection,
   sanitizeInputs,
   validateInput(schemas.auth.registerUsername),
+  limiters.auth,
   asyncHandler(authCtrl.registerUsername)
 );
 

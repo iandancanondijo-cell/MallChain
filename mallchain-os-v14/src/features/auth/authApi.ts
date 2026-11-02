@@ -9,6 +9,33 @@ export type SignUpData = { email: string; password: string; referral: string };
 
 const API_BASE = `${config.apiBaseUrl}/api`;
 
+/**
+ * Turn a failed auth response body into a message a human can act on, instead
+ * of surfacing the raw machine code. The backend returns:
+ *   - { error: 'validation_failed', details: [{ field, message }] }  → 400
+ *   - { error: 'rate_limit_exceeded', message: '…' }                 → 429
+ * The previous `error.error || 'Registration failed'` showed the literal code
+ * ("validation_failed"), which read like a generic failure and hid *why*
+ * (e.g. "Invalid email format"). Fall back to the code only when nothing
+ * friendlier is available.
+ */
+function describeAuthError(error: any, fallback: string): string {
+  if (!error || typeof error !== 'object') return fallback;
+  if (error.error === 'validation_failed' && Array.isArray(error.details) && error.details.length) {
+    const msgs = error.details
+      .map((d: any) => (typeof d?.message === 'string' ? d.message.replace(/^[a-zA-Z]+: /, '') : ''))
+      .filter(Boolean);
+    if (msgs.length) return msgs.join('. ');
+  }
+  // For rate limits and other structured errors, prefer the human 'message'
+  // field over the 'error' code.
+  if (typeof error.message === 'string' && error.message.trim()) return error.message;
+  if (typeof error.error === 'string' && error.error !== 'validation_failed' && error.error !== 'rate_limit_exceeded') {
+    return error.error;
+  }
+  return fallback;
+}
+
 type AuthUser = {
   id?: string;
   email?: string | null;
@@ -112,7 +139,7 @@ export const authApi = {
         authService.setCooldownUntil(Date.now() + error.retryAfterSeconds * 1000);
         return { ok: false, message: error.error, cooldownSeconds: error.retryAfterSeconds };
       }
-      return { ok: false, message: error.error || "Login failed" };
+      return { ok: false, message: describeAuthError(error, "Login failed") };
     } catch (err) {
       return { ok: false, message: "Network error. Please try again." };
     }
@@ -151,7 +178,7 @@ export const authApi = {
       }
 
       const error = await res.json();
-      return { ok: false, message: error.error || "Registration failed" };
+      return { ok: false, message: describeAuthError(error, "Registration failed") };
     } catch (err) {
       return { ok: false, message: "Network error. Please try again." };
     }
