@@ -159,7 +159,10 @@ export const authApi = {
         // The form field is called `referral` but the backend register
         // controller reads `referralCode` (authController.assignReferralCode);
         // sending `referral` left it undefined so referrers were never credited.
-        body: JSON.stringify({ email: data.email, password: data.password, referralCode: data.referral }),
+        // An empty referral must be OMITTED, not sent as "" — the backend
+        // schema rejected "" with "referral code is not allowed to be empty",
+        // failing every signup without an invite code (live bug 2026-11-02).
+        body: JSON.stringify({ email: data.email, password: data.password, referralCode: data.referral.trim() || undefined }),
         credentials: "include",
       });
 

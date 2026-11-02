@@ -79,7 +79,13 @@ const authSchemas = {
     // Referral code carried in from a shared invite link. Without this field in
     // the schema stripUnknown:true silently deletes it and no referrer is ever
     // credited (see authController.assignReferralCode).
-    referralCode: Joi.string().trim().max(64).optional(),
+    // allow('') because the signup form always sends the field — an optional
+    // referral left blank arrives as "" and Joi's default string.empty rule
+    // rejected the WHOLE register request with "referral code is not allowed
+    // to be empty" (confirmed live 2026-11-02; blocked every no-referral
+    // signup). The controller's `if (referralCodeInput)` guard already treats
+    // '' as "no referral", so an empty value is harmless downstream.
+    referralCode: Joi.string().trim().allow('').max(64).optional(),
   }),
   
   // Registration with username
