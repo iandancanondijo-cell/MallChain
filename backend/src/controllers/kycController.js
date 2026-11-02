@@ -125,17 +125,44 @@ exports.getDocument = asyncHandler(async (req, res) => {
 // Delegates to services/amlProvider.js — a real vendor (Chainalysis, TRM,
 // ComplyAdvantage, etc.) plugs in there once credentials exist; until then
 // this calls the mock provider, which returns the same shape as before.
+//
+// FAIL-CLOSED, NOT FAIL-500: a screening provider outage (e.g. Chainalysis
+// returning Cloudflare 530, confirmed live 2026-11-02 when a real user's
+// POST /api/kyc/submit died with "Internal server error" after 4 retries)
+// must not block a legitimate submission. The AML signal is informational
+// input for the admin reviewer — nothing here auto-approves — so when the
+// provider is unreachable we mark the checks as un-runnable, flag the
+// submission 'high' risk so it surfaces prominently in the manual review
+// queue, and let the record be created.
 const performAMLCheck = async (kycData) => {
-  const checks = await screenAml(kycData);
+  try {
+    const checks = await screenAml(kycData);
 
-  let riskLevel = 'low';
-  if (checks.sanctions || checks.adverseMedia || checks.watchlist) {
-    riskLevel = 'high';
-  } else if (checks.pep) {
-    riskLevel = 'medium';
+    let riskLevel = 'low';
+    if (checks.sanctions || checks.adverseMedia || checks.watchlist) {
+      riskLevel = 'high';
+    } else if (checks.pep) {
+      riskLevel = 'medium';
+    }
+
+    return { checks, riskLevel };
+  } catch (err) {
+    logger.error('kycController', 'AML screening unavailable — holding submission for manual review', err);
+    return {
+      checks: {
+        sanctions: false,
+        pep: Boolean(kycData.politicalExposure),
+        adverseMedia: false,
+        watchlist: false,
+        provider: 'unavailable',
+        raw: {
+          warning: 'AML screening provider unreachable at submit time — manual review required',
+          error: err.message,
+        },
+      },
+      riskLevel: 'high',
+    };
   }
-
-  return { checks, riskLevel };
 };
 
 exports.submitKYC = asyncHandler(async (req, res) => {
