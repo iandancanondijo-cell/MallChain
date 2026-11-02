@@ -10,7 +10,26 @@ type Errors = Record<string, string>;
 type Status = { text: string; bad: boolean } | null;
 type PwStrength = "weak" | "medium" | "strong";
 
-const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emailRe = /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/;
+
+/**
+ * Mirror of the server's register schema (backend inputValidation.js
+ * schemas.auth.register): min 8 chars, at least one uppercase, one
+ * lowercase and one digit. Without this the client happily submitted
+ * e.g. "abcdefggh" and the user got a bare 400 "validation_failed" —
+ * the exact confusing error reported on the live site 2026-11-02.
+ * Returning the specific unmet rule lets the form say what to fix
+ * before any request (and any rate-limit budget) is spent.
+ */
+function registerPasswordError(pw: string): string | null {
+  if (!pw) return "Enter a password.";
+  if (pw.length < 8) return "Use at least 8 characters.";
+  if (pw.length > 128) return "Password is too long (max 128 characters).";
+  if (!/[A-Z]/.test(pw)) return "Add at least one uppercase letter (A–Z).";
+  if (!/[a-z]/.test(pw)) return "Add at least one lowercase letter (a–z).";
+  if (!/\d/.test(pw)) return "Add at least one number (0–9).";
+  return null;
+}
 
 function readQuery(): URLSearchParams {
   return new URLSearchParams(window.location.hash.split("?")[1] ?? "");
@@ -281,8 +300,9 @@ export default function AuthPage() {
     setStatus(null);
 
     const next: Errors = {};
-    if (!emailRe.test(upEmail.trim())) next.email = "Enter a valid email address.";
-    if (upPass.length < 8) next.password = "Use at least 8 characters.";
+    if (!emailRe.test(upEmail.trim())) next.email = "Enter a valid email address (e.g. you@example.com).";
+    const pwErr = registerPasswordError(upPass);
+    if (pwErr) next.password = pwErr;
     if (!upPass2 || upPass !== upPass2) next.confirm = "The passwords do not match.";
     if (!age || !terms) next.checks = "Confirm your age and accept the Terms and Privacy Policy to continue.";
     setErrors(next);
@@ -456,7 +476,7 @@ export default function AuthPage() {
               type="password"
               value={upPass}
               onChange={setUpPass}
-              placeholder="Min 8 characters"
+              placeholder="Min 8 chars: A-Z, a-z, 0-9"
               autoComplete="new-password"
               error={errors.password}
               icon={<LockIcon />}

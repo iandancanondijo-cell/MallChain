@@ -67,6 +67,38 @@ const INITIAL_KYC_DATA: KycData = {
 };
 
 /** Auth flow — sign in / sign up → wallet create/import → security → dashboard. */
+
+/**
+ * Client-side mirror of the backend register password rule (Joi schema in
+ * backend/src/middleware/inputValidation.js: min 8 + at least one uppercase,
+ * one lowercase and one digit). The "Continue" gate used to check only length,
+ * so a long lowercase-only password passed the client, hit the server, and came
+ * back as an opaque "validation failed" — the single most common reason people
+ * got stuck registering. Validating the same rule here turns it into a clear,
+ * immediate message before the request is ever sent.
+ */
+function registerPasswordError(pw: string): string | null {
+  if (!pw || pw.length < 8) return 'Password must be at least 8 characters.';
+  if (!/[A-Z]/.test(pw)) return 'Password must include at least one uppercase letter (A–Z).';
+  if (!/[a-z]/.test(pw)) return 'Password must include at least one lowercase letter (a–z).';
+  if (!/[0-9]/.test(pw)) return 'Password must include at least one number (0–9).';
+  return null;
+}
+
+/**
+ * Client-side mirror of the backend email rule: a real address needs a dot with
+ * a 2+ character TLD ("someone@somewhere" is rejected server-side as
+ * "Invalid email format"). The old client check was just `email.includes('@')`,
+ * which let a guessed domain like that reach the server.
+ */
+function registerEmailError(em: string): string | null {
+  if (!em || !em.trim()) return 'Email address is required.';
+  if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(em.trim())) {
+    return 'Enter a valid email address (e.g. you@example.com).';
+  }
+  return null;
+}
+
 export default function AuthFlow({ navigate }: { navigate: (p: string) => void }) {
   useStoreVersion();
   const st = store.state;
@@ -414,8 +446,10 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
           if (kyc.stepIndex === 1) {
             // Step 1: Create account — validate and register
             const { email: em, password: pw, confirmPassword: cpw, acceptTerms: terms, confirmAge: ageOk } = kycData;
-            if (!em || !em.includes('@')) { setErr('Enter a valid email address.'); return; }
-            if (!pw || pw.length < 8) { setErr('Password must be at least 8 characters.'); return; }
+            const emailErr = registerEmailError(em);
+            if (emailErr) { setErr(emailErr); return; }
+            const pwErr = registerPasswordError(pw);
+            if (pwErr) { setErr(pwErr); return; }
             if (pw !== cpw) { setErr('Passwords do not match.'); return; }
             if (!ageOk) { setErr('You must confirm you are at least 18 years old.'); return; }
             if (!terms) { setErr('You must agree to the Terms of Service.'); return; }
@@ -875,8 +909,10 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                   onClick={async () => {
                     setErr('');
                     const { email: em, password: pw, confirmPassword: cpw, acceptTerms: terms, confirmAge: ageOk } = kycData;
-                    if (!em || !em.includes('@')) { setErr('Enter a valid email address.'); return; }
-                    if (!pw || pw.length < 8) { setErr('Password must be at least 8 characters.'); return; }
+                    const emailErr = registerEmailError(em);
+                    if (emailErr) { setErr(emailErr); return; }
+                    const pwErr = registerPasswordError(pw);
+                    if (pwErr) { setErr(pwErr); return; }
                     if (pw !== cpw) { setErr('Passwords do not match.'); return; }
                     if (!ageOk) { setErr('You must confirm you are at least 18 years old.'); return; }
                     if (!terms) { setErr('You must agree to the Terms of Service.'); return; }
