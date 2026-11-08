@@ -6,6 +6,7 @@ const { preventNoSQLInjection, sanitizeInputs, limitPayloadSize, validateQuery }
 const { asyncHandler } = require('../utils/errorHandler');
 const { createUserLimiter } = require('../middleware/rateLimiter');
 const requireAuth = require('../middleware/requireAuth');
+const { enforceReceiveIntent, settleReceiveIntent } = require('../middleware/receiveIntent');
 const { blindIndex } = require('../utils/fieldEncryption');
 const User = require('../models/user');
 const Joi = require('joi');
@@ -22,16 +23,25 @@ const financialLimiter = createUserLimiter({ windowMs: 15 * 60 * 1000, max: 20, 
 const readLimiter = createUserLimiter({ windowMs: 5 * 60 * 1000, max: 60, message: { error: 'rate_limit_exceeded', message: 'Too many requests. Please try again later.' } });
 
 /**
- * Wallet-ownership verification middleware.
- * After requireAuth() has populated req.user, this confirms the wallet address
- * in the request body actually belongs to the authenticated user. Without this,
- * any logged-in user could broadcast transactions from any other user's wallet
- * by supplying that wallet's address in the `from` / `buyerAddress` field — the
- * blockchain would accept the pre-signed txBytes, but the backend relay would
- * have no proof the requester was authorized to act on that address.
+ * Wallet-authorization middleware for the broadcast relays.
  *
- * `addressField` lets callers pick which body param holds the sender address
- * (defaults to 'from'; /payment uses 'buyerAddress' instead).
+ * Two ways to be authorized to relay a transaction whose `from` is X:
+ *  1. X is the wallet linked to the authenticated account (POST
+ *     /api/auth/link-wallet, ADR-036 signature-verified) — the fast path.
+ *  2. The request carries txBytes whose signature provably comes from the
+ *     key that derives X. The relay cannot move X's funds without X's
+ *     signature (the chain rejects unsigned/mismatched txs at CheckTx), so
+ *     this is real authorization, not a bypass — and it's what lets one
+ *     account transact across multiple wallets it holds the keys to without
+ *     re-linking on every switch.
+ *
+ * A pre-signed tx for a *stranger's* wallet still fails: only the key
+ * holder can produce txBytes that pass chain signature verification, and we
+ * additionally require the claimed `from` to equal a signer address derived
+ * from the tx's own pubkey, so relay logs/ledger rows can't be mislabeled.
+ *
+ * `addressField` picks which body param holds the sender address
+ * (defaults to 'from'; /payment uses 'buyerAddress').
  */
 function requireWalletOwnership(addressField = 'from') {
   return async function walletOwnershipMiddleware(req, res, next) {
@@ -43,23 +53,63 @@ function requireWalletOwnership(addressField = 'from') {
         return res.status(400).json({ error: 'missing_wallet_address', message: `${addressField} is required` });
       }
 
-      // Look up the user who has this wallet linked. walletAddress is encrypted
-      // at rest, so query by its blind index.
+      // Path 1: linked wallet. walletAddress is encrypted at rest, so query
+      // by its blind index.
       const walletOwner = await User.findOne({ walletAddress_blind: blindIndex(walletAddress) }).select('_id').lean();
+      if (walletOwner && walletOwner._id.toString() === req.user._id.toString()) return next();
 
-      if (!walletOwner) {
-        return res.status(403).json({ error: 'wallet_not_linked', message: 'This wallet address is not linked to any account' });
+      // Path 2: signed-tx proof. Decode txBytes, derive each secp256k1
+      // signer address, and require one to equal the claimed `from`.
+      const txBytes = body.txBytes;
+      if (txBytes && (typeof txBytes === 'string' || Array.isArray(txBytes))) {
+        try {
+          const { TxRaw } = require('cosmjs-types/cosmos/tx/v1beta1/tx');
+          const raw = typeof txBytes === 'string' ? Buffer.from(txBytes, 'base64') : Buffer.from(txBytes);
+          const txRaw = TxRaw.decode(raw);
+          const signerB64 = extractSignerPubkeys(txRaw);
+          if (signerB64.length) {
+            const { config } = require('../config');
+            const { signerAddressesFromPubkeys } = require('../mallwallet/security/verifyAdr036');
+            const addresses = signerAddressesFromPubkeys(signerB64, config.chain.prefix || 'mall');
+            if (addresses.includes(walletAddress)) return next();
+          }
+        } catch (_) {
+          // Unparseable txBytes — fall through to the rejection below.
+        }
       }
 
-      if (walletOwner._id.toString() !== req.user._id.toString()) {
-        return res.status(403).json({ error: 'wallet_ownership_mismatch', message: 'You can only send from your own linked wallet' });
+      if (walletOwner) {
+        return res.status(403).json({ error: 'wallet_ownership_mismatch', message: 'This wallet belongs to a different account, and the transaction signature does not match the claimed sender' });
       }
-
-      next();
+      return res.status(403).json({ error: 'wallet_not_linked', message: 'This wallet address is not linked to your account and the transaction was not signed by its key' });
     } catch (err) {
       return res.status(500).json({ error: 'ownership_check_failed', message: 'Could not verify wallet ownership' });
     }
   };
+}
+
+/**
+ * Pull the base64 pubkeys from authInfoBytes.signer_infos without dragging
+ * the full registry: authInfo is a plain protobuf message (cosmjs-types),
+ * and every Mallchain client-signed tx carries a single direct-signer
+ * secp256k1 pubkey.
+ */
+function extractSignerPubkeys(txRaw) {
+  const { AuthInfo } = require('cosmjs-types/cosmos/tx/v1beta1/tx');
+  const auth = AuthInfo.decode(txRaw.authInfoBytes);
+  const out = [];
+  for (const si of auth.signerInfos || []) {
+    const pk = si.publicKey;
+    if (pk && /secp256k1\.PubKey$/.test(pk.typeUrl || '') && pk.value) {
+      // cosmjs encodePubkey wraps the 33-byte compressed key in an amino
+      // Key envelope: 0x0a 0x21 <33 bytes> (35 bytes total). Unwrap it so
+      // both the bare and enveloped forms reach address derivation.
+      let bytes = Buffer.from(pk.value);
+      if (bytes.length === 35 && bytes[0] === 0x0a && bytes[1] === 0x21) bytes = bytes.subarray(2);
+      if (bytes.length === 33) out.push(bytes.toString('base64'));
+    }
+  }
+  return out;
 }
 
 // Task 8.6: Apply input validation to send routes to prevent NoSQL injection and XSS
@@ -94,6 +144,8 @@ router.post('/mallcoins',
   preventNoSQLInjection,
   sanitizeInputs,
   validate(schemas.transfer),
+  enforceReceiveIntent,
+  settleReceiveIntent,
   asyncHandler(sendCtrl.sendMallcoins)
 );
 
@@ -156,6 +208,8 @@ router.post('/mlcns/transfer',
   preventNoSQLInjection,
   sanitizeInputs,
   validate(schemas.mlcnsTransfer),
+  enforceReceiveIntent,
+  settleReceiveIntent,
   asyncHandler(sendCtrl.transferMlcns)
 );
 

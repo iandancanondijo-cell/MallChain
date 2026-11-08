@@ -87,7 +87,9 @@ func (am AppModule) ExportGenesis(ctx sdk.Context, _ codec.JSONCodec) json.RawMe
 	if err != nil {
 		panic(fmt.Errorf("failed to export %s genesis state: %w", types.ModuleName, err))
 	}
-	bz, err := am.cdc.MarshalJSON(genState)
+	// jsonpb requires a pointer to the proto message; passing the struct value
+	// made reflect.Value.Elem panic, so `export` could never serialise vault.
+	bz, err := am.cdc.MarshalJSON(&genState)
 	if err != nil {
 		panic(fmt.Errorf("failed to marshal %s genesis state: %w", types.ModuleName, err))
 	}

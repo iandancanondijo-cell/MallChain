@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"context"
+	"errors"
 
 	"cosmossdk.io/collections"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -41,14 +42,25 @@ func (k Keeper) InitGenesis(ctx context.Context, genState *types.GenesisState) e
 }
 
 // ExportGenesis returns the dex module's exported genesis.
+//
+// A chain that was started before the dex module existed has no Params (and no
+// NextPoolId) written to its store — InitGenesis never ran for it. Export must
+// still work on that state, so treat "not found" as the genesis default rather
+// than failing; a panic here took the whole `export` command down, which is the
+// only way to produce a state-preserving genesis for a restart.
 func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) {
 	params, err := k.GetParams(ctx)
-	if err != nil {
+	if errors.Is(err, collections.ErrNotFound) {
+		p := types.DefaultParams()
+		params = &p
+	} else if err != nil {
 		return nil, err
 	}
 
 	nextPoolId, err := k.GetNextPoolId(ctx)
-	if err != nil {
+	if errors.Is(err, collections.ErrNotFound) {
+		nextPoolId = 0
+	} else if err != nil {
 		return nil, err
 	}
 

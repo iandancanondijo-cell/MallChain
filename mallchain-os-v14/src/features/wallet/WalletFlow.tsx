@@ -8,7 +8,7 @@ import { validateMnemonicPhrase, generateNewMnemonic, deriveAddressFromMnemonic 
 import { chain } from '../../services/config';
 import { hashPin, encryptMnemonic as encryptMnemonicWithPin } from '../../services/security';
 import { api } from '../../services/api';
-import PINInput from '../../components/PINInput';
+import { CipherSetup } from '../../components/CipherWall';
 import { Shield, Check, AlertTriangle, Key, Wallet, ArrowLeft, ChevronRight } from 'lucide-react';
 import { encryptMnemonic, decryptMnemonic, type VaultEntry } from './walletCrypto';
 import { CreatePasswordStep, CreateSeedStep, CreateConfirmStep, CreateSecureStep } from './WalletCreateSteps';
@@ -16,7 +16,7 @@ import { ConnectMethodStep, ConnectRetrieveStep, ConnectImportStep } from './Wal
 
 const FLOW_STEPS = [
   'landing', 'create-password', 'create-seed', 'create-confirm', 'create-secure',
-  'set-pin', 'connect-method', 'connect-retrieve', 'connect-import', 'success',
+  'set-cipher', 'connect-method', 'connect-retrieve', 'connect-import', 'success',
 ] as const;
 type FlowStep = typeof FLOW_STEPS[number];
 type WalletMode = 'create' | 'import';
@@ -54,8 +54,6 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   const [securedMethod, setSecuredMethod] = useState({ stored: false, downloaded: false, cold: false });
   const [passwordResetMode, setPasswordResetMode] = useState(false);
   const [pendingWallet, setPendingWallet] = useState<{ mnemonic: string; address: string } | null>(null);
-  const [pin, setPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [vault, setVault] = useState<VaultEntry[]>([]);
@@ -126,7 +124,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     try {
       const info = await deriveAddressFromMnemonic(seedWords.join(' '));
       setPendingWallet({ mnemonic: seedWords.join(' '), address: info.address });
-      goTo('set-pin');
+      goTo('set-cipher');
     } catch {
       setError('Failed to create wallet');
       handleApiError({ ok: false, error: 'Wallet creation failed', code: 500 } as any, { action: 'creating wallet', endpoint: 'client-side derivation' }, false);
@@ -151,7 +149,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       }
       if (passwordResetMode) { toast('Password reset — this wallet now unlocks with your new password.'); setPasswordResetMode(false); }
       setPendingWallet({ mnemonic: words.join(' '), address: info.address });
-      goTo('set-pin');
+      goTo('set-cipher');
     } catch { setError('Failed to import wallet'); }
     setLoading(false);
   };
@@ -172,37 +170,36 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     try {
       const info = await deriveAddressFromMnemonic(seedWords.join(' '));
       setPendingWallet({ mnemonic: seedWords.join(' '), address: info.address });
-      goTo('set-pin');
+      goTo('set-cipher');
     } catch { setError('Failed to restore wallet'); }
     setLoading(false);
   };
 
-  const handleSetPin = async () => {
+  const handleSetCipher = async (cipher: string) => {
     if (!pendingWallet) return;
-    if (pin.length < 4 || pin.length > 8 || !/^\d+$/.test(pin)) { setError('PIN must be 4-8 digits'); return; }
-    if (pin !== confirmPin) { setError('PINs do not match'); return; }
     setLoading(true);
     try {
-      const hashResult = await hashPin(pin);
-      if (!hashResult.success || !hashResult.hash) { setError(hashResult.error || 'Failed to set PIN'); setLoading(false); return; }
-      const encryptResult = await encryptMnemonicWithPin(pendingWallet.mnemonic, pin);
+      const hashResult = await hashPin(cipher);
+      if (!hashResult.success || !hashResult.hash) { setError(hashResult.error || 'Failed to set cipher'); setLoading(false); return; }
+      const encryptResult = await encryptMnemonicWithPin(pendingWallet.mnemonic, cipher);
       if (!encryptResult.success || !encryptResult.encrypted) { setError(encryptResult.error || 'Failed to secure wallet'); setLoading(false); return; }
       st.wallet.address = pendingWallet.address;
       st.wallet.accountId = pendingWallet.address;
       st.wallet.chainId = chain.chainId;
       st.wallet.pinHash = hashResult.hash;
       st.wallet.pinEncryptedMnemonic = encryptResult.encrypted;
+      st.wallet.secretMode = 'cipher';
       st.wallet.createdAt = Date.now();
       store.commit();
-      // Mirror the bcrypt hash to the server so /api/wallet/pin/verify-pin
-      // can rate-limit/lock out brute force instead of failing "No PIN set"
+      // Mirror the bcrypt hash of the cipher to the server so
+      // /api/wallet/pin/verify-pin can rate-limit/lock out brute force
       // (which PinChallenge used to surface as "Incorrect PIN"). Best-effort:
       // offline/device-only users still pass the local fallback.
       api.post('/api/wallet/pin/set-pin', { pinHash: hashResult.hash }).then((r) => {
-        if (!r.ok) console.warn('[WalletFlow] PIN sync to server failed:', r.error);
+        if (!r.ok) console.warn('[WalletFlow] cipher hash sync to server failed:', r.error);
       });
       setWalletAddress(pendingWallet.address);
-      setPendingWallet(null); setPin(''); setConfirmPin('');
+      setPendingWallet(null);
       goTo('success');
     } catch { setError('Failed to secure wallet'); }
     setLoading(false);
@@ -253,31 +250,22 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     </motion.div>
   );
 
-  const renderSetPin = () => (
+  const renderSetCipher = () => (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
       <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 700, color: 'var(--gold)', letterSpacing: 1, textTransform: 'uppercase' }}>Final step</div>
-      <h1 className="text-gradient" style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Set a PIN</h1>
-      <p style={{ color: 'var(--txt-3)', fontSize: 14, marginBottom: 24 }}>
-        Your PIN unlocks your recovery phrase whenever you send, stake, vote, or make a purchase — it's never stored on this device in plain text, only this PIN can unlock it.
+      <h1 className="text-gradient" style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Choose your cipher</h1>
+      <p style={{ color: 'var(--txt-3)', fontSize: 14, marginBottom: 20 }}>
+        Instead of a PIN, your wallet is locked by a <strong>cipher</strong>: an ordered sequence of glyphs from this wall —
+        any shapes, symbols, numbers or letters. Four to twelve glyphs, whichever you engrave; that exact sequence is the one
+        and only thing that unlocks this wallet when you send, stake, vote, or buy. It is never stored anywhere in plain text —
+        forget it and the wallet can only be restored from the 24-word phrase you just saved.
       </p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div>
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>4-8 digit PIN</label>
-          <PINInput value={pin} onChange={setPin} />
+      {error && (
+        <div style={{ color: 'var(--red)', fontSize: 13, padding: 12, background: 'var(--red-dim)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+          <AlertTriangle size={16} />{error}
         </div>
-        <div>
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--txt-2)' }}>Confirm PIN</label>
-          <PINInput value={confirmPin} onChange={setConfirmPin} />
-        </div>
-        {error && (
-          <div style={{ color: 'var(--red)', fontSize: 13, padding: 12, background: 'var(--red-dim)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <AlertTriangle size={16} />{error}
-          </div>
-        )}
-        <button onClick={handleSetPin} disabled={loading || pin.length < 4 || confirmPin.length < 4} style={{ width: '100%', padding: 14, background: 'var(--gold)', border: 'none', borderRadius: 12, color: 'var(--gold-ink)', fontSize: 14, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.5 : 1 }}>
-          {loading ? 'Securing wallet...' : 'Secure my wallet'}
-        </button>
-      </div>
+      )}
+      <CipherSetup onSubmit={handleSetCipher} busy={loading} error={null} />
     </motion.div>
   );
 
@@ -316,7 +304,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
         {step === 'create-secure' && (
           <CreateSecureStep securedMethod={securedMethod} setSecuredMethod={setSecuredMethod} error={error} loading={loading} onStoreEncrypted={handleStoreEncrypted} onDownloadBackup={handleDownloadBackup} onContinue={handleCreateWallet} />
         )}
-        {step === 'set-pin' && renderSetPin()}
+        {step === 'set-cipher' && renderSetCipher()}
         {step === 'connect-method' && (
           <ConnectMethodStep vaultCount={vault.length} onSelectRetrieve={() => goTo('connect-retrieve')} onSelectImport={() => goTo('connect-import')} onBack={() => goTo('landing')} />
         )}

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { store } from '../../store/store';
-import { useStoreVersion, toast } from '../../components/ui';
+import { useStoreVersion, toast, fmtMoney } from '../../components/ui';
 import { sendMallcoinTransfer, MallcoinTxError } from '../../services/mallcoinTx';
+import { receiveApi, ReceiveAmountMismatchError, type ReceiveIntentView } from '../../services/receiveApi';
 import { RateLimitError, markPinChallengeLocked } from '../../services/api';
 import { isValidMallAddress } from '../../services/wallet';
 import { faucetApi } from '../../services/faucetApi';
@@ -9,10 +10,12 @@ import { requestMnemonic } from '../../services/mnemonicAccess';
 import { authService } from '../../services/auth';
 import { useWizard } from '../../hooks/useWizard';
 import { useWalletData } from '../../hooks/useWalletData';
+import { useLivePrice } from '../../hooks/useLivePrice';
+import { useCurrencyConverter } from '../../services/currency';
 import { loadAddressBook } from '../../services/addressBookStore';
 import {
   ArrowUpRight, Send, CheckCircle2, AlertTriangle, Shield,
-  ArrowRight, User, Hash, Coins, Zap, ChevronRight, ExternalLink, Link2
+  ArrowRight, User, Hash, Coins, Zap, ChevronRight, ExternalLink
 } from 'lucide-react';
 
 const SEND_STEPS = ['recipient', 'review', 'authorize', 'broadcast'] as const;
@@ -37,6 +40,12 @@ export default function WalletSend() {
   useStoreVersion();
   const st = store.state;
   useWalletData(st.wallet.address || null);
+
+  // Live MLCNS market price (KES midpoint from the on-chain oracle, the one
+  // canonical source via useLivePrice) converted into the user's display
+  // currency — the Send page shows the real-world value of what's being sent.
+  const { midKes } = useLivePrice();
+  const toDisplay = useCurrencyConverter(st.prefs.currency);
 
   const wizard = useWizard<SendStep, SendData>({
     key: 'walletSend',
@@ -93,18 +102,66 @@ export default function WalletSend() {
 
   const rateLimitClock = (seconds: number) =>
     `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-  // Sign-step state for the server-side wallet-link fix: `needsLink` shows
-  // the human "link your wallet" prompt with its own button; linkRetriedRef
-  // caps the automatic link-and-retry after a 403 wallet_not_linked at
-  // exactly ONE attempt.
-  const [needsLink, setNeedsLink] = useState(false);
+  // Sign-step link handling: since the multi-wallet update, the account↔
+  // wallet link is NOT a hard gate — the backend authorizes any broadcast
+  // whose txBytes are signed by the sender's own key. Linking stays as a
+  // best-effort so the dashboard/badge surfaces keep tracking this wallet;
+  // linkRetriedRef caps the automatic link-and-retry after a 403 at exactly
+  // ONE attempt.
   const linkRetriedRef = useRef(false);
 
   const validAddr = isValidMallAddress(addr);
   const max = st.balances.MALL;
   const addressBook = useMemo(() => loadAddressBook(), []);
 
+  // Live value of what's being inserted (amount + network fee), same
+  // KES-oracle → display-currency path as the Wallet asset cards. Null
+  // until the price/rate loads — the UI shows "…" rather than a guess.
+  const amtNum = parseFloat(amount);
+  const totalMlcns = Number.isFinite(amtNum) && amtNum > 0 ? amtNum + fee : 0;
+  const totalKes = midKes !== null && totalMlcns > 0 ? totalMlcns * midKes : null;
+  const totalDisplay = toDisplay(totalKes, 'KES');
+  // Rate calculation: the canonical live KES midpoint converted into the
+  // user's display currency, so every MALL figure on this page has its
+  // real-world counterpart visible (1 MALL = X, amount = Y, total = Z).
+  const rateDisplay = midKes !== null ? toDisplay(midKes, 'KES') : null;
+  const amountDisplay = midKes !== null && Number.isFinite(amtNum) && amtNum > 0
+    ? toDisplay(amtNum * midKes, 'KES')
+    : null;
+
   const stepIdx = SEND_STEPS.indexOf(step);
+
+  // Deep links from Receive QR codes / session links:
+  // #/wallet/send?to=mall1…&amount=X opens the live network and pre-fills
+  // this form. The URL always wins over whatever the persisted wizard held.
+  useEffect(() => {
+    const h = window.location.hash;
+    const linkTo = h.match(/[?&]to=(mall1[a-z0-9]{38,58})/)?.[1];
+    const linkAmt = h.match(/[?&]amount=([0-9]+(?:\.[0-9]+)?)/)?.[1];
+    if (!linkTo && !linkAmt) return;
+    const patch: Partial<SendData> = {};
+    if (linkTo) patch.addr = linkTo;
+    if (linkAmt && parseFloat(linkAmt) > 0) patch.amount = linkAmt;
+    if (Object.keys(patch).length) wizard.setData(patch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Receiver-stated amount: when the recipient activated receive with a
+  // specific figure, the backend will REJECT any other amount (failing the
+  // session for both sides). Surface that contract before the sender commits.
+  const [recipientIntent, setRecipientIntent] = useState<ReceiveIntentView | null>(null);
+  useEffect(() => {
+    if (!validAddr) { setRecipientIntent(null); return; }
+    let cancelled = false;
+    receiveApi.getActive(addr.trim().toLowerCase())
+      .then((r) => { if (!cancelled) setRecipientIntent(r.ok ? (r.data?.active ?? null) : null); })
+      .catch(() => { if (!cancelled) setRecipientIntent(null); });
+    return () => { cancelled = true; };
+  }, [addr, validAddr]);
+  const intentKes = recipientIntent && midKes !== null ? recipientIntent.amountMlcns * midKes : null;
+  const intentDisplay = intentKes !== null ? toDisplay(intentKes, 'KES') : null;
+  const amountMatchesIntent = !recipientIntent
+    || Math.abs((Number.isFinite(amtNum) ? amtNum : -1) - recipientIntent.amountMlcns) < 1e-9;
 
   const review = () => {
     setErr('');
@@ -114,9 +171,6 @@ export default function WalletSend() {
     if (amt + fee > max) { setErr(`Insufficient balance — you have ${max.toFixed(2)} MALL.`); return; }
     wizard.next();
   };
-
-  const LINK_REQUIRED_MESSAGE =
-    "Your wallet isn't linked to your account yet. Confirm your PIN to link it, then try again.";
 
   /** True for the backend's requireWalletOwnership 403 (send.js `wallet_not_linked`). */
   const isWalletNotLinkedError = (e: unknown): boolean =>
@@ -156,12 +210,19 @@ export default function WalletSend() {
   };
 
   const authorize = async () => {
-    if (!st.wallet.pinEncryptedMnemonic || !st.wallet.address) {
-      toast('No wallet loaded — import or create a wallet first', false);
+    if (!st.wallet.address) {
+      toast('No wallet connected yet — open Connect wallet to import or create one first', false);
       return;
     }
-    // Hard gate: while the backend rate limit runs, the PIN challenge must
-    // not even open — no re-prompting, no burned PIN attempts on requests
+    // NOTE: deliberately NOT gated on pinEncryptedMnemonic anymore. When the
+    // account is signed in but this device holds no wallet keys (post-logout
+    // store.reset(), or a second device — /me seeds the address only), the
+    // CipherChallenge host detects the missing ciphertext and shows an
+    // actionable "no wallet keys on this device → connect wallet" card,
+    // instead of the old vague "no wallet connected" toast that made
+    // connected users think the send itself failed.
+    // Hard gate: while the backend rate limit runs, the cipher wall must
+    // not even open — no re-prompting, no burned unlock attempts on requests
     // that cannot succeed.
     if (rateLimitedUntil > Date.now()) return;
     const mnemonic = await requestMnemonic();
@@ -170,18 +231,16 @@ export default function WalletSend() {
     setBusy(true);
     setErr('');
     setGasError(false);
-    setNeedsLink(false);
     linkRetriedRef.current = false;
 
     const address = st.wallet.address;
 
-    // POST /api/send/mallcoins rejects with 403 wallet_not_linked unless the
-    // account's server-side link (User.walletAddress, only ever set by
-    // POST /api/auth/link-wallet) matches this exact address. The App.tsx
-    // background auto-link is fire-and-forget and its failures were silent —
-    // so verify against the server here and, if the link is missing, complete
-    // it explicitly (reusing the PIN-decrypted mnemonic — no second prompt)
-    // before broadcasting.
+    // Multi-wallet: the backend now authorizes any broadcast whose txBytes
+    // are signed by the sender's own key, so the account↔wallet link is
+    // best-effort, never a gate. If this wallet isn't the account's linked
+    // one, complete the link quietly (reusing the PIN-decrypted mnemonic —
+    // no second prompt) so dashboards/badges keep tracking it; any failure
+    // there just logs and the send proceeds regardless.
     if (!st.wallet.linkedOnServer) {
       const me = await authService.getServerWalletLink();
       if (me.ok && me.address === address) {
@@ -189,14 +248,8 @@ export default function WalletSend() {
         store.commit();
       } else {
         const link = await authService.linkWallet(address, { mnemonic });
-        if (!link.ok) {
-          setBusy(false);
-          if (link.reason !== 'pin_cancelled') {
-            // The needsLink card renders the message itself — don't also set
-            // `err` or it would show twice.
-            setNeedsLink(true);
-          }
-          return;
+        if (!link.ok && link.reason !== 'pin_cancelled') {
+          console.info('[WalletSend] best-effort link skipped:', link.reason);
         }
       }
     }
@@ -214,16 +267,28 @@ export default function WalletSend() {
         markPinChallengeLocked(until, e.message);
         return;
       }
+      if (e instanceof ReceiveAmountMismatchError) {
+        // The receiver had stated an exact amount and this send deviated —
+        // both the sender's send and the receiver's session are now failed
+        // server-side. Say exactly that, with the figure to match next time.
+        setBusy(false);
+        const message = e.message;
+        setErr(message);
+        toast(message, false);
+        wizard.goTo('recipient');
+        return;
+      }
       if (e instanceof MallcoinTxError && e.code === 'NO_ON_CHAIN_HISTORY') {
         setBusy(false);
         setGasError(true);
         return;
       }
       if (isWalletNotLinkedError(e)) {
-        // The pre-check passed but the server still says unlinked (e.g. the
-        // /me read raced a link rotation). Exactly ONE explicit
-        // link-and-retry; anything beyond that goes to the user as a clear
-        // message with its own link button.
+        // The best-effort link passed but the server still says unlinked
+        // (e.g. the /me read raced a link rotation). Exactly ONE explicit
+        // link-and-retry; if that still fails, surface it as a plain error —
+        // with signed-tx authorization the link is a bookkeeping nicety, not
+        // a spending gate, so there's no separate "link required" state.
         if (!linkRetriedRef.current) {
           linkRetriedRef.current = true;
           store.state.wallet.linkedOnServer = false;
@@ -234,34 +299,20 @@ export default function WalletSend() {
               await broadcast(mnemonic);
               return;
             } catch {
-              // retry's broadcast failed again — fall through to the prompt
+              // retry's broadcast failed again — fall through to the message
             }
           }
         }
         setBusy(false);
-        setNeedsLink(true);
+        const message = "Couldn't complete this send — the network didn't accept your wallet's signature for this address. Double-check you're sending from the wallet that holds the funds.";
+        setErr(message);
+        toast(message, false);
         return;
       }
       setBusy(false);
       const message = e instanceof MallcoinTxError || e instanceof Error ? e.message : 'Failed to send';
       setErr(message);
       toast(message, false);
-    }
-  };
-
-  /** "Link wallet" button in the Sign-step error prompt: awaits linkWallet (raises the PIN challenge itself). */
-  const linkNow = async () => {
-    if (!st.wallet.address) return;
-    setBusy(true);
-    const link = await authService.linkWallet(st.wallet.address);
-    setBusy(false);
-    if (link.ok) {
-      setNeedsLink(false);
-      setErr('');
-      toast('Wallet linked to your account — you can send again');
-    } else if (link.reason !== 'pin_cancelled') {
-      // needsLink card stays up with its message; just report why it failed.
-      toast(link.reason, false);
     }
   };
 
@@ -459,6 +510,32 @@ export default function WalletSend() {
               >
                 <Zap size={11} style={{ marginRight: 4 }} /> Max
               </button>
+              {midKes !== null && (
+                <div className="hint" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, color: 'var(--txt-3)' }} role="status">
+                  <Coins size={11} style={{ color: 'var(--gold)' }} />
+                  <span>
+                    Live rate: <b>1 MALL ≈ {fmtMoney(rateDisplay!, st.prefs.currency)}</b>
+                    {amountDisplay !== null && amtNum > 0 && (
+                      <> · {amtNum} MALL ≈ <b>{fmtMoney(amountDisplay, st.prefs.currency)}</b></>
+                    )}
+                  </span>
+                </div>
+              )}
+              {midKes === null && (
+                <div className="hint" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, color: 'var(--txt-3)' }}>
+                  <Coins size={11} /> loading live rate…
+                </div>
+              )}
+              {totalMlcns > 0 && (
+                <div className="hint" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                  <Coins size={11} style={{ color: 'var(--gold)' }} />
+                  <span>
+                    Total incl. fee: <b>{totalMlcns.toFixed(2)} MALL</b>
+                    {' · '}
+                    {totalDisplay !== null ? <>≈ <b>{fmtMoney(totalDisplay, st.prefs.currency)}</b> at live price</> : 'loading live price…'}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="field">
@@ -483,6 +560,33 @@ export default function WalletSend() {
                 style={{ width: '100%', accentColor: 'var(--section-accent)' }}
               />
             </div>
+
+            {recipientIntent && (
+              <div
+                className={amountMatchesIntent ? 'wo-info wo-info--tip' : 'wo-info wo-info--error'}
+                style={{ marginBottom: 12 }}
+                role="status"
+              >
+                <Shield size={14} className="wo-info-icon" />
+                <span>
+                  <b>Receiver stated an exact amount:</b> {recipientIntent.amountMlcns} MALL
+                  {intentDisplay !== null && <> (≈ {fmtMoney(intentDisplay, st.prefs.currency)} at live rate)</>}
+                  {recipientIntent.note ? ` — "${recipientIntent.note}"` : ''}.
+                  {amountMatchesIntent
+                    ? ' Your amount matches — this send will be accepted.'
+                    : ' Sending any other amount will FAIL for both parties — tap "Use exact amount" to match.'}
+                </span>
+                {!amountMatchesIntent && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ marginLeft: 8 }}
+                    onClick={() => setAmount(String(recipientIntent.amountMlcns))}
+                  >
+                    Use exact amount
+                  </button>
+                )}
+              </div>
+            )}
 
             {err && (
               <div className="wo-info wo-info--error" style={{ marginBottom: 12 }}>
@@ -519,7 +623,11 @@ export default function WalletSend() {
                 <span className="wo-summary-label">
                   <Send size={13} /> Amount
                 </span>
-                <span className="wo-summary-value">{amount} MALL</span>
+                <span className="wo-summary-value">{amount} MALL{amountDisplay !== null && (
+                    <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+                      ≈ {fmtMoney(amountDisplay, st.prefs.currency)}
+                    </span>
+                  )}</span>
               </div>
               <div className="wo-summary-row">
                 <span className="wo-summary-label">
@@ -531,8 +639,38 @@ export default function WalletSend() {
                 <span className="wo-summary-label">Total</span>
                 <span className="wo-summary-value">
                   {(parseFloat(amount) + fee).toFixed(2)} MALL
+                  {totalDisplay !== null && (
+                    <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+                      ≈ {fmtMoney(totalDisplay, st.prefs.currency)}
+                    </span>
+                  )}
                 </span>
               </div>
+              {midKes !== null && (
+                <div className="wo-summary-row">
+                  <span className="wo-summary-label">
+                    <Coins size={13} /> Live rate applied
+                  </span>
+                  <span className="wo-summary-value">
+                    1 MALL ≈ {fmtMoney(rateDisplay!, st.prefs.currency)}
+                  </span>
+                </div>
+              )}
+              {recipientIntent && (
+                <div className="wo-summary-row" style={amountMatchesIntent ? undefined : { background: 'rgba(193, 88, 77, 0.12)', borderRadius: 8 }}>
+                  <span className="wo-summary-label">
+                    <Shield size={13} /> Receiver stated
+                  </span>
+                  <span className="wo-summary-value">
+                    {recipientIntent.amountMlcns} MALL
+                    <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+                      {amountMatchesIntent
+                        ? '· amount matches ✓'
+                        : `· YOU ENTERED ${amtNum} — this send will be REJECTED and the receiver's session will fail`}
+                    </span>
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="wo-actions" style={{ marginTop: 16 }}>
@@ -555,7 +693,7 @@ export default function WalletSend() {
 
             <div className="wo-info wo-info--tip" style={{ marginBottom: 16 }}>
               <Shield size={14} className="wo-info-icon" />
-              <span>You'll be asked for your PIN to unlock your recovery phrase and sign this transaction securely.</span>
+              <span>Tap your cipher glyphs on the wall and confirm — the instant your cipher verifies, this transaction is signed and broadcast, no further steps.</span>
             </div>
 
             {rateLimitRemaining > 0 && (
@@ -587,18 +725,6 @@ export default function WalletSend() {
                 <button className="btn btn-primary btn-sm" disabled={gettingGas} onClick={getGas}>
                   {gettingGas && <span className="wo-spinner" style={{ width: 14, height: 14, marginRight: 6, display: 'inline-block' }} />}
                   <Zap size={12} style={{ marginRight: 4 }} /> Get fee tokens
-                </button>
-              </div>
-            )}
-
-            {needsLink && (
-              <div className="wo-card wo-card--warning" style={{ marginBottom: 12, padding: 14 }}>
-                <div style={{ fontSize: 13, color: 'var(--txt-2)', marginBottom: 10 }}>
-                  {LINK_REQUIRED_MESSAGE}
-                </div>
-                <button className="btn btn-primary btn-sm" disabled={busy} onClick={linkNow}>
-                  {busy && <span className="wo-spinner" style={{ width: 14, height: 14, marginRight: 6, display: 'inline-block' }} />}
-                  <Link2 size={12} style={{ marginRight: 4 }} /> Link wallet now
                 </button>
               </div>
             )}

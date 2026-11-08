@@ -1,10 +1,11 @@
 /**
- * On-demand, PIN-gated mnemonic access.
+ * On-demand, cipher-gated mnemonic access.
  *
  * Mirrors ui.tsx's toast-bus pattern: requestMnemonic() emits a request that
- * <PinChallengeHost/> (mounted once in App.tsx) picks up, prompts the PIN,
- * decrypts store.state.wallet.pinEncryptedMnemonic, and resolves the
- * caller's promise with the plaintext phrase — which the caller must use
+ * <CipherChallengeHost/> (mounted once in App.tsx) picks up, shows the Crypt
+ * Cipher Wall, verifies the tapped glyph sequence (or a legacy digit PIN)
+ * server-side, decrypts store.state.wallet.pinEncryptedMnemonic, and resolves
+ * the caller's promise with the plaintext phrase — which the caller must use
  * immediately and let go out of scope, never store it. Replaces every
  * direct `st.wallet.mnemonic` read across the app's signing surfaces (Send,
  * Stake, Vote, Marketplace, Mallpoints, Validator apply): the plaintext
@@ -24,7 +25,7 @@ export const mnemonicRequestBus = {
 export function requestMnemonic(): Promise<string | null> {
   return new Promise((resolve) => {
     if (mnemonicRequestBus.listeners.size === 0) {
-      // No <PinChallengeHost/> mounted (shouldn't happen outside tests) —
+      // No <CipherChallengeHost/> mounted (shouldn't happen outside tests) —
       // fail safe rather than hang forever.
       resolve(null);
       return;

@@ -4,7 +4,7 @@
  * 
  * Features:
  * - Warning modal before access
- * - PIN re-entry requirement
+ * - Cipher Wall re-entry requirement (legacy digit PINs still unlock)
  * - Masked private key display
  * - Show/hide toggle
  * - Copy-to-clipboard with warning
@@ -15,6 +15,7 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { decryptMnemonic, encryptMnemonic } from '../services/security';
+import { CipherWall } from './CipherWall';
 import { derivePrivateKeyFromMnemonic } from '../services/wallet';
 import { toast } from './ui';
 import { getSessionDraft, setSessionDraft } from '../services/sessionDraft';
@@ -40,7 +41,10 @@ export function PrivateKeyExport({
   // like a normal wizard would let a reopen skip straight to 'display' and
   // leak the decrypted key without re-authenticating.
   const [step, setStep] = useState<ExportStep>('warning');
-  const [pin, setPin] = useState('');
+  // The unlocked secret (cipher glyph sequence, or legacy digit PIN keyed
+  // on the same wall) — kept for this modal's lifetime so the encrypted
+  // backup download uses exactly what unlocked the mnemonic.
+  const [secret, setSecret] = useState('');
   const [privateKey, setPrivateKey] = useState<string | null>(null);
   const [showPrivateKey, setShowPrivateKey] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
@@ -66,29 +70,20 @@ export function PrivateKeyExport({
     setStep('pin-entry');
   };
 
-  // Task 12.3 & 12.4: PIN re-entry and decrypt private key
-  const handlePinSubmit = async () => {
+  // Task 12.3 & 12.4 (cipher edition): re-carve the secret on the wall and
+  // decrypt the mnemonic with it locally.
+  const handleSecretSubmit = async (picked: string) => {
     try {
       setLoading(true);
       setPinError(null);
 
-      if (!pin) {
-        setPinError('Please enter your PIN');
-        return;
-      }
-
-      if (pin.length < 4 || pin.length > 8) {
-        setPinError('PIN must be 4-8 digits');
-        return;
-      }
-
-      // Decrypt mnemonic with PIN
-      const result = await decryptMnemonic(encryptedMnemonic, pin);
+      // Decrypt mnemonic with the cipher
+      const result = await decryptMnemonic(encryptedMnemonic, picked);
 
       if (!result.success) {
         setPinAttempts(prev => prev + 1);
-        setPinError(result.error || 'Invalid PIN. Try again.');
-        setPin('');
+        setPinError(result.error || 'Wrong cipher (or legacy PIN). Try again.');
+        setSecret('');
 
         if (pinAttempts >= 2) {
           setTimeout(() => {
@@ -104,6 +99,7 @@ export function PrivateKeyExport({
 
       // Derive the actual secp256k1 private key from the decrypted mnemonic
       // — never show the mnemonic itself as if it were the private key.
+      setSecret(picked);
       const derivedKey = await derivePrivateKeyFromMnemonic(result.decrypted!);
       setPrivateKey(derivedKey);
       setStep('display');
@@ -140,7 +136,7 @@ export function PrivateKeyExport({
   };
 
   // Task 12.7: Download encrypted file — actually encrypted with the same
-  // PIN just used to unlock this modal (AES-256, PBKDF2-derived key, via
+  // cipher just used to unlock this modal (AES-256, PBKDF2-derived key, via
   // services/security.ts — the same primitive that decrypted the mnemonic
   // above), not the plaintext key wrapped in a warning label.
   const handleDownloadEncrypted = async () => {
@@ -153,19 +149,19 @@ export function PrivateKeyExport({
 Generated: ${new Date().toLocaleString()}
 Wallet: ${walletAddress}
 
-⚠️  WARNING: This file's contents are encrypted with your account PIN.
-NEVER share this file or your PIN with anyone.
+⚠️  WARNING: This file's contents are encrypted with your Cipher Wall cipher.
+NEVER share this file or your cipher with anyone.
 
 Private Key:
 ${privateKey}
 
 Security Notes:
 - This key provides full access to your wallet
-- Anyone with this key AND your PIN can steal all your funds
+- Anyone with this key AND your cipher can steal all your funds
 - Keep this file in a secure location
 - Consider storing on an airgapped device`;
 
-    const result = await encryptMnemonic(content, pin);
+    const result = await encryptMnemonic(content, secret);
     if (!result.success || !result.encrypted) {
       toast(result.error || 'Failed to encrypt backup file', false);
       return;
@@ -179,7 +175,7 @@ Security Notes:
     element.click();
     document.body.removeChild(element);
 
-    toast('Encrypted backup downloaded — you\'ll need your PIN to decrypt it. Keep it secure!', true);
+    toast('Encrypted backup downloaded — you\'ll need your cipher to decrypt it. Keep it secure!', true);
   };
 
   return (
@@ -243,7 +239,7 @@ Security Notes:
 
         {step === 'pin-entry' && (
           <>
-            <h3>Verify PIN to Export Private Key</h3>
+            <h3>Unlock at the cipher wall to export your private key</h3>
 
             {pinError && (
               <div className="error-message">
@@ -257,35 +253,20 @@ Security Notes:
             )}
 
             <p className="instruction-text">
-              Enter your PIN to verify and access your private key.
+              Tap your cipher glyphs in order — or, if this wallet still uses a legacy 4-8 digit PIN,
+              tap those digits on the wall. The private key opens only for the exact sequence.
             </p>
 
-            <div className="form-group">
-              <label>PIN (4-8 digits)</label>
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength={8}
-                placeholder="••••"
-                value={pin}
-                onChange={e => {
-                  setPin(e.target.value.replace(/\D/g, ''));
-                  setPinError(null);
-                }}
-                disabled={loading}
-              />
-            </div>
+            <CipherWall
+              actionLabel="Verify & Export"
+              onSubmit={handleSecretSubmit}
+              busy={loading}
+              error={pinError}
+            />
 
-            <div className="modal-buttons">
+            <div className="modal-buttons" style={{ marginTop: 12 }}>
               <button className="btn btn-secondary" onClick={onClose} disabled={loading}>
                 Cancel
-              </button>
-              <button
-                className="btn btn-danger"
-                onClick={handlePinSubmit}
-                disabled={loading || pin.length < 4}
-              >
-                {loading ? 'Verifying...' : 'Verify & Export'}
               </button>
             </div>
           </>

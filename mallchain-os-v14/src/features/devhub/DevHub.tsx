@@ -3,8 +3,33 @@ import { useStoreVersion, toast } from '../../components/ui';
 import { devhubApi, type DevApiKey } from '../../services/devhubApi';
 import { config } from '../../services/config';
 
+/**
+ * Live bundle listing served by backend/src/routes/downloads.js at
+ * /downloads/node/. The backend discovers the newest artifacts by mtime, so
+ * this page must never hardcode a version string — after every
+ * scripts/build-validator-bundle.sh run the names, sizes and checksums change.
+ */
+interface NodeDownloads {
+  bundles?: Record<string, { fileName?: string; bytes?: number; sha256?: string }>;
+  fullBundle?: { fileName?: string; bytes?: number };
+}
+
 /** Node bundles are published by the backend under /downloads/node/. */
 const NODE_DOWNLOAD_BASE = `${config.apiBaseUrl.replace(/\/$/, '')}/downloads/node`;
+
+const mb = (bytes?: number) => (bytes ? `${Math.round(bytes / 1024 / 1024)} MB` : '—');
+
+/** strip the trailing '.zip' so the unzip target matches the folder inside. */
+const dirOf = (zip?: string) => (zip ? zip.replace(/\.zip$/, '') : 'the unpacked folder');
+
+/**
+ * 'mallchain-node-v3cdd575d-pricing-band-linux-amd64.zip' → the middle part,
+ * which is what `marketplaced version` prints.
+ */
+const versionOf = (zip?: string) => {
+  const m = /^mallchain-node-(.+)-linux-[a-z0-9]+\.zip$/.exec(zip || '');
+  return m ? m[1] : 'live listing unavailable';
+};
 
 /** Developer Hub — real API-key management (backend/src/routes/devhub.js). */
 export default function DevHub() {
@@ -14,6 +39,7 @@ export default function DevHub() {
   const [error, setError] = useState<string | null>(null);
   const [keyName, setKeyName] = useState('');
   const [copied, setCopied] = useState('');
+  const [nodeDl, setNodeDl] = useState<NodeDownloads | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -26,6 +52,12 @@ export default function DevHub() {
 
   useEffect(() => {
     load();
+    // Best-effort: the listing is public, but DevHub must still render if the
+    // backend is offline, so failures only affect the bundle-name line below.
+    fetch(`${NODE_DOWNLOAD_BASE}/`)
+      .then((r) => (r.ok ? (r.json() as Promise<NodeDownloads>) : null))
+      .then((d) => d && setNodeDl(d))
+      .catch(() => undefined);
   }, [load]);
 
   const createKey = async () => {
@@ -77,7 +109,7 @@ export default function DevHub() {
   const nodeSnippets = [
     {
       lang: 'Verify download',
-      code: `unzip mallchain-node-v48052ec8.zip && cd mallchain-node-v48052ec8-linux-amd64\nsha256sum -c SHA256SUMS.txt   # every file must report OK`,
+      code: `unzip ${nodeDl?.fullBundle?.fileName ?? 'mallchain-node-<version>.zip'} && cd ${dirOf(nodeDl?.bundles?.amd64?.fileName)}\nsha256sum -c SHA256SUMS.txt   # every file must report OK`,
     },
     {
       lang: 'Verify chain data yourself',
@@ -146,7 +178,8 @@ export default function DevHub() {
           <a className="btn btn-ghost" href={`${NODE_DOWNLOAD_BASE}/docs`} target="_blank" rel="noreferrer">Setup guide</a>
         </div>
         <div className="tiny mono" style={{ marginTop: 10, opacity: 0.75 }}>
-          Per-arch bundles ≈ 49 MB (amd64) / 44 MB (arm64), combined ≈ 89 MB · v48052ec8 · served live by the
+          Per-arch bundles {mb(nodeDl?.bundles?.amd64?.bytes)} (amd64) / {mb(nodeDl?.bundles?.arm64?.bytes)} (arm64),
+          combined {mb(nodeDl?.fullBundle?.bytes)} · {versionOf(nodeDl?.bundles?.amd64?.fileName)} · served live by the
           backend at <span className="mono">{NODE_DOWNLOAD_BASE}/</span> (index lists checksums and sizes).
           If a route 404s the bundle is missing from <span className="mono">backend/build/validator-bundle/zips/</span>;
           rebuild with <span className="mono">scripts/build-validator-bundle.sh</span>.

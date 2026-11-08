@@ -25,6 +25,16 @@ Companion in-repo docs: [user guide 10 — Run a blockchain node](../user-guides
 (the operator reference this guide mirrors) and
 [user guide 09 — Become a validator](../user-guides/09-become-a-validator.md).
 
+> **Which binary you need.** Consensus rules live in the node, so an old
+> binary diverges from the network once the rules change. The most recent
+> such change is the **MLCNS dynamic-pricing engine** (2026-11-08): the
+> EndBlocker now rolls activity counters into a window and keeps the market
+> price inside a bounded band, and `MsgBuy/MsgSellMallcoin` clamp to the same
+> band. Bundles built before that change compute a different app hash, so
+> upgrade to the current bundle rather than re-using an archived one. Check
+> `marketplaced version` against the version listed on the download page
+> (`GET /downloads/node/`) before you sync.
+
 ## 0. Verify what you downloaded
 
 ```bash
@@ -47,7 +57,7 @@ statically linked (`CGO_ENABLED=0`) — no glibc version games. Check
 
 ```bash
 sudo install -m 0755 bin/marketplaced bin/gen-node-home /usr/local/bin/
-marketplaced version        # → e.g. v48052ec8
+marketplaced version        # → must match the version on the download page
 ```
 
 ## 2. Create your node home — the `init` trap

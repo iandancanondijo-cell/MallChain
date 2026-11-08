@@ -20,6 +20,7 @@ import { estimateGas } from './gasEstimation';
 import { broadcastWithRetry } from './broadcastWithRetry';
 import { waitForConfirmation, TxConfirmationError } from './txConfirmation';
 import { MSG_TRANSFER_MALLCOIN, createMlcoinRegistry } from './mlcoinProto';
+import { ReceiveAmountMismatchError } from './receiveApi';
 
 const MLCNS_DECIMALS = 6;
 const PLACEHOLDER_GAS_LIMIT = 0;
@@ -161,6 +162,9 @@ export async function sendMallcoinTransfer(opts: {
     // Rate limiting is actionable state (cool-down window), not a send
     // failure — keep it typed so the caller can gate the PIN UI on it.
     if (err instanceof RateLimitError) throw err;
+    // Stated-amount mismatch is likewise structured state for the UI —
+    // keep the expected figure instead of flattening to a generic error.
+    if (err instanceof ReceiveAmountMismatchError) throw err;
     throw new MallcoinTxError(err instanceof Error ? err.message : 'Transaction failed during broadcast');
   }
 

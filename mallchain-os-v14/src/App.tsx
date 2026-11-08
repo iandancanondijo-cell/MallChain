@@ -9,7 +9,7 @@ const Admin = lazy(() => import('./features/admin/Admin'));
 import TopBar from './components/TopBar';
 import CommandPalette from './components/CommandPalette';
 import { ToastHost, toast, toastKind } from './components/ui';
-import { PinChallengeHost } from './components/PinChallenge';
+import { CipherChallengeHost } from './components/CipherChallenge';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { matchRoute, useHashRoute } from './router';
@@ -293,16 +293,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authInitialized, st.user.authed, st.wallet.address]);
 
-  // One-time migration nudge: an account created before PIN-gating existed
+  // One-time migration nudge: an account created before secret-gating existed
   // has its recovery phrase sitting in st.wallet.mnemonic in plaintext (see
   // services/mnemonicAccess.ts) with no pinHash/pinEncryptedMnemonic set.
-  // Route them to Security Settings — its "Change PIN" flow already
+  // Route them to Security Settings — its "Set cipher" flow already
   // recognizes this exact case (hasPinSet === false + legacy mnemonic
-  // present) and re-encrypts it, then wipes the plaintext field.
+  // present) and re-encrypts it under a Cipher Wall cipher, then wipes the
+  // plaintext field.
   useEffect(() => {
     const needsMigration = !!st.wallet.mnemonic && !st.wallet.pinHash;
     if (needsMigration && path !== '/security') {
-      toastKind('Secure your wallet — set a PIN to continue', 'warning');
+      toastKind('Secure your wallet — choose a cipher at the wall to continue', 'warning');
       navigate('/security');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -530,7 +531,7 @@ export default function App() {
       </main>
       <CommandPalette navigate={navigate} isAdminRoute={isAdminRoute} />
       <ToastHost />
-      <PinChallengeHost />
+      <CipherChallengeHost />
       <CookieConsentBanner />
       
       {/* KYC Gate - Blocks all features if KYC not completed (never over the /kyc wizard itself).

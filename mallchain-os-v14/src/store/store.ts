@@ -17,26 +17,31 @@ export const OS_KEY = 'mallchain_os_v1_v14';
  * Security model for wallet secrets:
  *
  *   st.wallet.pinEncryptedMnemonic — the recovery phrase encrypted with
- *     the user's PIN via AES-256-GCM (PBKDF2-SHA256, 250k iterations,
- *     fresh random salt + IV per encryption — services/security.ts).
+ *     the user's wallet secret via AES-256-GCM (PBKDF2-SHA256, 250k
+ *     iterations, fresh random salt + IV per encryption —
+ *     services/security.ts). Since the Crypt Cipher Wall replaced numeric
+ *     PINs the secret is the ordered glyph sequence the user engraved
+ *     (st.wallet.secretMode === 'cipher'); wallets enrolled before that
+ *     switch keep working with their digits (secretMode === '').
  *     PERSISTED to localStorage alongside the rest of the store so the
  *     wallet survives a browser refresh; without this the user is locked
  *     out of every signing operation the moment they reload, and the
- *     modal misreports it as a never-ending "wrong PIN".
+ *     modal misreports it as a never-ending "wrong cipher".
  *
- *   st.wallet.pinHash — bcrypt(10) hash of the same PIN. PERSISTED too —
- *     it's what verifyPin() checks before letting the modal attempt the
- *     expensive PBKDF2/AES-GCM decrypt. Both fields are useless without
- *     the PIN itself: PBKDF2 × 250k makes a 6+ digit PIN offline
- *     brute-force infeasible, and AES-GCM's auth tag rejects tampered
- *     ciphertext before any plaintext is exposed. The 24-word phrase
- *     backup (held by the user, never written anywhere we can read)
- *     remains the recovery path if the PIN itself is lost.
+ *   st.wallet.pinHash — bcrypt(10) hash of the same secret. PERSISTED too
+ *     — it's what the local verifyPin() fallback checks before the modal
+ *     attempts the expensive PBKDF2/AES-GCM decrypt, and what the server
+ *     mirrors for rate-limited verification. Both fields are useless
+ *     without the secret itself: PBKDF2 × 250k makes guessing offline
+ *     infeasible, and AES-GCM's auth tag rejects tampered ciphertext
+ *     before any plaintext is exposed. The 24-word phrase backup (held by
+ *     the user, never written anywhere we can read) remains the recovery
+ *     path if the cipher itself is lost.
  *
  *   Plaintext mnemonic (st.wallet.mnemonic) is still stripped from
  *     localStorage — it's only ever populated by legacy wallets awaiting
- *     PIN migration (App.tsx's "needsMigration" effect), and Security
- *     Settings wipes it the moment the encryption runs.
+ *     encryption migration (App.tsx's "needsMigration" effect), and
+ *     Security Settings wipes it the moment the encryption runs.
  *
  *   The in-memory `memoryWalletSecrets` mirror below is kept for fast
  *   reads and as a fallback in applyExternalState; localStorage remains
@@ -145,6 +150,17 @@ export interface AppState {
     pinHash: string;
     /** The real, canonical mnemonic storage — PIN-encrypted (services/security.ts encryptMnemonic). Decrypted on demand via requestMnemonic(), never held in plaintext in the store. */
     pinEncryptedMnemonic: string;
+    /**
+     * Which secret protects the key material above:
+     *   'cipher' — a Crypt Cipher Wall glyph sequence (services/security.ts
+     *              validateSecretFormat); pinEncryptedMnemonic/pinHash are
+     *              derived from that string.
+     *   ''       — legacy 4-8 digit PIN (pre-Cipher-Wall wallets, or not yet
+     *              set). Digits still verify everywhere; Security Settings
+     *              offers the one-time migration to a cipher.
+     * Not itself secret — safe to keep in the plain localStorage copy.
+     */
+    secretMode: '' | 'cipher';
     /**
      * True only when the backend has CONFIRMED that this exact local wallet
      * address is linked to the signed-in account (User.walletAddress) —
@@ -351,7 +367,7 @@ function emptyState(): AppState {
     activity: [],
     prefs: { accent: 'gold', currency: detectDefaultCurrency(), lang: 'EN' },
     settings: { theme: 'dark', network: config.network },
-    wallet: { address: '', accountId: '', chainId: '', mnemonic: '', createdAt: 0, requests: [], pinHash: '', pinEncryptedMnemonic: '', linkedOnServer: false },
+    wallet: { address: '', accountId: '', chainId: '', mnemonic: '', createdAt: 0, requests: [], pinHash: '', pinEncryptedMnemonic: '', secretMode: '', linkedOnServer: false },
     marketplace: { cart: [], wishlist: [], orders: [] },
     staking: { delegated: 0, apy: 0, pendingUnstake: 0, cooldownEnds: null, history: [] },
     governance: { proposals: [] },
@@ -524,7 +540,7 @@ class Store {
         // Only strip the legacy plaintext mnemonic field — the
         // PIN-encrypted blob and PIN hash MUST round-trip through
         // localStorage, otherwise the wallet is dead after a refresh
-        // (PinChallenge would treat every decrypt failure as a wrong
+        // (CipherChallengeHost would treat every decrypt failure as a wrong
         // PIN and lock the user out forever).
         const { mnemonic: _m, ...safeWallet } = toPersist.wallet as typeof toPersist.wallet & { mnemonic?: string };
         toPersist.wallet = { ...safeWallet, mnemonic: '' } as typeof toPersist.wallet;

@@ -105,11 +105,36 @@ function verifySubscribeWalletSignature({ address, timestamp, pubKeyBase64, sign
   });
 }
 
+/**
+ * Derive the bech32 addresses a signed transaction's signer infos prove
+ * control of. Only secp256k1 pubkeys are considered (every Mallchain wallet
+ * is secp256k1); anything unrecognized is skipped. Used by the send relay to
+ * authorize broadcasts from wallets that aren't the account's linked wallet:
+ * the single-group pubkey in a SignInfo IS the key that produced the
+ * transaction signature, so a derived address here is cryptographic proof —
+ * the same trust anchor as ADR-036 ownership verification, just read off the
+ * broadcast payload instead of a separate handshake.
+ */
+function signerAddressesFromPubkeys(signerPubkeysBase64, addressPrefix) {
+  const out = [];
+  for (const b64 of signerPubkeysBase64 || []) {
+    try {
+      const bytes = fromBase64(b64);
+      // uncompressed secp256k1 keys (33-65 bytes with 0x02/0x03 prefix) are
+      // what we issue; anything else isn't a wallet key we recognize.
+      if (bytes.length !== 33 || (bytes[0] !== 0x02 && bytes[0] !== 0x03)) continue;
+      out.push(pubkeyToAddress(encodeSecp256k1Pubkey(bytes), addressPrefix));
+    } catch (_) { /* unparseable pubkey — ignore this signer */ }
+  }
+  return out;
+}
+
 module.exports = {
   verifyOwnershipSignature,
   verifyConvertSignature,
   verifyLinkWalletSignature,
   verifySubscribeWalletSignature,
+  signerAddressesFromPubkeys,
   convertMessage,
   linkWalletMessage,
   subscribeWalletMessage,

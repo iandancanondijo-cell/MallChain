@@ -1,9 +1,9 @@
 /**
  * Security Settings Page
  * Phase 3 Section 11: Security Settings Page - Tasks 11.1-11.10
- * 
+ *
  * Features:
- * - Change PIN with old PIN verification
+ * - Change wallet cipher (Crypt Cipher Wall; legacy numeric PINs still unlock)
  * - Biometric settings enable/disable
  * - Two-factor authentication placeholder
  * - Session timeout configuration
@@ -11,7 +11,7 @@
  * - Sign out everywhere button
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import QRCode from 'qrcode';
 import { store, type Activity } from '../store/store';
 import { useStoreVersion, toast } from '../components/ui';
@@ -22,6 +22,7 @@ import { settingsApi, type UserSettingsData } from '../services/settingsApi';
 import { requestMnemonic } from '../services/mnemonicAccess';
 import { getStatus, setupKeyRecovery, confirmKeyRecovery, testRecovery, disableKeyRecovery } from '../services/vaultRecovery';
 import PrivateKeyExport from '../components/PrivateKeyExport';
+import { CipherWall, CipherSetup } from '../components/CipherWall';
 import '../styles/security-settings.css';
 
 interface SecuritySettingsState {
@@ -29,12 +30,6 @@ interface SecuritySettingsState {
   showActivityLog: boolean;
   showSignOutModal: boolean;
   showPrivateKeyExport: boolean;
-
-  oldPin: string;
-  newPin: string;
-  confirmPin: string;
-  pinError: string | null;
-  pinLoading: boolean;
 
   sessionTimeout: 5 | 15 | 30;
 }
@@ -48,12 +43,6 @@ export function SecuritySettings() {
     showActivityLog: false,
     showSignOutModal: false,
     showPrivateKeyExport: false,
-
-    oldPin: '',
-    newPin: '',
-    confirmPin: '',
-    pinError: null,
-    pinLoading: false,
 
     sessionTimeout: 15,
   });
@@ -192,108 +181,40 @@ export function SecuritySettings() {
     }
   };
 
-  // Task 11.2-11.3: Change PIN — verifies the current PIN against the stored
-  // hash (skipped on first-time setup, when no PIN has been set yet), then
-  // hashes and persists the new one AND re-encrypts the wallet mnemonic with
-  // it (services/security.ts) so PrivateKeyExport has something real to
-  // decrypt. Both previously just validated input and threw the result away.
-  const handleChangePinSubmit = async () => {
+  // Task 11.2-11.3 (cipher edition): persist a freshly enrolled Cipher Wall
+  // sequence. The modal already proved knowledge of the old secret and
+  // recovered the plaintext mnemonic locally; here we hash the new cipher
+  // (bcrypt), re-encrypt the mnemonic under it (PBKDF2+AES-GCM,
+  // services/security.ts) so PrivateKeyExport and every signing surface keep
+  // working, and mirror the hash to the server so /api/wallet/pin/verify-pin
+  // rate-limits brute force on the new secret too. Returns an error string
+  // or null on success.
+  const saveNewCipher = async (cipher: string, mnemonic: string): Promise<string | null> => {
     try {
-      setState(prev => ({ ...prev, pinLoading: true, pinError: null }));
-
-      if (hasPinSet && !state.oldPin) {
-        setState(prev => ({ ...prev, pinError: 'Please enter your current PIN', pinLoading: false }));
-        return;
-      }
-
-      if (!state.newPin) {
-        setState(prev => ({ ...prev, pinError: 'Please enter a new PIN', pinLoading: false }));
-        return;
-      }
-
-      if (state.newPin !== state.confirmPin) {
-        setState(prev => ({ ...prev, pinError: 'New PINs do not match', pinLoading: false }));
-        return;
-      }
-
-      if (state.newPin.length < 4 || state.newPin.length > 8) {
-        setState(prev => ({ ...prev, pinError: 'PIN must be 4-8 digits', pinLoading: false }));
-        return;
-      }
-
-      if ((hasPinSet && !/^\d+$/.test(state.oldPin)) || !/^\d+$/.test(state.newPin)) {
-        setState(prev => ({ ...prev, pinError: 'PIN must contain only digits', pinLoading: false }));
-        return;
-      }
-
-      // Recover the plaintext phrase to re-encrypt it under the new PIN —
-      // the durable store never holds it in plaintext (see
-      // services/mnemonicAccess.ts). st.wallet.mnemonic is only ever
-      // non-empty for an account created before PIN-gating existed, mid
-      // one-time migration (App.tsx's boot effect routes it here).
-      let mnemonic: string | null = null;
-      if (hasPinSet) {
-        const verifyResult = await verifyPin(state.oldPin, st.wallet.pinHash);
-        if (!verifyResult.success || !verifyResult.valid) {
-          setState(prev => ({ ...prev, pinError: 'Current PIN is incorrect', pinLoading: false }));
-          return;
-        }
-        const decryptResult = await decryptMnemonic(st.wallet.pinEncryptedMnemonic, state.oldPin);
-        if (!decryptResult.success || !decryptResult.decrypted) {
-          setState(prev => ({ ...prev, pinError: decryptResult.error || 'Failed to unlock wallet with current PIN', pinLoading: false }));
-          return;
-        }
-        mnemonic = decryptResult.decrypted;
-      } else if (st.wallet.mnemonic) {
-        mnemonic = st.wallet.mnemonic;
-      }
-
-      if (!mnemonic) {
-        setState(prev => ({ ...prev, pinError: 'No wallet found to secure with a PIN', pinLoading: false }));
-        return;
-      }
-
-      const hashResult = await hashPin(state.newPin);
+      const hashResult = await hashPin(cipher);
       if (!hashResult.success || !hashResult.hash) {
-        setState(prev => ({ ...prev, pinError: hashResult.error || 'Failed to hash PIN', pinLoading: false }));
-        return;
+        return hashResult.error || 'Failed to hash cipher';
       }
-
-      const encryptResult = await encryptMnemonic(mnemonic, state.newPin);
+      const encryptResult = await encryptMnemonic(mnemonic, cipher);
       if (!encryptResult.success || !encryptResult.encrypted) {
-        setState(prev => ({ ...prev, pinError: encryptResult.error || 'Failed to secure wallet with new PIN', pinLoading: false }));
-        return;
+        return encryptResult.error || 'Failed to secure wallet with new cipher';
       }
 
       st.wallet.pinHash = hashResult.hash;
       st.wallet.pinEncryptedMnemonic = encryptResult.encrypted;
+      st.wallet.secretMode = 'cipher';
       // Clears the legacy plaintext field once it's safely re-encrypted —
-      // a no-op for the normal "change PIN" path, where it's already empty.
+      // a no-op for the normal path, where it's already empty.
       st.wallet.mnemonic = '';
       store.commit();
 
-      // Keep the server's copy of the PIN hash in sync (same rationale as
-      // WalletFlow.handleSetPin) so verify-pin rate limiting applies.
+      // Server sync (same rationale as WalletFlow.handleSetCipher).
       api.post('/api/wallet/pin/set-pin', { pinHash: hashResult.hash }).then((r) => {
-        if (!r.ok) console.warn('[SecuritySettings] PIN sync to server failed:', r.error);
+        if (!r.ok) console.warn('[SecuritySettings] cipher hash sync to server failed:', r.error);
       });
-
-      setState(prev => ({
-        ...prev,
-        showChangePinModal: false,
-        oldPin: '',
-        newPin: '',
-        confirmPin: '',
-        pinLoading: false,
-      }));
-
-      toast(hasPinSet ? 'PIN changed successfully' : 'PIN set successfully', true);
+      return null;
     } catch (error) {
-      setState(prev => ({
-        ...prev,
-        pinError: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        pinLoading: false,
-      }));
+      return `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
   };
 
@@ -328,24 +249,24 @@ export function SecuritySettings() {
         <p>Manage your account security and authentication methods</p>
       </div>
 
-      {/* Section 1: PIN Management */}
+      {/* Section 1: Wallet Cipher (was PIN Management) */}
       <section className="settings-section">
         <div className="section-header">
-          <h2>PIN Management</h2>
+          <h2>Wallet Cipher</h2>
           <span className="section-status">{hasPinSet ? '✓ Active' : 'Not set'}</span>
         </div>
 
         <div className="settings-card card-glow bg-gradient-card">
           <div className="setting-item">
             <div className="setting-info">
-              <h3>{hasPinSet ? 'Current PIN' : 'Set a PIN'}</h3>
-              <p>{hasPinSet ? 'Your 4-8 digit security PIN' : 'Set a 4-8 digit PIN to secure private key export'}</p>
+              <h3>{hasPinSet ? (st.wallet.secretMode === 'cipher' ? 'Current cipher' : 'Current PIN (legacy)') : 'Set a cipher'}</h3>
+              <p>{hasPinSet ? (st.wallet.secretMode === 'cipher' ? 'Your Cipher Wall glyph sequence — the one and only key that unlocks this wallet' : 'This wallet still uses a legacy 4-8 digit PIN; switch to a Cipher Wall sequence for stronger, easier security') : 'Engrave a 4-12 glyph cipher on the wall to secure sends, staking, voting and private key export'}</p>
             </div>
             <button
               className="btn btn-secondary"
               onClick={() => setState(prev => ({ ...prev, showChangePinModal: true }))}
             >
-              {hasPinSet ? 'Change PIN' : 'Set PIN'}
+              {hasPinSet ? (st.wallet.secretMode === 'cipher' ? 'Change cipher' : 'Switch to a cipher') : 'Set cipher'}
             </button>
           </div>
         </div>
@@ -362,13 +283,13 @@ export function SecuritySettings() {
           <div className="setting-item">
             <div className="setting-info">
               <h3>Export Private Key</h3>
-              <p>{hasPinSet ? 'View and backup your private key (requires PIN verification)' : 'Set a PIN above first — export is PIN-protected'}</p>
+              <p>{hasPinSet ? 'View and backup your private key (requires cipher unlock)' : 'Set a cipher above first — export is cipher-protected'}</p>
             </div>
             <button
               className="btn btn-danger btn-sm"
               onClick={() => setState(prev => ({ ...prev, showPrivateKeyExport: true }))}
               disabled={!hasPinSet}
-              title={hasPinSet ? 'Exports private key with PIN verification' : 'Set a PIN first'}
+              title={hasPinSet ? 'Exports private key after cipher unlock' : 'Set a cipher first'}
             >
               Export Key
             </button>
@@ -512,29 +433,12 @@ export function SecuritySettings() {
         </div>
       </section>
 
-      {/* Change PIN Modal */}
+      {/* Change cipher Modal (PIN-era name kept on the state flag) */}
       {state.showChangePinModal && (
-        <ChangePinModal
-          hasPinSet={hasPinSet}
-          oldPin={state.oldPin}
-          newPin={state.newPin}
-          confirmPin={state.confirmPin}
-          error={state.pinError}
-          loading={state.pinLoading}
-          onOldPinChange={pin => setState(prev => ({ ...prev, oldPin: pin, pinError: null }))}
-          onNewPinChange={pin => setState(prev => ({ ...prev, newPin: pin, pinError: null }))}
-          onConfirmPinChange={pin => setState(prev => ({ ...prev, confirmPin: pin, pinError: null }))}
-          onSubmit={handleChangePinSubmit}
-          onCancel={() =>
-            setState(prev => ({
-              ...prev,
-              showChangePinModal: false,
-              oldPin: '',
-              newPin: '',
-              confirmPin: '',
-              pinError: null,
-            }))
-          }
+        <ChangeCipherModal
+          hasSecretSet={hasPinSet}
+          onClose={() => setState(prev => ({ ...prev, showChangePinModal: false }))}
+          onSave={saveNewCipher}
         />
       )}
 
@@ -588,95 +492,82 @@ export function SecuritySettings() {
 }
 
 /**
- * Change PIN Modal (Tasks 11.2-11.3)
+ * Change cipher Modal (Tasks 11.2-11.3, Crypt Cipher Wall edition).
+ * Step 1 (only when a secret already exists): unlock the wall with the
+ * current cipher — or an old numeric PIN, keyed as digits on the same wall,
+ * so pre-cipher accounts are never stranded. Step 2: engrave a new cipher
+ * and carve it again to confirm; on save the mnemonic is re-encrypted under
+ * it and the bcrypt hash is mirrored to the server (saveNewCipher).
  */
-interface ChangePinModalProps {
-  hasPinSet: boolean;
-  oldPin: string;
-  newPin: string;
-  confirmPin: string;
-  error: string | null;
-  loading: boolean;
-  onOldPinChange: (pin: string) => void;
-  onNewPinChange: (pin: string) => void;
-  onConfirmPinChange: (pin: string) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-}
+function ChangeCipherModal({ hasSecretSet, onClose, onSave }: {
+  hasSecretSet: boolean;
+  onClose: () => void;
+  onSave: (cipher: string, mnemonic: string) => Promise<string | null>;
+}) {
+  const st = store.state;
+  const [phase, setPhase] = useState<'unlock' | 'choose'>(hasSecretSet ? 'unlock' : 'choose');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const mnemonicRef = useRef<string | null>(null);
 
-function ChangePinModal({
-  hasPinSet,
-  oldPin,
-  newPin,
-  confirmPin,
-  error,
-  loading,
-  onOldPinChange,
-  onNewPinChange,
-  onConfirmPinChange,
-  onSubmit,
-  onCancel,
-}: ChangePinModalProps) {
+  const unlock = async (secret: string) => {
+    setBusy(true);
+    setError(null);
+    const verifyResult = await verifyPin(secret, st.wallet.pinHash);
+    if (!verifyResult.success || !verifyResult.valid) {
+      setBusy(false);
+      setError('Current cipher (or legacy PIN) does not match this wallet');
+      return;
+    }
+    const decryptResult = await decryptMnemonic(st.wallet.pinEncryptedMnemonic, secret);
+    if (!decryptResult.success || !decryptResult.decrypted) {
+      setBusy(false);
+      setError(decryptResult.error || 'Failed to unlock wallet with current secret');
+      return;
+    }
+    mnemonicRef.current = decryptResult.decrypted;
+    setBusy(false);
+    setPhase('choose');
+  };
+
+  const choose = async (cipher: string) => {
+    setBusy(true);
+    setError(null);
+    const mnemonic = mnemonicRef.current ?? st.wallet.mnemonic;
+    if (!mnemonic) {
+      setBusy(false);
+      setError('No wallet found on this device to secure with a cipher');
+      return;
+    }
+    const err = await onSave(cipher, mnemonic);
+    setBusy(false);
+    if (err) {
+      setError(err);
+      return;
+    }
+    toast('Cipher updated — your wallet now unlocks with the new glyph sequence', true);
+    onClose();
+  };
+
   return (
     <div className="modal-overlay">
-      <div className="modal modal-md">
-        <h3>{hasPinSet ? 'Change PIN' : 'Set PIN'}</h3>
+      <div className="modal" style={{ maxWidth: 780, width: '95%' }}>
+        <h3>{hasSecretSet ? (phase === 'unlock' ? 'Unlock to change your cipher' : 'Choose your new cipher') : 'Set your cipher'}</h3>
+        <p style={{ fontSize: 13, color: 'var(--txt-3)', margin: '6px 0 12px' }}>
+          {phase === 'unlock'
+            ? 'Tap the glyphs of your current cipher in order — or your old 4-8 digit PIN as digits on the wall — to prove ownership before enrolling the new one.'
+            : 'Your wallet secret is now an ordered sequence of 4-12 glyphs from the wall (shapes, symbols, numbers, letters — anything). Carve it, then carve the same sequence again to confirm.'}
+        </p>
 
-        {error && <div className="error-message">{error}</div>}
-
-        {hasPinSet && (
-          <div className="form-group">
-            <label>Current PIN</label>
-            <input
-              type="password"
-              inputMode="numeric"
-              maxLength={8}
-              placeholder="••••"
-              value={oldPin}
-              onChange={e => onOldPinChange(e.target.value.replace(/\D/g, ''))}
-              disabled={loading}
-            />
-          </div>
+        {phase === 'unlock' ? (
+          <CipherWall actionLabel="Unlock" onSubmit={unlock} busy={busy} error={error} />
+        ) : (
+          <CipherSetup onSubmit={choose} busy={busy} error={null} />
         )}
-
-        <div className="form-group">
-          <label>New PIN (4-8 digits)</label>
-          <input
-            type="password"
-            inputMode="numeric"
-            maxLength={8}
-            placeholder="••••"
-            value={newPin}
-            onChange={e => onNewPinChange(e.target.value.replace(/\D/g, ''))}
-            disabled={loading}
-          />
-          <small>Requirements: 4-8 digits, no repeating sequences (e.g., 1111)</small>
-        </div>
-
-        <div className="form-group">
-          <label>Confirm New PIN</label>
-          <input
-            type="password"
-            inputMode="numeric"
-            maxLength={8}
-            placeholder="••••"
-            value={confirmPin}
-            onChange={e => onConfirmPinChange(e.target.value.replace(/\D/g, ''))}
-            disabled={loading}
-          />
-        </div>
+        {phase === 'choose' && error && <div className="error-message" style={{ marginTop: 10 }}>{error}</div>}
 
         <div className="modal-buttons">
-          <button className="btn btn-secondary" onClick={onCancel} disabled={loading}>
-            Cancel
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={onSubmit}
-            disabled={loading || (hasPinSet && !oldPin) || !newPin || !confirmPin}
-          >
-            {loading ? 'Saving...' : hasPinSet ? 'Change PIN' : 'Set PIN'}
-          </button>
+          <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
         </div>
       </div>
     </div>

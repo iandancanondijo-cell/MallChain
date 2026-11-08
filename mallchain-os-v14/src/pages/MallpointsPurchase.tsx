@@ -64,22 +64,22 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
 
   // The server-side link (user.walletAddress) is what credits a purchase —
   // but a wallet connected on THIS device whose background link-wallet never
-  // completed (e.g. the PIN prompt was dismissed) used to be misreported as
+  // completed (e.g. the cipher prompt was dismissed) used to be misreported as
   // "No wallet connected". Distinguish the two cases: offer a one-tap
-  // "Link wallet" (PIN-verified signature) when the local wallet is present,
+  // "Link wallet" (cipher-verified signature) when the local wallet is present,
   // and only send genuinely wallet-less sessions through the connect flow.
   if (balLoaded && !walletAddress) {
     const localAddress = store.state.wallet.address;
     const linkWalletNow = async () => {
       if (!localAddress || linking) return;
       setLinking(true);
-      // Prompts the wallet PIN, signs the link message, POSTs /api/auth/link-wallet.
+      // Opens the cipher wall, signs the link message, POSTs /api/auth/link-wallet.
       await authService.linkWallet(localAddress);
       const res = await api.get<{ ok: boolean; mlpts_balance: number; walletAddress?: string }>('/api/creator-space/balance');
       if (res.ok && res.data?.walletAddress) {
         toast('Wallet linked — you can purchase Mallpoints now');
       } else {
-        toast('Linking was cancelled or failed — try again and enter your PIN', false);
+        toast('Linking was cancelled or failed — try again and enter your cipher', false);
       }
       setLinking(false);
       loadBalance();
@@ -104,10 +104,10 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
               <>
                 <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Wallet connected — one step left</div>
                 <div style={{ fontSize: 13, color: 'var(--txt-3)', lineHeight: 1.6, maxWidth: 360, margin: '0 auto' }}>
-                  This device holds your wallet <span style={{ fontFamily: 'monospace' }}>{localAddress.slice(0, 14)}…</span>, but it isn't linked to your account on the server yet. Link it with your wallet PIN so purchases can be credited.
+                  This device holds your wallet <span style={{ fontFamily: 'monospace' }}>{localAddress.slice(0, 14)}…</span>, but it isn't linked to your account on the server yet. Confirm your cipher so purchases can be credited.
                 </div>
                 <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={linkWalletNow} disabled={linking}>
-                  {linking ? 'Waiting for PIN…' : 'Link wallet with PIN'}
+                  {linking ? 'Waiting for cipher…' : 'Unlock with your cipher'}
                 </button>
               </>
             ) : (

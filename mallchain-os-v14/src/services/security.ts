@@ -38,6 +38,17 @@ export interface DecryptionResult {
 const PIN_SALT_ROUNDS = 10;
 const PIN_MIN_LENGTH = 4;
 const PIN_MAX_LENGTH = 8;
+/**
+ * Cipher Wall secrets: an ordered sequence of glyphs (hieroglyphs, symbols,
+ * digits, letters — anything the wall carves). 4-12 glyphs, and the UTF-8
+ * byte length is capped at 64 because bcrypt only reads the first 72 bytes
+ * of its input — past that the client's PBKDF2 key (full string) and the
+ * server's bcrypt hash (truncated) would be checking different content.
+ * Glyphs are 1-4 UTF-8 bytes, so 12 glyphs never exceed 48 bytes anyway.
+ */
+export const SECRET_MIN_GLYPHS = 4;
+export const SECRET_MAX_GLYPHS = 12;
+export const SECRET_MAX_BYTES = 64;
 // PBKDF2 iterations for PIN-based key derivation. OWASP recommends >=100k
 // for PBKDF2-SHA256; this used to be 100 (a hardcoded, non-random salt made
 // it worse — every user shared the same salt, so a single precomputed table
@@ -122,16 +133,48 @@ function isCommonPinSequence(pin: string): boolean {
 }
 
 /**
+ * Split a secret into its glyph sequence (code points, so multi-unit
+ * hieroglyphs like 𓄿 stay one "character").
+ */
+export function secretGlyphs(secret: string): string[] {
+  return [...secret];
+}
+
+/**
+ * Validate a Cipher Wall secret (or any non-numeric wallet secret).
+ * Digits-only strings keep going through the stricter legacy PIN rules;
+ * everything else must simply be 4-12 glyphs within 64 UTF-8 bytes and
+ * free of control characters (the wall only ever produces such strings).
+ */
+export function validateSecretFormat(secret: string): boolean {
+  if (!secret || typeof secret !== 'string') return false;
+  if (/[\u0000-\u001f\u007f]/.test(secret)) return false;
+  const glyphs = secretGlyphs(secret);
+  if (glyphs.length < SECRET_MIN_GLYPHS || glyphs.length > SECRET_MAX_GLYPHS) return false;
+  return new TextEncoder().encode(secret).length <= SECRET_MAX_BYTES;
+}
+
+/**
+ * Validate the format of any wallet secret — a legacy digits-only PIN or a
+ * Cipher Wall glyph sequence. Single gate every hashing/encryption entry
+ * point uses, so callers never need to know which kind they're holding.
+ */
+export function validateWalletSecret(secret: string): boolean {
+  if (!secret || typeof secret !== 'string') return false;
+  return /^\d+$/.test(secret) ? validatePinFormat(secret) : validateSecretFormat(secret);
+}
+
+/**
  * Hash a PIN using bcryptjs
  * @param pin - The PIN to hash
  * @returns Promise resolving to hash result
  */
 export async function hashPin(pin: string): Promise<PinHashResult> {
   try {
-    if (!validatePinFormat(pin)) {
+    if (!validateWalletSecret(pin)) {
       return {
         success: false,
-        error: `Invalid PIN format. PIN must be ${PIN_MIN_LENGTH}-${PIN_MAX_LENGTH} digits without sequences.`,
+        error: `Invalid secret format. Must be a ${PIN_MIN_LENGTH}-${PIN_MAX_LENGTH}-digit PIN or a ${SECRET_MIN_GLYPHS}-${SECRET_MAX_GLYPHS}-glyph cipher.`,
       };
     }
 
@@ -195,10 +238,10 @@ export async function encryptMnemonic(mnemonic: string, pin: string): Promise<En
       };
     }
 
-    if (!validatePinFormat(pin)) {
+    if (!validateWalletSecret(pin)) {
       return {
         success: false,
-        error: 'Invalid PIN format',
+        error: 'Invalid secret format (PIN or cipher)',
       };
     }
 

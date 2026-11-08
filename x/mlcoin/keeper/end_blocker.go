@@ -16,13 +16,56 @@ import (
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 )
 
-// Base market prices in KES cents. The dynamic pricing engine may raise the
-// price with engagement but never lets it fall below these values — this is the
-// "0.62 floor, live up-only" rule, and doubles as the initial/reset price.
+// Base market prices in KES cents. The dynamic pricing engine treats these as
+// the floor of its band — the "0.62 floor" rule — and doubles as the
+// initial/reset price. The matching ceiling is 1.5x base (see priceCeiling),
+// so the live price sits in [0.62, 0.93] buy / [0.58, 0.87] sell and can move
+// back down toward the base when activity is quiet.
 const (
 	baseBuyPriceCents  uint64 = 62 // 0.62 KES buy
 	baseSellPriceCents uint64 = 58 // 0.58 KES sell
 )
+
+// Engagement scoring constants.
+const (
+	// volumeCap / transactionCap / userCap bound each engagement component so
+	// no single dimension can exceed its share of the 0-1000 score.
+	volumeCap       uint64 = 500
+	transactionCap  uint64 = 300
+	activeUsersCap  uint64 = 200
+	highActivityMin uint64 = 500
+	lowActivityMax  uint64 = 300
+
+	// mlcnPerVolumePoint is how much settled Mallcoin volume, in whole MLCNS,
+	// is worth one engagement point. Combined with volumeCap it means a window
+	// needs ~500,000 MLCNS of settled volume to max out the volume component.
+	mlcnPerVolumePoint uint64 = 1_000
+
+	// mlcnMicroUnitScale is the 1e6 fixed-point scale x/mlcoin amounts are
+	// recorded in. RecordActivity is fed msg.Amount from
+	// MsgTransferMallcoin, which the senders (backend and CLI) build as
+	// floor(amount * 1e6), so engagement normalizers must divide by this
+	// before applying any per-point divisor. (The pre-existing code divided
+	// cumulative micro volume by 1e6 and then capped it at 500, which
+	// saturated the volume component after a lifetime total of 500 MLCNS.)
+	mlcnMicroUnitScale uint64 = 1_000_000
+
+	// priceCeilingMultiplier/priceCeilingDivisor express the ceiling as 1.5x
+	// the base price. ActivityMetrics.price_impact_multiplier is documented in
+	// activity_metrics.proto as "-50 to +50 = -0.5x to +0.5x adjustment", so
+	// the engagement envelope around the base is 0.5x-1.5x; the base floor
+	// already prevents the lower half, leaving [base, base*1.5]. Without a
+	// ceiling the 10%-per-tick circuit breaker still compounds: a busy window
+	// walks the price upward forever.
+	priceCeilingMultiplier uint64 = 3
+	priceCeilingDivisor    uint64 = 2
+)
+
+// microToMlcn converts an x/mlcoin amount recorded in micro units to whole
+// MLCNS, truncating.
+func microToMlcn(micro uint64) uint64 {
+	return micro / mlcnMicroUnitScale
+}
 
 // EndBlocker handles end-of-block operations for dynamic pricing and metrics
 func (k Keeper) EndBlocker(ctx context.Context) error {
@@ -144,48 +187,63 @@ func (k Keeper) StoreTreasurySnapshot(ctx context.Context, snapshot types.Treasu
 }
 
 // updateDynamicPricing adjusts market prices based on community activity
+// recorded inside the current activity window (see rollActivityWindow), so a
+// usage spike can never permanently reprice the token: a quiet window scores
+// zero and the price walks back down to the base floor.
 func (k Keeper) updateDynamicPricing(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	height := uint64(sdkCtx.BlockHeight())
+
+	intervals, err := k.GetModuleIntervals(ctx)
+	if err != nil {
+		return err
+	}
 
 	// Get or create activity metrics
 	metrics, err := k.ActivityMetrics.Get(ctx)
 	if err != nil {
 		metrics = types.ActivityMetrics{
-			TotalTransactions:     0,
-			TotalVolume:           0,
-			ActiveUsers:           0,
-			EngagementScore:       0,
-			PriceImpactMultiplier: 0,
-			LastResetHeight:       uint64(sdkCtx.BlockHeight()),
-			CurrentPeriod:         "daily",
+			LastResetHeight: height,
+			CurrentPeriod:   "daily",
 		}
 	}
 
-	// Calculate engagement score (0-1000 scale)
-	// Higher activity = higher score
-	volumeScore := metrics.TotalVolume / 1000000 // normalize to 0-1000
-	if volumeScore > 500 {
-		volumeScore = 500 // cap at 500
+	metrics, intervals, err = k.rollActivityWindow(ctx, metrics, intervals, height)
+	if err != nil {
+		return err
 	}
-	transactionScore := metrics.TotalTransactions / 100 // normalize
-	if transactionScore > 300 {
-		transactionScore = 300
-	}
-	userScore := metrics.ActiveUsers / 10 // normalize
-	if userScore > 200 {
-		userScore = 200
-	}
+
+	// Calculate engagement score (0-1000 scale) from the window's activity.
+	//
+	// TotalVolume arrives in the units each caller records it in: the
+	// transfer/stake paths pass msg.Amount straight from the micro-scaled
+	// WalletBalance ledger (1e6 per MLCNS — see
+	// msg_server_transfer_mallcoin_test.go's 100_000_000 delta for a 100 MLCNS
+	// transfer), while the buy/sell paths pass whole MLCNS. Transfers carry
+	// essentially all recorded volume in practice, so the score normalizes on
+	// the micro scale; buy/sell volume therefore contributes very little here.
+	// Known wart, left alone deliberately: fixing it means changing what
+	// RecordActivity stores, which the existing transfer test pins.
+	//
+	// The pre-existing code divided cumulative micro volume by 1e6 (i.e. whole
+	// MLCNS) and capped at 500, so the volume component maxed out after a
+	// lifetime total of 500 MLCNS had ever move — saturation that, combined
+	// with the counters never being reset, is what pushed the price into a
+	// one-way ratchet.
+	volumeScore := min(volumeCap, microToMlcn(metrics.TotalVolume)/mlcnPerVolumePoint)
+	transactionScore := min(transactionCap, metrics.TotalTransactions/100)
+	userScore := min(activeUsersCap, metrics.ActiveUsers/10)
 
 	metrics.EngagementScore = volumeScore + transactionScore + userScore
 
-	// Calculate price impact multiplier based on engagement
-	// Higher activity increases price (-50 to +50 = -0.5x to +0.5x adjustment)
-	if metrics.EngagementScore > 500 {
+	// Translate engagement into the documented -50..+50 (= -0.5x..+0.5x)
+	// impact multiplier.
+	if metrics.EngagementScore > highActivityMin {
 		// High activity: increase price by 0-50%
-		metrics.PriceImpactMultiplier = int64((metrics.EngagementScore - 500) / 10)
-	} else if metrics.EngagementScore < 300 {
+		metrics.PriceImpactMultiplier = int64((metrics.EngagementScore - highActivityMin) / 10)
+	} else if metrics.EngagementScore < lowActivityMax {
 		// Low activity: decrease price by 0-50%
-		metrics.PriceImpactMultiplier = -int64((300 - metrics.EngagementScore) / 6)
+		metrics.PriceImpactMultiplier = -int64((lowActivityMax - metrics.EngagementScore) / 6)
 	} else {
 		metrics.PriceImpactMultiplier = 0
 	}
@@ -196,70 +254,123 @@ func (k Keeper) updateDynamicPricing(ctx context.Context) error {
 		market = types.MarketPrice{BuyPrice: baseBuyPriceCents, SellPrice: baseSellPriceCents}
 	}
 
-	// Circuit breaker: cap price change at 10% of current price per update
-	// to prevent extreme swings from runaway feedback loops.
-	maxChangePerUpdate := func(price uint64) uint64 {
-		change := price / 10 // 10%
-		if change == 0 {
-			return 1 // minimum 1 unit change to avoid stalling
-		}
-		return change
+	// The multiplier is a percentage of the current price, not a raw number of
+	// cents — the previous code added |multiplier| cents directly, so the
+	// documented "-0.5x..+0.5x" envelope was really "+50 cents".
+	// Circuit breaker: cap the change at 10% of the current price per tick to
+	// prevent extreme swings from runaway feedback loops.
+	impactPct := uint64(metrics.PriceImpactMultiplier)
+	if metrics.PriceImpactMultiplier < 0 {
+		impactPct = uint64(-metrics.PriceImpactMultiplier)
+	}
+	maxChangePct := uint64(10)
+	if impactPct > maxChangePct {
+		sdkCtx.Logger().Warn("dynamic pricing circuit breaker triggered",
+			"height", height, "requested_pct", impactPct, "capped_pct", maxChangePct)
+		impactPct = maxChangePct
 	}
 
-	// Adjust prices based on activity multiplier with circuit breaker
 	if metrics.PriceImpactMultiplier > 0 {
-		// Increase prices on high activity
-		adjustment := uint64(metrics.PriceImpactMultiplier)
-		maxBuyChange := maxChangePerUpdate(market.BuyPrice)
-		maxSellChange := maxChangePerUpdate(market.SellPrice)
-		if adjustment > maxBuyChange {
-			adjustment = maxBuyChange
-			sdkCtx.Logger().Warn("dynamic pricing circuit breaker triggered (buy price cap)",
-				"requested", metrics.PriceImpactMultiplier, "capped", adjustment)
-		}
-		market.BuyPrice += adjustment
-		market.SellPrice += min(adjustment, maxSellChange)
+		market.BuyPrice += market.BuyPrice * impactPct / 100
+		market.SellPrice += market.SellPrice * impactPct / 100
 	} else if metrics.PriceImpactMultiplier < 0 {
-		// Decrease prices on low activity
-		adjustment := uint64(-metrics.PriceImpactMultiplier)
-		maxBuyChange := maxChangePerUpdate(market.BuyPrice)
-		maxSellChange := maxChangePerUpdate(market.SellPrice)
-		if adjustment > maxBuyChange {
-			adjustment = maxBuyChange
-			sdkCtx.Logger().Warn("dynamic pricing circuit breaker triggered (buy price floor cap)",
-				"requested", -metrics.PriceImpactMultiplier, "capped", adjustment)
-		}
-		// Price floor: prevent prices from going to zero
-		if market.BuyPrice > adjustment && market.BuyPrice-adjustment >= 1 {
-			market.BuyPrice -= adjustment
-		} else {
-			market.BuyPrice = 1 // minimum price floor
-		}
-		if market.SellPrice > adjustment && market.SellPrice-adjustment >= 1 {
-			market.SellPrice -= min(adjustment, maxSellChange)
-		} else {
-			market.SellPrice = 1 // minimum price floor
-		}
+		buyDelta := min(market.BuyPrice, market.BuyPrice*impactPct/100)
+		sellDelta := min(market.SellPrice, market.SellPrice*impactPct/100)
+		market.BuyPrice -= buyDelta
+		market.SellPrice -= sellDelta
 	}
 
-	// "0.62 floor, live up-only": regardless of the engagement-driven movement
-	// above, the price can never sit below the base. This also pulls a drifted
-	// market back to base on the next dynamic-pricing block.
-	if market.BuyPrice < baseBuyPriceCents {
-		market.BuyPrice = baseBuyPriceCents
-	}
-	if market.SellPrice < baseSellPriceCents {
-		market.SellPrice = baseSellPriceCents
-	}
+	// Bound the result to [base, base * 1.5]. The lower half of the documented
+	// envelope is the "0.62 floor" rule; the upper half is the ceiling, without
+	// which the per-tick circuit breaker still compounds and a long busy stretch
+	// walks the price upward forever.
+	market.BuyPrice = clampPrice(market.BuyPrice, baseBuyPriceCents, priceCeiling(baseBuyPriceCents))
+	market.SellPrice = clampPrice(market.SellPrice, baseSellPriceCents, priceCeiling(baseSellPriceCents))
 
-	market.LastUpdateHeight = uint64(sdkCtx.BlockHeight())
+	market.LastUpdateHeight = height
 	_ = k.MarketPrice.Set(ctx, market)
 
-	// Store updated metrics
-	metrics.LastResetHeight = uint64(sdkCtx.BlockHeight())
+	// Store updated metrics. LastResetHeight is written by rollActivityWindow
+	// only when a window actually starts — the previous code overwrote it on
+	// every tick, which is why the elapsed-window check could never fire and
+	// the counters accumulated for the whole life of the chain.
 	_ = k.ActivityMetrics.Set(ctx, metrics)
 
 	return nil
+}
+
+// rollActivityWindow returns the activity counters that should feed this tick's
+// engagement score, starting a fresh window when the current one has run its
+// course.
+//
+// Two cases reset the counters:
+//
+//  1. Legacy state — ModuleIntervals carries no ActivityWindowVersion (it was
+//     written before windowing existed, and the JSON value codec decodes the
+//     missing field as 0). Those counters are lifetime-cumulative and must not
+//     be scored, so they are discarded once and the version marker is persisted.
+//  2. The window anchored at LastResetHeight has elapsed BlocksPerDay blocks.
+//
+// Metrics that have never been anchored (LastResetHeight == 0) only get the
+// anchor written, since their counters are already zero.
+func (k Keeper) rollActivityWindow(
+	ctx context.Context,
+	metrics types.ActivityMetrics,
+	intervals types.ModuleIntervals,
+	height uint64,
+) (types.ActivityMetrics, types.ModuleIntervals, error) {
+	if intervals.ActivityWindowVersion != types.ActivityWindowVersionWindowed {
+		metrics = zeroActivityWindow(metrics, height)
+		intervals.ActivityWindowVersion = types.ActivityWindowVersionWindowed
+		if err := k.Intervals.Set(ctx, intervals); err != nil {
+			return metrics, intervals, err
+		}
+		return metrics, intervals, nil
+	}
+
+	if metrics.LastResetHeight == 0 {
+		metrics.LastResetHeight = height
+		return metrics, intervals, nil
+	}
+
+	if intervals.BlocksPerDay > 0 && height >= metrics.LastResetHeight+intervals.BlocksPerDay {
+		metrics = zeroActivityWindow(metrics, height)
+	}
+
+	return metrics, intervals, nil
+}
+
+// zeroActivityWindow discards a window's activity counters and anchors the new
+// window at height, keeping fields that describe the window rather than its
+// contents (CurrentPeriod, written by updateConversionWindows).
+func zeroActivityWindow(metrics types.ActivityMetrics, height uint64) types.ActivityMetrics {
+	metrics.TotalTransactions = 0
+	metrics.TotalVolume = 0
+	metrics.ActiveUsers = 0
+	metrics.EngagementScore = 0
+	metrics.PriceImpactMultiplier = 0
+	metrics.LastResetHeight = height
+	return metrics
+}
+
+// priceCeiling returns the highest price (in cents) the engine may hold for a
+// given base price.
+func priceCeiling(base uint64) uint64 {
+	return base * priceCeilingMultiplier / priceCeilingDivisor
+}
+
+// clampPrice keeps a price inside [floor, ceiling]. Callers subtract with a
+// min(price, delta) guard, so an underflow can't be clamped back upward here;
+// the ceiling check also pulls a price that has drifted above it (e.g. state
+// written before the ceiling existed) back down on the next tick.
+func clampPrice(price, floor, ceiling uint64) uint64 {
+	if price < floor {
+		return floor
+	}
+	if price > ceiling {
+		return ceiling
+	}
+	return price
 }
 
 // updateConversionWindows updates conversion window status based on date

@@ -66,7 +66,7 @@ export class RateLimitError extends Error {
 
 /**
  * Global "PIN entry locked" gate. WalletSend sets it when the send routes
- * answer 429 (financialLimiter); <PinChallengeHost/> consults it so the PIN
+ * answer 429 (financialLimiter); <CipherChallengeHost/> consults it so the cipher
  * UI neither opens nor accepts input while the cool-down runs — the user's
  * explicit requirement — and a mistyped-PIN attempt can't be burned against
  * the 3-attempt budget while the real problem is rate limiting.

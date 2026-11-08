@@ -2,6 +2,9 @@ package keeper
 
 import (
 	"context"
+	"errors"
+
+	"cosmossdk.io/collections"
 
 	"marketplace/x/crosschain/types"
 )
@@ -51,14 +54,23 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 }
 
 // ExportGenesis returns the module's exported genesis.
+//
+// Like dex, the crosschain module can be present on a chain whose genesis was
+// written before it existed, so Params/BridgeState may never have been set.
+// Falling back to the genesis defaults keeps `export` usable on that state
+// instead of panicking and taking the whole export down.
 func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) {
 	params, err := k.Params.Get(ctx)
-	if err != nil {
+	if errors.Is(err, collections.ErrNotFound) {
+		params = types.DefaultGenesisState().Params
+	} else if err != nil {
 		return nil, err
 	}
 
 	bridgeState, err := k.BridgeState.Get(ctx)
-	if err != nil {
+	if errors.Is(err, collections.ErrNotFound) {
+		bridgeState = types.DefaultGenesisState().BridgeState
+	} else if err != nil {
 		return nil, err
 	}
 

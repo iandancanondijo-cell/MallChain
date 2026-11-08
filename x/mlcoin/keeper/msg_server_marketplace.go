@@ -194,6 +194,11 @@ func (k msgServer) BuyMallcoin(ctx context.Context, msg *types.MsgBuyMallcoin) (
 	}
 	market.SellPrice = newSellPrice
 
+	// A linear trade adjustment is also a direct way to leave the band the
+	// pricing engine maintains, so clamp it to the same [base, base*1.5] band.
+	market.BuyPrice = clampPrice(market.BuyPrice, baseBuyPriceCents, priceCeiling(baseBuyPriceCents))
+	market.SellPrice = clampPrice(market.SellPrice, baseSellPriceCents, priceCeiling(baseSellPriceCents))
+
 	market.LastUpdateHeight = uint64(sdkCtx.BlockHeight())
 	if err := k.MarketPrice.Set(ctx, market); err != nil {
 		return nil, err
@@ -314,16 +319,25 @@ func (k msgServer) SellMallcoin(ctx context.Context, msg *types.MsgSellMallcoin)
 	if priceChange == 0 {
 		priceChange = 1
 	}
-	if market.BuyPrice > priceChange {
-		market.BuyPrice -= priceChange
-	} else {
-		market.BuyPrice = 1
+	// This path used to floor prices at 1 cent, so a single sufficiently large
+	// MsgSellMallcoin (mlcn/1000 >= current price) could flatten the token from
+	// 0.62 KES to 0.01 KES in one transaction, and repeated sells walked it
+	// there regardless of the "0.62 floor" rule the pricing engine enforces.
+	// Subtraction is capped at the current price so an oversized sell clamps to
+	// the band instead of failing the whole trade, then the result is clamped
+	// back into the same [base, base*1.5] band the engine maintains.
+	buyDelta := min(market.BuyPrice, priceChange)
+	sellDelta := min(market.SellPrice, priceChange)
+	newBuyPrice, err := safeSub(market.BuyPrice, buyDelta)
+	if err != nil {
+		return nil, errorsmod.Wrap(types.ErrInvalidRequest, "buy price underflow")
 	}
-	if market.SellPrice > priceChange {
-		market.SellPrice -= priceChange
-	} else {
-		market.SellPrice = 1
+	newSellPrice, err := safeSub(market.SellPrice, sellDelta)
+	if err != nil {
+		return nil, errorsmod.Wrap(types.ErrInvalidRequest, "sell price underflow")
 	}
+	market.BuyPrice = clampPrice(newBuyPrice, baseBuyPriceCents, priceCeiling(baseBuyPriceCents))
+	market.SellPrice = clampPrice(newSellPrice, baseSellPriceCents, priceCeiling(baseSellPriceCents))
 	market.LastUpdateHeight = uint64(sdkCtx.BlockHeight())
 	if err := k.MarketPrice.Set(ctx, market); err != nil {
 		return nil, err

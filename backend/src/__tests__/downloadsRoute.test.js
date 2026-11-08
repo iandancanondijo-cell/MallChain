@@ -73,24 +73,42 @@ describe('GET /downloads/node/ (JSON index, real artifacts)', () => {
 });
 
 describe('GET /downloads/node/<arch>.zip (real artifacts, HEAD)', () => {
+  // The bundle version in the filename changes on every
+  // scripts/build-validator-bundle.sh run, and the route resolves the newest
+  // artifact by mtime — so asserting an exact name here would make the suite
+  // fail the moment a legitimate bundle is rebuilt. Derive the expected name
+  // from disk the same way the router does.
+  const ZIPS_DIR = path.join(REPO_ROOT, 'build', 'validator-bundle', 'zips');
+  const newestZipFor = (arch) => {
+    const re = new RegExp(`^mallchain-node-v[A-Za-z0-9._-]+-linux-${arch}\\.zip$`);
+    return fs
+      .readdirSync(ZIPS_DIR)
+      .filter((n) => re.test(n))
+      .map((n) => ({ n, m: fs.statSync(path.join(ZIPS_DIR, n)).mtimeMs }))
+      .sort((a, b) => b.m - a.m)[0].n;
+  };
+
   for (const arch of ['amd64', 'arm64']) {
     test(`HEAD /node/${arch}.zip -> 200 with attachment + real filename`, async () => {
       const res = await request(realApp).head(`/downloads/node/${arch}.zip`);
       expect(res.status).toBe(200);
       expect(res.headers['content-type']).toMatch(/zip/);
       expect(res.headers['content-disposition']).toBe(
-        `attachment; filename="mallchain-node-v48052ec8-linux-${arch}.zip"`,
+        `attachment; filename="${newestZipFor(arch)}"`,
       );
-      const zipsDir = path.join(REPO_ROOT, 'build', 'validator-bundle', 'zips');
-      const expected = fs.readdirSync(zipsDir).find((n) => n.endsWith(`-linux-${arch}.zip`));
-      expect(Number(res.headers['content-length'])).toBe(fs.statSync(path.join(zipsDir, expected)).size);
+      const expected = path.join(ZIPS_DIR, newestZipFor(arch));
+      expect(Number(res.headers['content-length'])).toBe(fs.statSync(expected).size);
     });
   }
 
   test('/node/full.zip serves the multi-arch bundle', async () => {
     const res = await request(realApp).head('/downloads/node/full.zip');
     expect(res.status).toBe(200);
-    expect(res.headers['content-disposition']).toContain('mallchain-node-v48052ec8.zip');
+    // Name comes from the repo-root artifact the router discovered; assert the
+    // shape rather than a pinned version.
+    expect(res.headers['content-disposition']).toMatch(
+      /filename="mallchain-node-v[A-Za-z0-9._-]+\.zip"/,
+    );
   });
 });
 

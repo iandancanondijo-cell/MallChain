@@ -1,4 +1,5 @@
 import { api, RateLimitError } from './api';
+import { ReceiveAmountMismatchError } from './receiveApi';
 
 interface BroadcastResponse {
   success: boolean;
@@ -34,6 +35,22 @@ export async function broadcastWithRetry(
       // (and re-prompting a PIN that burns attempts on every retry).
       if (res.code === 429 && res.rateLimit) {
         throw new RateLimitError(res.rateLimit.message, res.rateLimit.retryAfterSeconds);
+      }
+      // 409 receive_amount_mismatch: the receiver stated an exact amount and
+      // this send deviated — the session failed for BOTH parties. Carry the
+      // expected/attempted figures to the UI instead of a generic failure.
+      if (res.code === 409) {
+        const d = (res.data ?? {}) as {
+          error?: string; message?: string;
+          expected?: { amountMlcns?: number }; attempted?: number;
+        };
+        if (d.error === 'receive_amount_mismatch') {
+          throw new ReceiveAmountMismatchError(
+            d.message || 'The receiver stated a different exact amount — this send failed and the receive session ended.',
+            Number(d.expected?.amountMlcns ?? 0),
+            Number(d.attempted ?? 0),
+          );
+        }
       }
       const errorMsg = res.data?.error || res.error || 'Transaction failed during broadcast';
       throw new Error(errorMsg);

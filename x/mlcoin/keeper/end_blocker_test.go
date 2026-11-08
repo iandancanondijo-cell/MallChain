@@ -442,3 +442,189 @@ func TestEndBlockerEmissionScheduleAnchorsToFirstTick(t *testing.T) {
 	require.NoError(t, err)
 	require.NotZero(t, emission.DailyLimit, "daily limit must never permanently collapse to zero")
 }
+
+// --- dynamic pricing: activity windows and bounded adjustment ----------------
+//
+// Regression coverage for the up-only ratchet that repriced MLCNS from 0.62 to
+// 0.87 on the live chain: ActivityMetrics counters accumulated for the whole
+// life of the chain (LastResetHeight was overwritten every tick and never
+// read), and the volume component saturated after 500 MLCNS of lifetime
+// volume, so engagement could never fall back under the 300 threshold that
+// gates the price-decrease branch.
+
+// pricingTestIntervals returns a windowed intervals set sized so that the
+// heights used below land on dynamic-pricing ticks (multiples of 100) without
+// also landing on an emission/conversion tick or the treasury-snapshot block —
+// the last of those needs a real BankKeeper, which keeperWithDeps can't give.
+func pricingTestIntervals(windowVersion uint64) types.ModuleIntervals {
+	return types.ModuleIntervals{
+		DynamicPricingBlocks:  100,
+		EmissionTickBlocks:    100_000,
+		ConversionTickBlocks:  100_000,
+		StakingLockBlocks:     50,
+		BlocksPerDay:          1000,
+		BlocksPerMonth:        30_000,
+		RewardDivisor:         10,
+		FeeRateBps:            100,
+		FeeSplitPercent:       50,
+		ActivityWindowVersion: windowVersion,
+	}
+}
+
+func TestDynamicPricingDiscardsLegacyLifetimeCounters(t *testing.T) {
+	k, ctx := keeperWithDeps(t)
+
+	// State exactly as it exists on the live chain written before windowing:
+	// intervals with no ActivityWindowVersion (the JSON codec decodes the
+	// absent field as 0) plus lifetime-cumulative counters from ~70 transfers.
+	require.NoError(t, k.SetModuleIntervals(ctx, pricingTestIntervals(0)))
+
+	require.NoError(t, k.MarketPrice.Set(ctx, types.MarketPrice{BuyPrice: 62, SellPrice: 58}))
+	require.NoError(t, k.ActivityMetrics.Set(ctx, types.ActivityMetrics{
+		TotalTransactions: 70,
+		TotalVolume:       19_944_190_451, // ~19,944 MLCNS ever transferred
+		ActiveUsers:       140,
+		LastResetHeight:   40_000,
+	}))
+
+	tickCtx := ctx.WithBlockHeight(100)
+	require.NoError(t, k.EndBlocker(sdk.WrapSDKContext(tickCtx)))
+
+	metrics, err := k.ActivityMetrics.Get(tickCtx)
+	require.NoError(t, err)
+	require.Zero(t, metrics.TotalVolume, "lifetime volume must not score in a fresh window")
+	require.Zero(t, metrics.TotalTransactions)
+	require.Zero(t, metrics.ActiveUsers)
+	require.Zero(t, metrics.EngagementScore, "legacy state scored 514 engagement, which started the ratchet")
+	require.Equal(t, uint64(100), metrics.LastResetHeight, "the new window must anchor at this tick")
+
+	// The migration marker is persisted, so it runs once and never again.
+	intervals, err := k.Intervals.Get(tickCtx)
+	require.NoError(t, err)
+	require.Equal(t, types.ActivityWindowVersionWindowed, intervals.ActivityWindowVersion)
+}
+
+func TestDynamicPricingVolumeComponentNoLongerSaturatesAt500Mlcn(t *testing.T) {
+	k, ctx := keeperWithDeps(t)
+
+	require.NoError(t, k.SetModuleIntervals(ctx, pricingTestIntervals(types.ActivityWindowVersionWindowed)))
+	require.NoError(t, k.MarketPrice.Set(ctx, types.MarketPrice{BuyPrice: 87, SellPrice: 83}))
+
+	// 500 MLCNS inside a single window — the old normalizer (micro/1e6, cap
+	// 500) maxed the volume component on exactly this much activity.
+	require.NoError(t, k.ActivityMetrics.Set(ctx, types.ActivityMetrics{
+		TotalVolume:     500 * 1_000_000,
+		LastResetHeight: 100,
+	}))
+
+	tickCtx := ctx.WithBlockHeight(100)
+	require.NoError(t, k.EndBlocker(sdk.WrapSDKContext(tickCtx)))
+
+	metrics, err := k.ActivityMetrics.Get(tickCtx)
+	require.NoError(t, err)
+	require.Zero(t, metrics.EngagementScore, "500 MLCNS is noise, not max engagement; ~500,000 MLCNS is needed to max the volume component")
+	require.Equal(t, int64(-50), metrics.PriceImpactMultiplier, "a quiet window must push the price back down")
+
+	market, err := k.MarketPrice.Get(tickCtx)
+	require.NoError(t, err)
+	require.Less(t, market.BuyPrice, uint64(87), "price must decay when the window is quiet")
+	require.GreaterOrEqual(t, market.BuyPrice, uint64(62))
+}
+
+func TestDynamicPricingRollsWindowAfterBlocksPerDay(t *testing.T) {
+	k, ctx := keeperWithDeps(t)
+
+	require.NoError(t, k.SetModuleIntervals(ctx, pricingTestIntervals(types.ActivityWindowVersionWindowed)))
+	require.NoError(t, k.MarketPrice.Set(ctx, types.MarketPrice{BuyPrice: 87, SellPrice: 83}))
+	require.NoError(t, k.ActivityMetrics.Set(ctx, types.ActivityMetrics{
+		TotalTransactions: 5_000,
+		TotalVolume:       800_000_000_000, // 800,000 MLCNS: a genuinely busy window
+		ActiveUsers:       4_000,
+		LastResetHeight:   100,
+	}))
+
+	// Still inside the window: last tick's busy counters must survive.
+	withinWindow := ctx.WithBlockHeight(200)
+	require.NoError(t, k.EndBlocker(sdk.WrapSDKContext(withinWindow)))
+
+	metrics, err := k.ActivityMetrics.Get(withinWindow)
+	require.NoError(t, err)
+	require.Equal(t, uint64(800_000_000_000), metrics.TotalVolume, "counters must not be discarded mid-window")
+	require.Equal(t, uint64(100), metrics.LastResetHeight)
+
+	// Past BlocksPerDay (100 >= 100 + 1000 is false; 1200 is true): the window
+	// rolls and the next score is based on nothing but this window's activity.
+	nextWindow := ctx.WithBlockHeight(1200)
+	require.NoError(t, k.EndBlocker(sdk.WrapSDKContext(nextWindow)))
+
+	metrics, err = k.ActivityMetrics.Get(nextWindow)
+	require.NoError(t, err)
+	require.Zero(t, metrics.TotalVolume, "an elapsed window must be discarded")
+	require.Zero(t, metrics.TotalTransactions)
+	require.Zero(t, metrics.ActiveUsers)
+	require.Equal(t, uint64(1200), metrics.LastResetHeight)
+}
+
+func TestDynamicPricingCannotExceedCeiling(t *testing.T) {
+	k, ctx := keeperWithDeps(t)
+
+	require.NoError(t, k.SetModuleIntervals(ctx, pricingTestIntervals(types.ActivityWindowVersionWindowed)))
+	require.NoError(t, k.MarketPrice.Set(ctx, types.MarketPrice{BuyPrice: 62, SellPrice: 58}))
+
+	// A sustained busy window: engagement 1000 → +50% impact, capped by the
+	// 10%-per-tick circuit breaker. Without a ceiling the breaker still
+	// compounds forever, which is how 0.62 became 0.87.
+	require.NoError(t, k.ActivityMetrics.Set(ctx, types.ActivityMetrics{
+		TotalTransactions: 30_000,
+		TotalVolume:       1_000_000_000_000, // 1,000,000 MLCNS
+		ActiveUsers:       20_000,
+		LastResetHeight:   100,
+	}))
+
+	var buy, sell uint64
+	// Stop below BlocksPerDay (1000): height 1000 would also fire
+	// RecordTreasurySnapshot, which needs a real BankKeeper.
+	for height := uint64(100); height <= 900; height += 100 {
+		tickCtx := ctx.WithBlockHeight(int64(height))
+		require.NoError(t, k.EndBlocker(sdk.WrapSDKContext(tickCtx)))
+
+		market, err := k.MarketPrice.Get(tickCtx)
+		require.NoError(t, err)
+		buy, sell = market.BuyPrice, market.SellPrice
+
+		require.LessOrEqual(t, buy, uint64(93), "buy must stay within 1.5x the 0.62 base")
+		require.LessOrEqual(t, sell, uint64(87), "sell must stay within 1.5x the 0.58 base")
+		require.GreaterOrEqual(t, buy, uint64(62))
+		require.GreaterOrEqual(t, sell, uint64(58))
+	}
+
+	require.Equal(t, uint64(93), buy, "sustained high activity should sit at the ceiling, not overshoot it")
+	require.Equal(t, uint64(87), sell)
+}
+
+func TestDynamicPricingDecaysToBaseFloor(t *testing.T) {
+	k, ctx := keeperWithDeps(t)
+
+	require.NoError(t, k.SetModuleIntervals(ctx, pricingTestIntervals(types.ActivityWindowVersionWindowed)))
+	require.NoError(t, k.MarketPrice.Set(ctx, types.MarketPrice{BuyPrice: 93, SellPrice: 87}))
+
+	// Silence: metrics anchored at this tick with no activity at all.
+	require.NoError(t, k.ActivityMetrics.Set(ctx, types.ActivityMetrics{LastResetHeight: 100}))
+
+	var buy, sell uint64
+	// Stop below BlocksPerDay (1000): height 1000 would also fire
+	// RecordTreasurySnapshot, which needs a real BankKeeper.
+	for height := uint64(100); height <= 900; height += 100 {
+		tickCtx := ctx.WithBlockHeight(int64(height))
+		require.NoError(t, k.EndBlocker(sdk.WrapSDKContext(tickCtx)))
+
+		market, err := k.MarketPrice.Get(tickCtx)
+		require.NoError(t, err)
+		buy, sell = market.BuyPrice, market.SellPrice
+		require.GreaterOrEqual(t, buy, uint64(62))
+		require.GreaterOrEqual(t, sell, uint64(58))
+	}
+
+	require.Equal(t, uint64(62), buy, "a quiet chain must return to the 0.62 base")
+	require.Equal(t, uint64(58), sell, "a quiet chain must return to the 0.58 base")
+}

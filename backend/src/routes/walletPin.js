@@ -1,6 +1,6 @@
 /**
- * Wallet PIN verification endpoints
- * POST /api/wallet/verify-pin - Verify PIN with rate limiting & lockout
+ * Wallet secret (PIN / Cipher Wall sequence) verification endpoints
+ * POST /api/wallet/verify-pin - Verify the secret with rate limiting & lockout
  * Enforces server-side rate limiting for brute-force protection
  */
 const express = require('express');
@@ -30,10 +30,18 @@ router.post('/verify-pin', requireAuth, async (req, res) => {
     });
   }
 
-  if (!/^\d{4,8}$/.test(pin)) {
+  // Input validation. The secret is either a legacy 4-8 digit PIN or a
+  // Crypt Cipher Wall sequence (ordered glyphs: hieroglyphs, symbols,
+  // digits, letters). Both are just strings bcrypt-compared against the
+  // stored hash — the client decides which UX collects them. The 64-BYTE
+  // UTF-8 ceiling matters because bcrypt only ever reads the first 72
+  // bytes of the input; past that, client and server hashes could silently
+  // derive from different content. Glyphs are 1-4 UTF-8 bytes each, so
+  // this comfortably covers the 12-glyph maximum the wall enforces.
+  if (pin.length < 4 || pin.length > 64 || /[\r\n]/.test(pin) || Buffer.byteLength(pin, 'utf8') > 64) {
     return res.status(400).json({
       ok: false,
-      error: 'Invalid PIN format (4-8 digits)',
+      error: 'Invalid secret format (4-64 characters)',
     });
   }
 

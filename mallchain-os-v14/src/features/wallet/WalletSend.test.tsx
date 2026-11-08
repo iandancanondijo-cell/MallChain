@@ -204,7 +204,36 @@ describe('WalletSend', () => {
     expect(await screen.findByText('RETRYTX789')).toBeInTheDocument();
   });
 
-  test('a link that keeps failing shows the human prompt with a "Link wallet now" button instead of a raw 403', async () => {
+  test('a failed best-effort link no longer blocks the send — txBytes signature is the authorization', async () => {
+    // Multi-wallet: the server has no link and the explicit link attempt
+    // fails, but the broadcast is still attempted and succeeds — the
+    // backend relays any tx signed by the sender's own key.
+    vi.mocked(authService.getServerWalletLink).mockResolvedValue({ ok: true, address: null });
+    vi.mocked(authService.linkWallet).mockResolvedValue({ ok: false, reason: 'link_rejected_by_server' });
+    vi.mocked(sendMallcoinTransfer).mockResolvedValue({
+      txHash: 'UNLINKEDTX55',
+      from: SENDER_ADDRESS,
+      to: RECIPIENT_ADDRESS,
+      amount: 10,
+    });
+
+    render(<WalletSend />);
+
+    fireEvent.change(screen.getByPlaceholderText(/mall1… \(bech32 address\)/i), {
+      target: { value: RECIPIENT_ADDRESS },
+    });
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '10' } });
+    fireEvent.click(screen.getByText(/Review transaction/i));
+    fireEvent.click(screen.getByText(/Continue to sign/i));
+    fireEvent.click(screen.getByText('Authorize & broadcast'));
+
+    await waitFor(() => expect(authService.linkWallet).toHaveBeenCalledWith(SENDER_ADDRESS, { mnemonic: UNIFORM_MNEMONIC }));
+    await waitFor(() => expect(sendMallcoinTransfer).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('UNLINKEDTX55')).toBeInTheDocument();
+    expect(screen.queryByText(/Link wallet now/i)).not.toBeInTheDocument();
+  });
+
+  test('a persistent wallet_not_linked from the broadcast surfaces a clear error after exactly one retry', async () => {
     vi.mocked(sendMallcoinTransfer).mockRejectedValue(new MallcoinTxError('wallet_not_linked'));
     vi.mocked(authService.linkWallet).mockResolvedValue({ ok: false, reason: 'link_rejected_by_server' });
 
@@ -218,11 +247,28 @@ describe('WalletSend', () => {
     fireEvent.click(screen.getByText(/Continue to sign/i));
     fireEvent.click(screen.getByText('Authorize & broadcast'));
 
-    expect(await screen.findByText(/isn't linked to your account yet\. Confirm your PIN/i)).toBeInTheDocument();
-    expect(screen.getByText('Link wallet now')).toBeInTheDocument();
+    expect(await screen.findByText(/didn't accept your wallet's signature/i)).toBeInTheDocument();
     // no endless retries: broadcast attempted once, auto-link once
     await waitFor(() => expect(sendMallcoinTransfer).toHaveBeenCalledTimes(1));
     expect(authService.linkWallet).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Link wallet now/i)).not.toBeInTheDocument();
+  });
+
+  test('amount entry shows the live total price (amount + fee) in the display currency', async () => {
+    render(<WalletSend />);
+
+    fireEvent.change(screen.getByPlaceholderText(/mall1… \(bech32 address\)/i), {
+      target: { value: RECIPIENT_ADDRESS },
+    });
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '10' } });
+
+    // 10 MALL + default 0.05 fee; the fiat figure comes from the live
+    // oracle/FX hooks — assert on the hint container's aggregate text so
+    // the split across <b> nodes doesn't matter.
+    await waitFor(() => {
+      const hints = Array.from(document.querySelectorAll('.hint')).map((e) => e.textContent || '');
+      expect(hints.some((t) => t.includes('Total incl. fee') && t.includes('10.05 MALL') && /at live price|loading live price/.test(t))).toBe(true);
+    });
   });
 
   test('Sent step tells the truth: renders the confirmed block height from the confirmation result', async () => {
