@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { store } from '../../store/store';
-import { useStoreVersion, toast, fmtMoney } from '../../components/ui';
+import { useStoreVersion, toast, fmtMoney, fmtUnitPrice } from '../../components/ui';
 import { sendMallcoinTransfer, MallcoinTxError } from '../../services/mallcoinTx';
 import { receiveApi, ReceiveAmountMismatchError, type ReceiveIntentView } from '../../services/receiveApi';
 import { RateLimitError, markPinChallengeLocked } from '../../services/api';
@@ -44,7 +44,8 @@ export default function WalletSend() {
   // Live MLCNS market price (KES midpoint from the on-chain oracle, the one
   // canonical source via useLivePrice) converted into the user's display
   // currency — the Send page shows the real-world value of what's being sent.
-  const { midKes } = useLivePrice();
+  const price = useLivePrice();
+  const midKes = price.midKes;
   const toDisplay = useCurrencyConverter(st.prefs.currency);
 
   const wizard = useWizard<SendStep, SendData>({
@@ -128,6 +129,16 @@ export default function WalletSend() {
   const amountDisplay = midKes !== null && Number.isFinite(amtNum) && amtNum > 0
     ? toDisplay(amtNum * midKes, 'KES')
     : null;
+  const feeDisplay = midKes !== null ? toDisplay(fee * midKes, 'KES') : null;
+  // The value box is ALWAYS rendered, so it must be able to explain WHY a fiat
+  // figure is absent. Three different things can be missing and each reads
+  // differently to the user: the price feed is still loading, the price feed
+  // failed (midKes stays null forever — useLivePrice sets error, not a value),
+  // or the price is known but the KES→display-currency FX rate has not arrived
+  // yet (only possible when the display currency is not KES).
+  const priceState: 'ready' | 'loading' | 'unavailable' =
+    midKes !== null ? 'ready' : price.loading ? 'loading' : 'unavailable';
+  const fxPending = midKes !== null && st.prefs.currency !== 'KES' && rateDisplay === null;
 
   const stepIdx = SEND_STEPS.indexOf(step);
 
@@ -518,32 +529,59 @@ export default function WalletSend() {
               >
                 <Zap size={11} style={{ marginRight: 4 }} /> Max
               </button>
-              {midKes !== null && (
-                <div className="hint" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, color: 'var(--txt-3)' }} role="status">
-                  <Coins size={11} style={{ color: 'var(--gold)' }} />
-                  <span>
-                    Live rate: <b>1 MALL ≈ {fmtMoney(rateDisplay!, st.prefs.currency)}</b>
-                    {amountDisplay !== null && amtNum > 0 && (
-                      <> · {amtNum} MALL ≈ <b>{fmtMoney(amountDisplay, st.prefs.currency)}</b></>
-                    )}
-                  </span>
+              <div className="wo-value-box" data-state={priceState}>
+                <div className="wo-value-top">
+                  <div className="wo-value-figure">
+                    {amountDisplay !== null
+                      ? fmtMoney(amountDisplay, st.prefs.currency)
+                      : <span className="wo-value-dash">—</span>}
+                  </div>
+                  <div className="wo-value-caption">
+                    {Number.isFinite(amtNum) && amtNum > 0
+                      ? <>real-world value of <b>{amtNum} MALL</b> at the live price</>
+                      : 'The fiat value of what you type appears here'}
+                  </div>
                 </div>
-              )}
-              {midKes === null && (
-                <div className="hint" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, color: 'var(--txt-3)' }}>
-                  <Coins size={11} /> loading live rate…
+                <div className="wo-value-lines">
+                  <div className="wo-value-line">
+                    <span>Live rate</span>
+                    <b>{rateDisplay !== null ? `1 MALL ≈ ${fmtUnitPrice(rateDisplay, st.prefs.currency)}` : 'not loaded'}</b>
+                  </div>
+                  <div className="wo-value-line">
+                    <span>Network fee</span>
+                    <b>
+                      {fee.toFixed(2)} MALL
+                      {feeDisplay !== null && <> ≈ {fmtUnitPrice(feeDisplay, st.prefs.currency)}</>}
+                    </b>
+                  </div>
+                  <div className="wo-value-line wo-value-line--total">
+                    <span>Total incl. fee</span>
+                    <b>
+                      {totalMlcns > 0 ? totalMlcns.toFixed(2) : '0.00'} MALL
+                      {totalDisplay !== null && <> ≈ {fmtMoney(totalDisplay, st.prefs.currency)}</>}
+                    </b>
+                  </div>
                 </div>
-              )}
-              {totalMlcns > 0 && (
-                <div className="hint" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                  <Coins size={11} style={{ color: 'var(--gold)' }} />
-                  <span>
-                    Total incl. fee: <b>{totalMlcns.toFixed(2)} MALL</b>
-                    {' · '}
-                    {totalDisplay !== null ? <>≈ <b>{fmtMoney(totalDisplay, st.prefs.currency)}</b> at live price</> : 'loading live price…'}
-                  </span>
+                <div className="wo-value-state" role="status">
+                  {priceState === 'ready' && !fxPending && (
+                    <>Midpoint of the on-chain buy/sell prices · refreshed every 30&nbsp;s.</>
+                  )}
+                  {priceState === 'ready' && fxPending && (
+                    <>Live price loaded · waiting on the KES → {st.prefs.currency} exchange rate to show fiat.</>
+                  )}
+                  {priceState === 'loading' && (
+                    <>Loading the live MALL price from the on-chain market feed…</>
+                  )}
+                  {priceState === 'unavailable' && (
+                    <>
+                      <AlertTriangle size={11} style={{ marginRight: 4, verticalAlign: -1 }} />
+                      Live price unavailable — the market feed could not be read, so no fiat figure is
+                      guessed. Token amounts stay exact; the page re-reads the feed every 30&nbsp;s and
+                      fills these figures as soon as it answers.
+                    </>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
 
             <div className="field">
@@ -660,7 +698,19 @@ export default function WalletSend() {
                     <Coins size={13} /> Live rate applied
                   </span>
                   <span className="wo-summary-value">
-                    1 MALL ≈ {fmtMoney(rateDisplay!, st.prefs.currency)}
+                    1 MALL ≈ {fmtUnitPrice(rateDisplay!, st.prefs.currency)}
+                  </span>
+                </div>
+              )}
+              {midKes === null && (
+                <div className="wo-summary-row">
+                  <span className="wo-summary-label">
+                    <Coins size={13} /> Fiat value
+                  </span>
+                  <span className="wo-summary-value muted" style={{ fontWeight: 400 }}>
+                    {priceState === 'loading'
+                      ? 'price still loading — token amounts only'
+                      : 'live price unavailable — token amounts only'}
                   </span>
                 </div>
               )}

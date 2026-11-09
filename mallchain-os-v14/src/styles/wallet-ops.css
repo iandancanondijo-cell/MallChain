@@ -301,6 +301,98 @@
   color: var(--section-accent);
 }
 
+/* ── Live fiat value box (Send amount field) ──
+   Always mounted: the earlier inline hint vanished whenever the price feed
+   failed, so "no live rate" and "still loading" both looked like "this screen
+   has no fiat at all". The three states are separated by data-state. */
+.wo-value-box {
+  margin-top: 10px;
+  padding: 12px 14px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(255, 199, 94, 0.07), rgba(255, 255, 255, 0.02)),
+    var(--glass-bg);
+  animation: wo-fade-in 0.3s var(--ease) both;
+}
+
+.wo-value-box[data-state='unavailable'] {
+  border-color: rgba(245, 166, 35, 0.28);
+  background: linear-gradient(135deg, rgba(245, 166, 35, 0.06), var(--glass-bg));
+}
+
+.wo-value-top {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.wo-value-figure {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  line-height: 1.1;
+  color: var(--section-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.wo-value-dash {
+  color: var(--txt-3);
+  font-weight: 700;
+}
+
+.wo-value-caption {
+  font-size: 11.5px;
+  color: var(--txt-3);
+}
+
+.wo-value-caption b {
+  color: var(--txt-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.wo-value-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-1);
+}
+
+.wo-value-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--txt-3);
+}
+
+.wo-value-line b {
+  color: var(--txt-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.wo-value-line--total b {
+  color: var(--txt-1);
+  font-weight: 800;
+}
+
+.wo-value-state {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--txt-3);
+}
+
+.wo-value-box[data-state='unavailable'] .wo-value-state {
+  color: var(--gold, #f5a623);
+}
+
 /* ── Amount Display ── */
 .wo-amount-display {
   text-align: center;

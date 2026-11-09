@@ -21,6 +21,26 @@ import { requestMnemonic } from '../../services/mnemonicAccess';
 import { authService } from '../../services/auth';
 import { RateLimitError } from '../../services/api';
 
+/**
+ * The live-value box under the amount field is driven entirely by these two
+ * hooks, so the tests control them directly: `price` is whatever the oracle
+ * poll last returned, and `toDisplay` is the identity function (KES shown in
+ * KES) because the FX layer has its own tests in services/currency.
+ */
+const PRICE_LOADING = { midKes: null, loading: true, error: false };
+const PRICE_READY = { midKes: 0.62, loading: false, error: false };
+const PRICE_FAILED = { midKes: null, loading: false, error: true };
+let price: { midKes: number | null; loading: boolean; error: boolean } = PRICE_LOADING;
+
+vi.mock('../../hooks/useLivePrice', () => ({
+  useLivePrice: () => price,
+}));
+
+vi.mock('../../services/currency', () => ({
+  useCurrencyConverter: () => (amount: number | null) =>
+    price.midKes === null || amount === null ? null : amount,
+}));
+
 vi.mock('../../services/mallcoinTx', () => ({
   sendMallcoinTransfer: vi.fn(),
   MallcoinTxError: class MallcoinTxError extends Error {
@@ -48,6 +68,7 @@ describe('WalletSend', () => {
   beforeEach(() => {
     store.reset();
     sessionStorage.clear();
+    price = PRICE_LOADING;
     vi.mocked(sendMallcoinTransfer).mockReset();
     vi.mocked(requestMnemonic).mockReset();
     vi.mocked(requestMnemonic).mockResolvedValue(UNIFORM_MNEMONIC);
@@ -254,7 +275,8 @@ describe('WalletSend', () => {
     expect(screen.queryByText(/Link wallet now/i)).not.toBeInTheDocument();
   });
 
-  test('amount entry shows the live total price (amount + fee) in the display currency', async () => {
+  test('the amount field shows a live-value box with the typed amount priced in fiat', async () => {
+    price = PRICE_READY;
     render(<WalletSend />);
 
     fireEvent.change(screen.getByPlaceholderText(/mall1… \(bech32 address\)/i), {
@@ -262,13 +284,37 @@ describe('WalletSend', () => {
     });
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '10' } });
 
-    // 10 MALL + default 0.05 fee; the fiat figure comes from the live
-    // oracle/FX hooks — assert on the hint container's aggregate text so
-    // the split across <b> nodes doesn't matter.
-    await waitFor(() => {
-      const hints = Array.from(document.querySelectorAll('.hint')).map((e) => e.textContent || '');
-      expect(hints.some((t) => t.includes('Total incl. fee') && t.includes('10.05 MALL') && /at live price|loading live price/.test(t))).toBe(true);
-    });
+    const box = document.querySelector('.wo-value-box') as HTMLElement;
+    expect(box).toBeTruthy();
+    expect(box.dataset.state).toBe('ready');
+    // 10 MALL × 0.62 = 6.20 shown as the headline figure, plus the rate and
+    // the amount+fee total (10.05 MALL) the send will actually debit.
+    await waitFor(() => expect(box.textContent).toMatch(/6\.2/));
+    expect(box.textContent).toContain('1 MALL ≈');
+    expect(box.textContent).toContain('10.05 MALL');
+    expect((box.querySelector('.wo-value-figure') as HTMLElement).textContent).not.toBe('—');
+    expect((box.querySelector('.wo-value-state') as HTMLElement).textContent).toContain('on-chain buy/sell prices');
+  });
+
+  test('the live-value box stays on screen and says so when the price feed fails', async () => {
+    price = PRICE_FAILED;
+    render(<WalletSend />);
+
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '10' } });
+
+    const box = document.querySelector('.wo-value-box') as HTMLElement;
+    expect(box.dataset.state).toBe('unavailable');
+    expect((box.querySelector('.wo-value-figure') as HTMLElement).textContent).toBe('—');
+    expect(box.textContent).toContain('Live price unavailable');
+    // No invented number anywhere in the box while the feed is down.
+    expect(box.textContent).not.toMatch(/1 MALL ≈ [^n]/);
+  });
+
+  test('the live-value box distinguishes "still loading" from "no rate"', () => {
+    render(<WalletSend />);
+    const box = document.querySelector('.wo-value-box') as HTMLElement;
+    expect(box.dataset.state).toBe('loading');
+    expect(box.textContent).toContain('Loading the live MALL price');
   });
 
   test('Sent step tells the truth: renders the confirmed block height from the confirmation result', async () => {
