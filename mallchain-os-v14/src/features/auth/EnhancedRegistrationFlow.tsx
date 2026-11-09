@@ -71,6 +71,15 @@ interface ComplianceConsent {
   allAccepted: boolean;
 }
 
+type CodeDelivery =
+  | { state: 'idle' }
+  | { state: 'sending' }
+  | { state: 'sent'; sentTo: string }
+  | { state: 'failed'; error: string }
+  | { state: 'already-verified' };
+
+const RESEND_COOLDOWN_MS = 60_000;
+
 // Step configuration
 const STEPS: Record<RegistrationStep, { index: number; title: string; icon: ComponentType<{ size?: number; className?: string; style?: CSSProperties }>; description: string }> = {
   welcome: { index: 1, title: 'Welcome', icon: Sparkles, description: 'Let\'s get started' },
@@ -134,6 +143,11 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
     privacyAccepted: false,
     allAccepted: false,
   });
+
+  // Email code delivery, reported by the server rather than assumed.
+  const [codeDelivery, setCodeDelivery] = useState<CodeDelivery>({ state: 'idle' });
+  const [resendAvailableAt, setResendAvailableAt] = useState(0);
+  const [resendNow, setResendNow] = useState(Date.now());
 
   // Auto-save draft
   useEffect(() => {
@@ -263,7 +277,56 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
   };
 
   // Step 3: Email Verification
+  //
+  // The old version of this step printed "We sent a 6-digit code to …" and
+  // never sent anything: /verify-signup accepted any 6 characters. The server
+  // now issues a real code, so this step asks for one when it opens and
+  // reports what the server actually did about it.
+  const requestSignupCode = useCallback(async () => {
+    setCodeDelivery({ state: 'sending' });
+    const res = await api.post('/api/email-management/send-signup-code', {});
+
+    if (res.ok) {
+      const d = res.data as { alreadyVerified?: boolean; sentTo?: string } | undefined;
+      if (d?.alreadyVerified) {
+        // Nothing to answer: this address was proven earlier. Marking the gate
+        // satisfied lets Continue through instead of demanding a code.
+        setCodeDelivery({ state: 'already-verified' });
+        void refreshGate();
+        return true;
+      }
+      setCodeDelivery({ state: 'sent', sentTo: d?.sentTo || '' });
+      setResendAvailableAt(Date.now() + RESEND_COOLDOWN_MS);
+      return true;
+    }
+
+    setCodeDelivery({ state: 'failed', error: res.error || 'The code could not be sent' });
+    return false;
+  }, [refreshGate]);
+
+  useEffect(() => {
+    if (state.step !== 'email-verify') return;
+    if (codeDelivery.state !== 'idle') return;
+    void requestSignupCode();
+  }, [state.step, codeDelivery.state, requestSignupCode]);
+
+  useEffect(() => {
+    if (codeDelivery.state !== 'sent') return;
+    const tick = setInterval(() => setResendNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, [codeDelivery.state]);
+
+  const handleResendCode = async () => {
+    if (resendNow < resendAvailableAt) return;
+    await requestSignupCode();
+  };
+
   const handleVerifyEmail = async () => {
+    if (codeDelivery.state === 'already-verified') {
+      setError('');
+      return true;
+    }
+
     if (!state.emailVerificationCode || state.emailVerificationCode.length !== 6) {
       setError('Please enter a valid 6-digit code');
       return false;
@@ -272,19 +335,26 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
     setLoading(true);
     setError('');
 
-    // Call backend to verify email
     const res = await api.post('/api/email-management/verify-signup', {
       code: state.emailVerificationCode,
     });
 
     if (res.ok) {
       setLoading(false);
+      // The wallet step is gated on the server's view of this account, not on
+      // this response, so re-read it the moment the address is proven.
+      void refreshGate();
       return true;
-    } else {
-      setError(res.error || 'Invalid verification code');
-      setLoading(false);
-      return false;
     }
+
+    const remaining = (res.details as { attemptsRemaining?: number } | undefined)?.attemptsRemaining;
+    setError(
+      res.error && res.error !== `HTTP ${res.code}`
+        ? res.error + (remaining ? ` (${remaining} attempts left)` : '')
+        : 'That code is not correct' + (remaining ? ` - ${remaining} attempts left` : '')
+    );
+    setLoading(false);
+    return false;
   };
 
   // Step 4: Security Setup (skip-able)
@@ -659,52 +729,114 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
               <CheckCircle size={48} style={{ color: 'var(--gold)', marginBottom: 16 }} />
               <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Verify Your Email</h2>
               <p style={{ color: 'var(--txt-3)', fontSize: 14 }}>
-                We sent a 6-digit code to {state.email}
+                {codeDelivery.state === 'sending' && `Sending a 6-digit code to ${state.email}…`}
+                {codeDelivery.state === 'idle' && `Preparing a code for ${state.email}…`}
+                {codeDelivery.state === 'sent' && (
+                  <>A one-time code is on its way to <strong>{codeDelivery.sentTo || state.email}</strong>.</>
+                )}
+                {codeDelivery.state === 'already-verified' && 'This address is already confirmed.'}
+                {codeDelivery.state === 'failed' && 'We could not deliver a code to this address.'}
               </p>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-              <div>
-                <label htmlFor="reg-verify-code" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                  Verification Code
-                </label>
-                <input
-                  id="reg-verify-code"
-                  type="text"
-                  value={state.emailVerificationCode}
-                  onChange={(e) => setState(prev => ({ ...prev, emailVerificationCode: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
-                  placeholder="000000"
-                  maxLength={6}
-                  inputMode="numeric"
+              {codeDelivery.state === 'failed' ? (
+                <>
+                  <div
+                    style={{
+                      padding: 12,
+                      background: 'var(--red-dim)',
+                      borderRadius: 8,
+                      color: 'var(--red)',
+                      fontSize: 13,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <AlertTriangle size={16} />
+                    {codeDelivery.error}
+                  </div>
+                  <button
+                    onClick={() => void requestSignupCode()}
+                    style={{
+                      background: 'var(--bg-2)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--txt)',
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      fontWeight: 600,
+                      padding: '12px 16px',
+                      borderRadius: 10,
+                    }}
+                  >
+                    Try sending again
+                  </button>
+                </>
+              ) : codeDelivery.state === 'already-verified' ? (
+                <div
                   style={{
-                    width: '100%',
-                    padding: '16px',
-                    background: 'var(--bg-2)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 10,
-                    color: 'var(--txt)',
-                    fontSize: 24,
-                    fontWeight: 600,
-                    letterSpacing: 8,
-                    textAlign: 'center',
+                    padding: 12,
+                    background: 'var(--green-dim, rgba(16,185,129,0.12))',
+                    borderRadius: 8,
+                    color: 'var(--txt-2)',
+                    fontSize: 13,
                   }}
-                />
-              </div>
+                >
+                  Your email is confirmed on our side — continue to finish setting up the account.
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label htmlFor="reg-verify-code" style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                      Verification Code
+                    </label>
+                    <input
+                      id="reg-verify-code"
+                      type="text"
+                      value={state.emailVerificationCode}
+                      onChange={(e) => setState(prev => ({ ...prev, emailVerificationCode: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
+                      placeholder="000000"
+                      maxLength={6}
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      disabled={codeDelivery.state === 'sending'}
+                      style={{
+                        width: '100%',
+                        padding: '16px',
+                        background: 'var(--bg-2)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 10,
+                        color: 'var(--txt)',
+                        fontSize: 24,
+                        fontWeight: 600,
+                        letterSpacing: 8,
+                        textAlign: 'center',
+                      }}
+                    />
+                  </div>
 
-              <button
-                onClick={() => toast('Resending verification code...')}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--gold)',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  textDecoration: 'underline',
-                }}
-              >
-                Didn't receive the code? Resend
-              </button>
+                  <button
+                    onClick={() => void handleResendCode()}
+                    disabled={codeDelivery.state !== 'sent' || resendNow < resendAvailableAt}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: resendNow < resendAvailableAt ? 'var(--txt-3)' : 'var(--gold)',
+                      cursor: resendNow < resendAvailableAt ? 'not-allowed' : 'pointer',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    {codeDelivery.state !== 'sent'
+                      ? 'Didn’t receive the code? Resend'
+                      : resendNow < resendAvailableAt
+                        ? `Resend available in ${Math.ceil((resendAvailableAt - resendNow) / 1000)}s`
+                        : 'Didn’t receive the code? Resend'}
+                  </button>
+                </>
+              )}
 
               {error && (
                 <motion.div

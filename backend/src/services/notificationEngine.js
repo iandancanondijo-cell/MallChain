@@ -21,7 +21,6 @@
 const crypto = require('crypto');
 const Notification = require('../models/Notification');
 const User = require('../models/user');
-const NotificationPreferences = require('../models/notificationPreferences');
 const { templateByEvent } = require('./notificationCatalogue');
 const { decryptField } = require('../utils/fieldEncryption');
 const logger = require('../utils/logger');
@@ -73,52 +72,25 @@ async function resolveRecipient(userId) {
 }
 
 // ─── PREFERENCE BRIDGE ───────────────────────────────────────────────
+// The merge itself lives in services/notificationPolicy.js so the dispatcher,
+// the admin broadcast fan-out and GET /api/notification-preferences/effective
+// all answer from one place. This is only the shape the engine consumes.
 
-const CATEGORY_MAP = {
-  account: 'security',
-  wallet: 'transactions',
-  transaction: 'transactions',
-  mlcns: 'transactions',
-  mlpts: 'campaigns',
-  campaign: 'campaigns',
-  mining: 'campaigns',
-  marketplace: 'transactions',
-  badge: 'badgeAlerts',
-  badges: 'badgeAlerts',
-  network: 'security',
-  security: 'security',
-  governance: 'governance',
-  administration: 'security',
-  support: 'system',
-  system: 'security',
-  marketing: 'marketing',
-  referrals: 'campaigns',
-  badgeAlerts: 'badgeAlerts',
-  transactions: 'transactions',
-  campaigns: 'campaigns',
-};
-
-function categoryToFrequencyKey(category) {
-  return CATEGORY_MAP[category] || 'security';
-}
+const {
+  categoryToFrequencyKey,
+  mergeChannels,
+  readPreferenceDocs,
+  isWithinDND,
+} = require('./notificationPolicy');
 
 /**
  * Bridge both preference systems into a single shape.
- * Priority: NotificationPreferences model > UserSettings model > defaults.
+ * Priority is NOT "one model wins": the coarse channel switch gates the
+ * per-category cell, and both must allow delivery. See notificationPolicy.js.
  */
 async function resolvePreferences(userId, category) {
   const freqKey = categoryToFrequencyKey(category);
-
-  let prefs = null;
-  try {
-    prefs = await NotificationPreferences.findOne({ userId }).lean();
-  } catch { /* ignore */ }
-
-  let userSettings = null;
-  try {
-    const UserSettings = require('../models/UserSettings');
-    userSettings = await UserSettings.findOne({ userId }).lean();
-  } catch { /* ignore */ }
+  const { prefs, userSettings } = await readPreferenceDocs(userId);
 
   const globalEnabled = prefs?.enableNotifications ?? true;
   const frequency = prefs?.frequency?.[freqKey] ?? 'immediate';
@@ -127,12 +99,7 @@ async function resolvePreferences(userId, category) {
   const dnd = prefs?.doNotDisturb;
   const dndActive = dnd?.enabled ? isWithinDND(dnd) : false;
 
-  const channels = {
-    inApp: prefs?.channels?.inApp ?? userSettings?.notifications?.push?.[freqKey] ?? true,
-    email: prefs?.channels?.email ?? userSettings?.notifications?.email?.[freqKey] ?? true,
-    sms: prefs?.channels?.sms ?? userSettings?.notifications?.sms?.[freqKey] ?? false,
-    whatsapp: prefs?.channels?.whatsapp ?? userSettings?.notifications?.whatsapp?.[freqKey] ?? false,
-  };
+  const { channels } = mergeChannels(prefs, userSettings, freqKey);
 
   const whatsappOptIn = userSettings?.contactInfo?.whatsappOptIn ?? false;
   const contactPhone = userSettings?.contactInfo?.phoneNumber ?? null;
@@ -146,43 +113,6 @@ async function resolvePreferences(userId, category) {
     whatsappOptIn,
     contactPhone,
   };
-}
-
-function isWithinDND(dnd) {
-  if (!dnd?.enabled) return false;
-
-  const now = new Date();
-  const tz = dnd.timezone || 'Africa/Nairobi';
-
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    weekday: 'short',
-  });
-
-  const parts = formatter.formatToParts(now);
-  const currentHour = parseInt(parts.find(p => p.type === 'hour').value);
-  const currentMinute = parseInt(parts.find(p => p.type === 'minute').value);
-  const currentDay = parts.find(p => p.type === 'weekday').value.toUpperCase();
-
-  if (!dnd.startTime || !dnd.endTime) return false;
-
-  const [startHour, startMinute] = dnd.startTime.split(':').map(Number);
-  const [endHour, endMinute] = dnd.endTime.split(':').map(Number);
-
-  const currentMinutes = currentHour * 60 + currentMinute;
-  const startMinutes = startHour * 60 + startMinute;
-  const endMinutes = endHour * 60 + endMinute;
-
-  const dayMatch = !dnd.days || dnd.days.length === 0 || dnd.days.includes(currentDay);
-  if (!dayMatch) return false;
-
-  if (startMinutes <= endMinutes) {
-    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
-  }
-  return currentMinutes >= startMinutes || currentMinutes < endMinutes;
 }
 
 // ─── IDEMPOTENCY ─────────────────────────────────────────────────────

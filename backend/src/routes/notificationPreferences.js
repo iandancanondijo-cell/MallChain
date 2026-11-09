@@ -2,10 +2,33 @@ const express = require('express');
 const router = express.Router();
 const requireAuth = require('../middleware/requireAuth');
 const NotificationPreferences = require('../models/notificationPreferences');
+const { effectiveNotificationMatrix } = require('../services/notificationPolicy');
+const { decryptField } = require('../utils/fieldEncryption');
 const logger = require('../utils/logger');
 
 // Middleware: require JWT auth
 router.use(requireAuth());
+
+/**
+ * GET /api/notification-preferences/effective
+ *
+ * What the two preference documents add up to, resolved by the same code that
+ * decides delivery (services/notificationPolicy.js). The Settings panels render
+ * from here so a switch cannot claim a effect the dispatcher does not honour;
+ * each cell carries `decidedBy` so a channel held off by the OTHER panel's
+ * switch can say which one to go and change.
+ */
+router.get('/effective', async (req, res) => {
+  try {
+    const matrix = await effectiveNotificationMatrix(req.user._id, {
+      hasEmail: Boolean(decryptField(req.user.email)),
+    });
+    res.json(matrix);
+  } catch (error) {
+    logger.error('notificationPreferences', 'Failed to resolve effective preferences', error);
+    res.status(500).json({ error: 'Failed to get notification preferences' });
+  }
+});
 
 /**
  * GET /api/notification-preferences

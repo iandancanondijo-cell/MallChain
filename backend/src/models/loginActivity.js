@@ -10,16 +10,21 @@ const LoginActivitySchema = new Schema({
   // Only populated if login failed
   failureReason: String, // 'invalid_credentials', 'account_locked', 'mfa_failed', 'unknown'
   
-  // Device & Browser info
-  device: String, // 'desktop', 'mobile', 'tablet'
-  browser: String, // 'Chrome', 'Safari', etc.
-  browserVersion: String,
-  os: String, // 'MacOS', 'Windows', 'iOS', etc.
-  
-  // Network info
-  ipAddress: { type: String, required: true },
-  country: String, // From IP geolocation
-  city: String,
+  // Device & Browser info (null = the request did not state it; see
+  // utils/deviceInfo.js — these used to be written as the literal 'Unknown'
+  // and the Settings UI displayed them as if they were observations)
+  device: { type: String, default: 'unknown' }, // 'desktop', 'mobile', 'tablet', 'unknown'
+  browser: { type: String, default: null }, // 'Chrome', 'Safari', etc.
+  browserVersion: { type: String, default: null },
+  os: { type: String, default: null }, // 'macOS', 'Windows', 'iOS', etc.
+
+  // Network info. Not `required`: behind some proxies this server cannot see
+  // a client address at all, and a mandatory field with no value made every
+  // insert from services/sessionRegistry.js fail validation — which it
+  // swallows, so the log would silently stay empty.
+  ipAddress: { type: String, default: null },
+  country: { type: String, default: null }, // ISO alpha-2 from Cloudflare's edge header
+  city: { type: String, default: null }, // No GeoIP lookup is wired up — stays null
   
   // Timing
   timestamp: { type: Date, default: Date.now, index: true },

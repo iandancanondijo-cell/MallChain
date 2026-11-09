@@ -31,7 +31,11 @@ interface SecuritySettingsState {
   showSignOutModal: boolean;
   showPrivateKeyExport: boolean;
 
-  sessionTimeout: 5 | 15 | 30;
+  // null = no preference saved, so the deployment's SESSION_TTL_MIN decides
+  // (backend/src/utils/sessionPolicy.js). Deliberately not a number: a fake
+  // default here is what let this control claim 15 minutes for an account
+  // whose sessions actually last 30.
+  sessionTimeout: number | null;
 }
 
 export function SecuritySettings() {
@@ -44,7 +48,7 @@ export function SecuritySettings() {
     showSignOutModal: false,
     showPrivateKeyExport: false,
 
-    sessionTimeout: 15,
+    sessionTimeout: null,
   });
 
   const [settings, setSettings] = useState<UserSettingsData | null>(null);
@@ -54,10 +58,15 @@ export function SecuritySettings() {
     settingsApi.get().then((res) => {
       if (res.ok && res.data) {
         setSettings(res.data);
-        const t = res.data.security.sessionTimeout;
-        if (t === 5 || t === 15 || t === 30) {
-          setState((prev) => ({ ...prev, sessionTimeout: t }));
-        }
+        // Whatever the account has saved, including null. The route accepts
+        // only 5/15/30/null, so there is nothing here to second-guess.
+        setState((prev) => ({ ...prev, sessionTimeout: res.data!.security.sessionTimeout }));
+      } else {
+        // Without this the selector below shows its hardcoded 15 as if it were
+        // the account's saved value, and pressing a button silently does
+        // nothing (handleSessionTimeoutChange has no settings document to
+        // merge into).
+        toast(res.error || 'Could not load your security settings', false);
       }
     });
   }, []);
@@ -195,14 +204,22 @@ export function SecuritySettings() {
   // Task 11.8: Session timeout — persisted via the real settings API
   // (backend/src/routes/settings.js), same pattern features/settings/Settings.tsx
   // already uses for other preference fields.
-  const handleSessionTimeoutChange = async (timeout: 5 | 15 | 30) => {
+  const handleSessionTimeoutChange = async (timeout: number | null) => {
+    if (!settings) {
+      // Do not leave a choice highlighted on screen that the server never
+      // accepted: with no settings document there is nothing to merge into.
+      toast('Your settings are still loading — try again in a moment', false);
+      return;
+    }
     setState(prev => ({ ...prev, sessionTimeout: timeout }));
-    if (!settings) return;
     const updatedSecurity = { ...settings.security, sessionTimeout: timeout };
     setSettings({ ...settings, security: updatedSecurity });
     const res = await settingsApi.update({ security: updatedSecurity });
-    if (res.ok) toast(`Session timeout set to ${timeout} minutes`, true);
-    else toast(res.error || 'Failed to save session timeout', false);
+    if (res.ok) {
+      toast(timeout === null ? 'Next sign-in uses the service default' : `Next sign-in ends after ${timeout} minutes`, true);
+    } else {
+      toast(res.error || 'Failed to save session timeout', false);
+    }
   };
 
   // Task 11.10: Sign out everywhere — revokes every token issued to this
@@ -353,18 +370,36 @@ export function SecuritySettings() {
           <div className="setting-item">
             <div className="setting-info">
               <h3>Session Timeout</h3>
-              <p>Automatically log out after inactivity</p>
+              {/* Was "Automatically log out after inactivity". It is not
+                  inactivity: utils/sessionPolicy.js writes this number into
+                  the token's exp at sign-in, and activity does not extend it
+                  (GET /api/sessions reports renewsOnActivity: false, which
+                  Settings > Active Sessions now shows instead of contradicting). */}
+              <p>
+                Counted from the moment you sign in, not from your last click —
+                staying active does not extend it. Applies to your next sign-in.
+              </p>
             </div>
             <div className="timeout-selector">
               {[5, 15, 30].map(timeout => (
                 <button
                   key={timeout}
                   className={`timeout-btn ${state.sessionTimeout === timeout ? 'active' : ''}`}
-                  onClick={() => handleSessionTimeoutChange(timeout as 5 | 15 | 30)}
+                  onClick={() => handleSessionTimeoutChange(timeout)}
                 >
                   {timeout}m
                 </button>
               ))}
+              {/* Without this an account that chose 5m could never go back to
+                  whatever the service sets, because the saved value was the
+                  only thing the control knew about. */}
+              <button
+                className={`timeout-btn ${state.sessionTimeout === null ? 'active' : ''}`}
+                onClick={() => handleSessionTimeoutChange(null)}
+                title="Use the lifetime this service gives every session by default"
+              >
+                Default
+              </button>
             </div>
           </div>
 

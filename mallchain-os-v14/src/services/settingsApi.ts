@@ -22,7 +22,9 @@ export interface UserSettingsData {
   };
   security: {
     twoFactorEnabled: boolean;
-    sessionTimeout: number;
+    // null = the account has no preference and the deployment's
+    // SESSION_TTL_MIN decides. backend/src/utils/sessionPolicy.js.
+    sessionTimeout: number | null;
     loginNotifications: boolean;
     deviceManagement: boolean;
     trustedDevices: string[];
@@ -90,7 +92,13 @@ class SettingsApi {
     return unwrap(api.put('/api/settings/contact', patch));
   }
 
-  async sendPhoneOtp(): Promise<ApiResult<{ sent: boolean; otp?: string; message: string }>> {
+  /**
+   * Asks the SMS provider to deliver a 6-digit code to the saved number.
+   * The digits never come back in this response — an earlier "dev mode" build
+   * returned them, which made phone verification a formality for anyone with
+   * the Network tab open. 503 means the provider refused; no code exists then.
+   */
+  async sendPhoneOtp(): Promise<ApiResult<{ sent: boolean; expiresAt: string; message: string }>> {
     return unwrap(api.post('/api/settings/contact/phone/send-otp', {}));
   }
 

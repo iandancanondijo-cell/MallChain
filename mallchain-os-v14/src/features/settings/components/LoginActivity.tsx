@@ -1,153 +1,141 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { loginActivityApi, type LoginActivity } from '../../../services/loginActivityApi';
-import { useStoreVersion, toast } from '../../../components/ui';
+import { EmptyState, toast, useStoreVersion } from '../../../components/ui';
 
 type FilterStatus = 'all' | 'success' | 'failed';
 
+const PAGE_SIZE = 10;
+
 /**
- * LoginActivity Component
- * Displays login attempt history with filtering and details
+ * LoginActivity — sign-in history as the server recorded it.
+ *
+ * Two claims this panel used to make that nothing supported: it promised
+ * "recent login attempts and account access history" while no code had ever
+ * written a LoginActivity row (the only writer was a POST endpoint no client
+ * called), and it turned a bare `riskScore` number into a "High/Medium/Low
+ * risk" verdict the backend never issued. The list is now written by
+ * services/sessionRegistry.js at the moment a token is issued or a credential
+ * is rejected, and the only verdict shown is the server's own `suspicious`
+ * flag with the reasons behind it.
  */
 export function LoginActivityComponent() {
   useStoreVersion();
-  const [activities, setActivities] = useState<LoginActivity[]>([]);
-  const [loading, setLoading] = useState(false);
+  // null = never loaded successfully; [] = loaded and there is nothing to show
+  const [activities, setActivities] = useState<LoginActivity[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(0);
 
-  const ITEMS_PER_PAGE = 10;
-
-  /**
-   * Load login activity from API
-   */
   const loadActivity = useCallback(
     async (newPage = 0) => {
       setLoading(true);
-      const res = await loginActivityApi.getLoginActivity(
-        ITEMS_PER_PAGE,
-        newPage * ITEMS_PER_PAGE,
-        filterStatus
-      );
+      setLoadError(null);
+      const res = await loginActivityApi.getLoginActivity(PAGE_SIZE, newPage * PAGE_SIZE, filterStatus);
 
       if (res.ok && res.data) {
-        if (newPage === 0) {
-          setActivities(res.data?.activities || []);
-        } else {
-          setActivities((prev) => [...prev, ...(res.data?.activities || [])]);
-        }
-        setHasMore(res.data?.hasMore || false);
+        const rows = res.data.activities || [];
+        setActivities((prev) => (newPage === 0 || prev === null ? rows : [...prev, ...rows]));
+        setHasMore(Boolean(res.data.hasMore));
         setPage(newPage);
+      } else if (newPage === 0) {
+        // A failed first page replaces the list, so it needs its own state;
+        // a failed "show older" leaves the list on screen and only needs a
+        // toast, or the whole panel would disappear over one bad page.
+        setLoadError(res.error || 'Could not load your sign-in history.');
+        setActivities(null);
       } else {
-        toast(res.error || 'Failed to load login activity', false);
+        toast(res.error || 'Could not load older sign-ins. Try again.', false);
       }
       setLoading(false);
     },
     [filterStatus]
   );
 
-  // Load activity on mount and when filter changes
   useEffect(() => {
     loadActivity(0);
   }, [loadActivity]);
 
-  const handleLoadMore = () => {
-    loadActivity(page + 1);
-  };
-
-  // Get risk level text and color
-  const getRiskLevel = (riskScore: number) => {
-    if (riskScore >= 50) return { text: 'High', color: 'var(--red)' };
-    if (riskScore >= 25) return { text: 'Medium', color: 'var(--gold)' };
-    if (riskScore >= 10) return { text: 'Low', color: 'var(--green)' };
-    return { text: 'Very Low', color: 'var(--txt-3)' };
-  };
-
-  // Get status badge text and color
-  const getStatusBadge = (success: boolean) => {
-    return success
-      ? { text: 'Success', color: 'var(--green)', emoji: '✓' }
-      : { text: 'Failed', color: 'var(--red)', emoji: '✕' };
-  };
-
-  // Format relative time
-  const formatRelativeTime = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 30) return `${diffDays}d ago`;
-
-    return date.toLocaleDateString();
-  };
-
-  // Get device emoji
-  const getDeviceEmoji = (device: string) => {
-    switch (device) {
-      case 'mobile':
-        return '📱';
-      case 'tablet':
-        return '📱';
-      default:
-        return '🖥️';
-    }
-  };
-
-  if (loading && activities.length === 0) {
-    return <div className="tiny">Loading login activity…</div>;
-  }
+  const flag = (activity: LoginActivity) =>
+    activity.success
+      ? { text: 'Signed in', tone: 'var(--green)' }
+      : { text: 'Rejected', tone: 'var(--red)' };
 
   return (
     <div className="card mb">
-      <div className="sec-title"><h2>Login Activity</h2></div>
-      <div className="tiny" style={{ marginBottom: 14, color: 'var(--txt-3)' }}>
-        View your recent login attempts and account access history.
+      <div className="sec-title">
+        <h2>Login activity</h2>
+        <span className="sub">
+          {activities === null && !loading
+            ? 'Not loaded'
+            : filterStatus === 'failed'
+              ? 'Rejected sign-ins · newest first'
+              : filterStatus === 'success'
+                ? 'Successful sign-ins · newest first'
+                : 'Every recorded attempt · newest first'}
+        </span>
+        <button className="sec-link" onClick={() => loadActivity(page)} disabled={loading}>
+          {loading ? <span className="spin" /> : null}
+          Refresh
+        </button>
       </div>
 
-      {/* Filter buttons */}
-      <div className="row" style={{ gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+      <div className="row" style={{ gap: 8, marginBottom: 14 }}>
         {(['all', 'success', 'failed'] as const).map((status) => (
           <button
             key={status}
             className={`btn btn-sm ${filterStatus === status ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => {
               setFilterStatus(status);
-              setActivities([]);
+              setActivities(null);
               setPage(0);
             }}
+            disabled={loading}
           >
-            {status === 'all' ? 'All' : status === 'success' ? 'Successful' : 'Failed'}
+            {status === 'all' ? 'Everything' : status === 'success' ? 'Signed in' : 'Rejected'}
           </button>
         ))}
       </div>
 
-      {/* Activity list */}
-      {activities.length > 0 ? (
+      {loading && activities === null ? (
+        <>
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="shimmer" style={{ height: 52, borderRadius: 10, marginBottom: 10 }} />
+          ))}
+          <div className="tiny" style={{ color: 'var(--txt-3)' }}>Loading sign-in history…</div>
+        </>
+      ) : loadError && activities === null ? (
+        <EmptyState
+          icon="⚠️"
+          title="Sign-in history unavailable"
+          message={loadError}
+          cta={
+            <button className="btn btn-ghost btn-sm" onClick={() => loadActivity(0)} disabled={loading}>
+              {loading ? 'Retrying…' : 'Try again'}
+            </button>
+          }
+        />
+      ) : activities && activities.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {activities.map((activity) => {
-            const isExpanded = expandedId === activity._id;
-            const riskLevel = getRiskLevel(activity.riskScore);
-            const statusBadge = getStatusBadge(activity.success);
+            const isExpanded = expandedId === activity.id;
+            const badge = flag(activity);
+            const place = [activity.city, activity.country].filter(Boolean).join(', ');
 
             return (
               <div
-                key={activity._id}
+                key={activity.id}
+                className="card-hover"
                 style={{
                   border: '1px solid var(--outline)',
-                  borderRadius: 8,
+                  borderRadius: 10,
                   cursor: 'pointer',
-                  transition: 'all 0.2s ease',
+                  backgroundColor: activity.suspicious ? 'rgba(239, 68, 68, 0.04)' : undefined,
                 }}
-                onClick={() => setExpandedId(isExpanded ? null : activity._id)}
+                onClick={() => setExpandedId(isExpanded ? null : activity.id)}
               >
-                {/* Summary row */}
                 <div
                   style={{
                     padding: 12,
@@ -158,107 +146,58 @@ export function LoginActivityComponent() {
                     flexWrap: 'wrap',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 200 }}>
-                    <div style={{ fontSize: 18 }}>{getDeviceEmoji(activity.device)}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>
-                        {activity.browser} on {activity.os}
-                      </div>
-                      <div className="tiny" style={{ color: 'var(--txt-3)', marginTop: 2 }}>
+                  <div className="row" style={{ gap: 10, flex: 1, minWidth: 200 }}>
+                    <div style={{ fontSize: 18, lineHeight: '20px' }}>{deviceGlyph(activity.device)}</div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{deviceLine(activity)}</div>
+                      <div className="tiny" style={{ marginTop: 2 }}>
                         {formatRelativeTime(activity.timestamp)}
+                        {place ? ` · ${place}` : ' · location not recorded'}
                       </div>
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div className="row" style={{ gap: 8 }}>
                     {activity.suspicious && (
-                      <span className="chip" style={{ color: 'var(--red)', borderColor: 'var(--red)' }}>
-                        ⚠ Suspicious
+                      <span className="chip red" title="Flagged by this server's rules">
+                        ⚠ Flagged
                       </span>
                     )}
-                    <span
-                      className="chip"
-                      style={{ color: statusBadge.color, borderColor: statusBadge.color }}
-                    >
-                      {statusBadge.emoji} {statusBadge.text}
+                    <span className="chip" style={{ color: badge.tone, borderColor: badge.tone }}>
+                      {activity.success ? '✓' : '✕'} {badge.text}
                     </span>
                   </div>
                 </div>
 
-                {/* Expanded details */}
                 {isExpanded && (
-                  <div style={{ borderTop: '1px solid var(--outline)', padding: 12, backgroundColor: 'var(--surface-alt)' }}>
-                    {/* Location & Device Info */}
-                    <div style={{ marginBottom: 12 }}>
-                      <div className="tiny" style={{ fontWeight: 600, marginBottom: 6, color: 'var(--txt-3)' }}>
-                        📍 LOCATION & DEVICE
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                        <div>
-                          <div className="tiny" style={{ color: 'var(--txt-3)' }}>IP Address</div>
-                          <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 600, marginTop: 2 }}>
-                            {activity.ipAddress}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="tiny" style={{ color: 'var(--txt-3)' }}>Country</div>
-                          <div style={{ fontSize: 13, fontWeight: 600, marginTop: 2 }}>
-                            {activity.country}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Security Info */}
-                    <div style={{ marginBottom: 12 }}>
-                      <div className="tiny" style={{ fontWeight: 600, marginBottom: 6, color: 'var(--txt-3)' }}>
-                        🔒 SECURITY
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                        <div>
-                          <div className="tiny" style={{ color: 'var(--txt-3)' }}>Risk Level</div>
-                          <div style={{ fontSize: 13, fontWeight: 600, marginTop: 2, color: riskLevel.color }}>
-                            {riskLevel.text} ({activity.riskScore}/100)
-                          </div>
-                        </div>
-                        <div>
-                          <div className="tiny" style={{ color: 'var(--txt-3)' }}>MFA Used</div>
-                          <div style={{ fontSize: 13, fontWeight: 600, marginTop: 2, color: 'var(--green)' }}>
-                            {activity.mfaUsed ? '✓ Yes' : '✕ No'}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Login Method */}
-                    <div style={{ marginBottom: 12 }}>
-                      <div className="tiny" style={{ fontWeight: 600, marginBottom: 6, color: 'var(--txt-3)' }}>
-                        LOGIN METHOD
-                      </div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>
-                        {activity.loginMethod === 'password' ? '🔐 Password' : activity.loginMethod}
-                      </div>
-                    </div>
-
-                    {/* Failure reason (if failed) */}
-                    {!activity.success && activity.failureReason && (
-                      <div style={{ marginBottom: 12 }}>
-                        <div className="tiny" style={{ fontWeight: 600, marginBottom: 6, color: 'var(--txt-3)' }}>
-                          ✕ FAILURE REASON
-                        </div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--red)' }}>
-                          {activity.failureReason}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Suspicious reasons (if flagged) */}
+                  <div
+                    style={{
+                      borderTop: '1px solid var(--outline)',
+                      padding: 12,
+                      backgroundColor: 'var(--surface-alt)',
+                      display: 'grid',
+                      gap: 12,
+                    }}
+                  >
+                    <Detail label="Network address" value={activity.ipAddress || 'Not stated by the request'} mono />
+                    <Detail label="Location" value={place || 'Not resolved — no IP-to-location lookup is configured'} />
+                    <Detail label="Method" value={methodLabel(activity.loginMethod)} />
+                    <Detail
+                      label="Second factor"
+                      value={
+                        activity.mfaUsed
+                          ? 'Verified with your authenticator or a backup code'
+                          : 'Not used for this attempt'
+                      }
+                    />
+                    {!activity.success && <Detail label="Why it was rejected" value={reasonLabel(activity.failureReason)} />}
+                    <Detail label="Risk score" value={`${activity.riskScore}/100 on this server's scale`} />
                     {activity.suspicious && activity.suspiciousReasons.length > 0 && (
                       <div>
-                        <div className="tiny" style={{ fontWeight: 600, marginBottom: 6, color: 'var(--txt-3)' }}>
-                          ⚠️ SUSPICIOUS REASONS
+                        <div className="tiny" style={{ fontWeight: 600, color: 'var(--txt-3)', marginBottom: 4 }}>
+                          FLAGGED BECAUSE
                         </div>
-                        <ul style={{ margin: '0 0 0 20px', padding: 0 }}>
+                        <ul style={{ margin: '0 0 0 18px', padding: 0 }}>
                           {activity.suspiciousReasons.map((reason, idx) => (
                             <li key={idx} className="tiny" style={{ marginBottom: 2, color: 'var(--txt-2)' }}>
                               {reason}
@@ -272,29 +211,119 @@ export function LoginActivityComponent() {
               </div>
             );
           })}
+
+          {hasMore && (
+            <button className="btn btn-ghost btn-block" onClick={() => loadActivity(page + 1)} disabled={loading}>
+              {loading ? <span className="spin" /> : null}
+              {loading ? 'Loading…' : 'Show 10 older'}
+            </button>
+          )}
         </div>
       ) : (
-        <div className="tiny" style={{ color: 'var(--txt-3)', textAlign: 'center', padding: '20px 0' }}>
-          {filterStatus === 'failed' ? 'No failed login attempts' : 'No login activity found'}
-        </div>
+        <EmptyState
+          icon="🗒️"
+          title={filterStatus === 'failed' ? 'No rejected sign-ins' : 'No sign-ins recorded yet'}
+          message={
+            filterStatus === 'failed'
+              ? 'Every sign-in attempt stored for your account succeeded.'
+              : 'Sign-in history begins with the first session issued to your account on this server.'
+          }
+        />
       )}
 
-      {/* Load more button */}
-      {hasMore && (
-        <button
-          className="btn btn-ghost btn-block"
-          onClick={handleLoadMore}
-          disabled={loading}
-          style={{ marginTop: 12 }}
-        >
-          {loading ? 'Loading…' : 'Load More'}
-        </button>
-      )}
-
-      {/* Security tip */}
-      <div className="tiny" style={{ marginTop: 14, padding: 10, backgroundColor: 'var(--surface-alt)', borderRadius: 6, color: 'var(--txt-3)' }}>
-        <strong>💡 Security Tip:</strong> If you see login attempts you don't recognize, change your password immediately and enable MFA if you haven't already.
+      <div
+        className="tiny"
+        style={{
+          marginTop: 14,
+          padding: 10,
+          backgroundColor: 'var(--surface-alt)',
+          borderRadius: 8,
+          color: 'var(--txt-3)',
+          lineHeight: 1.5,
+        }}
+      >
+        <strong>If you do not recognise an entry:</strong> sign out the other devices in Active
+        sessions above, then change your password — an entry here is a token this server issued, so
+        ending that session stops it working immediately. Entries are kept for 90 days.
       </div>
     </div>
   );
+}
+
+function Detail({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <div className="tiny" style={{ fontWeight: 600, color: 'var(--txt-3)' }}>
+        {label.toUpperCase()}
+      </div>
+      <div
+        style={{
+          fontSize: mono ? 12 : 13,
+          fontWeight: 600,
+          marginTop: 2,
+          fontFamily: mono ? 'monospace' : undefined,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+const DEVICE_GLYPH: Record<string, string> = {
+  desktop: '🖥️',
+  mobile: '📱',
+  tablet: '📱',
+  // 'unknown' = the request stated nothing usable; a desktop icon would be a
+  // guess drawn as a fact.
+  unknown: '•',
+};
+
+function deviceGlyph(device: string) {
+  return DEVICE_GLYPH[device] ?? '•';
+}
+
+function deviceLine(activity: LoginActivity) {
+  const parts = [activity.browser, activity.os].filter(Boolean);
+  return parts.length ? parts.join(' on ') : 'Device did not identify itself';
+}
+
+function methodLabel(method: string | null) {
+  switch (method) {
+    case 'password':
+      return 'Password';
+    case 'google':
+      return 'Google account';
+    case null:
+      return 'Not recorded';
+    default:
+      return method;
+  }
+}
+
+const REASONS: Record<string, string> = {
+  invalid_credentials: 'The password did not match this account',
+  mfa_failed: 'The password matched, but the second factor did not',
+  account_locked: 'Sign-ins are paused on this account after repeated failures',
+  login_cooldown: 'A session had just ended, so sign-in is paused briefly',
+  unknown: 'A rejection was recorded without a reason',
+};
+
+function reasonLabel(reason: string | null) {
+  if (!reason) return REASONS.unknown;
+  return REASONS[reason] ?? reason;
+}
+
+function formatRelativeTime(dateString: string) {
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return 'Time not recorded';
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return date.toLocaleDateString();
 }

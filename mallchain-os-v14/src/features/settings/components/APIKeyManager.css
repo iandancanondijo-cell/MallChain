@@ -342,3 +342,62 @@ button[disabled] {
   color: var(--txt-3);
   font-weight: 400;
 }
+
+/* ── what the server actually does with these fields ── */
+.api-key-truth,
+.api-key-note {
+  border: 1px solid var(--outline);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface-alt);
+}
+
+.api-key-truth { margin-bottom: 14px; }
+
+.api-key-note { border-left-color: var(--txt-3); }
+.api-key-note-warn { border-left-color: var(--gold); margin-bottom: 10px; }
+
+.api-key-truth .t,
+.api-key-note .t {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.api-key-truth .m,
+.api-key-note .m {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--txt-3);
+}
+
+.api-key-truth code,
+.api-key-note code {
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--txt-1);
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.api-key-field-note {
+  margin-top: 5px;
+  line-height: 1.45;
+}
+
+.api-key-scope-flag {
+  align-self: flex-start;
+  margin-top: 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--gold);
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}

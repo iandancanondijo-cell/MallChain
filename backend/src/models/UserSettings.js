@@ -63,9 +63,21 @@ const UserSettingsSchema = new Schema({
     // Email verification status (email itself is on User model)
     emailVerified: { type: Boolean, default: false },
     emailVerifiedAt: { type: Date },
+    // Recovery backup address, set only after a code sent TO IT was verified
+    // (routes/emailManagement.js). recovery-options and the account-recovery
+    // flows read this; it used to answer from a User.backupEmail path that the
+    // schema never had, so it could only ever report "no backup".
+    backupEmail: { type: String, default: null },
+    backupEmailVerifiedAt: { type: Date },
     // Temporary OTP for phone verification — cleared after use or expiry.
-    pendingPhoneOtp: { type: String, select: false },
+    // Stored as a SHA-256 hash, never the digits: this document is readable
+    // through GET /api/settings, and a plaintext code there would let the
+    // holder of a session prove they own a phone number they do not own.
+    // `select: false` keeps it out of ordinary queries; the verify route
+    // asks for it explicitly.
+    pendingPhoneOtpHash: { type: String, select: false },
     pendingPhoneOtpExpiry: { type: Date, select: false },
+    pendingPhoneOtpAttempts: { type: Number, default: 0, select: false },
   },
 
   security: {
@@ -77,7 +89,12 @@ const UserSettingsSchema = new Schema({
     twoFactorPendingSecret: { type: String, select: false },
     twoFactorSecret: { type: String, select: false },
     twoFactorBackupCodeHashes: { type: [String], default: undefined, select: false },
-    sessionTimeout: { type: Number, default: 120 },
+    // Minutes a sign-in stays valid, chosen in Settings > Security. null is
+    // "this account has no preference", which lets utils/sessionPolicy.js use
+    // the deployment's SESSION_TTL_MIN. It used to default to 120, so an
+    // operator raising SESSION_TTL_MIN above 120 would silently get 120 for
+    // every account that never opened that page.
+    sessionTimeout: { type: Number, default: null, min: 1, max: 480 },
     loginNotifications: { type: Boolean, default: true },
     deviceManagement: { type: Boolean, default: true },
     trustedDevices: { type: [String], default: [] },

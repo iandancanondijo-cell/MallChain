@@ -1,254 +1,250 @@
+/**
+ * Active sessions — GET the list, end one, end all the others, check whether
+ * this one is still live.
+ *
+ * Two properties this route did not previously have:
+ *
+ *  1. It matched "which session am I using?" by hashing the Authorization
+ *     header. The JWT lives in an httpOnly cookie (see
+ *     controllers/authController.js) and the frontend never holds the token,
+ *     so that header is absent on every browser request, currentTokenHash was
+ *     always null, and no row could ever match. The token's own `jti` claim —
+ *     which requireAuth already puts on req.tokenPayload — is the session's
+ *     identity, so that is what gets compared.
+ *  2. "Terminating" a session only flipped isActive on a row that nothing
+ *     else read, so the other device's JWT stayed valid until it naturally
+ *     expired. Ending a session now goes through services/sessionRegistry.js,
+ *     which revokes that jti in Redis for the remainder of its life — the same
+ *     mechanism /api/auth/logout uses. The row and the token now agree.
+ */
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
 const requireAuth = require('../middleware/requireAuth');
 const Session = require('../models/session');
 const logger = require('../utils/logger');
-const crypto = require('crypto');
+const { browserLabel } = require('../utils/deviceInfo');
+const { endSessionByJti, endOtherSessions, recordIssuedSession } = require('../services/sessionRegistry');
+const { effectiveSessionTtlMinutes } = require('../utils/sessionPolicy');
 
-// Middleware: require JWT auth for all routes
 router.use(requireAuth());
 
 /**
- * Helper: Hash token for secure comparison
+ * Response shape used across this file: `error` carries the human-readable
+ * text (services/api.ts surfaces exactly that) and details.code the stable
+ * string the UI branches on.
  */
-function hashToken(token) {
-  return crypto.createHash('sha256').update(token).digest('hex');
+function refuse(res, status, code, message) {
+  return res.status(status).json({ error: message, details: { code } });
 }
 
-/**
- * Helper: Parse user agent to extract device, browser, OS (simple regex-based parsing)
- */
-function parseUserAgent(userAgentString) {
-  // Simple UA parsing without external dependencies
-  let device = 'desktop';
-  let browser = 'Unknown';
-  let browserVersion = '';
-  let os = 'Unknown';
-
-  // Detect OS
-  if (userAgentString.includes('Windows')) os = 'Windows';
-  else if (userAgentString.includes('Mac OS X')) os = 'MacOS';
-  else if (userAgentString.includes('iPhone')) os = 'iOS';
-  else if (userAgentString.includes('iPad')) os = 'iOS';
-  else if (userAgentString.includes('Android')) os = 'Android';
-  else if (userAgentString.includes('Linux')) os = 'Linux';
-
-  // Detect device type
-  if (userAgentString.includes('Mobile') || userAgentString.includes('iPhone') || userAgentString.includes('Android')) device = 'mobile';
-  else if (userAgentString.includes('iPad') || userAgentString.includes('Tablet')) device = 'tablet';
-
-  // Detect browser
-  if (userAgentString.includes('Chrome')) browser = 'Chrome';
-  else if (userAgentString.includes('Safari')) browser = 'Safari';
-  else if (userAgentString.includes('Firefox')) browser = 'Firefox';
-  else if (userAgentString.includes('Edge')) browser = 'Edge';
-  else if (userAgentString.includes('Opera')) browser = 'Opera';
-
-  // Extract version for Chrome
-  if (browser === 'Chrome') {
-    const match = userAgentString.match(/Chrome\/(\d+\.\d+)/);
-    if (match) browserVersion = match[1];
-  }
-  // Extract version for Firefox
-  else if (browser === 'Firefox') {
-    const match = userAgentString.match(/Firefox\/(\d+\.\d+)/);
-    if (match) browserVersion = match[1];
-  }
-  // Extract version for Safari
-  else if (browser === 'Safari') {
-    const match = userAgentString.match(/Version\/(\d+\.\d+)/);
-    if (match) browserVersion = match[1];
-  }
-
-  return { device, browser, browserVersion, os };
+function currentJti(req) {
+  const jti = req.tokenPayload?.jti;
+  return typeof jti === 'string' && jti ? jti : null;
 }
 
-/**
- * Helper: Get IP address and geolocation (basic implementation)
- * In production, integrate with MaxMind GeoIP2 or similar service
- */
-function getLocationInfo(req) {
-  const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
-  
-  // TODO: Add real geolocation service here
-  // For now, return basic info
+function shape(session, jti) {
   return {
-    ipAddress,
-    country: req.headers['cf-ipcountry'] || 'Unknown', // Cloudflare header
-    city: 'Unknown', // Would come from geolocation API
+    id: String(session._id),
+    device: session.device || 'unknown',
+    browser: browserLabel(session.browser, session.browserVersion),
+    os: session.os || null,
+    automatedClient: Boolean(session.automatedClient),
+    loginMethod: session.loginMethod || null,
+    // Nothing here is invented: if the request did not state an address and no
+    // GeoIP lookup is wired up, these stay null and the UI says so rather than
+    // printing the old 'Unknown' placeholder as though it were a place.
+    location: { country: session.country || null, city: session.city || null },
+    ipAddress: session.ipAddress || null,
+    startedAt: session.createdAt,
+    lastActivityAt: session.lastActivityAt,
+    expiresAt: session.expiresAt,
+    isCurrent: Boolean(jti) && session.jti === jti,
   };
 }
 
 /**
+ * A session issued before the recorder was deployed has no row. Without this,
+ * the panel would omit the very session you are using, and
+ * POST /logout-all-others would compare `$ne` against a missing jti. Backfill
+ * it from what the token itself proves (`jti`, `exp`) plus this request's own
+ * headers. loginMethod is 'unknown' because the token does not carry one.
+ */
+async function ensureCurrentSessionRecord(req) {
+  const jti = currentJti(req);
+  if (!jti) return null;
+  const existing = await Session.findOne({ jti }).lean();
+  if (existing) return existing;
+  const expSeconds = Number(req.tokenPayload?.exp);
+  if (!Number.isFinite(expSeconds)) return null;
+  return recordIssuedSession({
+    userId: req.user._id,
+    jti,
+    token: null,
+    expiresAt: new Date(expSeconds * 1000),
+    req,
+    loginMethod: 'unknown',
+    recordLogin: false,
+  });
+}
+
+/**
  * GET /api/sessions
- * List all active sessions for the user
  */
 router.get('/', async (req, res) => {
   try {
-    const userId = req.user._id;
-    const currentToken = req.headers.authorization?.split(' ')[1];
-    const currentTokenHash = currentToken ? hashToken(currentToken) : null;
+    const jti = currentJti(req);
+    await ensureCurrentSessionRecord(req);
 
-    const sessions = await Session.find({
-      userId,
-      isActive: true,
-    })
+    const sessions = await Session.find({ userId: req.user._id, isActive: true })
       .sort('-lastActivityAt')
       .lean();
 
-    // Mark which one is current and format response
-    const sessionsWithCurrent = sessions.map((s) => ({
-      _id: s._id.toString(),
-      device: s.device,
-      browser: `${s.browser}${s.browserVersion ? ' ' + s.browserVersion : ''}`,
-      os: s.os,
-      country: s.country,
-      city: s.city,
-      lastActivityAt: s.lastActivityAt,
-      createdAt: s.createdAt,
-      isCurrent: s.tokenHash === currentTokenHash,
-    }));
+    const current = sessions.find((s) => s.jti === jti);
+    // The account's own Session Timeout preference is part of this number, so
+    // the panel states the same lifetime the token was actually signed with.
+    const { ttlMinutes } = await effectiveSessionTtlMinutes(req.user._id);
 
-    res.json({ sessions: sessionsWithCurrent });
+    res.json({
+      sessions: sessions.map((s) => shape(s, jti)),
+      policy: {
+        // The Settings copy used to promise "sessions automatically expire
+        // after 24 hours of inactivity". Neither half was true: the lifetime is
+        // SESSION_TTL_MIN from sign-in, and it does not move when you are
+        // active. These two fields are what the panel is allowed to say.
+        ttlMinutes,
+        renewsOnActivity: false,
+        endsAt: current ? current.expiresAt : null,
+      },
+      // A token without a jti predates session tracking; per-device controls
+      // cannot address it, so say that instead of offering buttons that would
+      // act on the wrong row.
+      currentSessionTracked: Boolean(jti),
+    });
   } catch (error) {
     logger.error('sessions', 'Failed to get sessions', error);
-    res.status(500).json({ error: 'Failed to get sessions' });
+    refuse(res, 500, 'session_list_failed', 'Could not load your active sessions. Try again in a moment.');
   }
 });
 
 /**
- * POST /api/sessions/{id}/logout
- * Terminate a specific session
+ * POST /api/sessions/:id/logout — end one of your own sessions.
  */
 router.post('/:id/logout', async (req, res) => {
   try {
     const userId = req.user._id;
-    const sessionId = req.params.id;
+    const jti = currentJti(req);
 
-    const session = await Session.findOneAndUpdate(
-      { _id: sessionId, userId },
-      { isActive: false },
-      { new: true }
-    );
+    // An id this server cannot parse is the same answer as one that isn't
+    // yours — and not a 500 from a Mongoose CastError.
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return refuse(res, 404, 'session_not_found', 'No session with that id belongs to your account.');
+    }
 
+    const session = await Session.findOne({ _id: req.params.id, userId, isActive: true }).lean();
     if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
+      return refuse(res, 404, 'session_not_found', 'No active session with that id belongs to your account.');
+    }
+
+    if (jti && session.jti === jti) {
+      return refuse(
+        res,
+        409,
+        'current_session_not_terminable',
+        'That is the session you are using right now. Use Sign out to end it — ending it here would cut off the request that asked.'
+      );
+    }
+
+    const closed = await endSessionByJti(session.jti, { userId });
+    if (!closed) {
+      return refuse(res, 500, 'session_not_terminated', 'That session could not be ended. Try again.');
     }
 
     logger.info('sessions', 'Session terminated', {
-      userId: userId.toString(),
-      sessionId,
+      userId: String(userId),
+      sessionId: String(session._id),
       device: session.device,
     });
 
-    res.json({ success: true });
+    res.json({ ok: true, terminated: true, id: String(session._id) });
   } catch (error) {
     logger.error('sessions', 'Failed to logout session', error);
-    res.status(500).json({ error: 'Failed to logout session' });
+    refuse(res, 500, 'session_logout_failed', 'Could not end that session. Try again in a moment.');
   }
 });
 
 /**
  * POST /api/sessions/logout-all-others
- * Terminate all sessions except current
  */
 router.post('/logout-all-others', async (req, res) => {
   try {
     const userId = req.user._id;
-    const currentToken = req.headers.authorization?.split(' ')[1];
-    const currentTokenHash = currentToken ? hashToken(currentToken) : null;
-
-    if (!currentTokenHash) {
-      return res.status(401).json({ error: 'Current session not found' });
+    const jti = currentJti(req);
+    if (!jti) {
+      return refuse(
+        res,
+        409,
+        'current_session_untracked',
+        'This session predates session tracking, so it cannot be told apart from the others. Sign out and back in to use per-device controls.'
+      );
     }
 
-    const result = await Session.updateMany(
-      {
-        userId,
-        isActive: true,
-        tokenHash: { $ne: currentTokenHash },
-      },
-      { isActive: false }
-    );
+    const { closed } = await endOtherSessions({ userId, jti });
 
-    logger.info('sessions', 'All other sessions terminated', {
-      userId: userId.toString(),
-      count: result.modifiedCount,
+    logger.info('sessions', 'Other sessions terminated', {
+      userId: String(userId),
+      count: closed,
     });
 
-    res.json({ success: true, loggedOut: result.modifiedCount });
+    res.json({ ok: true, loggedOut: closed });
   } catch (error) {
-    logger.error('sessions', 'Failed to logout all sessions', error);
-    res.status(500).json({ error: 'Failed to logout sessions' });
+    logger.error('sessions', 'Failed to logout sessions', error);
+    refuse(res, 500, 'session_logout_failed', 'Could not end your other sessions. Try again in a moment.');
   }
 });
 
 /**
- * POST /api/sessions/{id}/verify
- * Verify session activity (update lastActivityAt)
+ * POST /api/sessions/verify-current
+ *
+ * Replaces POST /:id/verify, which updated lastActivityAt on any document
+ * whose id was supplied — no userId in the filter, so any signed-in user
+ * could rewrite the activity timestamp of any other user's session (and got a
+ * 500 instead of a 404 on a malformed id).
+ *
+ * Answering "is this session still live" needs no lookup to be trusted
+ * either: requireAuth above has already rejected an expired or revoked token,
+ * so reaching this handler IS the proof.
  */
-router.post('/:id/verify', async (req, res) => {
+router.post('/verify-current', async (req, res) => {
   try {
-    const sessionId = req.params.id;
-    await Session.findByIdAndUpdate(sessionId, {
-      lastActivityAt: new Date(),
+    const jti = currentJti(req);
+    const expSeconds = Number(req.tokenPayload?.exp);
+    const expiresAt = Number.isFinite(expSeconds) ? new Date(expSeconds * 1000) : null;
+
+    if (!jti) {
+      return res.json({
+        ok: true,
+        active: true,
+        tracked: false,
+        expiresAt,
+        reason: 'This token predates session tracking, so it has no session record.',
+      });
+    }
+
+    const session = await Session.findOne({ userId: req.user._id, jti }).lean();
+    if (!session) {
+      return res.json({ ok: true, active: true, tracked: false, expiresAt });
+    }
+
+    res.json({
+      ok: true,
+      active: Boolean(session.isActive),
+      tracked: true,
+      expiresAt: session.expiresAt || expiresAt,
     });
-    res.json({ success: true });
   } catch (error) {
     logger.error('sessions', 'Failed to verify session', error);
-    res.status(500).json({ error: 'Failed to verify session' });
-  }
-});
-
-/**
- * POST /api/sessions/create (internal use during login)
- * Create a new session record
- * Called from routes/auth.js after JWT is issued
- */
-router.post('/create', async (req, res) => {
-  try {
-    const { token } = req.body;
-    const userId = req.user._id;
-    
-    if (!token) {
-      return res.status(400).json({ error: 'Token required' });
-    }
-
-    const userAgent = req.headers['user-agent'] || '';
-    const uaInfo = parseUserAgent(userAgent);
-    const locationInfo = getLocationInfo(req);
-
-    // Calculate expiration (24 hours from now)
-    const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + 24);
-
-    const session = new Session({
-      userId,
-      tokenHash: hashToken(token),
-      device: uaInfo.device,
-      browser: uaInfo.browser,
-      browserVersion: uaInfo.browserVersion,
-      os: uaInfo.os,
-      ipAddress: locationInfo.ipAddress,
-      country: locationInfo.country,
-      city: locationInfo.city,
-      userAgent,
-      expiresAt,
-    });
-
-    await session.save();
-
-    logger.info('sessions', 'Session created', {
-      userId: userId.toString(),
-      device: uaInfo.device,
-      browser: uaInfo.browser,
-      country: locationInfo.country,
-    });
-
-    res.json({ success: true, sessionId: session._id });
-  } catch (error) {
-    logger.error('sessions', 'Failed to create session', error);
-    res.status(500).json({ error: 'Failed to create session' });
+    refuse(res, 500, 'session_verify_failed', 'Could not check this session. Try again in a moment.');
   }
 });
 

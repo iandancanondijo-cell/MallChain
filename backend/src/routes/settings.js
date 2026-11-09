@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const logger = require('../utils/logger');
 const auth = require('../middleware/auth');
@@ -7,8 +8,14 @@ const UserSettings = require('../models/UserSettings');
 const User = require('../models/user');
 const totp = require('../utils/totp');
 const { limiters } = require('../middleware/rateLimiter');
-const { config } = require('../config');
 const { appendAuditEvent } = require('../services/auditChainService');
+
+// The values Settings > Security > Session Timeout offers, and now the only
+// ones it accepts: this number is written into the `exp` of the next token by
+// utils/sessionPolicy.js, so a stored 0 or 1 would sign the user out on every
+// request. Kept here rather than in the policy util because it is what the
+// product advertises, not a security bound.
+const SESSION_TIMEOUT_CHOICES = [5, 15, 30];
 
 // Tamper-evident chain audit for privileged account-security changes (2FA,
 // password, security flags). Non-fatal + serialized inside the service, so
@@ -25,8 +32,38 @@ function chainSecurityAudit(req, action, payload = {}) {
 
 function ok(data) { return { ok: true, data }; }
 function fail(err) {
-  logger.error('API error', { error: err.message || err, stack: err.stack });
-  return { ok: false, error: typeof err === 'string' ? err : 'Invalid request' };
+  // utils/logger.js's error() is (context, message, error, data) — passing the
+  // failure object as `message` (which every caller of this helper used to do)
+  // landed it in the wrong slot, so the log line read `errorMessage:
+  // 'undefined'` and carried none of the reason. Strings are a client-facing
+  // refusal, not a fault, so they log at info; only real errors reach error().
+  if (typeof err === 'string') {
+    logger.warn('settings', 'request refused', { reason: err });
+    return { ok: false, error: err };
+  }
+  logger.error('settings', 'request failed', err);
+  return { ok: false, error: 'Invalid request' };
+}
+
+/**
+ * Phone OTPs are short-lived numeric secrets, so they are compared as hashes
+ * (see UserSettings.contactInfo.pendingPhoneOtpHash) with a constant-time
+ * equality check rather than `===` on digits an attacker is guessing.
+ */
+function hashOtp(otp) {
+  return crypto.createHash('sha256').update(String(otp)).digest('hex');
+}
+
+function otpsMatch(candidate, storedHash) {
+  const a = Buffer.from(hashOtp(candidate), 'hex');
+  const b = Buffer.from(String(storedHash), 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function clearPendingOtp(settings) {
+  settings.contactInfo.pendingPhoneOtpHash = undefined;
+  settings.contactInfo.pendingPhoneOtpExpiry = undefined;
+  settings.contactInfo.pendingPhoneOtpAttempts = 0;
 }
 
 async function getOrCreateSettings(userId) {
@@ -144,8 +181,12 @@ router.put('/contact', auth, async (req, res) => {
 });
 
 // POST /api/settings/contact/phone/send-otp - Send OTP to phone number
-// In production, this would integrate with an SMS gateway (Africa's Talking)
-// to deliver a real OTP. For now, returns the OTP in dev mode for testing.
+//
+// The digits used to be handed back in the response outside production
+// ("dev mode: check response for code"), which made phone verification a
+// formality for anyone who could open the Network tab — the answer arrived
+// with the question. The code is now only ever stored as a hash, and the
+// response only ever says whether the SMS provider accepted the message.
 router.post('/contact/phone/send-otp', auth, async (req, res) => {
   try {
     const settings = await getOrCreateSettings(req.user._id);
@@ -153,60 +194,137 @@ router.post('/contact/phone/send-otp', auth, async (req, res) => {
       return res.status(400).json(fail('Set a phone number first via PUT /contact'));
     }
 
-    // Generate a 6-digit OTP
-    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const otp = String(crypto.randomInt(100000, 1000000));
     const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    // Store OTP temporarily on the settings document
-    settings.contactInfo.pendingPhoneOtp = otp;
-    settings.contactInfo.pendingPhoneOtpExpiry = otpExpiry;
-    await settings.save();
+    // Persist before sending: a code that is delivered but not stored could
+    // never be verified, whereas a stored code that was not delivered simply
+    // expires unused — the safe direction to fail.
+    await UserSettings.updateOne(
+      { userId: req.user._id },
+      {
+        $set: {
+          'contactInfo.pendingPhoneOtpHash': hashOtp(otp),
+          'contactInfo.pendingPhoneOtpExpiry': otpExpiry,
+          'contactInfo.pendingPhoneOtpAttempts': 0,
+        },
+      }
+    );
 
-    // In production, send via SMS gateway. In dev, return it directly.
-    if (config.isProduction) {
-      const { sendSMS } = require('../services/brevoService');
-      await sendSMS(
-        settings.contactInfo.phoneNumber,
-        `Your Mallchain verification code is: ${otp}. Valid for 10 minutes.`
-      );
-      res.json(ok({ sent: true, message: 'OTP sent to your phone' }));
-    } else {
-      // Dev mode: return OTP directly for testing convenience
-      res.json(ok({ sent: true, otp, message: 'OTP generated (dev mode — check response for code)' }));
+    const { sendSMS } = require('../services/brevoService');
+    const sent = await sendSMS(
+      settings.contactInfo.phoneNumber,
+      `Your Mallchain verification code is: ${otp}. Valid for 10 minutes.`
+    );
+
+    if (!sent?.success) {
+      // No SMS left this server. Withdraw the pending code rather than leaving
+      // the account sitting on a challenge nobody can answer, and say so —
+      // "sent" would be a promise about a message that was never sent.
+      await UserSettings.updateOne({ userId: req.user._id }, { $unset: {
+        'contactInfo.pendingPhoneOtpHash': 1,
+        'contactInfo.pendingPhoneOtpExpiry': 1,
+        'contactInfo.pendingPhoneOtpAttempts': 1,
+      } });
+      logger.warn('settings', 'phone OTP was not delivered', {
+        userId: String(req.user._id),
+        reason: sent?.error || 'sms provider returned no result',
+      });
+      // `error` is what the SPA's api client turns into a toast (it reads a flat
+      // string), so the sentence goes there and the machine code rides along.
+      return res.status(503).json({
+        ok: false,
+        error: 'The SMS service did not accept the message, so no code was sent. Your phone number has not been changed.',
+        details: { code: 'sms_delivery_unavailable' },
+      });
     }
+
+    res.json(ok({ sent: true, expiresAt: otpExpiry, message: 'OTP sent to your phone' }));
   } catch (e) {
     res.status(500).json(fail(e));
   }
 });
 
 // POST /api/settings/contact/phone/verify - Verify phone with OTP
+//
+// Six digits, ten minutes: without a counter a caller can try the whole
+// space from a script, so each wrong answer is counted and the challenge is
+// burned at five. The code is read with an explicit `+`-select — it is
+// `select: false` on the schema precisely so no route that returns a settings
+// document can hand it out by accident — and compared as hashes.
+const PHONE_OTP_MAX_ATTEMPTS = 5;
+
 router.post('/contact/phone/verify', auth, async (req, res) => {
   try {
     const { otp } = req.body;
     if (!otp) return res.status(400).json(fail('OTP is required'));
 
-    const settings = await getOrCreateSettings(req.user._id);
-    const pendingOtp = settings.contactInfo?.pendingPhoneOtp;
-    const otpExpiry = settings.contactInfo?.pendingPhoneOtpExpiry;
+    const challenge = await UserSettings.findOne({ userId: req.user._id })
+      .select('+contactInfo.pendingPhoneOtpHash +contactInfo.pendingPhoneOtpExpiry +contactInfo.pendingPhoneOtpAttempts')
+      .lean();
 
-    if (!pendingOtp) {
-      return res.status(400).json(fail('No pending OTP. Request a new one via /phone/send-otp'));
+    const pendingHash = challenge?.contactInfo?.pendingPhoneOtpHash;
+    const otpExpiry = challenge?.contactInfo?.pendingPhoneOtpExpiry;
+    const attempts = challenge?.contactInfo?.pendingPhoneOtpAttempts ?? 0;
+
+    if (!pendingHash) {
+      return res.status(400).json(fail('No code has been sent to this number yet. Request one first.'));
     }
-    if (new Date() > otpExpiry) {
+    if (!otpExpiry || new Date() > new Date(otpExpiry)) {
+      await UserSettings.updateOne({ userId: req.user._id }, { $unset: {
+        'contactInfo.pendingPhoneOtpHash': 1,
+        'contactInfo.pendingPhoneOtpExpiry': 1,
+        'contactInfo.pendingPhoneOtpAttempts': 1,
+      } });
       return res.status(400).json(fail('OTP has expired. Request a new one'));
     }
-    if (pendingOtp !== String(otp).trim()) {
-      return res.status(400).json(fail('Invalid OTP'));
+    if (attempts >= PHONE_OTP_MAX_ATTEMPTS) {
+      await UserSettings.updateOne({ userId: req.user._id }, { $unset: {
+        'contactInfo.pendingPhoneOtpHash': 1,
+        'contactInfo.pendingPhoneOtpExpiry': 1,
+        'contactInfo.pendingPhoneOtpAttempts': 1,
+      } });
+      return res.status(429).json(fail('Too many incorrect codes. Request a new one.'));
+    }
+    if (!otpsMatch(String(otp).trim(), pendingHash)) {
+      await UserSettings.updateOne(
+        { userId: req.user._id },
+        { $inc: { 'contactInfo.pendingPhoneOtpAttempts': 1 } }
+      );
+      // settingsApi.unwrap drops everything but `error`, so the countdown has
+      // to live inside the sentence or the person never learns how close the
+      // challenge is to burning.
+      const remaining = PHONE_OTP_MAX_ATTEMPTS - (attempts + 1);
+      return res.status(400).json(fail(
+        remaining > 0
+          ? `That code is not correct. ${remaining} attempt${remaining === 1 ? '' : 's'} left before this code stops working.`
+          : 'Too many incorrect codes. Request a new one.'
+      ));
     }
 
-    // OTP matches — mark phone as verified
-    settings.contactInfo.phoneVerified = true;
-    settings.contactInfo.phoneVerifiedAt = new Date();
-    settings.contactInfo.pendingPhoneOtp = undefined;
-    settings.contactInfo.pendingPhoneOtpExpiry = undefined;
-    await settings.save();
+    // OTP matches — mark phone as verified and burn the challenge so a
+    // captured code cannot be replayed against the same number.
+    await UserSettings.updateOne(
+      { userId: req.user._id },
+      {
+        $set: {
+          'contactInfo.phoneVerified': true,
+          'contactInfo.phoneVerifiedAt': new Date(),
+        },
+        $unset: {
+          'contactInfo.pendingPhoneOtpHash': 1,
+          'contactInfo.pendingPhoneOtpExpiry': 1,
+          'contactInfo.pendingPhoneOtpAttempts': 1,
+        },
+      }
+    );
 
-    res.json(ok({ verified: true, phoneNumber: settings.contactInfo.phoneNumber }));
+    logger.info('settings', 'phone number verified', { userId: String(req.user._id) });
+
+    res.json(ok({
+      verified: true,
+      phoneNumber: challenge.contactInfo?.phoneNumber ?? null,
+    }));
   } catch (e) {
     res.status(500).json(fail(e));
   }
@@ -330,6 +448,16 @@ router.put('/security', auth, async (req, res) => {
     const settings = await getOrCreateSettings(req.user._id);
 
     const allowedFields = ['twoFactorEnabled', 'sessionTimeout', 'loginNotifications', 'deviceManagement'];
+    // sessionTimeout is read by utils/sessionPolicy.js and written into the
+    // `exp` of the next token, so it is a live input now, not a display
+    // preference. The control that sets it offers 5/15/30 minutes or no
+    // preference at all; anything else is refused rather than stored, because
+    // a 0 or a 1 would sign the user out on every request.
+    if (req.body.sessionTimeout !== undefined
+      && req.body.sessionTimeout !== null
+      && !SESSION_TIMEOUT_CHOICES.includes(Number(req.body.sessionTimeout))) {
+      return res.status(400).json(fail(`sessionTimeout must be one of ${SESSION_TIMEOUT_CHOICES.join(', ')} minutes, or null for the server default`));
+    }
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) settings.security[field] = req.body[field];
     });

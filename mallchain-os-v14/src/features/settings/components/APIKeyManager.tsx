@@ -148,7 +148,17 @@ export function APIKeyManager() {
     <div className="card mb">
       <div className="sec-title">
         <h2>API Keys</h2>
-        <span className="sub">Programmatic access for integrations</span>
+        <span className="sub">bearer keys for the metrics and treasury endpoints</span>
+      </div>
+
+      <div className="api-key-truth">
+        <div className="t">What a key actually opens today</div>
+        <div className="m">
+          <code>/metrics</code>, <code>/api/mallwallet/treasury/metrics</code> and{' '}
+          <code>/api/mallwallet/treasury/history</code> are the only endpoints that accept one. Expiry and the IP
+          whitelist are checked on every request; revoke and rotate take effect immediately. Scopes and the
+          per-key rate limit are <strong>stored but not checked</strong> — see the note in the create dialog.
+        </div>
       </div>
 
       {/* Key List */}
@@ -190,6 +200,7 @@ export function APIKeyManager() {
                   <span className="value">
                     {key.scope.join(', ') || 'None'}
                   </span>
+                  <span className="api-key-scope-flag">recorded only</span>
                 </div>
                 <div className="detail">
                   <span className="label">Expires:</span>
@@ -359,7 +370,7 @@ export function APIKeyManager() {
                 </div>
 
                 <div className="field">
-                  <label>Rate Limit (requests/minute)</label>
+                  <label>Rate limit (requests/minute)</label>
                   <input
                     type="number"
                     className="input"
@@ -373,10 +384,23 @@ export function APIKeyManager() {
                       }))
                     }
                   />
+                  <div className="tiny api-key-field-note">
+                    Saved on the key, not applied to it: the per-key limiter is not mounted, so the general API
+                    limit governs every request whatever you set here.
+                  </div>
                 </div>
 
                 <div className="field">
                   <label>Scopes</label>
+                  <div className="api-key-note api-key-note-warn">
+                    <div className="t">These boxes change the record, not the access.</div>
+                    <div className="m">
+                      No endpoint asks the key for a scope, so a key with one scope reaches everything a key with
+                      ten does — and unchecking everything here would not restrict it either. The ten names are
+                      what the key document allows (<code>models/apiKey.js</code>), so they are recorded
+                      accurately; real enforcement is a backend change (see the note under this card).
+                    </div>
+                  </div>
                   <div style={{ display: 'grid', gap: 8 }}>
                     {Object.entries(scopeCategories).map(([category, scopes]) => (
                       <div key={category}>
@@ -388,6 +412,7 @@ export function APIKeyManager() {
                             <label key={scope} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                               <input
                                 type="checkbox"
+                                aria-label={`Record scope ${scope} on this key`}
                                 checked={formData.scope.includes(scope)}
                                 onChange={() => toggleScope(scope)}
                               />
@@ -402,6 +427,10 @@ export function APIKeyManager() {
 
                 <div className="field">
                   <label>IP Whitelist (optional)</label>
+                  <div className="tiny api-key-field-note">
+                    This one is enforced: a request from an address outside this list is rejected with 403, even
+                    with a valid key.
+                  </div>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                     <input
                       type="text"
@@ -454,9 +483,22 @@ export function APIKeyManager() {
       )}
 
       {/* Help Text */}
-      <div className="tiny" style={{ marginTop: 16, padding: 10, backgroundColor: 'var(--surface-alt)', borderRadius: 6, color: 'var(--txt-3)' }}>
-        <strong>💡 Tips:</strong> API keys grant access to your account. Treat them like passwords. Use separate keys for
-        different apps. Rotate compromised keys immediately. Always use HTTPS. Never commit keys to version control.
+      <div className="api-key-truth">
+        <div className="t">Using a key safely</div>
+        <div className="m">
+          A key is a bearer credential: whoever holds it reads those three endpoints as you. Treat it like a
+          password, give each integration its own key, set an expiry, and add the caller&apos;s IP — both are
+          enforced. Rotate immediately if it leaks; the old string stops working at once.
+        </div>
+      </div>
+      <div className="api-key-note" style={{ marginTop: 10 }}>
+        <div className="t">Not enforced yet — backend work</div>
+        <div className="m">
+          <code>apiKeyAuth()</code> is mounted on the three endpoints without a required-scope list,{' '}
+          <code>requireScope()</code> and the per-key <code>rateLimit()</code> in the same middleware file are
+          never used, and the key routes do not check a scope against the endpoint being hit. Until those are
+          wired up, this panel&apos;s scope and rate-limit fields are documentation, not controls.
+        </div>
       </div>
     </div>
   );

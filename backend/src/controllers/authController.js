@@ -10,6 +10,14 @@ const { stampCurrentSession, checkLoginCooldown, handleExpiredToken, cooldownMin
 const getRedis = require('../mallwallet/queue/redis');
 const { blindIndex, decryptField } = require('../utils/fieldEncryption');
 const activityEvents = require('../services/activityEvents');
+const logger = require('../utils/logger');
+const { effectiveSessionTtlMinutes } = require('../utils/sessionPolicy');
+const {
+  recordIssuedSession,
+  recordFailedLoginAttempt,
+  endSessionByJti,
+  endAllSessions,
+} = require('../services/sessionRegistry');
 
 const LINK_WALLET_SIGNATURE_MAX_AGE_MS = 10 * 60 * 1000;
 const ADR036_CONSUMED_TTL_SECONDS = 60 * 60;
@@ -75,15 +83,19 @@ async function clearFailedLogins(identifier) {
  * here ever checked UserSettings at all — enabling "2FA" was purely
  * cosmetic and provided zero actual login protection.
  * Returns null if login can proceed, or a response object to send instead.
+ * On the "login can proceed" path it returns { mfaUsed } rather than null,
+ * because Login Activity has to say whether a second factor was actually
+ * presented — "2FA is enabled on the account" is not the same claim, and the
+ * panel used to have no way to tell them apart.
  */
 async function checkTwoFactor(userId, otp) {
   const settings = await UserSettings.findOne({ userId })
     .select('+security.twoFactorSecret +security.twoFactorBackupCodeHashes');
-  if (!settings?.security?.twoFactorEnabled) return null;
+  if (!settings?.security?.twoFactorEnabled) return { mfaUsed: false };
 
   if (!otp) return { requires2fa: true };
 
-  if (totp.verifyToken(settings.security.twoFactorSecret, otp)) return null;
+  if (totp.verifyToken(settings.security.twoFactorSecret, otp)) return { mfaUsed: true };
 
   const hashes = settings.security.twoFactorBackupCodeHashes || [];
   for (let i = 0; i < hashes.length; i++) {
@@ -92,7 +104,7 @@ async function checkTwoFactor(userId, otp) {
       hashes.splice(i, 1);
       settings.security.twoFactorBackupCodeHashes = hashes;
       await settings.save();
-      return null;
+      return { mfaUsed: true };
     }
   }
 
@@ -105,42 +117,62 @@ function getJwtSecret() {
   return secret;
 }
 
-function signToken(user) {
+async function signToken(user, req, { loginMethod = 'password', recordLogin = false, mfaUsed = false } = {}) {
   // Task 4.1: Generate JWT with correct payload: {userId, username, exp}
   // exp is set automatically by jsonwebtoken with expiresIn option
   // jti is a per-token id: logout revokes by jti (see routes/auth.js's
   // /logout and middleware/tokenDenylist.js) without needing to invalidate
-  // every other token this user holds.
-  // P1 ISSUE #1 WORKAROUND: Reduce default SESSION_TTL_MIN from 120 to 120 minutes
-  // (recommended 2 hours for financial app, but allowing override)
+  // every other token this user holds. It is also the primary key of a
+  // session in services/sessionRegistry.js — the same id is what
+  // GET /api/sessions matches "this is you" against, because the token value
+  // itself is unreachable from the frontend (httpOnly cookie).
   // Platform security policy (2026-11): deployment sets SESSION_TTL_MIN=30 —
   // 30 minutes of use, then the session hard-ends and login enters a 15-minute
-  // cooldown (see middleware/sessionCooldown.js). The 30-minute clamp floor
-  // below intentionally matches the policy.
-  const sessionTtlMin = parseInt(process.env.SESSION_TTL_MIN || '120', 10);
-  // Clamp to reasonable bounds: minimum 30 min, maximum 480 min (8 hours)
-  // This prevents misconfiguration from creating security holes
-  const clampedTtl = Math.max(30, Math.min(480, sessionTtlMin));
-  if (clampedTtl !== sessionTtlMin && process.env.SESSION_TTL_MIN) {
-    logger.warn('auth', 'SESSION_TTL_MIN clamped to safe bounds', { requested: sessionTtlMin, clamped: clampedTtl });
+  // cooldown (see middleware/sessionCooldown.js). The 30-minute clamp floor in
+  // utils/sessionPolicy.js intentionally matches the policy, and is the same
+  // function GET /api/sessions reads so the panel cannot claim a different
+  // lifetime than the one being signed into the token.
+  //
+  // `await`: the TTL is read from the account's own Settings > Security >
+  // Session Timeout as well, which is a database read. utils/sessionPolicy.js
+  // never throws for any reason that read can fail for, so this cannot turn a
+  // valid password into a 500.
+  const { ttlMinutes, requested, clamped } = await effectiveSessionTtlMinutes(user._id);
+  if (clamped) {
+    logger.warn('auth', 'SESSION_TTL_MIN clamped to safe bounds', { requested, clamped: ttlMinutes });
   }
+  const jti = crypto.randomUUID();
   const token = jwt.sign(
     {
       userId: String(user._id),
       username: user.username || user.email,
-      jti: crypto.randomUUID(),
+      jti,
     },
     getJwtSecret(),
-    { expiresIn: `${clampedTtl}m` }
+    { expiresIn: `${ttlMinutes}m` }
   );
-  const expiresAt = Math.floor(Date.now() / 1000) + clampedTtl * 60;
+  const expiresAt = Math.floor(Date.now() / 1000) + ttlMinutes * 60;
   // Record this token's exp as the user's CURRENT session (fail-open,
   // best-effort — see middleware/sessionCooldown.js). Every issue path
   // (register, login, refresh rotation, googleCallback) goes through here,
   // which is what lets requireAuth ignore expired tokens from stale tabs
   // whose exp predates the newest stamp instead of re-locking the account.
   stampCurrentSession(String(user._id), expiresAt).catch(() => {});
-  return { token, sessionTtlMin: clampedTtl, expiresAt };
+  // Same fail-open contract, from the same reason: this is the ONLY place a
+  // Session row is created, so routing every issuance through here is what
+  // makes the Active Sessions list complete. recordIssuedSession never
+  // rejects — see services/sessionRegistry.js.
+  recordIssuedSession({
+    userId: String(user._id),
+    jti,
+    token,
+    expiresAt: new Date(expiresAt * 1000),
+    req,
+    loginMethod,
+    recordLogin,
+    mfaUsed,
+  });
+  return { token, sessionTtlMin: ttlMinutes, expiresAt, jti };
 }
 
 // The JWT itself now lives ONLY in an httpOnly cookie — never in a JSON
@@ -312,7 +344,10 @@ exports.register = async (req, res) => {
   const u = await User.create({ email, password: hash });
   await recordReferralAttribution(u, referralCode);
 
-  const { token, sessionTtlMin, expiresAt } = signToken(u);
+  // Signing up is not signing in: the session row is recorded (so the Active
+  // Sessions panel shows this device) but no Login Activity row is, because
+  // the user did not authenticate against a credential.
+  const { token, sessionTtlMin, expiresAt } = await signToken(u, req);
   setAuthCookie(res, token, sessionTtlMin);
   activityEvents.emitAccountCreated(u._id.toString(), {}).catch(() => {});
   res.json({ expiresAt, user: toPublicUser(u) });
@@ -356,18 +391,28 @@ exports.login = async (req, res) => {
   if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
 
   const ok = await bcrypt.compare(password, u.password);
-  if (!ok) { await recordFailedLogin(email); return res.status(400).json({ error: 'invalid credentials' }); }
+  if (!ok) {
+    await recordFailedLogin(email);
+    // Attributable to an account only once the account is found — an attempt
+    // against an unknown email has no userId to file it under, and is already
+    // answered with the same generic message for that reason.
+    recordFailedLoginAttempt({ userId: u._id, req, failureReason: 'invalid_credentials' });
+    return res.status(400).json({ error: 'invalid credentials' });
+  }
 
   const twoFactorResult = await checkTwoFactor(u._id, otp);
   if (twoFactorResult?.requires2fa) return res.json({ requires2fa: true });
-  if (twoFactorResult?.error) return res.status(twoFactorResult.status).json({ error: twoFactorResult.error });
+  if (twoFactorResult?.error) {
+    recordFailedLoginAttempt({ userId: u._id, req, failureReason: 'mfa_failed' });
+    return res.status(twoFactorResult.status).json({ error: twoFactorResult.error });
+  }
 
   await clearFailedLogins(email);
 
   u.lastLoginAt = new Date();
   await u.save();
 
-  const { token, sessionTtlMin, expiresAt } = signToken(u);
+  const { token, sessionTtlMin, expiresAt } = await signToken(u, req, { recordLogin: true, mfaUsed: twoFactorResult.mfaUsed });
   setAuthCookie(res, token, sessionTtlMin);
   activityEvents.emitNewLogin(u._id.toString(), {
     event_time: new Date().toISOString(),
@@ -399,7 +444,7 @@ exports.registerUsername = async (req, res) => {
   const u = await User.create({ username, email: syntheticEmail, password: hash });
   await recordReferralAttribution(u, req.body?.referralCode);
 
-  const { token, sessionTtlMin, expiresAt } = signToken(u);
+  const { token, sessionTtlMin, expiresAt } = await signToken(u, req);
   setAuthCookie(res, token, sessionTtlMin);
   res.json({ expiresAt, user: toPublicUser(u) });
 };
@@ -430,17 +475,24 @@ exports.loginUsername = async (req, res) => {
   }
   if (!u.password) return res.status(400).json({ error: 'use OAuth login' });
   const ok = await bcrypt.compare(password, u.password);
-  if (!ok) { await recordFailedLogin(username); return res.status(400).json({ error: 'invalid credentials' }); }
+  if (!ok) {
+    await recordFailedLogin(username);
+    recordFailedLoginAttempt({ userId: u._id, req, failureReason: 'invalid_credentials' });
+    return res.status(400).json({ error: 'invalid credentials' });
+  }
 
   const twoFactorResult = await checkTwoFactor(u._id, req.body?.otp);
   if (twoFactorResult?.requires2fa) return res.json({ requires2fa: true });
-  if (twoFactorResult?.error) return res.status(twoFactorResult.status).json({ error: twoFactorResult.error });
+  if (twoFactorResult?.error) {
+    recordFailedLoginAttempt({ userId: u._id, req, failureReason: 'mfa_failed' });
+    return res.status(twoFactorResult.status).json({ error: twoFactorResult.error });
+  }
 
   await clearFailedLogins(username);
   u.lastLoginAt = new Date();
   await u.save();
 
-  const { token, sessionTtlMin, expiresAt } = signToken(u);
+  const { token, sessionTtlMin, expiresAt } = await signToken(u, req, { recordLogin: true, mfaUsed: twoFactorResult.mfaUsed });
   setAuthCookie(res, token, sessionTtlMin);
   res.json({ expiresAt, user: toPublicUser(u) });
 };
@@ -590,6 +642,9 @@ exports.googleCallback = async (req, res) => {
   const profile = req.user;
   const email = normalizeEmail((profile.emails && profile.emails[0] && profile.emails[0].value) || `${profile.id}@google`);
   let user = await User.findOne({ googleId: profile.id });
+  // 'returning' decides whether this lands in Login Activity: first Google
+  // use creates the account, which is a signup, not a sign-in.
+  const returning = Boolean(user);
   if (!user) {
     // New Google signup — the cooldown policy never applies to fresh
     // accounts (same as register/registerUsername).
@@ -610,7 +665,10 @@ exports.googleCallback = async (req, res) => {
       return res.redirect(`${frontend}/#/auth?mode=login&cooldown=${seconds}`);
     }
   }
-  const { token, sessionTtlMin } = signToken(user);
+  const { token, sessionTtlMin } = await signToken(user, req, {
+    loginMethod: 'google',
+    recordLogin: returning,
+  });
   setAuthCookie(res, token, sessionTtlMin);
   // Redirect with no token in the URL — it lives only in the cookie just
   // set above now. `?authed=1` is a non-secret signal so the frontend
@@ -624,12 +682,16 @@ exports.googleCallback = async (req, res) => {
 // cookie. Without the revoke, "logging out" only ever cleared the token
 // client-side; the JWT itself stayed valid server-side until it naturally
 // expired (SESSION_TTL_MIN).
+// The Session row is closed in the same breath: sign-out that left the row
+// active would keep listing this device under Active Sessions after the user
+// had, in fact, signed out.
 exports.logout = async (req, res) => {
   const payload = req.tokenPayload;
   if (payload?.jti && payload?.exp) {
     const ttlSeconds = payload.exp - Math.floor(Date.now() / 1000);
     await revokeToken(payload.jti, ttlSeconds);
   }
+  if (payload?.jti) await endSessionByJti(payload.jti);
   clearAuthCookie(res);
   return res.json({ ok: true });
 };
@@ -649,12 +711,16 @@ exports.logout = async (req, res) => {
 // by rotation instead of an explicit sign-out.
 exports.refresh = async (req, res) => {
   const oldPayload = req.tokenPayload;
-  const { token, sessionTtlMin, expiresAt } = signToken(req.user);
+  // loginMethod 'refresh' rather than 'password': the user did not present a
+  // credential again, so this belongs in Active Sessions but not in Login
+  // Activity.
+  const { token, sessionTtlMin, expiresAt } = await signToken(req.user, req, { loginMethod: 'refresh' });
   setAuthCookie(res, token, sessionTtlMin);
 
   if (oldPayload?.jti && oldPayload?.exp) {
     const ttlSeconds = oldPayload.exp - Math.floor(Date.now() / 1000);
     if (ttlSeconds > 0) await revokeToken(oldPayload.jti, ttlSeconds);
+    await endSessionByJti(oldPayload.jti);
   }
 
   return res.json({ expiresAt });
@@ -666,6 +732,10 @@ exports.refresh = async (req, res) => {
 // any other device holding a token for this account stayed fully logged in.
 exports.logoutEverywhere = async (req, res) => {
   await revokeAllUserTokens(String(req.user._id));
+  // revokeAllUserTokens rejects every token issued before this moment; the
+  // rows are closed to match, otherwise Active Sessions would go on listing
+  // devices that are already signed out.
+  await endAllSessions(req.user._id);
   clearAuthCookie(res);
   return res.json({ ok: true });
 };

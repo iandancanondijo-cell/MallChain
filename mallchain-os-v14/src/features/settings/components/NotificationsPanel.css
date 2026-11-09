@@ -1,0 +1,40 @@
+/* The notifications matrix lives in a half-width column on the settings page,
+   so its real width is ~320px on a 1000px window and ~560px on a 1440px one.
+   A 4-switch × 6-category grid cannot be legible at 320 with full-size
+   switches, so the card is a query container and the grid has one compact
+   step. Below that the wrapper still scrolls rather than crushing columns.
+
+   Selectors are doubled up (.notif-grid .x) because global.css is loaded after
+   this file and its bare `.tiny` / `.input` rules would otherwise win the
+   tie on the same elements. */
+
+.notif-card { container-type: inline-size; }
+
+.notif-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) repeat(4, 62px);
+  align-items: center;
+  gap: 2px;
+  min-width: 400px;
+}
+
+.notif-grid .notif-col-label { font-size: 11px; }
+.notif-grid .notif-col-caption { font-size: 10px; }
+.notif-grid .notif-freq { font-size: 11.5px; padding: 3px 4px; }
+.notif-grid .notif-freq-row { margin-top: 5px; }
+
+@container (max-width: 520px) {
+  .notif-grid {
+    grid-template-columns: minmax(96px, 1fr) repeat(4, 42px);
+    min-width: 0;
+  }
+  .notif-grid .notif-col-label { font-size: 8px; letter-spacing: -0.01em; }
+  .notif-grid .notif-col-caption { font-size: 8.5px; }
+  .notif-grid .switch { width: 32px; height: 18px; }
+  .notif-grid .switch .knob { width: 12px; height: 12px; }
+  .notif-grid .switch input:checked ~ .knob { transform: translateX(14px); }
+  .notif-grid .switch input:focus-visible + .track { outline-offset: 1px; }
+  .notif-grid .notif-freq { font-size: 10.5px; padding: 2px 3px; }
+  .notif-grid .notif-row-title { font-size: 11.5px; }
+  .notif-grid .notif-resub { font-size: 9.5px; padding: 2px 6px; width: 100%; }
+}

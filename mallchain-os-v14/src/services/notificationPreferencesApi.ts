@@ -31,6 +31,70 @@ export interface NotificationPreferences {
   updatedAt: string;
 }
 
+export type NotificationFrequencyValue = 'immediate' | 'daily' | 'weekly' | 'disabled';
+
+/** The four columns the per-category matrix renders. `push` is the in-app
+ *  column: NotificationPreferences has both a `push` and an `inApp` boolean and
+ *  the only one any dispatcher reads is `inApp`. */
+export type NotificationMatrixColumn = 'email' | 'push' | 'sms' | 'whatsapp';
+
+export interface NotificationCell {
+  /** Whether that channel may carry that category right now. */
+  on: boolean;
+  /** The per-channel switch, as stored. null = no NotificationPreferences row. */
+  master: boolean | null;
+  /** The per-category cell, as stored. null = the settings document has no opinion. */
+  cell: boolean | null;
+  /** Which switch is responsible for `on`. null = on, nothing is blocking it. */
+  decidedBy: 'channel' | 'category' | 'both' | 'default' | null;
+}
+
+/**
+ * What the two preference documents add up to, computed by
+ * backend/src/services/notificationPolicy.js — the same function the
+ * dispatchers call. Panels render their state from here, not from the document
+ * they happen to edit, so a switch cannot advertise an effect the server does
+ * not have.
+ */
+export interface EffectiveNotifications {
+  globalEnabled: boolean;
+  dnd: {
+    enabled: boolean;
+    /** True inside the quiet window as the server clocks it, not just "enabled". */
+    active: boolean;
+    startTime: string | null;
+    endTime: string | null;
+    timezone: string;
+    days: string[];
+  };
+  unsubscribedCategories: string[];
+  channels: Record<NotificationMatrixColumn, {
+    /** The field of `channels` this column's header switch edits. */
+    key: keyof NotificationPreferences['channels'];
+    /** 'gate' = ANDed with every cell in the column; 'override' = decides alone. */
+    mode: 'gate' | 'override';
+    master: boolean | null;
+  }>;
+  /** `channels` as the document stores them — send this back with one key
+   *  changed. Null when no NotificationPreferences row exists yet. */
+  preferenceChannels: NotificationPreferences['channels'] | null;
+  matrix: Array<{
+    category: string;
+    frequency: NotificationFrequencyValue;
+    /** 'frequency' | 'unsubscribed' — reasons the whole row cannot deliver. */
+    blockedBy: string[];
+    cells: Record<NotificationMatrixColumn, NotificationCell>;
+  }>;
+  gates: {
+    emailOnFile: boolean | null;
+    phoneOnFile: boolean;
+    phoneVerified: boolean;
+    whatsappOptIn: boolean;
+  };
+  hasPreferenceDocument: boolean;
+  hasSettingsDocument: boolean;
+}
+
 /**
  * A partial payload here used to blank out `frequency`/`channels` and crash the
  * whole Settings section on `prefs.frequency[cat]`, so every response is merged
@@ -69,12 +133,66 @@ function prefResponse<T extends { data?: NotificationPreferences }>(res: T): T {
   return res.data ? { ...res, data: withDefaults(res.data) } : res;
 }
 
+const MATRIX_COLUMNS: NotificationMatrixColumn[] = ['email', 'push', 'sms', 'whatsapp'];
+
+/**
+ * Same reasoning as withDefaults, one layer up: the panel reads
+ * `eff.channels[col].key` and maps `eff.matrix` while rendering, so a response
+ * that omits a column, a row or the gates object would blank the whole Settings
+ * section instead of showing one incomplete card.
+ */
+function withEffectiveDefaults(data: EffectiveNotifications): EffectiveNotifications {
+  const channels = { ...data.channels };
+  for (const col of MATRIX_COLUMNS) {
+    channels[col] ??= {
+      key: col === 'push' ? 'inApp' : col,
+      mode: col === 'push' ? 'override' : 'gate',
+      master: null,
+    };
+  }
+  const dnd: Partial<EffectiveNotifications['dnd']> = data.dnd ?? {};
+  const gates: Partial<EffectiveNotifications['gates']> = data.gates ?? {};
+  return {
+    ...data,
+    globalEnabled: data.globalEnabled !== false,
+    unsubscribedCategories: Array.isArray(data.unsubscribedCategories) ? data.unsubscribedCategories : [],
+    channels,
+    matrix: Array.isArray(data.matrix)
+      ? data.matrix.map((row) => ({ ...row, blockedBy: Array.isArray(row.blockedBy) ? row.blockedBy : [], cells: { ...row.cells } }))
+      : [],
+    dnd: {
+      enabled: dnd.enabled === true,
+      active: dnd.active === true,
+      startTime: dnd.startTime ?? null,
+      endTime: dnd.endTime ?? null,
+      timezone: dnd.timezone ?? 'Africa/Nairobi',
+      days: Array.isArray(dnd.days) ? dnd.days : [],
+    },
+    gates: {
+      emailOnFile: typeof gates.emailOnFile === 'boolean' ? gates.emailOnFile : null,
+      phoneOnFile: gates.phoneOnFile === true,
+      phoneVerified: gates.phoneVerified === true,
+      whatsappOptIn: gates.whatsappOptIn === true,
+    },
+  };
+}
+
 export const notificationPreferencesApi = {
   /**
    * Get user's notification preferences
    */
   async getPreferences() {
     return prefResponse(await api.get<NotificationPreferences>('/api/notification-preferences'));
+  },
+
+  /**
+   * Both preference documents resolved into what delivery will actually do.
+   * `getPreferences()` alone cannot render a switch honestly: it is one of the
+   * two documents that decide.
+   */
+  async getEffective() {
+    const res = await api.get<EffectiveNotifications>('/api/notification-preferences/effective');
+    return res.ok && res.data ? { ...res, data: withEffectiveDefaults(res.data) } : res;
   },
 
   /**

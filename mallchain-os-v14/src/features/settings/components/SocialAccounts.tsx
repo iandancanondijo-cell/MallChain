@@ -63,9 +63,11 @@ export function SocialAccounts({ onUpdate }: SocialAccountsProps) {
       const res = await settingsApi.getSocialAccounts();
       if (res.ok && res.data) {
         setAccounts(res.data);
+      } else {
+        toast(res.error || 'Saved social handles could not be loaded.', false);
       }
-    } catch (error) {
-      console.error('Failed to load social accounts:', error);
+    } catch {
+      toast('Saved social handles could not be loaded.', false);
     }
     setLoading(false);
   };
@@ -91,7 +93,7 @@ export function SocialAccounts({ onUpdate }: SocialAccountsProps) {
     try {
       const res = await settingsApi.updateSocialAccount(platformId, editHandle.trim());
       if (res.ok) {
-        toast(`${getPlatformName(platformId)} account linked`);
+        toast(`${getPlatformName(platformId)} handle saved`);
         setEditingPlatform(null);
         setEditHandle('');
         await loadAccounts();
@@ -133,7 +135,7 @@ export function SocialAccounts({ onUpdate }: SocialAccountsProps) {
     <div className="social-accounts">
       <div className="sec-title">
         <h2>Social Accounts</h2>
-        <span className="tiny">Link your social media profiles for content creation and publishing</span>
+        <span className="tiny">Saved handles for your storefront links — nothing here is verified with the platform</span>
       </div>
 
       {loading ? (
@@ -159,11 +161,11 @@ export function SocialAccounts({ onUpdate }: SocialAccountsProps) {
                     <div className="social-name">{platform.name}</div>
                     <div className="social-status">
                       {connected ? (
-                        <span className="connected-badge">
-                          ✓ Connected
+                        <span className="connected-badge" title="Stored on your profile. Mallchain has not signed in to this platform to check the handle exists.">
+                          Saved
                         </span>
                       ) : (
-                        <span className="disconnected-badge">Not connected</span>
+                        <span className="disconnected-badge">Not saved</span>
                       )}
                     </div>
                   </div>
@@ -232,7 +234,7 @@ export function SocialAccounts({ onUpdate }: SocialAccountsProps) {
                           onClick={() => handleConnect(platform.id)}
                           disabled={connecting === platform.id}
                         >
-                          {connecting === platform.id ? 'Connecting...' : 'Connect'}
+                          {connecting === platform.id ? 'Opening…' : 'Add handle'}
                         </button>
                       )}
                     </>

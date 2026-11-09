@@ -1,7 +1,9 @@
 # Frontend → backend handoff: what the UI cannot get today
 
 Date: 2026-11-09. Source: `mallchain-os-v14` at `fix/stale-wallet-persistence`,
-commits `a5d207ca` (dashboard pass) and `2f765202` (wallet credential integrity).
+commits `a5d207ca` (dashboard pass) and `2f765202` (wallet credential integrity);
+items 8–11 were added during the notifications, sessions and Profile & Settings
+passes on the same branch.
 Every item below was observed against the real route handlers in
 `mallchain-frontend/backend/src`, not inferred from the UI.
 
@@ -171,3 +173,71 @@ Requested on the backend/infra side: serve the published bundles from a separate
 account app. Frontend will additionally harden `storeSync` so an inbound snapshot can
 never replace a server-verified identity, only wallet-local hints — tracked with the
 KYC-gate work in this branch.
+
+## 10. API key scopes and per-key rate limits are recorded, not enforced
+
+`middleware/apiKeyAuth.js:12` is `apiKeyAuth(requiredScopes = [])`, and all three
+mounts pass nothing: `index.js:851` (`GET /metrics`), `mallwallet/routes/treasury.js:7`
+and `:21` (`GET /api/mallwallet/treasury/metrics`, `GET /api/mallwallet/treasury/history`).
+Those are the only endpoints that accept an API key at all. `requireScope()`
+(`apiKeyAuth.js:113`) and `rateLimit()` (`apiKeyAuth.js:137`) are exported from the same
+file and imported nowhere in `backend/src`.
+
+Consequences today:
+
+- a key minted with only `read:profile` reads treasury metrics and treasury history —
+  the scope list cannot narrow a key, so it cannot be used to hand an integration a
+  small grant;
+- `rateLimitPerMinute` (accepted up to 10000 by `routes/apiKeys.js:44`) has no effect;
+  only the global `apiLimiter` applies;
+- what *is* enforced, and can be quoted to users honestly: expiry and revocation
+  (`apiKeyAuth.js:45`) and the IP whitelist (`apiKeyAuth.js:57`).
+
+Requested:
+1. pass the required scope at each mount, e.g. `apiKeyAuth(['read:metrics'])` — note
+   the enum in `models/apiKey.js:36` currently lists only the ten UI scopes, none of
+   which names metrics or treasury, so it needs a value added (or the endpoints mapped
+   onto existing ones);
+2. mount `rateLimit()` behind those routes so the stored number means something;
+3. either expose more endpoints to keys or retire the scopes that describe endpoints
+   which cannot take one (`write:*`, `admin:*`) — keeping them in the picker invites
+   users to believe they are granting least privilege.
+
+The Settings panel now labels both fields as recorded-only and lists the three
+endpoints a key actually opens; that wording should be reversed when 1 and 2 land.
+
+## 11. Notification preferences: one merge now, four leftovers
+
+`services/notificationPolicy.js` (new on this branch) is the single place the two
+preference documents — `NotificationPreferences.channels.<channel>` and
+`UserSettings.notifications.<channel>.<category>` — are combined. The template engine
+(`notificationEngine.js`), the admin broadcast fan-out (`notificationDispatcher.js`) and
+`GET /api/notification-preferences/effective` all call it, so the UI and the senders
+cannot disagree any more. Four things still need a backend decision:
+
+**a. `NotificationPreferences.channels.push` is dead.** Stored, was rendered as a
+switch under "Notification Channels", and read by nothing: grepping `channels.push`
+across `backend/src` (excluding tests) returns no reader. The in-app channel is
+`channels.inApp`. Requested: delete the field (and its default) or wire it; the UI no
+longer offers it.
+
+**b. Quiet hours cannot suppress a templated event.** `notificationCatalogue.js:19`
+sets `transactional: true` on every template built by `t()`, and
+`notificationEngine.js:291` skips delivery on DND only when `!template.transactional`.
+So `dndActive` is computed and then ignored for every catalogue event; only the
+broadcast path in `notificationDispatcher.js` is actually suppressed. Requested: mark
+genuinely transactional templates (withdrawal confirmed, 2FA, KYC decision) as such and
+let the rest respect quiet hours — otherwise the Settings copy "alerts in the window are
+skipped, not delivered later" is true for one of the two senders.
+
+**c. `PATCH /channels` and `PATCH /frequency` replace whole subdocuments**
+(`routes/notificationPreferences.js:71` and `:131` pass the body object straight into
+`findOneAndUpdate`). A client that sends one key blanks the others to their schema
+defaults. The panel works around this by reading the stored object and sending it back
+with one key changed; requested: `$set` the individual keys (`channels.$set`, or a
+merge) so a partial write is safe.
+
+**d. `categoryToFrequencyKey('support')` returns `'system'`**, which is not one of the
+six frequency keys, so support events always resolve to `immediate` and cannot be
+paused. This is preserved as-is to avoid changing delivery under the merge refactor.
+Requested: decide whether `support` is its own frequency key or maps to `security`.

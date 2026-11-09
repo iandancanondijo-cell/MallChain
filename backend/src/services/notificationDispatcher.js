@@ -12,45 +12,12 @@ const Notification = require('../models/Notification');
 const brevoService = require('./brevoService');
 const { decryptField } = require('../utils/fieldEncryption');
 const logger = require('../utils/logger');
-
-/**
- * Check if current time is within user's do-not-disturb window.
- */
-function isWithinDND(dnd) {
-  if (!dnd.enabled) return false;
-
-  const now = new Date();
-  const userTimezone = dnd.timezone || 'Africa/Nairobi';
-
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: userTimezone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    weekday: 'short',
-  });
-
-  const parts = formatter.formatToParts(now);
-  const currentHour = parseInt(parts.find(p => p.type === 'hour').value);
-  const currentMinute = parseInt(parts.find(p => p.type === 'minute').value);
-  const currentDay = parts.find(p => p.type === 'weekday').value.toUpperCase();
-
-  const [startHour, startMinute] = dnd.startTime.split(':').map(Number);
-  const [endHour, endMinute] = dnd.endTime.split(':').map(Number);
-
-  const currentMinutes = currentHour * 60 + currentMinute;
-  const startMinutes = startHour * 60 + startMinute;
-  const endMinutes = endHour * 60 + endMinute;
-
-  const dayMatch = !dnd.days || dnd.days.length === 0 || dnd.days.includes(currentDay);
-  if (!dayMatch) return false;
-
-  if (startMinutes <= endMinutes) {
-    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
-  } else {
-    return currentMinutes >= startMinutes || currentMinutes < endMinutes;
-  }
-}
+const {
+  categoryToFrequencyKey,
+  mergeChannels,
+  readUserNotificationSettings,
+  isWithinDND,
+} = require('./notificationPolicy');
 
 /**
  * Map a category (plural preference-key, singular enum value, or raw kind)
@@ -75,26 +42,6 @@ const TYPE_BY_CATEGORY = {
 
 function toNotificationType(category) {
   return TYPE_BY_CATEGORY[category] || 'system';
-}
-
-/**
- * Map notification category to preference frequency key.
- */
-function categoryToFrequencyKey(category) {
-  const mapping = {
-    transaction: 'transactions',
-    transactions: 'transactions',
-    wallet: 'transactions',
-    security: 'security',
-    governance: 'governance',
-    campaign: 'campaigns',
-    campaigns: 'campaigns',
-    badge: 'badgeAlerts',
-    badgeAlerts: 'badgeAlerts',
-    marketing: 'marketing',
-    system: 'security',
-  };
-  return mapping[category] || 'security';
 }
 
 /**
@@ -154,16 +101,30 @@ async function dispatchNotification(userId, category, payload, options = {}) {
     const gate = options.channels || {};
     const gateOpen = (name) => gate[name] !== false;
 
+    // Same merge the template engine and the Settings panel use: the coarse
+    // NotificationPreferences switch ANDed with the per-category
+    // UserSettings.notifications cell. This path used to read only the coarse
+    // switch, so an admin broadcast reached every category of a channel the user
+    // had switched off category by category in Settings.
+    const userSettings = await readUserNotificationSettings(userId);
+    const { channels: allowed } = mergeChannels(prefs, userSettings, frequencyKey);
+
     const channels = {
       email: false,
       sms: false,
       whatsapp: false,
-      inApp: prefs.channels.inApp && gateOpen('inApp'),
+      inApp: allowed.inApp && gateOpen('inApp'),
     };
 
-    const willEmail = prefs.channels.email && user.email && gateOpen('email');
-    const willSms = prefs.channels.sms && user.phone && gateOpen('sms');
-    const willWhatsapp = prefs.channels.whatsapp && user.phone && gateOpen('whatsapp');
+    // WhatsApp carries its own consent flag (contactInfo.whatsappOptIn), which
+    // the engine has always required before sending one. The engine also checks
+    // it inside its own sender, so the extra condition here is what makes the
+    // broadcast path answer the same way the bell does.
+    const whatsappOptedIn = Boolean(userSettings?.contactInfo?.whatsappOptIn);
+
+    const willEmail = allowed.email && user.email && gateOpen('email');
+    const willSms = allowed.sms && user.phone && gateOpen('sms');
+    const willWhatsapp = allowed.whatsapp && whatsappOptedIn && user.phone && gateOpen('whatsapp');
 
     const deliveryStatus = {
       email: willEmail ? 'pending' : 'skipped',

@@ -13,6 +13,7 @@ const { getCachedUser, setCachedUser } = require('./authCache');
 const { isRevoked } = require('./tokenDenylist');
 const { handleExpiredToken } = require('./sessionCooldown');
 const { csrfProtection } = require('./csrf');
+const { touch: touchSession } = require('../services/sessionRegistry');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -104,6 +105,12 @@ function requireAuth(role) {
       req.tokenPayload = decoded; // exposes jti/exp for routes/auth.js's logout handlers
       req.authMethod = authMethod;
       if (!role) markActiveToday(user._id); // fire-and-forget — feeds the badge streak, never blocks the request
+
+      // "Last active" on the Active Sessions panel — this is the only write
+      // that keeps it current. Throttled to once a minute per session inside
+      // the registry and deliberately not awaited: a slightly stale timestamp
+      // is cosmetic, a blocked request is not.
+      touchSession(decoded.jti);
 
       // Presence: touch lastSeenAt for superadmins on every authed request
       // so /api/admin/presence can answer "is anyone with reply authority

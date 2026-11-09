@@ -37,7 +37,6 @@ export default function NotificationSetupWizard({ contact, userEmail, onComplete
   const [phoneInput, setPhoneInput] = useState(contact?.phoneNumber || '');
   const [otpInput, setOtpInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [devOtp, setDevOtp] = useState<string | undefined>();
 
   const goBack = () => {
     if (step === 'platform') setStep('welcome');
@@ -62,19 +61,21 @@ export default function NotificationSetupWizard({ contact, userEmail, onComplete
       // Phone-based channels: save number, send OTP.
       const r = await settingsApi.updateContact({ phoneNumber: phoneInput });
       if (!r.ok) {
-        toast(r.error || 'Could not save phone number');
+        toast(r.error || 'Could not save phone number', false);
         setLoading(false);
         return;
       }
 
       const otpRes = await settingsApi.sendPhoneOtp();
       if (!otpRes.ok) {
-        toast(otpRes.error || 'Could not send verification code');
+        // The number is saved; only the delivery failed. The backend answers
+        // 503 when the SMS provider refuses — this used to show a code that
+        // had been returned by a "dev mode" branch and never sent at all.
+        toast(otpRes.error || 'Number saved, but no code could be sent. Try again shortly.', false);
         setLoading(false);
         return;
       }
 
-      if (otpRes.data?.otp) setDevOtp(otpRes.data.otp);
       setStep('verify');
     } finally {
       setLoading(false);
@@ -86,7 +87,7 @@ export default function NotificationSetupWizard({ contact, userEmail, onComplete
     try {
       const r = await settingsApi.verifyPhone(otpInput);
       if (!r.ok) {
-        toast(r.error || 'Invalid verification code');
+        toast(r.error || 'That code is not correct', false);
         setLoading(false);
         return;
       }
@@ -270,16 +271,6 @@ export default function NotificationSetupWizard({ contact, userEmail, onComplete
         We sent a 6-digit code to <strong style={{ color: 'var(--txt-2)' }}>{phoneInput}</strong>
       </div>
 
-      {devOtp && (
-        <div style={{
-          padding: '8px 12px', background: 'rgba(96,165,250,0.08)', borderRadius: 8,
-          border: '1px solid rgba(96,165,250,0.2)', fontSize: 11.5, color: 'var(--info)',
-          marginBottom: 12,
-        }}>
-          Dev mode — your code: <strong>{devOtp}</strong>
-        </div>
-      )}
-
       <input
         className="input"
         type="text"
@@ -309,8 +300,7 @@ export default function NotificationSetupWizard({ contact, userEmail, onComplete
         onClick={async () => {
           setLoading(true);
           const r = await settingsApi.sendPhoneOtp();
-          if (r.ok && r.data?.otp) setDevOtp(r.data.otp);
-          toast(r.ok ? 'Code resent' : (r.error || 'Could not resend code'));
+          toast(r.ok ? 'A new code is on its way' : (r.error || 'Could not resend the code'), r.ok);
           setLoading(false);
         }}
         style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, marginTop: 10, cursor: 'pointer', display: 'block', width: '100%', textAlign: 'center' }}

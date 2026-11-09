@@ -14,7 +14,7 @@ import { badgeApi, type BadgeConfig, type BadgeQuote } from '../../services/badg
 import { SessionManager } from './components/SessionManager';
 import { LoginActivityComponent } from './components/LoginActivity';
 import { EmailManagement } from './components/EmailManagement';
-import { NotificationEnhancements } from './components/NotificationEnhancements';
+import { NotificationsPanel } from './components/NotificationsPanel';
 import { APIKeyManager } from './components/APIKeyManager';
 import { SocialAccounts } from './components/SocialAccounts';
 import { AvatarUpload } from './AvatarUpload';
@@ -290,10 +290,21 @@ export default function Settings() {
   };
 
   const toggleNotif = async (channel: 'email' | 'push' | 'sms' | 'whatsapp', key: string, value: boolean) => {
-    if (!settings) return;
-    const updated = { ...settings, notifications: { ...settings.notifications, [channel]: { ...settings.notifications[channel], [key]: value } } };
+    if (!settings) {
+      // Writing this without a loaded document used to quietly do nothing.
+      toast('Your settings are still loading — try again in a second.', false);
+      return;
+    }
+    const previous = settings.notifications;
+    const updated = { ...settings, notifications: { ...previous, [channel]: { ...previous[channel], [key]: value } } };
     setSettings(updated);
-    await settingsApi.update({ notifications: updated.notifications });
+    const res = await settingsApi.update({ notifications: updated.notifications });
+    if (!res.ok) {
+      // The grid renders the server's merged answer, so the optimistic flip must
+      // not survive a write the server refused.
+      setSettings((s) => (s ? { ...s, notifications: previous } : s));
+      toast(res.error || 'That change was not saved.', false);
+    }
   };
 
   const togglePrivacy = async (key: keyof UserSettingsData['privacy'], value: boolean | string) => {
@@ -431,7 +442,7 @@ export default function Settings() {
 
           <EmailManagement />
 
-          <NotificationEnhancements />
+          {!loading && settings && <NotificationsPanel onCellChange={toggleNotif} />}
 
           <APIKeyManager />
 
@@ -563,28 +574,11 @@ export default function Settings() {
 
           {!loading && settings && (
             <>
+              {/* The per-category grid that used to sit here is now part of the
+                  Notifications card, which renders the merged answer instead of
+                  only this document. */}
               <div className="card mb card-glow bg-gradient-card">
-                <div className="sec-title"><h2>Notifications</h2></div>
-                <div className="flag-row" style={{ marginBottom: 8 }}>
-                  <div className="desc"><div className="t">Category</div></div>
-                  <span className="tiny" style={{ width: 48, textAlign: 'center' }}>email</span>
-                  <span className="tiny" style={{ width: 48, textAlign: 'center' }}>push</span>
-                  <span className="tiny" style={{ width: 48, textAlign: 'center' }}>SMS</span>
-                  <span className="tiny" style={{ width: 56, textAlign: 'center' }}>WhatsApp</span>
-                </div>
-                {(['transactions', 'campaigns', 'governance', 'security', 'badgeAlerts'] as const).map((key) => (
-                  <div key={key} className="flag-row">
-                    <div className="desc"><div className="t">{key}</div></div>
-                    <label className="switch"><input type="checkbox" aria-label={`Email notifications for ${key}`} checked={settings.notifications.email[key]} onChange={(e) => toggleNotif('email', key, e.target.checked)} /><span className="track" /><span className="knob" /></label>
-                    <label className="switch"><input type="checkbox" aria-label={`Push notifications for ${key}`} checked={settings.notifications.push[key]} onChange={(e) => toggleNotif('push', key, e.target.checked)} /><span className="track" /><span className="knob" /></label>
-                    <label className="switch"><input type="checkbox" aria-label={`SMS notifications for ${key}`} checked={settings.notifications.sms?.[key] ?? false} onChange={(e) => toggleNotif('sms', key, e.target.checked)} /><span className="track" /><span className="knob" /></label>
-                    <label className="switch"><input type="checkbox" aria-label={`WhatsApp notifications for ${key}`} checked={settings.notifications.whatsapp?.[key] ?? false} onChange={(e) => toggleNotif('whatsapp', key, e.target.checked)} /><span className="track" /><span className="knob" /></label>
-                  </div>
-                ))}
-              </div>
-
-              <div className="card mb card-glow bg-gradient-card">
-                <div className="sec-title"><h2>Notification Channels</h2><span className="sub">Connect WhatsApp &amp; verify phone for SMS/WhatsApp alerts</span></div>
+                <div className="sec-title"><h2>Where notifications are sent</h2><span className="sub">Verify a phone number &amp; opt in for SMS and WhatsApp alerts</span></div>
 
                 {/* Phone number section */}
                 <div style={{ marginBottom: 16 }}>
@@ -608,16 +602,25 @@ export default function Settings() {
                         onClick={async () => {
                           setContactLoading(true);
                           const r = await settingsApi.updateContact({ phoneNumber: phoneInput });
-                          if (r.ok) {
-                            const otpRes = await settingsApi.sendPhoneOtp();
-                            if (otpRes.ok) {
-                              setOtpSent(true);
-                              toast(otpRes.data?.otp ? `OTP sent (dev: ${otpRes.data.otp})` : 'OTP sent to your phone');
-                            }
-                          } else {
-                            toast(r.error || 'Failed to save phone number');
+                          if (!r.ok) {
+                            setContactLoading(false);
+                            toast(r.error || 'Failed to save phone number', false);
+                            return;
                           }
+                          const otpRes = await settingsApi.sendPhoneOtp();
                           setContactLoading(false);
+                          if (otpRes.ok) {
+                            setOtpSent(true);
+                            setOtpInput('');
+                            toast(`A 6-digit code is on its way to ${phoneInput}`);
+                          } else {
+                            // The number is saved; only the delivery failed. The
+                            // backend answers 503 when the SMS gateway refuses,
+                            // and saying "sent" here would be a lie a person
+                            // would spend their time waiting on.
+                            setOtpSent(false);
+                            toast(otpRes.error || 'Number saved, but no code could be sent. Try again shortly.', false);
+                          }
                         }}
                       >
                         {contactLoading ? 'Sending…' : 'Verify Phone'}
@@ -630,13 +633,18 @@ export default function Settings() {
                 {otpSent && !contact?.phoneVerified && (
                   <div style={{ marginBottom: 16 }}>
                     <div className="t" style={{ marginBottom: 6, fontWeight: 600 }}>Enter Verification Code</div>
+                    <div className="tiny" style={{ marginBottom: 8, color: 'var(--txt-3)' }}>
+                      The code expires in 10 minutes. Five wrong guesses end it.
+                    </div>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <input
                         className="input"
                         type="text"
                         placeholder="6-digit code"
                         value={otpInput}
-                        onChange={(e) => setOtpInput(e.target.value)}
+                        onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
                         maxLength={6}
                         style={{ maxWidth: 160 }}
                       />
@@ -646,15 +654,15 @@ export default function Settings() {
                         onClick={async () => {
                           setContactLoading(true);
                           const r = await settingsApi.verifyPhone(otpInput);
+                          setContactLoading(false);
                           if (r.ok) {
                             setContact((prev) => prev ? { ...prev, phoneVerified: true, phoneVerifiedAt: new Date().toISOString() } : prev);
                             setOtpSent(false);
                             setOtpInput('');
                             toast('Phone verified');
                           } else {
-                            toast(r.error || 'Invalid OTP');
+                            toast(r.error || 'That code is not correct', false);
                           }
-                          setContactLoading(false);
                         }}
                       >
                         Verify
@@ -682,7 +690,7 @@ export default function Settings() {
                               setContact((prev) => prev ? { ...prev, whatsappOptIn: e.target.checked } : prev);
                               toast(e.target.checked ? 'WhatsApp notifications enabled' : 'WhatsApp notifications disabled');
                             } else {
-                              toast(r.error || 'Failed to update WhatsApp settings');
+                              toast(r.error || 'Failed to update WhatsApp settings', false);
                             }
                             setContactLoading(false);
                           }}
