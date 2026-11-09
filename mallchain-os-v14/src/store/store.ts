@@ -10,8 +10,10 @@
  */
 import { config } from '../services/config';
 import { detectDefaultCurrency } from '../services/locale';
+import { ADDRESS_BOOK_STORAGE_KEY } from '../services/addressBookStore';
 
 export const OS_KEY = 'mallchain_os_v1_v14';
+export const WALLET_VAULT_STORAGE_KEY = 'mallchain_vault';
 
 /**
  * Security model for wallet secrets:
@@ -737,6 +739,12 @@ class Store {
 
   reset() {
     localStorage.removeItem(OS_KEY);
+    // The vault and address book are account-scoped wallet data kept outside
+    // OS_KEY, so clearing only the store left a signed-out or newly registered
+    // account looking at the previous user's addresses — and the cipher wall
+    // offering to decrypt their mnemonic.
+    localStorage.removeItem(WALLET_VAULT_STORAGE_KEY);
+    localStorage.removeItem(ADDRESS_BOOK_STORAGE_KEY);
     memoryWalletSecrets = null;  // Clear memory secrets on logout
     this.state = emptyState();
     this.commit();

@@ -171,6 +171,10 @@ export const authApi = {
         resetRateLimit(rateLimitKey);
 
         const body = await res.json();
+        // A fresh account must not inherit the previous device user's store:
+        // without this the dashboard mounts with the old wallet address and the
+        // cipher wall offers to decrypt a mnemonic that was never theirs.
+        store.reset();
         if (typeof body?.expiresAt === 'number') {
           authService.setSession(body.expiresAt);
         }

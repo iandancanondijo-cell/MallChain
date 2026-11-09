@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { store } from '../../store/store';
+import { store, WALLET_VAULT_STORAGE_KEY } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { handleApiError } from '../../services/errorHandler';
 import { useWizard } from '../../hooks/useWizard';
@@ -60,7 +60,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('mallchain_vault');
+      const stored = localStorage.getItem(WALLET_VAULT_STORAGE_KEY);
       if (stored) setVault(JSON.parse(stored));
     } catch (err) { console.error('Failed to load vault:', err); }
   }, []);
@@ -95,7 +95,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       const entry: VaultEntry = { address: walletAddress, ...enc, savedAt: Date.now() };
       const newVault = [...vault.filter(v => v.address !== walletAddress), entry];
       setVault(newVault);
-      localStorage.setItem('mallchain_vault', JSON.stringify(newVault));
+      localStorage.setItem(WALLET_VAULT_STORAGE_KEY, JSON.stringify(newVault));
       setSecuredMethod(prev => ({ ...prev, stored: true }));
       toast('Phrase encrypted and stored');
     } catch { setError('Failed to encrypt phrase'); }
@@ -145,7 +145,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
         const entry: VaultEntry = { address: info.address, ...enc, savedAt: Date.now() };
         const newVault = [...vault.filter(v => v.address !== info.address), entry];
         setVault(newVault);
-        localStorage.setItem('mallchain_vault', JSON.stringify(newVault));
+        localStorage.setItem(WALLET_VAULT_STORAGE_KEY, JSON.stringify(newVault));
       }
       if (passwordResetMode) { toast('Password reset — this wallet now unlocks with your new password.'); setPasswordResetMode(false); }
       setPendingWallet({ mnemonic: words.join(' '), address: info.address });
