@@ -64,10 +64,22 @@ export interface TransactionsResponse {
 }
 
 /**
+ * routes/tx.js returns the chain's own `timestamp`, which is an ISO-8601 string
+ * (`Number()` of that is NaN) — but node-side code paths have also been seen to
+ * hand back epoch seconds or milliseconds. Normalise all three to ms; 0 means
+ * the value was unusable rather than "now".
+ */
+function toEpochMs(timestamp: string | number): number {
+  const numeric = typeof timestamp === 'number' ? timestamp : Number(timestamp);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric < 1e11 ? numeric * 1000 : numeric;
+  const parsed = Date.parse(String(timestamp ?? ''));
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+/**
  * Wallet API service
  */
-class WalletApi {
-  /**
+class WalletApi {  /**
    * Fetch wallet balance from API
    * Maps to: GET /api/wallet/{address}
    * 
@@ -151,18 +163,25 @@ class WalletApi {
       if (!result.ok || !result.data) return { ok: false, error: result.error || 'Failed to fetch transactions' };
 
       const MLCNS_DECIMALS = 6;
-      const transactions: Transaction[] = result.data.transactions.map((t) => ({
-        id: t.hash,
-        type: (t.type as Transaction['type']) || 'send',
-        amount: Number(t.amount || 0) / 10 ** MLCNS_DECIMALS,
-        asset: 'MALL',
-        status: (t.status as Transaction['status']) || 'confirmed',
-        to: t.to,
-        from: t.from,
-        ts: Number(t.timestamp) || Date.now(),
-        hash: t.hash,
-        blockNumber: t.block,
-      }));
+      const transactions: Transaction[] = result.data.transactions.map((t) => {
+        const ts = toEpochMs(t.timestamp);
+        return {
+          id: t.hash,
+          type: (t.type as Transaction['type']) || 'send',
+          amount: Number(t.amount || 0) / 10 ** MLCNS_DECIMALS,
+          asset: 'MALL',
+          status: (t.status as Transaction['status']) || 'confirmed',
+          to: t.to,
+          from: t.from,
+          // 0 = genuinely unknown. The previous `|| Date.now()` stamped every
+          // transaction with no parseable time as "just now", which is wrong on
+          // screen and wrong in WalletHistory's CSV export.
+          ts,
+          note: ts === 0 ? 'Chain returned no usable timestamp for this transaction' : undefined,
+          hash: t.hash,
+          blockNumber: t.block,
+        };
+      });
 
       return {
         ok: true,

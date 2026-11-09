@@ -241,22 +241,34 @@ export function BarChart({ data, labels, height = 150, color }: { data: number[]
 }
 
 /* ---------------- LineChart (SVG polyline) ---------------- */
-export function LineChart({ data, height = 150, color = 'var(--gold)' }: { data: number[]; height?: number; color?: string }) {
+export function LineChart({ data, height = 150, color = 'var(--gold)', labels, formatValue }: { data: number[]; height?: number; color?: string; labels?: string[]; formatValue?: (v: number) => string }) {
   const w = 300;
   const h = height;
   const max = Math.max(...data, 1);
   const min = Math.min(...data, 0);
-  const pts = data.map((v, i) => {
-    const x = (i / Math.max(data.length - 1, 1)) * w;
-    const y = h - ((v - min) / Math.max(max - min, 1)) * (h - 20) - 10;
-    return `${x},${y}`;
-  }).join(' ');
+  const yFor = (v: number) => h - ((v - min) / Math.max(max - min, 1)) * (h - 20) - 10;
+  const pts = data.map((v, i) => `${(i / Math.max(data.length - 1, 1)) * w},${yFor(v)}`).join(' ');
+  const showTip = (v: number, i: number) => `${labels?.[i] ?? ''} — ${(formatValue ?? String)(v)}`;
   return (
     <div className="chart-wrap">
-      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height }} preserveAspectRatio="none">
-        <polyline points={pts} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height }} preserveAspectRatio="none" role="img" aria-label={labels?.length ? `Line chart, ${data.length} points: ${data.map(showTip).join(', ')}` : 'Line chart'}>
+        <polyline points={pts} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         <polygon points={`0,${h} ${pts} ${w},${h}`} fill={color} opacity={0.08} />
       </svg>
+      {/* Vertices and tooltips are HTML, not SVG: the viewBox is stretched to
+          the container width, so in-SVG circles render as ellipses and an
+          in-SVG hit area lands anywhere between a few and a few dozen real
+          pixels depending on the panel. */}
+      {labels && labels.length > 0 && (
+        <div className="chart-hit-layer" style={{ ['--_lc' as string]: color, height }}>
+          {data.map((v, i) => (
+            <span key={i} className="chart-hit" style={{ left: `${(i / Math.max(data.length - 1, 1)) * 100}%`, top: `${(yFor(v) / h) * 100}%` }}>
+              <span className="tip">{showTip(v, i)}</span>
+            </span>
+          ))}
+        </div>
+      )}
+      {labels && labels.length > 0 && <div className="chart-x">{labels.map((l, i) => <span key={i}>{l}</span>)}</div>}
     </div>
   );
 }
@@ -316,5 +328,19 @@ export function fmtMoney(n: number, currency = 'USD'): string {
   } catch {
     // Intl doesn't recognize the code (shouldn't happen for a real ISO 4217 currency) — fall back to a plain code prefix rather than crashing.
     return `${currency} ${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+  }
+}
+
+/** Unit prices rather than balances. MLCNS trades at fractions of a Kenyan
+ * shilling, so once FX-crossed into USD it is well under a cent — and
+ * fmtMoney's fixed two decimals flattens every one of those rates to "$0.00".
+ * Keeps two decimals from 1 upward and six below. */
+export function fmtUnitPrice(n: number, currency = 'USD'): string {
+  const digits = Math.abs(n) < 1 ? 6 : 2;
+  try {
+    const locale = navigator.language || 'en-US';
+    return new Intl.NumberFormat(locale, { style: 'currency', currency, maximumFractionDigits: digits }).format(n);
+  } catch {
+    return `${currency} ${n.toLocaleString('en-US', { maximumFractionDigits: digits })}`;
   }
 }

@@ -1163,6 +1163,30 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .chart-x { display: flex; gap: 6px; margin-top: 6px; }
 .chart-x span { flex: 1; text-align: center; font-size: 10px; color: var(--txt-3); }
 
+/* LineChart vertices — HTML overlay so the markers stay round and the hover
+   target stays a fixed 16px regardless of how the SVG viewBox is stretched. */
+.chart-hit-layer { position: absolute; top: 0; left: 0; right: 0; pointer-events: none; }
+.chart-hit {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 16px; height: 16px; pointer-events: auto;
+}
+.chart-hit::after {
+  content: ''; position: absolute; inset: 5px; border-radius: 50%;
+  background: var(--bg-1); border: 2px solid var(--_lc, var(--gold));
+  transition: transform var(--duration-fast) var(--ease), box-shadow var(--duration-fast) var(--ease);
+}
+.chart-hit:hover::after { transform: scale(1.35); box-shadow: 0 0 10px var(--_lc, var(--gold)); }
+.chart-hit .tip {
+  position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  background: var(--bg-3); border: 1px solid var(--glass-border-hover); color: var(--txt-1);
+  font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 7px;
+  white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.15s; z-index: 6;
+  box-shadow: var(--shadow-sm);
+}
+.chart-hit:hover .tip { opacity: 1; }
+.chart-hit:first-child .tip { left: 0; transform: none; }
+.chart-hit:last-child .tip { left: auto; right: 0; transform: none; }
+
 .score-ring { position: relative; width: 72px; height: 72px; flex: none; }
 .score-ring svg { transform: rotate(-90deg); }
 .score-ring .ring-txt { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: var(--accent); }

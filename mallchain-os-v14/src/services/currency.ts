@@ -73,10 +73,15 @@ export function useCurrencyConverter(cur: Currency): (amount: number | null, uni
   const usdToCur = useRate('USD', cur);
   const kesToCur = useRate('KES', cur);
   return (amount: number | null, unit: FiatUnit) => {
-    if (amount === null) return null;
+    // A missing balance is `undefined`, and a persisted store written by an
+    // older version can hold `null` or a field that no longer exists — both
+    // used to survive the `=== null` check and reach Intl as NaN, which
+    // rendered "$NaN" on the dashboard instead of the "still loading" dash.
+    if (typeof amount !== 'number' || !Number.isFinite(amount)) return null;
     const rate = unit === 'KES' ? kesToCur : usdToCur;
-    if (rate === null) return null;
-    return amount * rate;
+    if (typeof rate !== 'number' || !Number.isFinite(rate)) return null;
+    const converted = amount * rate;
+    return Number.isFinite(converted) ? converted : null;
   };
 }
 

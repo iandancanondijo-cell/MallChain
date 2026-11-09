@@ -364,35 +364,8 @@
 }
 
 /* ============================================================
-   Dashboard Mini Chart
-   ============================================================ */
-
-.dash-mini-chart {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius);
-  min-width: 180px;
-  transition: border-color var(--duration-normal) var(--ease);
-}
-
-.dash-mini-chart:hover {
-  border-color: rgba(var(--section-accent-rgb), 0.15);
-}
-
-.dash-mini-chart > :first-child {
-  font-size: var(--text-xs);
-  color: var(--txt-3);
-  font-weight: var(--weight-semibold);
-}
-
-/* ============================================================
    Dashboard Hero Section
    ============================================================ */
-
 .dash-hero {
   position: relative;
   overflow: hidden;
@@ -645,6 +618,278 @@
 }
 
 /* ============================================================
+   Uniform section rhythm
+   ============================================================ */
+
+/* The view used to mix inline marginTop: 14 with .stat-grid's own 18px
+   margin-bottom and .dash-quick-actions' 14px margin-top, so the gaps between
+   sections were 14, 18, 32 and 14 in no particular order. The stack owns the
+   spacing now and its children own none. */
+.dash-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.dash-stack > * {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* ============================================================
+   Balance card identity — name, chain, three status squares
+   ============================================================ */
+
+.dash-hero-sub {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.dash-hero-account {
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  color: var(--txt-1);
+}
+
+.dash-hero-chainid {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.2px;
+  color: var(--txt-3);
+  padding: 2px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dash-hero-chainid.mismatch {
+  color: var(--red-2);
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.dash-hero-height {
+  font-size: 11px;
+  color: var(--txt-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.net-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 2px;
+}
+
+.net-dot {
+  width: 7px;
+  height: 7px;
+  /* deliberately a square, not a circle — three lit squares read as a
+     hardware status strip, which is what this replaced */
+  border-radius: 1.5px;
+  display: inline-block;
+  /* the colour belongs to the signal, so it stays on the square when the
+     signal is off — a dead square is still the same square, just unlit */
+  filter: saturate(0.25);
+  opacity: 0.3;
+  transition: opacity var(--duration-normal) var(--ease), box-shadow var(--duration-normal) var(--ease), filter var(--duration-normal) var(--ease);
+}
+
+.net-dot-green { background: var(--green-2); }
+.net-dot-yellow { background: var(--gold); }
+.net-dot-orange { background: #ff8a3d; }
+
+.net-dot.is-on {
+  opacity: 1;
+  filter: none;
+  animation: net-dot-breathe 2.8s var(--ease) infinite;
+}
+
+.net-dot-green.is-on {
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.85), 0 0 14px rgba(74, 222, 128, 0.35);
+}
+
+.net-dot-yellow.is-on {
+  box-shadow: 0 0 6px rgba(243, 186, 47, 0.85), 0 0 14px rgba(243, 186, 47, 0.35);
+}
+
+.net-dot-orange.is-on {
+  box-shadow: 0 0 6px rgba(255, 138, 61, 0.85), 0 0 14px rgba(255, 138, 61, 0.35);
+}
+
+/* Not-yet-measured: the square is lit enough to see, but pulses on its own
+   rhythm so it cannot be mistaken for a live or a dead signal. */
+.net-dot.is-check {
+  opacity: 0.75;
+  filter: saturate(0.5);
+  animation: net-dot-scan 1.2s linear infinite;
+}
+
+.net-dot:nth-child(2) { animation-delay: 0.35s; }
+.net-dot:nth-child(3) { animation-delay: 0.7s; }
+
+@keyframes net-dot-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.22); }
+}
+
+@keyframes net-dot-scan {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.8; }
+}
+
+.chip.chip-action {
+  cursor: pointer;
+  color: var(--gold);
+  border-color: rgba(243, 186, 47, 0.4);
+  background: rgba(243, 186, 47, 0.1);
+}
+
+.chip.chip-action:hover:not(:disabled) {
+  background: rgba(243, 186, 47, 0.18);
+  border-color: rgba(243, 186, 47, 0.6);
+}
+
+.chip.chip-action:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* ============================================================
+   7-day balance flow chart (hero)
+   ============================================================ */
+
+.dash-flow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: 360px;
+  padding: var(--space-3);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  transition: border-color var(--duration-normal) var(--ease);
+}
+
+.dash-flow:hover {
+  border-color: rgba(34, 211, 238, 0.22);
+}
+
+.dash-flow-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.dash-flow-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--txt-3);
+}
+
+.dash-flow-trend {
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+  color: var(--txt-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-flow-trend.up { color: var(--green-2); }
+.dash-flow-trend.down { color: var(--red-2); }
+
+.dash-flow-note {
+  color: var(--txt-3);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.dash-flow-empty,
+.dash-flow-empty-plot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--txt-3);
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-sm);
+}
+
+.dash-flow-empty {
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  text-align: center;
+}
+
+/* ============================================================
+   KYC verdict states
+   ============================================================ */
+
+.kyc-banner.kyc-verified {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.14), rgba(34, 197, 94, 0.04));
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.kyc-banner.kyc-verified .kyc-banner-title { color: var(--green-2); }
+
+.kyc-banner.kyc-invalid {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.14), rgba(239, 68, 68, 0.04));
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
+.kyc-banner.kyc-invalid .kyc-banner-title { color: var(--red-2); }
+
+.kyc-banner.kyc-review {
+  background: linear-gradient(135deg, rgba(243, 186, 47, 0.12), rgba(243, 186, 47, 0.03));
+  border-color: rgba(243, 186, 47, 0.35);
+}
+
+.kyc-banner-icon.ok {
+  background: rgba(34, 197, 94, 0.18);
+  color: var(--green-2);
+  box-shadow: 0 0 18px rgba(34, 197, 94, 0.25);
+}
+
+.kyc-banner-icon.bad {
+  background: rgba(239, 68, 68, 0.18);
+  color: var(--red-2);
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.2);
+}
+
+/* A confirmation that has done its job folds itself away instead of sitting
+   on the dashboard permanently. */
+.kyc-banner.kyc-fade {
+  animation: kyc-confirm 6s var(--ease) both;
+}
+
+@keyframes kyc-confirm {
+  0% { opacity: 0; transform: translateY(8px); }
+  8% { opacity: 1; transform: none; }
+  85% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(-6px); }
+}
+
+/* ============================================================
+   Notification rows (dashboard feed)
+   ============================================================ */
+
+button.dash-notif-row {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button.dash-notif-row:hover {
+  background: rgba(var(--section-accent-rgb), 0.06);
+}
+
+/* ============================================================
    Accessibility
    ============================================================ */
 
@@ -668,6 +913,19 @@
   .dash-stats,
   .dash-quick-actions,
   .grid-2 {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  /* the status squares still have to say "live" without pulsing, so keep the
+     glow and drop only the breathing scale */
+  .net-dot.is-on {
+    animation: none !important;
+    transform: none !important;
+  }
+
+  .kyc-banner.kyc-fade {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;
