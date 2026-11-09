@@ -4,7 +4,7 @@ import { store, WALLET_VAULT_STORAGE_KEY } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { handleApiError } from '../../services/errorHandler';
 import { useWizard } from '../../hooks/useWizard';
-import { validateMnemonicPhrase, generateNewMnemonic, deriveAddressFromMnemonic } from '../../services/wallet';
+import { validateMnemonicPhrase, generateNewMnemonic, deriveAddressFromMnemonic, formatAddressForDisplay } from '../../services/wallet';
 import { chain } from '../../services/config';
 import { saveWalletCredential } from './credentialSave';
 import { CipherSetup } from '../../components/CipherWall';
@@ -12,6 +12,8 @@ import { Shield, Check, AlertTriangle, Key, Wallet, ArrowLeft, ChevronRight } fr
 import { encryptMnemonic, decryptMnemonic, type VaultEntry } from './walletCrypto';
 import { CreatePasswordStep, CreateSeedStep, CreateConfirmStep, CreateSecureStep } from './WalletCreateSteps';
 import { ConnectMethodStep, ConnectRetrieveStep, ConnectImportStep } from './WalletImportSteps';
+import { useWalletGate, invalidateWalletGate, canAttachAddress } from './walletGate';
+import WalletGateNotice from './WalletGateNotice';
 
 const FLOW_STEPS = [
   'landing', 'create-password', 'create-seed', 'create-confirm', 'create-secure',
@@ -30,9 +32,33 @@ type WalletFlowData = {
 
 const INITIAL_DATA: WalletFlowData = { mode: 'create', password: '', seedWords: [], seedSaved: false, walletAddress: '' };
 
+/**
+ * Every step that builds or restores a key on this device. Verified identity
+ * comes before a wallet (backend/src/middleware/requireKyc.js refuses the link
+ * that attaches one to an account), so these steps are unreachable while the
+ * gate refuses — otherwise the wizard would happily run someone through 24
+ * words, a cipher and a backup download for a wallet the account cannot hold.
+ */
+const WALLET_BUILD_STEPS: FlowStep[] = [
+  'create-password', 'create-seed', 'create-confirm', 'create-secure', 'set-cipher',
+  'connect-method', 'connect-retrieve', 'connect-import',
+];
+
+/**
+ * The steps that mint a *brand new* key. In restore mode — an unverified
+ * account that already holds a wallet on the server — these are the ones that
+ * must stay shut, because the address they produce is by definition not the
+ * address the link route will accept. Importing a phrase stays open: it may
+ * produce the one address this account is allowed to re-attach.
+ */
+const CREATE_STEPS: FlowStep[] = [
+  'create-password', 'create-seed', 'create-confirm', 'create-secure',
+];
+
 export default function WalletFlow({ navigate, onBack }: { navigate: (p: string) => void; onBack?: () => void }) {
   useStoreVersion();
   const st = store.state;
+  const { gate, refresh: refreshGate } = useWalletGate();
 
   const wizard = useWizard<FlowStep, WalletFlowData>({ key: 'walletCreate', tier: 'session', steps: FLOW_STEPS, initialData: INITIAL_DATA });
   const step = wizard.step;
@@ -64,9 +90,22 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     } catch (err) { console.error('Failed to load vault:', err); }
   }, []);
 
+  // The wizard keeps its current step in sessionStorage, so a reload can land
+  // straight on 'create-seed' without passing the landing buttons. A gate
+  // refusal sends that back to the landing, where the notice says why —
+  // 'checking' is left alone so a page refresh mid-flow isn't thrown out.
+  // Restore mode gets the same treatment for its own half of the wizard: a
+  // new key would be an address this account can never link.
   useEffect(() => {
-    if (step === 'create-seed' && seedWords.length === 0) generateMnemonic();
-  }, [step, seedWords.length]);
+    if (step === 'landing' || step === 'success') return;
+    if (gate.blocked || (gate.restoreOnly && CREATE_STEPS.includes(step))) wizard.goTo('landing');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gate.blocked, gate.restoreOnly]);
+
+  useEffect(() => {
+    if (step === 'create-seed' && seedWords.length === 0 && !gate.restoreOnly) generateMnemonic();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, seedWords.length, gate.restoreOnly]);
 
   const generateMnemonic = async () => {
     setLoading(true);
@@ -83,6 +122,19 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   };
 
   const goTo = (newStep: FlowStep) => {
+    if (WALLET_BUILD_STEPS.includes(newStep) && !gate.allowed) {
+      // Every door into key generation goes through here, so the rule is
+      // enforced once rather than per-button — and the landing it falls back
+      // to is where WalletGateNotice explains the reason.
+      wizard.goTo('landing');
+      setError('');
+      return;
+    }
+    if (gate.restoreOnly && CREATE_STEPS.includes(newStep)) {
+      wizard.goTo('landing');
+      setError(`This account is not verified yet, so it can only re-connect the wallet already attached to it (${formatAddressForDisplay(gate.restoreAddress || '')}). Generating a new one would give an address that cannot be linked. Verify your identity to open full wallet setup.`);
+      return;
+    }
     wizard.goTo(newStep);
     setError('');
     if (newStep === 'create-seed' && seedWords.length === 0) generateMnemonic();
@@ -132,6 +184,29 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     toast('Backup file downloaded');
   };
 
+  /**
+   * The one phrase-level check that restore mode adds: an unverified account
+   * may re-attach only the address already on file (the link route matches it
+   * with `allowSameAddress`), so a mismatch is caught here — before anything is
+   * stored or a secret is chosen — rather than at the server, after.
+   */
+  const restoreMismatch = (address: string): string | null => (
+    gate.restoreOnly && address !== gate.restoreAddress
+      ? `That phrase belongs to ${formatAddressForDisplay(address)}, but this account is not verified and already holds ${formatAddressForDisplay(gate.restoreAddress || '')}. Only that wallet can be re-connected here. Use its recovery phrase, or verify your identity to connect a different one.`
+      : null
+  );
+
+  const openCipherStep = (mnemonic: string, address: string) => {
+    const mismatch = restoreMismatch(address);
+    if (mismatch) {
+      setPendingWallet(null);
+      setError(mismatch);
+      return;
+    }
+    setPendingWallet({ mnemonic, address });
+    goTo('set-cipher');
+  };
+
   const handleCreateWallet = async () => {
     if (!securedMethod.stored && !securedMethod.downloaded && !securedMethod.cold) {
       setError('Please choose at least one security method'); return;
@@ -139,8 +214,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     setLoading(true);
     try {
       const info = await deriveAddressFromMnemonic(seedWords.join(' '));
-      setPendingWallet({ mnemonic: seedWords.join(' '), address: info.address });
-      goTo('set-cipher');
+      openCipherStep(seedWords.join(' '), info.address);
     } catch (error) {
       setError(`Could not finish creating the wallet: ${error instanceof Error ? error.message : 'unexpected error'}`);
       handleApiError({ ok: false, error: 'Wallet creation failed', code: 500 } as any, { action: 'creating wallet', endpoint: 'client-side derivation' }, false);
@@ -156,6 +230,14 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     setLoading(true);
     try {
       const info = await deriveAddressFromMnemonic(words.join(' '));
+      const mismatch = restoreMismatch(info.address);
+      if (mismatch) {
+        // Before the vault write: an address this account cannot link is not
+        // worth a stored copy in this browser.
+        setError(mismatch);
+        setLoading(false);
+        return;
+      }
       if (importPassword) {
         const enc = await encryptMnemonic(words.join(' '), importPassword);
         const entry: VaultEntry = { address: info.address, ...enc, savedAt: Date.now() };
@@ -170,8 +252,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
         setVault(newVault);
       }
       if (passwordResetMode) { toast('Password reset — this stored copy now unlocks with your new password.'); setPasswordResetMode(false); }
-      setPendingWallet({ mnemonic: words.join(' '), address: info.address });
-      goTo('set-cipher');
+      openCipherStep(words.join(' '), info.address);
     } catch (error) {
       setError(`Could not import this phrase: ${error instanceof Error ? error.message : 'unexpected error'}`);
     }
@@ -218,6 +299,28 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
 
   const handleSetCipher = async (cipher: string) => {
     if (!pendingWallet) return;
+    // Last line before a key is written to this device: the step guards above
+    // can be raced by a verdict that changes mid-flow (an admin revoking while
+    // the wizard is open), and a wallet nobody can link is a liability, not a
+    // convenience. Nothing is saved and the pending phrase is dropped.
+    if (!gate.allowed) {
+      setPendingWallet(null);
+      wizard.goTo('landing');
+      invalidateWalletGate();
+      setError('');
+      return;
+    }
+    // Restore mode: an unverified account that already holds a wallet on the
+    // server may re-attach that one address and no other — link-wallet accepts
+    // it only when the body matches what is on file (allowSameAddress in
+    // backend/src/routes/auth.js). Saving a cipher around a different phrase
+    // would hand this person a wallet the account can never link.
+    if (!canAttachAddress(gate, pendingWallet.address)) {
+      setPendingWallet(null);
+      wizard.goTo('landing');
+      setError(`The phrase you unlocked gives a different address (${formatAddressForDisplay(pendingWallet.address)}) than the wallet already on this account (${formatAddressForDisplay(gate.restoreAddress || '')}), so nothing was saved. Use the recovery phrase for that wallet, or verify your identity to connect a new one.`);
+      return;
+    }
     setLoading(true);
     try {
       st.wallet.address = pendingWallet.address;
@@ -254,9 +357,37 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       <div style={{ textAlign: 'center', marginBottom: 32 }}>
         <Wallet size={48} style={{ color: 'var(--gold)', marginBottom: 16 }} />
         <h1 className="text-gradient" style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Wallet Setup</h1>
-        <p style={{ color: 'var(--txt-3)', fontSize: 14 }}>Create a new wallet or connect an existing one</p>
+        <p style={{ color: 'var(--txt-3)', fontSize: 14 }}>
+          {!gate.allowed
+            ? 'A wallet is attached to a verified identity'
+            : gate.restoreOnly
+              ? 'This account can re-connect the wallet already attached to it'
+              : 'Create a new wallet or connect an existing one'}
+        </p>
       </div>
+      {error && (
+        <div style={{ color: 'var(--red)', fontSize: 13, padding: 12, background: 'var(--red-dim)', borderRadius: 8, display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 16 }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />{error}
+        </div>
+      )}
+      {gate.allowed ? (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {gate.restoreOnly ? (
+          <div style={{ width: '100%', padding: 20, background: 'var(--bg-2)', border: '1px dashed var(--border)', borderRadius: 16, display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+            <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--gold-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Shield size={24} style={{ color: 'var(--gold)' }} />
+            </div>
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>New wallets are on hold</div>
+              <div style={{ fontSize: 13, color: 'var(--txt-3)', lineHeight: 1.5 }}>
+                This account is not verified yet, so it can only get back the wallet already on it
+                (<strong style={{ color: 'var(--txt-2)' }}>{formatAddressForDisplay(gate.restoreAddress || '')}</strong>).
+                <a href="#/kyc" style={{ display: 'block', marginTop: 6, color: 'var(--gold)', fontWeight: 600 }}>Verify your identity</a>
+                to open full wallet setup.
+              </div>
+            </div>
+          </div>
+        ) : (
         <button onClick={() => { setMode('create'); goTo('create-password'); }} style={{ width: '100%', padding: 20, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16, transition: 'all 0.2s' }}
           onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--gold)'} onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border)'}>
           <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--gold-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -268,6 +399,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
           </div>
           <ChevronRight size={20} style={{ color: 'var(--txt-3)' }} />
         </button>
+        )}
         <button onClick={() => { setMode('import'); goTo('connect-method'); }} style={{ width: '100%', padding: 20, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16, transition: 'all 0.2s' }}
           onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--gold)'} onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border)'}>
           <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--green-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -275,11 +407,18 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
           </div>
           <div style={{ flex: 1, textAlign: 'left' }}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Connect existing wallet</div>
-            <div style={{ fontSize: 13, color: 'var(--txt-3)' }}>Import with recovery phrase or connect a wallet app</div>
+            <div style={{ fontSize: 13, color: 'var(--txt-3)' }}>
+              {gate.restoreOnly
+                ? `Import the recovery phrase for ${formatAddressForDisplay(gate.restoreAddress || '')}`
+                : 'Import with recovery phrase or connect a wallet app'}
+            </div>
           </div>
           <ChevronRight size={20} style={{ color: 'var(--txt-3)' }} />
         </button>
       </div>
+      ) : (
+        <WalletGateNotice gate={gate} onRetry={refreshGate} />
+      )}
       {onBack && (
         <button onClick={onBack} style={{ marginTop: 24, padding: 12, background: 'transparent', border: 'none', color: 'var(--txt-3)', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
           <ArrowLeft size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6 }} />Back

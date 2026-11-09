@@ -22,6 +22,7 @@ const passport = require('passport');
 const { validateInput, preventNoSQLInjection, sanitizeInputs, limitPayloadSize, schemas } = require('../middleware/inputValidation');
 const { limiters } = require('../middleware/rateLimiter');
 const { asyncHandler } = require('../utils/errorHandler');
+const { requireVerifiedKyc } = require('../middleware/requireKyc');
 
 /**
  * Task 4.1: POST /api/auth/register
@@ -189,8 +190,19 @@ router.get('/compliance-status', auth, asyncHandler(async (req, res) => {
  * this file's other non-me routes used to) so it accepts the httpOnly
  * session cookie, gets CSRF-checked when cookie-authenticated, and honors
  * the token denylist/banned-user checks like every other protected route.
+ *
+ * requireVerifiedKyc: this is the only endpoint that writes
+ * User.walletAddress, so it is where "no wallet before verification" has to
+ * hold. Client-side doors can be bypassed by anyone who can send an HTTP
+ * request; this cannot. 403 + error: 'kyc_verification_required' — see
+ * middleware/requireKyc.js for the verdict and why it is not `kycLevel >= 1`.
+ *
+ * allowSameAddress keeps one thing the rule was never about: an unverified
+ * account re-linking the address it already holds. The cipher wall disconnects
+ * the local copy after three wrong attempts, and that owner must not be told
+ * they cannot get their own wallet back. No new address can pass this check.
  */
-router.post('/link-wallet', auth, asyncHandler(authCtrl.linkWallet));
+router.post('/link-wallet', auth, requireVerifiedKyc({ allowSameAddress: true }), asyncHandler(authCtrl.linkWallet));
 
 /**
  * POST /api/auth/refresh — silently renews the session (new JWT/cookie,

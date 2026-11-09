@@ -15,6 +15,7 @@
  */
 
 import { store } from '../store/store';
+import { toastAction } from '../components/ui';
 import { api } from './api';
 import { chain, config } from './config';
 import { requestMnemonic } from './mnemonicAccess';
@@ -39,8 +40,17 @@ interface SessionMeta {
   authedUntil: number;
 }
 
-/** Outcome of linkWallet() — see its doc comment. `reason` is machine-readable (`pin_cancelled`, `not_signed_in`, a backend error string…) for logging; callers show their own human message. */
-export type LinkWalletResult = { ok: true } | { ok: false; reason: string };
+/** Outcome of linkWallet() — see its doc comment. `reason` is machine-readable (`pin_cancelled`, `not_signed_in`, a backend error string…) for logging; callers show their own human message.
+ *
+ * On success the server also reports the account's referral code — which it now
+ * mints at this exact moment (backend authController.activateReferralCode), so
+ * this response is the only place the frontend learns a code exists at all.
+ * `referralActivated` distinguishes "you just earned one" from "you already had
+ * one, here it is again" on a re-link; it is optional only because test doubles
+ * of this method predate the field, not because the server ever omits it. */
+export type LinkWalletResult =
+  | { ok: true; referralCode?: string | null; referralActivated?: boolean }
+  | { ok: false; reason: string };
 
 /** Outcome of getServerWalletLink(): `address` is the account's server-side linked wallet, or null when none is linked. */
 export type ServerWalletLinkResult =
@@ -330,6 +340,22 @@ class AuthService {
         signature: signature.signature,
       });
       if (!res.ok) {
+        // The server's KYC gate (backend/src/middleware/requireKyc.js) refuses
+        // the link for an account whose identity isn't verified, and says so
+        // with a stable token. Keep that token as the machine-readable reason
+        // — the doors turn it into the verification notice (and re-read the
+        // verdict, which was evidently stale) instead of a generic
+        // "couldn't link" toast. Not imported from walletGate.ts to invalidate
+        // the cache here: services/auth.ts is imported by kycApi.ts, which
+        // walletGate.ts imports, and a call-through cycle for one cache clear
+        // isn't worth it — callers do it.
+        if (res.code === 403 && res.error === 'kyc_verification_required') {
+          console.warn('[Auth] link-wallet blocked: identity not verified');
+          return { ok: false, reason: 'kyc_verification_required' };
+        }
+        if (res.code === 503 && res.error === 'kyc_check_unavailable') {
+          return { ok: false, reason: 'kyc_check_unavailable' };
+        }
         const reason = res.error || 'link_rejected_by_server';
         console.warn('[Auth] link-wallet rejected:', reason);
         return { ok: false, reason };
@@ -338,7 +364,21 @@ class AuthService {
         store.state.wallet.linkedOnServer = true;
         store.commit();
       }
-      return { ok: true };
+      const body = (res.data || {}) as { referralCode?: string | null; referralActivated?: boolean };
+      // The reward clock starts here, not at signup: the backend mints the
+      // account's referral code in this same response (activateReferralCode),
+      // and an account with no code cannot be referred to or earn from
+      // referrals. Five different doors link a wallet (dashboard, wallet hub,
+      // send, Mallpoints purchase, settings) and only this function sees the
+      // code, so the announcement lives here — otherwise the person who just
+      // qualified would still be looking at the "connect a wallet" notice.
+      if (body.referralActivated && body.referralCode) {
+        toastAction(`Referral code ${body.referralCode} is now active`, {
+          label: 'View',
+          onClick: () => { window.location.hash = '#/referrals'; },
+        });
+      }
+      return { ok: true, referralCode: body.referralCode ?? null, referralActivated: Boolean(body.referralActivated) };
     } catch (error) {
       console.warn('[Auth] Failed to link wallet address:', (error as Error).message);
       return { ok: false, reason: (error as Error).message };

@@ -51,13 +51,22 @@ import type { AppNotification } from './notificationsApi';
 const OWNER = '507f1f77bcf86cd799439011';
 const OTHER = '507f1f77bcf86cd799439012';
 
+/**
+ * One moment for the whole file, not one per row(). The rows a test builds are
+ * meant to be indistinguishable in time — the feed sorts newest-first, and equal
+ * stamps keep that sort on its input order. Calling Date.now() per row let a
+ * millisecond tick between rows reorder the list, which showed up only when the
+ * full suite ran slow enough: the assertion failed under load and passed alone.
+ */
+const NOW = Date.now();
+
 function row(over: Partial<AppNotification> & { _id: string }): AppNotification {
   return {
     kind: 'system',
     title: 'title ' + over._id,
     body: '',
     read: false,
-    createdAt: new Date(Date.now() - 60_000).toISOString(),
+    createdAt: new Date(NOW - 60_000).toISOString(),
     ...over,
   };
 }

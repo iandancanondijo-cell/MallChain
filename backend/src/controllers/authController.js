@@ -235,30 +235,69 @@ function makeSyntheticEmail(username) {
 const REFERRAL_SIGNUP_BONUS = 10;
 
 /**
- * Assigns a real, persisted referralCode to a freshly-created user and — if
- * they signed up with someone else's code — links and credits that
- * referrer. This used to live only in register() (email/password signup);
- * registerUsername() and googleCallback() created users with no
- * referralCode at all, so GET /api/referrals fell back to a display-only
- * code computed from username/id that looked identical to a real one but
- * was never in the DB — any signup using that shown code as `referralCode`
- * silently found no matching user and credited nobody. Confirmed live:
- * referring through a username-signup user's shown code produced zero
- * referralCount/referralEarnings change, with no error surfaced anywhere.
+ * Signup records WHO introduced this account, and nothing more.
+ *
+ * It used to also mint the new user's own referral code and pay the referrer on
+ * the spot. Both of those moved to wallet linkage — see
+ * {@link activateReferralCode} — because the product rule (owner, 2026-11-09)
+ * is that a code is earned by connecting a wallet, and because the reward had
+ * nowhere to land before one existed: mlpts balances and every claim path are
+ * keyed to `User.walletAddress` (routes/referrals.js refuses a claim without
+ * it), so a signup-only bonus was a number nobody could spend.
+ *
+ * The code that is entered here is still looked up in the database rather than
+ * trusted, for the reason that created this function in the first place: the
+ * old display-only fallback in routes/referrals.js showed a plausible
+ * `MALL-…` string that was never stored, so people referring with it credited
+ * nobody and were told nothing.
  */
-async function assignReferralCode(user, referralCodeInput) {
+async function recordReferralAttribution(user, referralCodeInput) {
   let referrer = null;
   if (referralCodeInput) {
     referrer = await User.findOne({ referralCode: String(referralCodeInput).trim().toUpperCase() });
   }
   user.referredBy = referrer ? referrer._id : undefined;
-  user.referralCode = `MALL-${user._id.toString().slice(-8)}`.toUpperCase();
   await user.save();
+}
 
-  if (referrer) {
-    await User.findByIdAndUpdate(referrer._id, {
+/**
+ * A connected wallet is what makes an account rewardable, so that is the moment
+ * it gets a code of its own. Callers must save the user afterwards — the code
+ * is set here, not written, so the address and the code land in one document
+ * write rather than two that can disagree.
+ *
+ * Returns `newlyAssigned: false` (and the existing code) for an account that
+ * already has one, which is what keeps a re-link — a new device, a rotated
+ * wallet — from crediting the referrer a second time.
+ *
+ * The code is the WHOLE id, not a slice: referralCode carries a unique index
+ * (models/user.js:100). An 8-hex-character tail is 32 bits, so once 100,000
+ * codes exist a new account has roughly a 1-in-43,000 chance of hitting one
+ * that is already taken — noticeable at scale, not a rounding error. A collision
+ * on this path used to be harmless (a signup 500s, nobody loses anything); it
+ * now lands inside wallet linkage, so E11000 on the code would fail a wallet
+ * link the person proved with their own signature. The full id is unique by
+ * construction, which is the only guarantee worth having here.
+ */
+function activateReferralCode(user) {
+  if (user.referralCode) return { code: user.referralCode, newlyAssigned: false };
+  user.referralCode = `MALL-${user._id.toString()}`.toUpperCase();
+  return { code: user.referralCode, newlyAssigned: true };
+}
+
+/**
+ * The one referrer credit, paid after the referred account's wallet (and code)
+ * are on disk. Best-effort on purpose: a failed credit must not undo a wallet
+ * link the person proved with their signature, and the strike is logged.
+ */
+async function creditSignupReferrer(referrerId) {
+  if (!referrerId) return;
+  try {
+    await User.findByIdAndUpdate(referrerId, {
       $inc: { referralCount: 1, referralEarnings: REFERRAL_SIGNUP_BONUS },
     });
+  } catch (error) {
+    require('../utils/logger').error('auth', 'referral credit failed after a wallet was connected', error, { referrerId: String(referrerId) });
   }
 }
 
@@ -271,7 +310,7 @@ exports.register = async (req, res) => {
   const hash = await bcrypt.hash(password, 10);
 
   const u = await User.create({ email, password: hash });
-  await assignReferralCode(u, referralCode);
+  await recordReferralAttribution(u, referralCode);
 
   const { token, sessionTtlMin, expiresAt } = signToken(u);
   setAuthCookie(res, token, sessionTtlMin);
@@ -358,7 +397,7 @@ exports.registerUsername = async (req, res) => {
 
   const hash = await bcrypt.hash(password, 10);
   const u = await User.create({ username, email: syntheticEmail, password: hash });
-  await assignReferralCode(u, req.body?.referralCode);
+  await recordReferralAttribution(u, req.body?.referralCode);
 
   const { token, sessionTtlMin, expiresAt } = signToken(u);
   setAuthCookie(res, token, sessionTtlMin);
@@ -531,9 +570,19 @@ exports.linkWallet = async (req, res) => {
   const user = await User.findById(userId).select('-password');
   if (!user) return res.status(401).json({ error: 'user not found' });
   user.walletAddress = address;
+  // This is the moment the account becomes rewardable, so it is the moment it
+  // earns a referral code (see activateReferralCode). Set before the save so
+  // the address and the code go to disk in one write, and credit the referrer
+  // only after it succeeds — a credit for a link that did not land would be
+  // paid twice on the retry.
+  const referral = activateReferralCode(user);
   await user.save();
+  if (referral.newlyAssigned) await creditSignupReferrer(user.referredBy);
 
-  return res.json({ ok: true, walletAddress: address });
+  // `referralActivated` is the difference between "here is your code again" and
+  // "you just earned one" — the frontend celebrates only the latter, so it must
+  // not infer it from the code being present (a re-link returns the same code).
+  return res.json({ ok: true, walletAddress: address, referralCode: referral.code, referralActivated: referral.newlyAssigned });
 };
 
 exports.googleCallback = async (req, res) => {
@@ -548,7 +597,7 @@ exports.googleCallback = async (req, res) => {
     // GET /google (routes/auth.js) echoes the referral code through as the
     // OAuth `state` param — Google returns it verbatim on the callback.
     const referralCode = typeof req.query.state === 'string' ? req.query.state : undefined;
-    await assignReferralCode(user, referralCode);
+    await recordReferralAttribution(user, referralCode);
   } else {
     // Returning Google login — same cooldown gate as login()/loginUsername().
     // No credential to withhold here, so on lock we bounce back to the auth

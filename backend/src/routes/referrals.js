@@ -23,7 +23,14 @@ router.get('/', auth, async (req, res) => {
     }
 
     const referralData = {
-      code: user.referralCode || `MALL-${user.username || user._id}`.toUpperCase().substring(0, 15),
+      // No fallback, and that is the whole point of this line. The expression
+      // used here — `MALL-${username}` computed on the fly — produced a string
+      // that looked exactly like a real code but was never in the database, so
+      // anyone who used it to sign up credited nobody and was told nothing. A
+      // code now exists only once a wallet has been connected
+      // (authController.activateReferralCode), and `code: null` says so.
+      code: user.referralCode || null,
+      walletConnected: !!user.walletAddress,
       earned: user.referralEarnings || 0,
       count: user.referralCount || 0,
       claimed: user.referralClaimed || 0,
@@ -47,9 +54,11 @@ router.get('/code', auth, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const code = user.referralCode || `MALL-${user.username || user._id}`.toUpperCase().substring(0, 15);
-    
-    res.json({ code });
+    // Same no-invented-code rule as GET / above: a code only exists once a
+    // wallet is connected. `code: null` is the honest answer, and the frontend
+    // renders the "connect a wallet to earn your code" state from it plus
+    // walletConnected.
+    res.json({ code: user.referralCode || null, walletConnected: !!user.walletAddress });
   } catch (error) {
     logger.error('referrals', 'error fetching referral code', error);
     res.status(500).json({ error: 'Failed to fetch referral code' });

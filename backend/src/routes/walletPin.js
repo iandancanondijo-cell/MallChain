@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const PinAttempt = require('../models/PinAttempt');
 const logger = require('../utils/logger');
 const { requireAuth } = require('../middleware/auth');
+const { requireVerifiedKyc } = require('../middleware/requireKyc');
 
 /**
  * POST /api/wallet/verify-pin
@@ -147,8 +148,18 @@ router.post('/verify-pin', requireAuth, async (req, res) => {
  * hijacked session cookie already owns the account session).
  *
  * Body: { pinHash: string }  ($2a/$2b/$2y bcrypt, cost 04-15)
+ *
+ * requireVerifiedKyc({ allowExistingWallet }): setting a cipher is how a brand
+ * new wallet becomes usable, so it belongs on the verified-identity side of the
+ * rule — "no wallet before verification" is not honoured if an unverified
+ * account can complete the creation flow here after /link-wallet refuses it.
+ * The exception is for the owner of an address this account already holds: the
+ * cipher wall disconnects the local copy after three wrong attempts, and that
+ * person must be able to set a cipher again for the wallet that is already
+ * theirs. This route carries no address, so the exception is "the account has
+ * a linked wallet", not "this particular address".
  */
-router.post('/set-pin', requireAuth, async (req, res) => {
+router.post('/set-pin', requireAuth, requireVerifiedKyc({ allowExistingWallet: true }), async (req, res) => {
   const { pinHash } = req.body || {};
   const userId = req.user._id || req.user.id;
 

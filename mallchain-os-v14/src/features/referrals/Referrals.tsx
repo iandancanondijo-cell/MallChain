@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, fmtNum, toast } from '../../components/ui';
 import { referralsApi, type ReferralStats } from '../../services/referralsApi';
+import { useWalletGate } from '../wallet/walletGate';
+import WalletGateNotice from '../wallet/WalletGateNotice';
 import { Users, Gift, Copy, Sparkles, AlertTriangle, TrendingUp } from 'lucide-react';
 
 /** Referrals — growth/social glassmorphism layout with real invite code + claimable commission. */
@@ -11,6 +13,11 @@ export default function Referrals() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
+
+  // The code is earned by connecting a wallet, and a wallet is gated behind
+  // verification — so this page needs the same verdict every other door uses,
+  // not a guess. It is the reason shown when `stats.code` comes back null.
+  const { gate, refresh } = useWalletGate();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -23,9 +30,13 @@ export default function Referrals() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Null is the server saying "this account has no code yet", and it is the only
+  // honest answer before a wallet is connected. Copying a null used to build
+  // `#/auth?ref=null` — an invite link that silently referred nobody.
+  const code = stats?.code ?? null;
   const copyCode = async () => {
-    if (!stats) return;
-    const link = `${window.location.origin}${window.location.pathname}#/auth?ref=${stats.code}`;
+    if (!code) return;
+    const link = `${window.location.origin}${window.location.pathname}#/auth?ref=${code}`;
     try {
       await navigator.clipboard.writeText(link);
     } catch {
@@ -57,7 +68,7 @@ export default function Referrals() {
     <div>
       <div className="view-head">
         <h1 className="text-gradient">Referrals</h1>
-        <span className="sub">Earn 10 MLPTS for every friend who signs up with your code</span>
+        <span className="sub">Earn 10 MLPTS for every friend who signs up with your code and connects their wallet</span>
       </div>
 
       {error && (
@@ -74,13 +85,13 @@ export default function Referrals() {
           <div className="wallet-hero-label">Your referral code</div>
           <div className="wallet-hero-balance">
             <div className="wallet-hero-num" style={{ fontFamily: 'var(--font-mono)', letterSpacing: '2px' }}>
-              {loading ? '—' : stats?.code}
+              {loading ? '—' : code}
             </div>
           </div>
           <div className="wallet-hero-meta">
             <span className="chip"><Users size={12} style={{ marginRight: 4 }} />{loading ? '—' : stats?.count ?? 0} referrals</span>
             <span className="chip"><TrendingUp size={12} style={{ marginRight: 4 }} />{loading ? '—' : fmtNum(stats?.earned ?? 0)} MLPTS earned</span>
-            <button className="btn btn-ghost btn-sm" onClick={copyCode} disabled={!stats} style={{ marginLeft: 'auto' }}>
+            <button className="btn btn-ghost btn-sm" onClick={copyCode} disabled={!code} style={{ marginLeft: 'auto' }} title={code ? 'Copy your invite link' : 'Connect a wallet to get your code'}>
               <Copy size={12} /> Copy invite link
             </button>
           </div>
@@ -88,11 +99,39 @@ export default function Referrals() {
         <div className="wallet-hero-right" style={{ justifyContent: 'center' }}>
           <div style={{ textAlign: 'center', padding: '12px 0' }}>
             <Gift size={36} style={{ color: 'rgb(var(--section-accent-rgb))', marginBottom: 8 }} />
-            <div style={{ fontSize: 12, color: 'var(--txt-3)' }}>10 MLPTS per signup</div>
-            <div style={{ fontSize: 11, color: 'var(--txt-3)', marginTop: 2 }}>Instant commission</div>
+            <div style={{ fontSize: 12, color: 'var(--txt-3)' }}>10 MLPTS per referral</div>
+            <div style={{ fontSize: 11, color: 'var(--txt-3)', marginTop: 2 }}>Credited when their wallet connects</div>
           </div>
         </div>
       </div>
+
+      {/* The unearned-code state: what it means, and the one step that changes it. */}
+      {!loading && !code && !error && (
+        <div className="card" style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <Gift size={18} style={{ color: 'var(--txt-3)', flexShrink: 0, marginTop: 2 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--txt-2)', marginBottom: 4 }}>No code yet</div>
+            <div className="tiny" style={{ color: 'var(--txt-3)' }}>
+              A referral code is issued the moment this account connects a wallet — that is also the moment it can be paid,
+              because commissions land in your Mallpoints balance. Until then there is nothing to share, and this page says
+              so instead of showing a code that would credit nobody.
+            </div>
+            {!gate.allowed && (
+              <div style={{ marginTop: 10 }}>
+                <WalletGateNotice gate={gate} onRetry={refresh} />
+              </div>
+            )}
+            {gate.allowed && stats?.walletConnected !== true && (
+              <a className="btn btn-primary btn-sm" href="#/wallet/connect" style={{ marginTop: 10 }}>Connect a wallet</a>
+            )}
+            {gate.allowed && stats?.walletConnected === true && (
+              <button className="btn btn-ghost btn-sm" onClick={() => { refresh(); load(); }} style={{ marginTop: 10 }}>
+                Wallet is connected — check again
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Stat cards */}
       <div className="stat-grid stagger">
@@ -103,7 +142,7 @@ export default function Referrals() {
           <div>
             <div className="card-label">Referrals</div>
             <div className="card-value">{loading ? '—' : stats?.count ?? 0}</div>
-            <div className="card-sub">signups via your code</div>
+            <div className="card-sub">friends who joined and connected a wallet</div>
           </div>
         </div>
         <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
@@ -135,7 +174,8 @@ export default function Referrals() {
       <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Gift size={18} style={{ color: 'rgb(var(--section-accent-rgb))', flexShrink: 0 }} />
         <div className="tiny" style={{ color: 'var(--txt-2)' }}>
-          10 MLPTS is credited to your account the moment someone signs up using your referral link. Claim moves it into your spendable Mallpoints balance.
+          10 MLPTS is credited to you when a friend who signed up with your code connects their own wallet — the same step that
+          makes your reward spendable. Claim moves it into your Mallpoints balance.
         </div>
       </div>
     </div>

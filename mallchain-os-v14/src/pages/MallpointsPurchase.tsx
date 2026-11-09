@@ -4,6 +4,8 @@ import { api } from '../services/api';
 import { store } from '../store/store';
 import { authService } from '../services/auth';
 import { useStoreVersion, toast } from '../components/ui';
+import { useWalletGate, reportLinkFailure, linkAttemptGuard } from '../features/wallet/walletGate';
+import WalletGateNotice from '../features/wallet/WalletGateNotice';
 
 type Step = 'form' | 'awaiting_payment' | 'stalled' | 'crediting' | 'done';
 
@@ -31,6 +33,9 @@ const STEP_INDEX: Record<Step, number> = { form: 0, awaiting_payment: 1, stalled
 /** Purchase Mallpoints (MLPTS) with real money via M-Pesa STK push. */
 export default function MallpointsPurchase({ navigate }: { navigate: (p: string) => void }) {
   useStoreVersion();
+  // MLPTS credit to a wallet, a wallet links to an account, and the link needs
+  // a verified identity — the gate is checked before any of those are offered.
+  const { gate, refresh: refreshGate } = useWalletGate();
 
   const [amount, setAmount] = useState(50);
   const [phone, setPhone] = useState('');
@@ -72,14 +77,21 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
     const localAddress = store.state.wallet.address;
     const linkWalletNow = async () => {
       if (!localAddress || linking) return;
+      const refused = linkAttemptGuard(gate, localAddress);
+      if (refused) { toast(refused, false); return; }
       setLinking(true);
       // Opens the cipher wall, signs the link message, POSTs /api/auth/link-wallet.
-      await authService.linkWallet(localAddress);
-      const res = await api.get<{ ok: boolean; mlpts_balance: number; walletAddress?: string }>('/api/creator-space/balance');
-      if (res.ok && res.data?.walletAddress) {
+      const res = await authService.linkWallet(localAddress);
+      const after = await api.get<{ ok: boolean; mlpts_balance: number; walletAddress?: string }>('/api/creator-space/balance');
+      if (after.ok && after.data?.walletAddress) {
         toast('Wallet linked — you can purchase Mallpoints now');
+      } else if (!res.ok) {
+        // The verification refusal has its own words and its own way out; the
+        // generic "try again and enter your cipher" is a lie when the cipher
+        // was entered correctly and the account simply isn't verified yet.
+        if (!reportLinkFailure(res.reason)) toast('Linking was cancelled — nothing was changed', false);
       } else {
-        toast('Linking was cancelled or failed — try again and enter your cipher', false);
+        toast('The link did not land on your account — try again', false);
       }
       setLinking(false);
       loadBalance();
@@ -92,7 +104,7 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
           </div>
           <div className="wo-hero-body">
             <div className="wo-hero-title">Purchase Mallpoints</div>
-            <div className="wo-hero-sub">{localAddress ? 'Link your wallet to buy MLPTS' : 'Connect a wallet to buy MLPTS'}</div>
+            <div className="wo-hero-sub">{gate.blocked ? 'Verify your identity, then connect a wallet to buy MLPTS' : localAddress ? 'Link your wallet to buy MLPTS' : 'Connect a wallet to buy MLPTS'}</div>
           </div>
         </div>
         <div className="wo-card" style={{ maxWidth: 520 }}>
@@ -100,14 +112,20 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
             <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(34, 211, 238, 0.08)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
               {localAddress ? <Link2 size={24} style={{ color: 'var(--cyan)' }} /> : <Wallet size={24} style={{ color: 'var(--cyan)', opacity: 0.5 }} />}
             </div>
-            {localAddress ? (
+            {/* A purchase can only be credited to a server-linked wallet, and
+                only a verified account can have one — so an unverified session
+                is sent to verification, not offered a cipher prompt that would
+                come back 403. */}
+            {gate.blocked ? (
+              <WalletGateNotice gate={gate} onRetry={refreshGate} />
+            ) : localAddress ? (
               <>
                 <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Wallet connected — one step left</div>
                 <div style={{ fontSize: 13, color: 'var(--txt-3)', lineHeight: 1.6, maxWidth: 360, margin: '0 auto' }}>
                   This device holds your wallet <span style={{ fontFamily: 'monospace' }}>{localAddress.slice(0, 14)}…</span>, but it isn't linked to your account on the server yet. Confirm your cipher so purchases can be credited.
                 </div>
-                <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={linkWalletNow} disabled={linking}>
-                  {linking ? 'Waiting for cipher…' : 'Unlock with your cipher'}
+                <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={linkWalletNow} disabled={linking || gate.state === 'checking'}>
+                  {linking ? 'Waiting for cipher…' : gate.state === 'checking' ? 'Checking…' : 'Unlock with your cipher'}
                 </button>
               </>
             ) : (
@@ -116,8 +134,8 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
                 <div style={{ fontSize: 13, color: 'var(--txt-3)', lineHeight: 1.6, maxWidth: 360, margin: '0 auto' }}>
                   Mallpoints are credited to a Mallchain wallet. Connect one first — purchases without a wallet can't be credited to you.
                 </div>
-                <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={() => navigate('/auth')}>
-                  Connect a wallet
+                <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={() => navigate('/auth')} disabled={gate.state === 'checking'}>
+                  {gate.state === 'checking' ? 'Checking…' : 'Connect a wallet'}
                 </button>
               </>
             )}

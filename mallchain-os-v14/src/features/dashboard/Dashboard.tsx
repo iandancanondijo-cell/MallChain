@@ -12,6 +12,8 @@ import { api } from '../../services/api';
 import { authService } from '../../services/auth';
 import NetworkDots from './NetworkDots';
 import WalletFlowChart from './WalletFlowChart';
+import { useWalletGate, reportLinkFailure, linkAttemptGuard } from '../wallet/walletGate';
+import WalletGateNotice from '../wallet/WalletGateNotice';
 import { TrendingUp, Wallet, Zap, Shield, ArrowUpRight, ArrowDownLeft, Repeat, Sparkles, CheckCircle2, XCircle, Bell, RefreshCw } from 'lucide-react';
 import { Button, Card, Badge, Heading, Text } from '../../components/shared';
 import './Dashboard.css';
@@ -221,6 +223,11 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
   const isWalletConnected = st.wallet.address && st.wallet.address.length > 0;
   const net = useNetworkIdentity();
   const { midKes, pointPriceKes, error: priceError, loading: priceLoading } = useLivePrice();
+  // Whether this account may attach a wallet at all. Verified identity comes
+  // first (backend/src/middleware/requireKyc.js answers 403 on the link), so a
+  // "Link wallet" button shown without it would only cost the user a cipher
+  // prompt they can never use.
+  const { gate, refresh: refreshWalletGate } = useWalletGate();
 
   // "Connected" used to be a local flag that kept surviving the server saying
   // no. Ask the account which address it actually holds (GET /api/auth/me →
@@ -253,14 +260,25 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
   const [linkingWallet, setLinkingWallet] = useState(false);
   const linkWalletNow = async () => {
     if (!st.wallet.address || linkingWallet) return;
+    // The button is rendered from the same verdict, so this is the race guard:
+    // restore mode allows exactly one address and refuses every other.
+    const refused = linkAttemptGuard(gate, st.wallet.address);
+    if (refused) { toast(refused, false); return; }
     setLinkingWallet(true);
     const res = await authService.linkWallet(st.wallet.address);
     setLinkingWallet(false);
     // Never trust the flag the link call set — re-read the account, so a
     // "Connected" chip always means the backend has this address.
     await refreshLinkCheck();
-    if (res.ok) toast('Wallet linked to your account');
-    else if (res.reason !== 'pin_cancelled') toast(res.reason || 'Could not link your wallet', false);
+    if (res.ok) {
+      toast('Wallet linked to your account');
+      return;
+    }
+    // The server's verification gate outranks whatever this page rendered.
+    // reportLinkFailure drops the cached verdict so the button becomes the
+    // notice on the next paint rather than offering a second signing prompt
+    // that would fail the same way.
+    reportLinkFailure(res.reason);
   };
 
   const [submissions, setSubmissions] = useState<MinesSubmission[]>([]);
@@ -427,6 +445,17 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
               </span>
               {serverLinked ? (
                 <span className="chip green" style={{ fontSize: 10 }}>Connected</span>
+              ) : gate.state === 'checking' ? (
+                <span className="chip" style={{ fontSize: 10, color: 'var(--txt-3)' }} title="Checking whether this account may attach a wallet">Checking verification…</span>
+              ) : !gate.allowed ? (
+                <a
+                  className="chip chip-action"
+                  style={{ fontSize: 10 }}
+                  href="#/kyc"
+                  title="The account needs a verified identity before a wallet can be attached to it"
+                >
+                  Verification needed
+                </a>
               ) : isWalletConnected ? (
                 <button
                   className="chip chip-action"
@@ -452,13 +481,44 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
                 <div style={{ fontWeight: 700, fontSize: 13 }}>Wallet not connected</div>
                 <div style={{ fontSize: 11.5, color: 'var(--txt-3)', marginTop: 2 }}>Connect to view balances and transact</div>
               </div>
-              <button className="btn btn-primary btn-sm" onClick={() => navigate('/wallet/connect')}>Connect</button>
+              {/* The Connect button starts a wallet on this device, and the
+                  server will refuse to attach that wallet to an unverified
+                  account — so an unverified account is offered the verification
+                  step instead, never a wallet it cannot keep. */}
+              {gate.allowed ? (
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => navigate('/wallet/connect')}
+                  title={gate.restoreOnly
+                    ? 'This account is not verified yet, so it can only re-connect the wallet already attached to it'
+                    : 'Start a wallet on this device'}
+                >
+                  {gate.restoreOnly ? 'Re-connect' : 'Connect'}
+                </button>
+              ) : gate.state === 'checking' ? (
+                <span className="chip" style={{ fontSize: 11, color: 'var(--txt-3)' }}>Checking…</span>
+              ) : (
+                <a
+                  className="btn btn-primary btn-sm"
+                  href="#/kyc"
+                  title="A wallet is attached to an account only after its identity is verified"
+                >
+                  Verify first
+                </a>
+              )}
             </div>
           ) : (
             <WalletFlowChart address={st.wallet.address} balanceCoins={st.balances.MALL || 0} midKes={midKes} currency={cur} height={130} />
           )}
         </div>
       </section>
+
+      {/* One sentence, in the app's own words, for why the wallet actions above
+          are disabled — shown whenever the gate refuses and the account does
+          not already hold this address on the server. */}
+      {gate.blocked && !serverLinked && (
+        <WalletGateNotice gate={gate} onRetry={refreshWalletGate} />
+      )}
 
       {/* ── KYC container: the admin's verdict, verbatim ── */}
       {st.user.authed && st.user.role !== 'admin' && st.user.role !== 'superadmin' && (

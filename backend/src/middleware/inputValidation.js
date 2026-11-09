@@ -78,7 +78,9 @@ const authSchemas = {
       }),
     // Referral code carried in from a shared invite link. Without this field in
     // the schema stripUnknown:true silently deletes it and no referrer is ever
-    // credited (see authController.assignReferralCode).
+    // credited. What it does at signup is *attribution* only
+    // (authController.recordReferralAttribution); the code itself and the
+    // commission are a wallet-link event — authController.activateReferralCode.
     // allow('') because the signup form always sends the field — an optional
     // referral left blank arrives as "" and Joi's default string.empty rule
     // rejected the WHOLE register request with "referral code is not allowed

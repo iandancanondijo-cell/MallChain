@@ -1,0 +1,98 @@
+/* Wallet KYC gate notice. Self-contained on purpose: the dashboard's
+   .kyc-banner rules only reach the bundle once Dashboard.tsx is imported, and a
+   door on Settings or Mallpoints must not depend on that. Same palette, so the
+   app reads as one product. */
+
+.wgn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4, 16px);
+  padding: 14px 16px;
+  margin: 12px 0;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius, 14px);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.wgn-ico {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-full, 9999px);
+  font-size: 16px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.wgn-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wgn-title {
+  font-weight: var(--weight-bold, 700);
+  font-size: var(--text-md, 14px);
+}
+
+.wgn-msg {
+  margin: 0;
+  font-size: var(--text-sm, 13px);
+  line-height: 1.45;
+  color: var(--txt-2, rgba(255, 255, 255, 0.68));
+}
+
+.wgn-action {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Verification never started: the one state that is the user's to act on. */
+.wgn-kyc_required {
+  border-color: rgba(243, 186, 47, 0.38);
+  background: linear-gradient(135deg, rgba(243, 186, 47, 0.12), rgba(243, 186, 47, 0.03));
+}
+.wgn-kyc_required .wgn-title { color: var(--gold); }
+
+/* A reviewer holds the decision, so this one must not read as an error. */
+.wgn-kyc_pending {
+  border-color: rgba(96, 165, 250, 0.35);
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.12), rgba(96, 165, 250, 0.03));
+}
+.wgn-kyc_pending .wgn-title { color: #93c5fd; }
+
+.wgn-kyc_rejected,
+.wgn-signed_out {
+  border-color: rgba(239, 68, 68, 0.42);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.13), rgba(239, 68, 68, 0.04));
+}
+.wgn-kyc_rejected .wgn-title,
+.wgn-signed_out .wgn-title { color: var(--red-2); }
+
+/* Nothing is known and nothing is wrong with the account — say neither. */
+.wgn-kyc_unreachable {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+}
+.wgn-kyc_unreachable .wgn-title { color: var(--txt-1, rgba(255, 255, 255, 0.86)); }
+
+.wgn-checking {
+  padding: 8px 12px;
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.wgn-checking .wgn-msg { color: var(--txt-3, rgba(255, 255, 255, 0.5)); }
+
+@media (max-width: 720px) {
+  .wgn {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .wgn-action {
+    align-self: stretch;
+    text-align: center;
+  }
+}

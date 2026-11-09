@@ -30,6 +30,7 @@ import {
   KYCStatusAlert
 } from './components/ComplianceGates';
 import { KYCGate } from './components/KYCGate';
+import { useWalletGate, invalidateWalletGate, canAttachAddress } from './features/wallet/walletGate';
 import { LoadingState } from './components/LoadingState';
 import { updateSEO, getSEOForRoute, generateCanonicalUrl } from './utils/seo';
 import './styles/auth.css';
@@ -81,6 +82,11 @@ export default function App() {
   
   // Compliance state
   const complianceStatus = useComplianceStatus();
+  // Whether this account is allowed to attach a wallet at all. The background
+  // auto-link below is the one place a link happens with nobody pressing a
+  // button, so it is the place that must not spend the user's cipher prompt on
+  // a signature the server is going to refuse.
+  const { gate } = useWalletGate();
   const [showAgeVerification, setShowAgeVerification] = useState(false);
   const [showTOSAcceptance, setShowTOSAcceptance] = useState(false);
   const [showPrivacyAcceptance, setShowPrivacyAcceptance] = useState(false);
@@ -274,6 +280,18 @@ export default function App() {
     // during that window prompts the PIN on every plain reload (the server
     // link already exists — linkedAddressRef only learns that from /me).
     if (!authInitialized) return;
+    // Verified identity comes before a wallet, on the server and therefore
+    // here too. While the gate refuses — or is still being read — this effect
+    // does nothing at all: linkWallet would open the cipher, ask for a
+    // signature, and get 403'd, which is a prompt the user can never get back.
+    // The address deliberately stays out of linkedAddressRef so the link fires
+    // by itself the moment the verification lands, with no reload.
+    if (!gate.allowed) return;
+    // Restore mode is `allowed` for exactly one address — the one the account
+    // already holds. A leftover wallet from another account would be refused
+    // 403 here, so it is not attempted; the person sees nothing, because they
+    // asked for nothing.
+    if (!canAttachAddress(gate, st.wallet.address)) return;
     if (st.user.authed && st.wallet.address && st.wallet.address !== linkedAddressRef.current) {
       linkedAddressRef.current = st.wallet.address;
       // Still best-effort (never blocks the UI), but linkWallet now reports
@@ -286,13 +304,25 @@ export default function App() {
           store.state.wallet.linkedOnServer = false;
           store.commit();
         }
+        // The gate said allowed and the server said no — the cached verdict is
+        // wrong (an admin just revoked or downgraded this account, or the KYC
+        // record changed inside the 30s TTL). Drop it so every door in the app
+        // re-reads and shows the verification notice instead of a wallet button
+        // that cannot work; and retry once immediately so the refetched address
+        // isn't left unlinked for the rest of the session.
+        if (res.reason === 'kyc_verification_required' || res.reason === 'kyc_check_unavailable') {
+          console.warn('[App] Server refused the wallet link on verification (', res.reason, ') while the client gate allowed it — re-reading the verdict');
+          invalidateWalletGate();
+          linkedAddressRef.current = null;
+          return;
+        }
         if (res.reason !== 'pin_cancelled') {
           console.warn('[App] Background wallet link failed:', res.reason);
         }
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authInitialized, st.user.authed, st.wallet.address]);
+  }, [authInitialized, st.user.authed, st.wallet.address, gate.allowed, gate.state, gate.restoreAddress]);
 
   // One-time migration nudge: an account created before secret-gating existed
   // has its recovery phrase sitting in st.wallet.mnemonic in plaintext (see

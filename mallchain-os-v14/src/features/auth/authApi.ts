@@ -164,8 +164,10 @@ export const authApi = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // The form field is called `referral` but the backend register
-        // controller reads `referralCode` (authController.assignReferralCode);
-        // sending `referral` left it undefined so referrers were never credited.
+        // controller reads `referralCode` (authController.recordReferral-
+        // Attribution); sending `referral` left it undefined so the invite was
+        // never attributed. It only records who referred this account — the
+        // code and the commission arrive when the wallet connects.
         // An empty referral must be OMITTED, not sent as "" — the backend
         // schema rejected "" with "referral code is not allowed to be empty",
         // failing every signup without an invite code (live bug 2026-11-02).

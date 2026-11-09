@@ -249,7 +249,15 @@ export default function WalletSend() {
       } else {
         const link = await authService.linkWallet(address, { mnemonic });
         if (!link.ok && link.reason !== 'pin_cancelled') {
-          console.info('[WalletSend] best-effort link skipped:', link.reason);
+          // Refusing the link does not stop this send — the broadcast is
+          // authorized by the signature, and an account that held this wallet
+          // before the verification rule keeps spending from it. What it does
+          // mean is the account never records the address, so say which of the
+          // two it was rather than logging one line for both.
+          console.info('[WalletSend] best-effort link skipped:',
+            link.reason === 'kyc_verification_required'
+              ? 'the account has no verified identity, and wallets only link to verified accounts'
+              : link.reason);
         }
       }
     }

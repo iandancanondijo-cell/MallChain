@@ -9,6 +9,7 @@ import { settingsApi, type UserSettingsData, type ContactInfo } from '../../serv
 import { kycApi, type KycStatusResponse } from '../../services/kycApi';
 import { api } from '../../services/api';
 import { authService } from '../../services/auth';
+import { useWalletGate, reportLinkFailure, linkAttemptGuard } from '../wallet/walletGate';
 import { badgeApi, type BadgeConfig, type BadgeQuote } from '../../services/badgeApi';
 import { SessionManager } from './components/SessionManager';
 import { LoginActivityComponent } from './components/LoginActivity';
@@ -67,6 +68,10 @@ function normalizeSettings(s: UserSettingsData): UserSettingsData {
 export default function Settings() {
   useStoreVersion();
   const st = store.state;
+  // The wallet row below can start a link, and a link needs a verified
+  // identity — so the row reads the same verdict the server enforces rather
+  // than offering a signing prompt that comes back 403.
+  const { gate, refresh: refreshGate } = useWalletGate();
 
   // Profile state
   const [profile, setProfile] = useState<MinesProfile | null>(null);
@@ -80,14 +85,14 @@ export default function Settings() {
   const [linkingWallet, setLinkingWallet] = useState(false);
   const linkWalletNow = async () => {
     if (!st.wallet.address || linkingWallet) return;
+    // Restore mode allows exactly one address — the account's own.
+    const refused = linkAttemptGuard(gate, st.wallet.address);
+    if (refused) { toast(refused, false); return; }
     setLinkingWallet(true);
     const res = await authService.linkWallet(st.wallet.address);
     setLinkingWallet(false);
-    if (res.ok) {
-      toast('Wallet linked to your account');
-    } else if (res.reason !== 'pin_cancelled') {
-      toast(res.reason || 'Could not link your wallet', false);
-    }
+    if (res.ok) toast('Wallet linked to your account');
+    else reportLinkFailure(res.reason);
   };
   const [kyc, setKyc] = useState<KycStatusResponse | null>(null);
   const [docModal, setDocModal] = useState<{ blobUrl: string; loading: boolean } | null>(null);
@@ -325,6 +330,12 @@ export default function Settings() {
                 /api/send/*, so don't claim Connected for it. */}
             {st.wallet.linkedOnServer ? (
               <span className="chip" style={{ color: 'var(--green)' }}>✓ Connected</span>
+            ) : !gate.allowed ? (
+              /* The row's own KYC chip is two above, but it reports the status;
+                 this says what the status now blocks and points at the fix. */
+              <a className="link-btn" href="#/kyc" title="A wallet is attached to an account only after its identity is verified">
+                {gate.state === 'checking' ? 'Checking…' : 'Verify identity first'}
+              </a>
             ) : st.wallet.address ? (
               <button className="link-btn" onClick={linkWalletNow} disabled={linkingWallet}>
                 {linkingWallet ? 'Linking…' : 'Link wallet'}

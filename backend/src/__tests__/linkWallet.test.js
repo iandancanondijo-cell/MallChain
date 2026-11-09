@@ -212,6 +212,93 @@ describe('POST /api/auth/link-wallet', () => {
     expect(userDoc.save).toHaveBeenCalledTimes(1);
     expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
   });
+
+  // The referral rule (owner, 2026-11-09): a code is earned by connecting a
+  // wallet, not by signing up — because the commission it earns is only
+  // spendable once there is an address to spend it from.
+  test('the first successful link assigns the account its referral code', async () => {
+    verifyLinkWalletSignature.mockReturnValue(true);
+    const userDoc = mockAuthenticatedUser('user-1');
+
+    const res = await request(app)
+      .post('/api/auth/link-wallet')
+      .set(authHeader('user-1'))
+      .send({
+        address: VALID_ADDRESS,
+        timestamp: new Date().toISOString(),
+        pubKey: 'fake-pubkey-b64',
+        signature: 'fake-signature-b64',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.referralCode).toMatch(/^MALL-/);
+    expect(res.body.referralActivated).toBe(true);
+    expect(userDoc.referralCode).toBe(res.body.referralCode);
+    // Same single write as the address — the code must not need a second save.
+    expect(userDoc.save).toHaveBeenCalledTimes(1);
+  });
+
+  test('a link credits the referrer exactly once, on the account\'s first code', async () => {
+    verifyLinkWalletSignature.mockReturnValue(true);
+    const userDoc = mockAuthenticatedUser('user-1');
+    userDoc.referredBy = 'referrer-9';
+
+    const res = await request(app)
+      .post('/api/auth/link-wallet')
+      .set(authHeader('user-1'))
+      .send({
+        address: VALID_ADDRESS,
+        timestamp: new Date().toISOString(),
+        pubKey: 'fake-pubkey-b64',
+        signature: 'fake-signature-b64',
+      });
+
+    expect(res.body.referralActivated).toBe(true);
+    expect(User.findByIdAndUpdate).toHaveBeenCalledWith('referrer-9', {
+      $inc: { referralCount: 1, referralEarnings: 10 },
+    });
+  });
+
+  test('re-linking a wallet does not mint a second code or pay the referrer again', async () => {
+    verifyLinkWalletSignature.mockReturnValue(true);
+    const userDoc = mockAuthenticatedUser('user-1');
+    userDoc.referredBy = 'referrer-9';
+    userDoc.referralCode = 'MALL-EXISTING';
+
+    const res = await request(app)
+      .post('/api/auth/link-wallet')
+      .set(authHeader('user-1'))
+      .send({
+        address: VALID_ADDRESS,
+        timestamp: new Date().toISOString(),
+        pubKey: 'fake-pubkey-b64',
+        signature: 'fake-signature-b64',
+      });
+
+    expect(res.body.referralCode).toBe('MALL-EXISTING');
+    expect(res.body.referralActivated).toBe(false);
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('a failed referrer credit does not undo the link the caller signed for', async () => {
+    verifyLinkWalletSignature.mockReturnValue(true);
+    const userDoc = mockAuthenticatedUser('user-1');
+    userDoc.referredBy = 'referrer-9';
+    User.findByIdAndUpdate.mockRejectedValueOnce(new Error('mongo down'));
+
+    const res = await request(app)
+      .post('/api/auth/link-wallet')
+      .set(authHeader('user-1'))
+      .send({
+        address: VALID_ADDRESS,
+        timestamp: new Date().toISOString(),
+        pubKey: 'fake-pubkey-b64',
+        signature: 'fake-signature-b64',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.walletAddress).toBe(VALID_ADDRESS);
+  });
 });
 
 describe('GET /api/auth/me — badge enrichment', () => {

@@ -16,6 +16,7 @@ import type { ChangeEvent, ReactNode } from 'react';
 import { AlertTriangle, Check, Shield } from 'lucide-react';
 import { kycApi } from '../../services/kycApi';
 import { api } from '../../services/api';
+import { invalidateWalletGate } from '../wallet/walletGate';
 import CameraCapture from '../../components/CameraCapture';
 import '../auth/KycWizard.css';
 import './KycSession.css';
@@ -316,6 +317,11 @@ export default function KycSession({ navigate }: { navigate: (p: string) => void
       setSubmitError(res.error ?? 'Submission failed — please try again.');
       return;
     }
+    // The submission changes what the wallet doors are allowed to offer, and
+    // the gate caches the verdict for 30s. Without dropping that cache here a
+    // person who just verified would keep seeing "verify first" on a page they
+    // can now leave, with no way to tell whether the app knows.
+    invalidateWalletGate();
     api.delete('/api/kyc/draft');
     setPhase('success');
   };

@@ -11,6 +11,7 @@ import { generateNewMnemonic, deriveAddressFromMnemonic } from '../../services/w
 import { config, chain } from '../../services/config';
 import { useWizard } from '../../hooks/useWizard';
 import WalletFlow from '../wallet/WalletFlow';
+import { useWalletGate, invalidateWalletGate } from '../wallet/walletGate';
 import { KycWizard, type KycData } from './KycWizard';
 import BlockchainLogo from './BlockchainLogo';
 import './AuthFlow.css';
@@ -102,6 +103,9 @@ function registerEmailError(em: string): string | null {
 export default function AuthFlow({ navigate }: { navigate: (p: string) => void }) {
   useStoreVersion();
   const st = store.state;
+  // Wallets attach to verified identities, so the paths below that mint or
+  // restore a key on this device ask the same question the server asks.
+  const { gate } = useWalletGate();
   // If user is authenticated and has wallet connected, go to dashboard
   // If user is authenticated but no wallet, go to wallet connection
   // If user is not authenticated, go to login/signup
@@ -265,17 +269,26 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
 
   // Generate the mnemonic entirely client-side — it never transits the
   // network this way, unlike the old POST /api/wallet/generate-mnemonic.
+  // Nothing is generated while the verification gate is down: showing a
+  // 24-word phrase the account is not allowed to turn into a wallet invites
+  // the person to write it down for a wallet that cannot exist yet.
   useEffect(() => {
-    if (step === 1 && !mnemonic) {
+    if (step === 1 && !mnemonic && gate.allowed) {
       try {
         setMnemonic(generateNewMnemonic(24));
       } catch (err) {
         console.error('Failed to generate mnemonic:', err);
       }
     }
-  }, [step, mnemonic]);
+  }, [step, mnemonic, gate.allowed]);
 
   const createWallet = async (mnemonicToUse?: string) => {
+    if (!gate.allowed) {
+      setErr(gate.state === 'checking'
+        ? 'Checking your verification status — this page will let you continue in a moment.'
+        : gate.message);
+      return;
+    }
     setBusy(true);
     try {
       const mnemonicPhrase = mnemonicToUse || mnemonic;
@@ -352,7 +365,11 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         // Every submission now requires a real admin decision — kycLevel
         // stays at 1 (unverified) until an admin approves it, regardless of
         // the automated risk signal.
-        toast('KYC submitted — under review. You can now access the dashboard with limited features.');
+        toast('KYC submitted — a reviewer will decide. You can use the dashboard while it is in review; connecting a wallet waits for that approval.');
+        // The wallet doors cache the verification verdict; this submission
+        // changes what they may offer, so drop the cache rather than let them
+        // sit on a verdict the KYC page just made stale.
+        invalidateWalletGate();
         // Clear the saved draft — the user has completed the flow, so a
         // stale "resume" prompt on next login would be confusing.
         api.delete('/api/kyc/draft').catch(() => {});
@@ -515,6 +532,7 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
               return;
             }
             toast('KYC submitted successfully! We\'ll review your information.', true);
+            invalidateWalletGate();
             kyc.reset();
             navigate('/');
           } catch (e) {

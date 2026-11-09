@@ -25,6 +25,8 @@ import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
 import { api } from '../../services/api';
 import { kycApi } from '../../services/kycApi';
+import { useWalletGate, invalidateWalletGate } from '../wallet/walletGate';
+import WalletGateNotice from '../wallet/WalletGateNotice';
 import { authService } from '../../services/auth';
 import { handleApiError } from '../../services/errorHandler';
 import { socketManager } from '../../services/socket';
@@ -75,13 +77,20 @@ const STEPS: Record<RegistrationStep, { index: number; title: string; icon: Comp
   account: { index: 2, title: 'Account', icon: Mail, description: 'Create your account' },
   'email-verify': { index: 3, title: 'Verify Email', icon: CheckCircle, description: 'Confirm your email' },
   security: { index: 4, title: 'Security', icon: Shield, description: 'Secure your account' },
-  wallet: { index: 5, title: 'Wallet', icon: Wallet, description: 'Set up your wallet' },
-  kyc: { index: 6, title: 'Verification', icon: Globe, description: 'Complete verification' },
+  // Verification comes before the wallet, in the numbered path as well as in
+  // the rules: an unverified account cannot have a wallet attached to it.
+  kyc: { index: 5, title: 'Verification', icon: Globe, description: 'Verify your identity' },
+  wallet: { index: 6, title: 'Wallet', icon: Wallet, description: 'Set up your wallet' },
   completion: { index: 7, title: 'Complete', icon: Check, description: 'All done!' },
 };
 
+const REG_STEPS: RegistrationStep[] = ['welcome', 'account', 'email-verify', 'security', 'kyc', 'wallet', 'completion'];
+
 export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path: string) => void }) {
   useStoreVersion();
+  // Verification is now a step of this wizard, not an afterthought: it is what
+  // lets the wallet step below do anything at all.
+  const { gate, refresh: refreshGate } = useWalletGate();
   const [state, setState] = useState<RegistrationState>(() => {
     // Try to resume from sessionStorage
     const saved = sessionStorage.getItem('mallchain_registration_draft');
@@ -133,7 +142,7 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
 
   // Calculate progress
   useEffect(() => {
-    const steps: RegistrationStep[] = ['welcome', 'account', 'email-verify', 'security', 'wallet', 'kyc', 'completion'];
+    const steps = REG_STEPS;
     const currentStepIndex = steps.indexOf(state.step);
     const progress = ((currentStepIndex + 1) / steps.length) * 100;
     setState(prev => ({ ...prev, progress }));
@@ -166,7 +175,7 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
       if (!valid) return;
     }
 
-    const steps: RegistrationStep[] = ['welcome', 'account', 'email-verify', 'security', 'wallet', 'kyc', 'completion'];
+    const steps = REG_STEPS;
     const currentIndex = steps.indexOf(state.step);
     if (currentIndex < steps.length - 1) {
       goToStep(steps[currentIndex + 1]);
@@ -174,7 +183,7 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
   }, [state.step, goToStep]);
 
   const prevStep = useCallback(() => {
-    const steps: RegistrationStep[] = ['welcome', 'account', 'email-verify', 'security', 'wallet', 'kyc', 'completion'];
+    const steps = REG_STEPS;
     const currentIndex = steps.indexOf(state.step);
     if (currentIndex > 0) {
       goToStep(steps[currentIndex - 1]);
@@ -287,8 +296,18 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
     await nextStep();
   };
 
-  // Step 5: Wallet Creation
+  // Step 6: Wallet Creation
   const handleCreateWallet = async () => {
+    // The wizard puts verification before this step, and the server refuses to
+    // attach a wallet to an account that has none — so a resumed draft (this
+    // flow persists in sessionStorage) cannot mint a key the account cannot
+    // keep. The wallet step's own notice carries the way forward.
+    if (!gate.allowed) {
+      setError(gate.state === 'checking'
+        ? 'Checking your verification status — hold on a moment.'
+        : gate.message);
+      return;
+    }
     setLoading(true);
     setError('');
 
@@ -311,12 +330,17 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
     }
   };
 
-  // Step 6: KYC/AML - simplified starter form
+  // Step 5: KYC/AML.
+  // This step has never collected a document or sent a request — it only
+  // flipped a local flag, which used to be good enough because nothing
+  // downstream depended on it. The wallet step after it now does, and the
+  // server decides that step from the reviewer's record, not this flag. So the
+  // button hands off to the real verification container, and the draft this
+  // wizard keeps in sessionStorage is still here when the person comes back.
   const handleKYCSubmit = async () => {
-    // In a real scenario, this would start the full KYC wizard
-    // For now, we'll just advance to completion
     setState(prev => ({ ...prev, kycStarted: true }));
-    await nextStep();
+    invalidateWalletGate();
+    navigate('/kyc');
   };
 
   // Render step content
@@ -778,11 +802,21 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
           >
             <div style={{ textAlign: 'center', marginBottom: 24 }}>
               <Wallet size={48} style={{ color: 'var(--gold)', marginBottom: 16 }} />
-              <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Create Your Wallet</h2>
+              <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>
+                {gate.allowed ? 'Create Your Wallet' : 'Your wallet unlocks after verification'}
+              </h2>
               <p style={{ color: 'var(--txt-3)', fontSize: 14 }}>
-                Your blockchain wallet for Mallchain transactions
+                {gate.allowed
+                  ? 'Your blockchain wallet for Mallchain transactions'
+                  : 'A wallet attaches to a verified identity, so this step opens the moment a reviewer approves your documents.'}
               </p>
             </div>
+
+            {!gate.allowed && (
+              <div style={{ marginBottom: 16 }}>
+                <WalletGateNotice gate={gate} onRetry={refreshGate} />
+              </div>
+            )}
 
             <div style={{
               padding: 16,
@@ -819,7 +853,7 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
               <Globe size={48} style={{ color: 'var(--gold)', marginBottom: 16 }} />
               <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Complete Verification</h2>
               <p style={{ color: 'var(--txt-3)', fontSize: 14 }}>
-                Final step: identity & compliance verification (KYC/AML)
+                Identity &amp; compliance verification (KYC/AML) — this is what unlocks the wallet
               </p>
             </div>
 
@@ -871,7 +905,8 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
               </div>
               <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 8 }}>Welcome Aboard!</h2>
               <p style={{ color: 'var(--txt-3)', fontSize: 15, marginBottom: 32 }}>
-                Your Mallchain account is ready. You can now access the dashboard while your KYC verification is reviewed.
+                Your Mallchain account is ready. The dashboard is open while your documents are
+                reviewed; connecting a wallet is the part that waits for that approval.
               </p>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

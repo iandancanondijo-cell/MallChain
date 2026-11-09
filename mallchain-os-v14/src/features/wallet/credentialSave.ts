@@ -84,7 +84,15 @@ export async function saveWalletCredential(
   // server-side too. Best-effort: an offline device still holds a working,
   // verified local secret, so this is a warning and never a rollback.
   api.post('/api/wallet/pin/set-pin', { pinHash: hashResult.hash }).then((r) => {
-    if (!r.ok) console.warn('[credentialSave] secret-hash sync to server failed:', r.error);
+    if (r.ok) return;
+    // kyc_verification_required here means the doors let a wallet through on a
+    // verdict that has since changed (or a restore the server read differently).
+    // The local secret is still real and still unlocks — what is missing is the
+    // server-side lockout, so say that instead of one generic line.
+    console.warn('[credentialSave] secret-hash sync to server failed:', r.error,
+      r.code === 403
+        ? '— only this device can now throttle wrong guesses for this wallet'
+        : '');
   });
 
   return { ok: true };

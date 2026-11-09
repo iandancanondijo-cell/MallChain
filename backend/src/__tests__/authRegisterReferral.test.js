@@ -25,7 +25,7 @@ process.env.SESSION_TTL_MIN = '120';
 const User = require('../models/user');
 const authController = require('../controllers/authController');
 
-describe('POST /api/auth/register — user payload + referral bonus', () => {
+describe('POST /api/auth/register — user payload + referral attribution', () => {
   let app;
 
   beforeAll(() => {
@@ -68,11 +68,16 @@ describe('POST /api/auth/register — user payload + referral bonus', () => {
     const setCookie = res.headers['set-cookie'] || [];
     expect(setCookie.some((c) => c.startsWith('auth_token=signed.jwt.token'))).toBe(true);
     expect(res.body.user).toMatchObject({ email: 'new@x.com', role: 'user', banned: false, kycLevel: 1 });
-    expect(created.referralCode).toMatch(/^MALL-/);
+    // Signup deliberately does NOT mint a code. A referral code is earned by
+    // connecting a wallet (authController.activateReferralCode, called from
+    // linkWallet) — before that there is no address for a commission to be
+    // claimed against, so an issued code would be a promise the product cannot
+    // keep. The link tests that do pay live in linkWallet.test.js.
+    expect(created.referralCode).toBeUndefined();
     expect(created.save).toHaveBeenCalled();
   });
 
-  test('credits the referrer when a valid referralCode is supplied at signup', async () => {
+  test('a valid referralCode at signup is recorded, but nobody is paid until the referee connects a wallet', async () => {
     const referrer = { _id: 'referrer1', referralCode: 'MALL-REF1' };
     User.findOne
       .mockResolvedValueOnce(null) // existing-email check
@@ -83,15 +88,14 @@ describe('POST /api/auth/register — user payload + referral bonus', () => {
 
     await request(app).post('/api/auth/register').send({ email: 'new@x.com', password: 'pw123456', referralCode: 'mall-ref1' });
 
-    // assignReferralCode() looks up the referrer *after* User.create() (it
-    // needs the new user's own _id to build referralCode), so referredBy is
-    // set by mutating the created user and calling .save() — not passed as
-    // a User.create() argument.
+    // Attribution runs *after* User.create() (recordReferralAttribution needs
+    // the new document to write onto), so referredBy is set by mutating the
+    // created user and calling .save() — not passed as a User.create() argument.
     expect(created.referredBy).toBe('referrer1');
     expect(created.save).toHaveBeenCalled();
-    expect(User.findByIdAndUpdate).toHaveBeenCalledWith('referrer1', {
-      $inc: { referralCount: 1, referralEarnings: 10 },
-    });
+    // ...and the credit itself moved to the wallet-link path, so signup pays
+    // no one. The link tests that do pay live in linkWallet.test.js.
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   test('signup with an unknown referralCode still succeeds, without crediting anyone', async () => {

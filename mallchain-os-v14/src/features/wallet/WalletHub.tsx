@@ -6,6 +6,8 @@ import { useLivePrice } from '../../hooks/useLivePrice';
 import { useCurrencyConverter, type FiatUnit } from '../../services/currency';
 import { authService } from '../../services/auth';
 import { LoadingState } from '../../components/LoadingState';
+import { useWalletGate, reportLinkFailure, linkAttemptGuard } from './walletGate';
+import WalletGateNotice from './WalletGateNotice';
 import {
   ArrowUpRight, ArrowDownLeft, CreditCard, Building2, Sparkles,
   Repeat, Clock, BarChart3, Wallet, Copy, ExternalLink, Settings, Lock, Banknote
@@ -25,6 +27,10 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
   const walletCreatedAt = st.wallet.createdAt;
 
   const { balance, loading, error, retry } = useWalletData(walletAddress);
+  // Verified identity comes before a wallet: this is the second door a signed-in
+  // person can try to attach an address through, and it must not offer what the
+  // server will refuse.
+  const { gate, refresh: refreshGate } = useWalletGate();
 
   const getWalletAge = () => {
     if (!walletCreatedAt) return 'Unknown';
@@ -48,11 +54,15 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
   const [linkingWallet, setLinkingWallet] = useState(false);
   const linkWalletNow = async () => {
     if (!walletAddress || linkingWallet) return;
+    // Restore mode allows exactly one address — the account's own. The button
+    // is rendered from the same verdict, so this is only the race guard.
+    const refused = linkAttemptGuard(gate, walletAddress);
+    if (refused) { toast(refused, false); return; }
     setLinkingWallet(true);
     const res = await authService.linkWallet(walletAddress);
     setLinkingWallet(false);
     if (res.ok) toast('Wallet linked to your account');
-    else if (res.reason !== 'pin_cancelled') toast(res.reason || 'Could not link your wallet', false);
+    else reportLinkFailure(res.reason);
   };
 
   const realBalance = balance || {
@@ -174,11 +184,19 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
                   <span className="chip gold" style={{ fontSize: 10 }}>{cur}</span>
                   {st.wallet.linkedOnServer
                     ? <span className="chip green" style={{ fontSize: 10 }}>Connected</span>
-                    : (
-                      <button className="chip" style={{ fontSize: 10, color: 'var(--gold)' }} onClick={linkWalletNow} disabled={linkingWallet} title="Confirm your PIN to link this wallet to your account">
-                        {linkingWallet ? 'Linking…' : 'Link wallet'}
-                      </button>
-                    )}
+                    : gate.state === 'checking'
+                      ? <span className="chip" style={{ fontSize: 10, color: 'var(--txt-3)' }}>Checking verification…</span>
+                      : !gate.allowed
+                        ? (
+                          <a className="chip" style={{ fontSize: 10, color: 'var(--gold)' }} href="#/kyc" title="A wallet is attached to an account only after its identity is verified">
+                            Verification needed
+                          </a>
+                        )
+                        : (
+                          <button className="chip" style={{ fontSize: 10, color: 'var(--gold)' }} onClick={linkWalletNow} disabled={linkingWallet} title="Confirm your cipher to link this wallet to your account">
+                            {linkingWallet ? 'Linking…' : 'Link wallet'}
+                          </button>
+                        )}
                   {balance && <span className="chip green" style={{ fontSize: 10 }}>Live</span>}
                 </>
               ) : (
@@ -196,7 +214,13 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
                 <div style={{ fontWeight: 700, fontSize: 13 }}>Connect your wallet</div>
                 <div style={{ fontSize: 11.5, color: 'var(--txt-3)', marginTop: 2 }}>View balances and transact on Mallchain</div>
               </div>
-              <button className="btn btn-primary btn-sm" onClick={() => navigate('/wallet/connect')}>Connect</button>
+              {gate.allowed ? (
+                <button className="btn btn-primary btn-sm" onClick={() => navigate('/wallet/connect')}>Connect</button>
+              ) : gate.state === 'checking' ? (
+                <span className="chip" style={{ fontSize: 11, color: 'var(--txt-3)' }}>Checking…</span>
+              ) : (
+                <a className="btn btn-primary btn-sm" href="#/kyc" title="A wallet is attached to an account only after its identity is verified">Verify first</a>
+              )}
             </div>
           )}
           {isWalletConnected && (
@@ -211,6 +235,11 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
           )}
         </div>
       </div>
+
+      {/* One sentence explaining the disabled wallet actions above. */}
+      {gate.blocked && !st.wallet.linkedOnServer && (
+        <WalletGateNotice gate={gate} onRetry={refreshGate} />
+      )}
 
       {/* ── error ── */}
       {error && (
