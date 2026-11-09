@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const MinesReviewer = require('../models/MinesReviewer');
+const TaskSubmission = require('../models/TaskSubmission');
 const User = require('../models/user');
 const WalletTransaction = require('../models/WalletTransaction');
 const Campaign = require('../models/Campaign');
@@ -126,14 +127,34 @@ async function settle(task, { approved, reason }) {
   const pendingNotifications = [];
 
   const session = await mongoose.startSession();
+  // settle() is reachable from three places at once — a reviewer casting the
+  // deciding vote, another reviewer opening their queue (the lazy sweep), and
+  // the miner reading their own list. Writing the terminal status through
+  // task.save() matched only _id, so two of them running together each paid
+  // the miner and credited every majority-matching reviewer. The claim below
+  // keys on the still-open voting state, so only the first writer gets past
+  // it; the losers stop before any money moves.
+  const terminalFields = {
+    status: approved ? 'auto_approved' : 'rejected',
+    assignment_status: approved ? 'approved' : 'rejected',
+    completed_at: new Date(),
+    reward_amount: finalReward,
+  };
+  if (!approved && reason) terminalFields.rejection_note = reason;
+  let claimLost = false;
+
   try {
     await session.withTransaction(async () => {
-      task.status = approved ? 'auto_approved' : 'rejected';
-      task.assignment_status = approved ? 'approved' : 'rejected';
-      task.completed_at = new Date();
-      task.reward_amount = finalReward;
-      if (!approved && reason) task.rejection_note = reason;
-      await task.save({ session });
+      const claimed = await TaskSubmission.findOneAndUpdate(
+        { _id: task._id, assignment_status: { $in: ['assigned', 'voting'] } },
+        { $set: terminalFields },
+        { new: true, session }
+      ).lean();
+      if (!claimed) {
+        claimLost = true;
+        return;
+      }
+      Object.assign(task, terminalFields);
 
       if (approved && finalReward > 0) {
         await WalletTransaction.create(
@@ -215,6 +236,21 @@ async function settle(task, { approved, reason }) {
               userId: reviewerId,
               flow: 'mines_reviewer_vote_reward',
             });
+            // Without this row the reviewer's payout is invisible to
+            // GET /api/mines/transactions and the wallet history: the balance
+            // moves, but nothing explains why.
+            await WalletTransaction.create(
+              [
+                {
+                  user_id: reviewerId,
+                  type: 'credit',
+                  amount: VOTE_REWARD,
+                  currency: 'MLPTS',
+                  description: 'Mines review reward — vote matched the weighted majority',
+                },
+              ],
+              { session }
+            );
             pendingNotifications.push({
               userId: reviewerId,
               kind: 'mines',
@@ -233,6 +269,14 @@ async function settle(task, { approved, reason }) {
     });
   } finally {
     session.endSession();
+  }
+
+  if (claimLost) {
+    // Another writer already settled and paid this task. Return its stored
+    // outcome so callers show the real status instead of the stale
+    // still-'voting' copy they handed in.
+    const settledRow = await TaskSubmission.findById(task._id).lean();
+    return settledRow || task;
   }
 
   for (const n of pendingNotifications) {

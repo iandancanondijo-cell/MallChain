@@ -26,16 +26,16 @@ export default function MinesLeaderboard() {
   }, [load]);
 
   const sorted = rows || [];
-  const myRank = profile ? sorted.findIndex((r) => r.id === profile.id) + 1 : 0;
-  const myEarned = profile ? sorted.find((r) => r.id === profile.id)?.earned ?? profile.mlpts_balance : 0;
+  const myIndex = profile ? sorted.findIndex((r) => r.id === profile.id) : -1;
+  const myRow = myIndex >= 0 ? sorted[myIndex] : null;
   const maxEarned = Math.max(...sorted.map((r) => r.earned), 1);
 
   return (
     <div>
       <div className="view-head">
         <h1 className="text-gradient">Leaderboard</h1>
-        <span className="sub">Top Campaign Participants by lifetime Mallpoints</span>
-        {myRank > 0 && <span className="chip gold">Your rank: #{myRank}</span>}
+        <span className="sub">Top Campaign Participants by Mallpoints approved from completed campaigns</span>
+        {myRow && <span className="chip gold">Your rank: #{myIndex + 1}</span>}
       </div>
 
       {error && (
@@ -66,13 +66,21 @@ export default function MinesLeaderboard() {
       {profile && (
         <div className="card card-glow bg-gradient-card mt">
           <div className="sec-title"><h2>Your standing</h2></div>
-          <div className="row">
-            <ScoreRing pct={maxEarned ? Math.round((myEarned / maxEarned) * 100) : 0} size={84} label="Share of top earner" />
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 800 }}>#{myRank || '—'} of {sorted.length}</div>
-              <div className="muted" style={{ fontSize: 12.5 }}>You've earned {fmtNum(myEarned)} MLPTS lifetime.</div>
+          {myRow ? (
+            <div className="row">
+              <ScoreRing pct={Math.round((myRow.earned / maxEarned) * 100)} size={84} label="Share of top earner" />
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800 }}>#{myIndex + 1} shown on this board</div>
+                <div className="muted" style={{ fontSize: 12.5 }}>
+                  {fmtNum(myRow.earned)} MLPTS approved from {myRow.tasks} completed campaign{myRow.tasks === 1 ? '' : 's'}.
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="muted" style={{ fontSize: 12.5 }}>
+              You are not in the ranked list yet — only approved campaign rewards count here, and your wallet balance is not part of it.
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -22,6 +22,12 @@ export interface AssignedTask {
   voting_deadline?: string;
   my_vote: 'yes' | 'no' | null;
   has_voted: boolean;
+  /** Hydrated by GET /my-assigned so the reviewer can see what was actually published. */
+  campaign_title?: string;
+  campaign_content_link?: string;
+  campaign_platform?: string;
+  campaign_rate_per_task?: number | null;
+  campaign_status?: string;
 }
 
 export interface ReviewerProfile {
@@ -50,6 +56,13 @@ export interface MinesCampaign {
   multiplier?: number;
   rate_per_task: number;
   budget_remaining: number;
+  /**
+   * How many rewarded submissions one account may make. Sent by
+   * GET /campaigns/active and enforced by POST /submissions, so the Discover
+   * button can promise a second attempt only when the server would allow it.
+   */
+  max_completions_per_user?: number;
+  cooldown_seconds?: number;
   status: 'active' | 'paused' | 'completed';
   completions_count: number;
 }
@@ -133,6 +146,30 @@ export interface ParticipantLeaderboardEntry {
   rankPoints: number;
 }
 
+/** GET /api/mines/earnings/summary — settled submissions only, never wallet credits. */
+export interface EarningsSummary {
+  currency: string;
+  approvedCount: number;
+  approvedMlpts: number;
+  rejectedCount: number;
+  pendingCount: number;
+  pendingMlptsAtStake: number;
+  pendingCampaignsUnresolved: number;
+  thisWeekMlpts: number;
+  avgRewardMlpts: number;
+  daily: Array<{ date: string; mlpts: number; count: number }>;
+  balanceMlpts: number;
+  tasksCompleted: number;
+  source: string;
+}
+
+export interface ProofUploadResult {
+  documentRef: string;
+  /** Multer's own metadata, kept optional so a partial response still type-checks. */
+  size?: number;
+  mimetype?: string;
+}
+
 // backend routes in taskAssignment.js respond via an `ok(data) => {ok, data}` helper
 interface Envelope<T> {
   ok: boolean;
@@ -211,6 +248,22 @@ class MinesApi {
 
   async submitTask(payload: { campaign_id: string; title?: string; task_type?: string; description?: string; proof_url?: string }): Promise<ApiResult<MinesSubmission>> {
     return unwrap(api.post('/api/mines/submissions', payload));
+  }
+
+  /**
+   * Uploads an activity screenshot and returns the ref that POST /submissions
+   * accepts as `proof_url`. This is the only way to produce a proof the
+   * backend can verify exists on disk; a typed URL is still accepted but is
+   * just a claim.
+   */
+  async uploadProof(file: File): Promise<ApiResult<ProofUploadResult>> {
+    const form = new FormData();
+    form.append('proof', file);
+    return unwrap(api.upload<Envelope<ProofUploadResult>>('/api/mines/upload', form));
+  }
+
+  async getEarningsSummary(): Promise<ApiResult<EarningsSummary>> {
+    return unwrap(api.get('/api/mines/earnings/summary'));
   }
 
   async campaignLeaderboard(): Promise<ApiResult<ParticipantLeaderboardEntry[]>> {

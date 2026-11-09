@@ -72,20 +72,43 @@ export default function MinesReviewerStake() {
         <div className="card card-hover"><div className="lbl">Current stake</div><div className="num">{loading ? '—' : fmtNum(profile?.stakedAmount ?? 0)} MLPTS</div></div>
         <div className="card card-hover"><div className="lbl">Minimum required</div><div className="num">{loading ? '—' : fmtNum(profile?.minRequiredStake ?? 0)} MLPTS</div></div>
         <div className="card card-hover"><div className="lbl">Status</div><div className="num" style={{ fontSize: 14 }}>{loading ? '—' : profile?.stakeStatus ?? 'unstaked'}</div></div>
+        <div className="card card-hover"><div className="lbl">Review earnings</div><div className="num">{loading ? '—' : fmtNum(profile?.total_earnings ?? 0)} MLPTS</div></div>
       </div>
+
+      {profile && profile.stakeStatus === 'suspended' && (
+        <div className="card mb" style={{ borderColor: 'var(--red)', backgroundColor: 'var(--red-dark)' }}>
+          <div style={{ color: 'var(--red-2)', fontSize: 12.5 }}>
+            Your reviewer stake is suspended after missed votes. Staking again restores eligibility, but the reputation penalty stays until you review consistently.
+          </div>
+        </div>
+      )}
 
       <div className="card card-glow bg-gradient-card" style={{ maxWidth: 480 }}>
         <div className="sec-title"><h2>Manage stake</h2></div>
         <div className="field">
           <label>Amount (MLPTS)</label>
           <input className="input" type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 50" />
+          <div className="hint">
+            {profile?.minRequiredStake
+              ? `At least ${fmtNum(profile.minRequiredStake)} MLPTS total makes you eligible for random assignment. It is held by the review system, not sent anywhere.`
+              : 'Loading the minimum stake…'}
+          </div>
+          {profile && profile.stakedAmount < (profile.minRequiredStake ?? 0) && (
+            <button type="button" className="btn btn-ghost btn-sm mt" disabled={busy !== null}
+              onClick={() => setAmount(String(Math.max(0, (profile.minRequiredStake ?? 0) - profile.stakedAmount)))}>
+              Top up to the minimum
+            </button>
+          )}
         </div>
         <div className="modal-actions">
           <button className="btn btn-primary" disabled={busy !== null} onClick={doStake}>{busy === 'stake' && <span className="spin" />} Stake</button>
-          <button className="btn btn-ghost" disabled={busy !== null} onClick={() => doUnstake(false)}>{busy === 'unstake' && <span className="spin" />} Unstake amount</button>
-          <button className="btn btn-ghost" disabled={busy !== null} onClick={() => doUnstake(true)}>Unstake all</button>
+          <button className="btn btn-ghost" disabled={busy !== null || !(profile?.stakedAmount ?? 0)} onClick={() => doUnstake(false)}>{busy === 'unstake' && <span className="spin" />} Unstake amount</button>
+          <button className="btn btn-ghost" disabled={busy !== null || !(profile?.stakedAmount ?? 0)} onClick={() => doUnstake(true)}>Unstake all</button>
         </div>
         <div className="tiny mt">Unstaking is blocked while you have an open assigned vote that hasn't been cast yet.</div>
+        <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>
+          This is the review-system stake, separate from on-chain validator staking — see <a href="#/mines/validator-queue">your reviewer queue</a>.
+        </div>
       </div>
     </div>
   );

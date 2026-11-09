@@ -45,6 +45,7 @@ import type {
   TreasuryMetricTotal,
 } from '../../../services/adminApi';
 import { fmtNum, Modal, toast } from '../../../components/ui';
+import { resolveContentLink, resolveProofLink } from '../../../services/proofLink';
 import { store } from '../../../store/store';
 import { config } from '../../../services/config';
 import { AdminErrorBanner, collectErrors, amlAmountLabel, displayPii } from '../adminShared';
@@ -1233,7 +1234,9 @@ function MiningAdmin() {
     const r = await adminApi.approveSubmission(id, up.data.documentRef);
     setBusySub(null);
     if (r.ok) {
-      toast('Submission approved');
+      // Say what the route did, not just that it succeeded: approve now
+      // credits the participant's Mallpoints balance in the same transaction.
+      toast(`Approved — ${fmtNum(r.data?.submission?.reward_amount ?? 0)} MLPTS credited to the participant`);
       setDecisionShots((m) => {
         const { [id]: _f, ...rest } = m;
         return rest;
@@ -1330,16 +1333,43 @@ function MiningAdmin() {
           <span className="sub">{subs.length} awaiting review</span>
         </div>
         {!subs.length && <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>No pending submissions.</div>}
-        {subs.map((s) => (
+        {subs.map((s) => {
+          // The submission only stores campaign_id; the amount approving will
+          // pay is the campaign's own rate_per_task (see adminPanel.js's
+          // approve route), so an admin clicking Approve has to be able to see
+          // it before they click rather than guess at a payout.
+          const campaign = s.campaign_id ? campaigns.find((c) => String(c._id) === String(s.campaign_id)) : undefined;
+          const proof = resolveProofLink(s.proof_url);
+          const taskLink = resolveContentLink(campaign?.content_link);
+          return (
           <div key={s._id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <div>
                 <div className="t">{s.title || 'Submission'}</div>
                 <div className="m tiny">{s.description}</div>
-                {s.proof_url && (
-                  <div className="tiny mono" style={{ marginTop: 4 }}>
-                    <a href={s.proof_url.startsWith('http') ? s.proof_url : `/api/mines/proof/${encodeURIComponent(s.proof_url)}`} target="_blank" rel="noreferrer">proof</a>
+                {campaign ? (
+                  <div className="tiny" style={{ marginTop: 4 }}>
+                    Campaign: <b>{campaign.title}</b> · pays <b>{fmtNum(campaign.rate_per_task)} MLPTS</b>
+                    {campaign.status !== 'active' && <span className="chip" style={{ marginLeft: 6 }}>campaign {campaign.status}</span>}
                   </div>
+                ) : s.campaign_id ? (
+                  <div className="tiny mt" style={{ color: 'var(--red-2)' }}>⚠ Its campaign is not in the active list — approving may be refused.</div>
+                ) : null}
+                {taskLink.kind === 'external' && (
+                  <div className="tiny" style={{ marginTop: 4 }}>
+                    <a href={taskLink.href} target="_blank" rel="noopener noreferrer nofollow">task link · {taskLink.label} ↗</a>
+                  </div>
+                )}
+                {proof.kind !== 'none' ? (
+                  <div className="tiny mono" style={{ marginTop: 4 }}>
+                    <a href={proof.href} target="_blank" rel="noopener noreferrer nofollow">{proof.kind === 'upload' ? 'proof screenshot' : 'proof link ↗'}</a>
+                  </div>
+                ) : s.proof_url ? (
+                  /* An admin clicking this is clicking a participant's string,
+                     so it goes through the same allowlist as the reviewer queue. */
+                  <div className="tiny mono" style={{ marginTop: 4, color: 'var(--red-2)' }} title={proof.reason}>⛔ proof link blocked: {proof.display}</div>
+                ) : (
+                  <div className="tiny" style={{ marginTop: 4, color: 'var(--txt-3)' }}>No proof attached.</div>
                 )}
               </div>
               <span className="chip gold">pending</span>
@@ -1365,7 +1395,7 @@ function MiningAdmin() {
             </label>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn btn-primary btn-sm" onClick={() => void approveSub(s._id)} disabled={busySub === s._id}>
-                Approve
+                {campaign ? `Approve · pay ${fmtNum(campaign.rate_per_task)} MLPTS` : 'Approve'}
               </button>
               <button className="btn btn-danger btn-sm" onClick={() => void rejectSub(s._id)} disabled={busySub === s._id}>
                 Reject
@@ -1375,7 +1405,8 @@ function MiningAdmin() {
               </span>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="card mt">

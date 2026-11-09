@@ -1,14 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, StatusChip } from '../../components/ui';
 import { minesApi, type MinesSubmission } from '../../services/minesApi';
+import { resolveProofLink } from '../../services/proofLink';
+import { submissionChipToken, submissionState } from './submissionStatus';
 
-const STATUS_MAP: Record<string, string> = {
-  manual_review: 'pending',
-  assigned: 'pending',
-  voting: 'pending',
-  auto_approved: 'approved',
-  rejected: 'rejected',
-};
+/** What the reviewer is actually looking at, opened only if it is safe to open. */
+function ProofRow({ value }: { value?: string }) {
+  const proof = resolveProofLink(value);
+  if (proof.kind === 'none') {
+    return (
+      <div className="tiny mt" style={{ color: proof.display ? 'var(--red-2)' : 'var(--txt-3)' }}>
+        {proof.display ? `⛔ Proof is not an uploaded screenshot or http(s) link: ${proof.display}` : '⚠ No proof was attached to this submission.'}
+      </div>
+    );
+  }
+  return (
+    <div className="tiny mt">
+      <a className="mc-link-open" href={proof.href} target="_blank" rel="noopener noreferrer nofollow">
+        {proof.kind === 'upload' ? `🖼 Your screenshot${proof.label ? ` · ${proof.label}` : ''}` : `🔗 Your proof link · ${proof.label}`} <span aria-hidden>↗</span>
+      </a>
+    </div>
+  );
+}
 
 /** My Submissions — real GET /api/mines/submissions/me (backend/src/routes/mines.js). */
 export default function MinesParticipation({ navigate }: { navigate: (p: string) => void }) {
@@ -53,22 +66,37 @@ export default function MinesParticipation({ navigate }: { navigate: (p: string)
         </div>
       )}
 
-      {(submissions || []).map((s) => (
+      {(submissions || []).map((s) => {
+        const state = submissionState(s);
+        return (
         <div key={s._id} className="card card-glow bg-gradient-card mb">
           <div className="row">
             <div className="grow"><b>{s.title || `Submission ${s._id}`}</b> <span className="muted">· {new Date(s.created_at).toLocaleString()}</span></div>
-            <StatusChip status={STATUS_MAP[s.status] || s.status} />
-            {s.status === 'auto_approved' && <b className="gold">+{s.reward_amount} MLPTS</b>}
+            <StatusChip status={submissionChipToken(s)} />
+            {state === 'paid' && <b className="gold">+{s.reward_amount} {s.reward_currency || 'MLPTS'}</b>}
           </div>
           {s.description && <div className="tiny" style={{ marginTop: 4, color: 'var(--txt-2)' }}>{s.description}</div>}
-          {s.status === 'rejected' && (
+          <ProofRow value={s.proof_url} />
+          {/* 'assigned'/'voting' means named reviewers hold the proof; anything
+              else means it is sitting in an admin queue. Saying "pending
+              reviewer consensus" for both told a participant their proof was
+              being voted on when nothing of the sort had happened. */}
+          {(state === 'reviewing' || state === 'queued') && (
+            <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>
+              {state === 'reviewing'
+                ? 'With your proof reviewers — nothing is paid until they approve it.'
+                : 'Queued for review — nothing is paid until it is approved.'}
+            </div>
+          )}
+          {state === 'rejected' && (
             <div style={{ fontSize: 11, color: 'var(--red-2)', marginTop: 6 }}>
               ⚠ {s.rejection_note || 'Not approved by reviewers'}{' '}
               {s.campaign_id && <button className="btn btn-ghost btn-sm" onClick={() => navigate('/mines/discover')}>Resubmit from Discover →</button>}
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

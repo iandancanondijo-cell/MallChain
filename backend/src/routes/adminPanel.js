@@ -38,8 +38,15 @@ const { limiters } = require('../middleware/rateLimiter');
 const { blindIndex, decryptField } = require('../utils/fieldEncryption');
 const { uploadBadgeImage, BADGE_UPLOAD_DIR } = require('../middleware/upload');
 const { uploadProof, PROOFS_UPLOAD_DIR } = require('../middleware/upload');
+const { syncMallPointAccount, requireWalletAddress } = require('../services/mallpointsService');
 const fs = require('fs');
 const path = require('path');
+
+// A submission in one of these states has already been paid (or finally
+// refused) — no route may credit it again. Shared shape with
+// routes/mines.js's TERMINAL_STATUSES and services/minesReviewService.js's
+// settlement guard.
+const MINING_TERMINAL_STATUSES = ['auto_approved', 'approved', 'rejected'];
 
 const MAINTENANCE_SCOPES = ['send', 'withdraw', 'buy', 'payment', 'marketplace', 'staking', 'vault', 'key-vault', 'badge', 'dex'];
 
@@ -863,11 +870,20 @@ router.post('/mining/submissions/:id/approve', requireCategory('mining'), limite
     const sub = await TaskSubmission.findById(req.params.id).lean();
     if (!sub) return res.status(404).json({ ok: false, error: 'submission not found' });
 
+    // A settled submission must never pay a second time. The previous version
+    // of this route wrote status='auto_approved' and created a WalletTransaction
+    // but never checked what was already there, so a double-click (or a second
+    // admin with a fresh request) credited the reward again.
+    if (MINING_TERMINAL_STATUSES.includes(sub.status)) {
+      return res.status(409).json({ ok: false, error: `submission is already ${sub.status} — nothing to pay` });
+    }
+
     // Valid-task enforcement at the payout boundary too: even after a
     // submission passed mines.js's POST /submissions gate, the campaign
     // or its creator could have changed status between submission and
     // approval. Re-check before crediting MLPTS so a banned creator or
     // paused campaign can't keep paying out.
+    let finalReward = Number(rewardAmount) || 0;
     if (sub.campaign_id) {
       const campaign = await Campaign.findById(sub.campaign_id).lean();
       if (!campaign) {
@@ -883,35 +899,106 @@ router.post('/mining/submissions/:id/approve', requireCategory('mining'), limite
       if (creator.banned === true) {
         return res.status(400).json({ ok: false, error: 'campaign creator is banned — cannot approve rewards' });
       }
+      // The campaign's own rate is the promised price of a task. The SPA's
+      // approve dialog lets an admin type an amount, which used to be the
+      // only number ever paid — so a mistyped figure silently over/under-paid
+      // against the published campaign. Default to the campaign rate and let
+      // an explicit, valid amount override it.
+      if (!finalReward) finalReward = Number(campaign.rate_per_task) || 0;
+    }
+    if (finalReward < 0) finalReward = 0;
+
+    // The claim and the payout share one transaction. Run separately, a
+    // failing credit (miner unlinked, dead session) left the row already
+    // marked 'auto_approved' while nothing was paid — the admin got a 500,
+    // and the retry then answered 409 "nothing was paid", which was no longer
+    // true. Inside one transaction a failed payout rolls the status write
+    // back too, so the submission stays reviewable and the retry is honest.
+    const session = await mongoose.startSession();
+    let updated;
+    try {
+      await session.withTransaction(async () => {
+        // Atomic claim: the status filter is part of the update itself, so two
+        // approvals racing — or an admin approval racing a reviewer vote —
+        // cannot both land; the loser matches no document.
+        updated = await TaskSubmission.findOneAndUpdate(
+          { _id: req.params.id, status: { $nin: MINING_TERMINAL_STATUSES } },
+          { $set: {
+            status: 'auto_approved',
+            // Closing the voting state is what stops minesReviewService
+            // .checkAndResolve() from settling this task a second time (and
+            // paying again) when a reviewer votes after an admin already
+            // approved it. Leaving it 'assigned'/'voting' was the
+            // double-payout path.
+            assignment_status: 'approved',
+            completed_at: new Date().toISOString(),
+            reward_amount: finalReward,
+            reviewedScreenshotRef: safeName,
+            reviewedBy: adminId,
+          } },
+          { new: true, session }
+        ).lean();
+        if (!updated) {
+          const settled = new Error('already settled');
+          settled.alreadySettled = true;
+          throw settled;
+        }
+
+        // The reward has to actually reach the miner's balance. WalletTransaction
+        // is a ledger record, not a credit: nothing reads it to update
+        // User.mlpts_balance, so the previous version of this route left the
+        // miner's Mines earnings and wallet view at zero while claiming the
+        // reward was paid. Same transaction shape as routes/mines.js
+        // /submissions/:id/approve and minesReviewService.settle().
+        if (finalReward > 0) {
+          const miner = await User.findById(sub.miner_id).session(session);
+          if (!miner) throw new Error('miner user not found during transaction');
+
+          // GATE 61.1: Wallet-first enforcement — no reward to a linked-less account.
+          requireWalletAddress(miner, { userId: sub.miner_id, flow: 'mining_approval' });
+
+          await WalletTransaction.create([{
+            user_id: sub.miner_id,
+            type: 'credit',
+            amount: finalReward,
+            currency: sub.reward_currency || 'MLPTS',
+            description: 'Task reward approved by admin',
+          }], { session });
+
+          await User.findByIdAndUpdate(sub.miner_id, { $inc: { mlpts_balance: finalReward } }).session(session);
+
+          // GATE 61: Synchronize mining reward to MallPointAccount (conversion-eligible ledger)
+          await syncMallPointAccount(User.decryptUserPii(miner).walletAddress, finalReward, session, {
+            userId: sub.miner_id,
+            flow: 'mining_approval',
+          });
+        }
+
+        if (sub.campaign_id) {
+          await Campaign.findByIdAndUpdate(sub.campaign_id, {
+            $inc: finalReward > 0
+              ? { completions_count: 1, budget_remaining: -finalReward }
+              : { completions_count: 1 },
+          }).session(session);
+        }
+      });
+    } catch (err) {
+      if (err.alreadySettled) {
+        return res.status(409).json({ ok: false, error: 'submission was settled by another review moments ago — nothing was paid' });
+      }
+      throw err;
+    } finally {
+      session.endSession();
     }
 
-    const updated = await TaskSubmission.findByIdAndUpdate(
-      req.params.id,
-      { $set: {
-        status: 'auto_approved',
-        completed_at: new Date().toISOString(),
-        reviewedScreenshotRef: safeName,
-        reviewedBy: adminId,
-      } },
-      { new: true }
-    ).lean();
-
-    await WalletTransaction.create({
-      user_id: sub.miner_id,
-      type: 'credit',
-      amount: rewardAmount || 0,
-      currency: 'MLPTS',
-      description: 'Task reward approved by admin',
+    notify(sub.miner_id, {
+      kind: 'mines',
+      title: 'Submission approved',
+      body: `Your Mines submission was approved — +${finalReward} ${sub.reward_currency || 'MLPTS'}`,
     });
 
-    if (sub.campaign_id) {
-      await Campaign.findByIdAndUpdate(sub.campaign_id, {
-        $inc: { completions_count: 1, budget_remaining: -(rewardAmount || 0) },
-      });
-    }
-
-    await auditLog('mining_submission_approve', req.user, { submissionId: req.params.id, rewardAmount, screenshotRef: safeName });
-    chainAudit(req, 'admin_mining_submission_approve', `submission:${req.params.id}`, { minerId: String(sub.miner_id), rewardAmount: rewardAmount || 0, screenshotRef: safeName });
+    await auditLog('mining_submission_approve', req.user, { submissionId: req.params.id, rewardAmount: finalReward, screenshotRef: safeName });
+    chainAudit(req, 'admin_mining_submission_approve', `submission:${req.params.id}`, { minerId: String(sub.miner_id), rewardAmount: finalReward, screenshotRef: safeName });
     return res.json({ ok: true, submission: updated });
   } catch (err) {
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
@@ -935,17 +1022,28 @@ router.post('/mining/submissions/:id/reject', requireCategory('mining'), limiter
       return res.status(400).json({ ok: false, error: 'screenshotRef not found on disk — re-upload via /api/admin/proof' });
     }
 
-    const row = await TaskSubmission.findByIdAndUpdate(
-      req.params.id,
+    const existing = await TaskSubmission.findById(req.params.id).select('status').lean();
+    if (!existing) return res.status(404).json({ ok: false, error: 'submission not found' });
+
+    // Rejection has to close the voting state too. While assignment_status
+    // stayed 'assigned'/'voting', minesReviewService.checkAndResolve() would
+    // still fire on the next reviewer vote and settle() the task — flipping
+    // status back to 'auto_approved' and paying a submission the admin had
+    // just refused. The status filter makes the claim atomic so a
+    // already-paid submission can't be silently re-labelled 'rejected'
+    // either.
+    const row = await TaskSubmission.findOneAndUpdate(
+      { _id: req.params.id, status: { $nin: MINING_TERMINAL_STATUSES } },
       { $set: {
         status: 'rejected',
+        assignment_status: 'rejected',
         rejection_note: note || null,
         reviewedScreenshotRef: safeName,
         reviewedBy: adminId,
       } },
       { new: true }
     ).lean();
-    if (!row) return res.status(404).json({ ok: false, error: 'submission not found' });
+    if (!row) return res.status(409).json({ ok: false, error: 'submission is already settled — nothing to reject' });
 
     await auditLog('mining_submission_reject', req.user, { submissionId: req.params.id, note, screenshotRef: safeName });
     chainAudit(req, 'admin_mining_submission_reject', `submission:${req.params.id}`, { note: note || null, screenshotRef: safeName });

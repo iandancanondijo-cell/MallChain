@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, fmtNum, toast } from '../../components/ui';
 import { minesApi, type AssignedTask, type ReviewerProfile } from '../../services/minesApi';
+import { blockedLinkTitle, resolveContentLink, resolveProofLink } from '../../services/proofLink';
 
 /**
  * Proof Reviewer queue — real content-review game: submissions are randomly
@@ -39,7 +40,15 @@ export default function MinesValidatorQueue() {
     const result = await minesApi.vote(taskId, vote);
     setVotingId(null);
     if (result.ok) {
-      toast(`Vote recorded — ${result.data?.status || 'thanks for reviewing'}`);
+      // `status` is the submission's assignment_status after this vote —
+      // 'voting' means the other reviewers still need to cast theirs, and
+      // nothing has been paid yet. Say that instead of implying the task is done.
+      const settled = result.data?.status === 'approved' || result.data?.status === 'auto_approved' || result.data?.status === 'rejected';
+      toast(result.data?.status === 'rejected'
+        ? 'Vote recorded — this submission was rejected'
+        : settled
+          ? 'Vote recorded — the review reached its decision'
+          : 'Vote recorded — waiting on the other reviewers');
       load();
     } else {
       toast(result.error || 'Vote failed', false);
@@ -58,7 +67,7 @@ export default function MinesValidatorQueue() {
 
       {profile && (
         <div className="mc-stats-grid stagger" style={{ marginBottom: 16 }}>
-          <div className="card card-hover"><div className="lbl">Stake status</div><div className="num" style={{ fontSize: 14 }}>{profile.stakeStatus}</div></div>
+          <div className="card card-hover"><div className="lbl">Stake status</div><div className="num" style={{ fontSize: 14 }}>{profile.stakeStatus || 'unstaked'}</div></div>
           <div className="card card-hover"><div className="lbl">Staked</div><div className="num">{fmtNum(profile.stakedAmount)} MLPTS</div></div>
           <div className="card card-hover"><div className="lbl">Reputation</div><div className="num">{profile.mining_reputation}</div></div>
           <div className="card card-hover"><div className="lbl">Earnings</div><div className="num">{fmtNum(profile.total_earnings)} MLPTS</div></div>
@@ -89,29 +98,68 @@ export default function MinesValidatorQueue() {
         {tasks?.length === 0 && (
           <div className="empty-state"><div className="es-ico">🛂</div><div className="es-t">Queue empty — nothing assigned to you right now</div><div className="es-m">New submissions are randomly assigned to eligible reviewers as they arrive.</div></div>
         )}
-        {(tasks || []).map((t) => (
-          <div key={t._id} className="mc-queue-row">
-            <div style={{ flex: 1 }}>
-              <div className="t" style={{ fontWeight: 700, fontSize: 13 }}>{t.title || `Submission ${t._id}`}</div>
-              <div className="m" style={{ fontSize: 11.5, color: 'var(--txt-2)', marginTop: 2 }}>{t.description}</div>
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 5 }}>
-                <span className="chip">Votes: <b>{t.votes_yes + t.votes_no} / {t.votes_required}</b></span>
-                {t.voting_deadline && <span className="chip">Deadline: {new Date(t.voting_deadline).toLocaleString()}</span>}
-                {t.proof_url && <a className="chip" href={t.proof_url} target="_blank" rel="noreferrer">View proof ↗</a>}
+        {(tasks || []).map((t) => {
+          const proof = resolveProofLink(t.proof_url);
+          const taskLink = resolveContentLink(t.campaign_content_link);
+          return (
+            <div key={t._id} className="mc-queue-row">
+              <div style={{ flex: 1 }}>
+                <div className="t" style={{ fontWeight: 700, fontSize: 13 }}>{t.title || `Submission ${t._id}`}</div>
+                {t.campaign_title && (
+                  <div className="m" style={{ fontSize: 11.5, marginTop: 2 }}>
+                    Campaign: <b>{t.campaign_title}</b>
+                    {t.campaign_rate_per_task != null && <> · pays {fmtNum(t.campaign_rate_per_task)} MLPTS</>}
+                    {t.campaign_status && t.campaign_status !== 'active' && <span className="mc-badge b-rejected"> campaign {t.campaign_status}</span>}
+                  </div>
+                )}
+                {taskLink.kind === 'external' ? (
+                  <div style={{ marginTop: 4 }}>
+                    <a className="mc-link-open" href={taskLink.href} target="_blank" rel="noopener noreferrer nofollow">🔗 Task link · {taskLink.label} <span aria-hidden>↗</span></a>
+                  </div>
+                ) : taskLink.display ? (
+                  /* The creator published something that is not an address a
+                     reviewer can check against. Shown as inert text. */
+                  <div style={{ marginTop: 4 }}>
+                    <span className="mc-link-row mc-link-row--blocked" title={blockedLinkTitle(taskLink)}>🔗 {taskLink.display}</span>
+                  </div>
+                ) : null}
+                <div className="m" style={{ fontSize: 11.5, color: 'var(--txt-2)', marginTop: 4 }}>{t.description}</div>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 5 }}>
+                  <span className="chip">Votes: <b>{t.votes_yes + t.votes_no} / {t.votes_required}</b></span>
+                  {t.voting_deadline && <span className="chip">Deadline: {new Date(t.voting_deadline).toLocaleString()}</span>}
+                  {/* proof_url is participant-submitted text. It used to go straight into
+                      href, so a stored `javascript:` payload executed with the reviewing
+                      account's own session. resolveProofLink() only hands out an href for
+                      http(s) or a ref it recognises as an uploaded screenshot. */}
+                  {proof.kind !== 'none' ? (
+                    <a className="chip" href={proof.href} target="_blank" rel="noopener noreferrer nofollow">
+                      {proof.kind === 'upload' ? '🖼 View screenshot proof' : '🔗 View proof'} ↗
+                    </a>
+                  ) : (
+                    <span className="chip mc-proof-unusable" title={proof.reason}>
+                      {t.proof_url ? '⛔ Proof link blocked' : '⚠ No proof attached'}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                {t.has_voted ? (
+                  <span className="mc-badge b-approved">voted {t.my_vote}</span>
+                ) : (
+                  <div className="row">
+                    {/* The server refuses a vote without an active stake, so an
+                        enabled button here would only produce a refusal. */}
+                    <button className="btn btn-primary btn-sm" disabled={votingId === t._id || !eligible} onClick={() => castVote(t._id, 'yes')}>✓ Approve</button>
+                    <button className="btn btn-ghost btn-sm" disabled={votingId === t._id || !eligible} onClick={() => castVote(t._id, 'no')}>✕ Reject</button>
+                    {!eligible && (
+                      <span className="tiny" style={{ color: 'var(--txt-3)' }}>Stake required — <a href="#/mines/reviewer/stake">Stake now</a></span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
-            <div style={{ textAlign: 'right' }}>
-              {t.has_voted ? (
-                <span className="mc-badge b-approved">voted {t.my_vote}</span>
-              ) : (
-                <div className="row">
-                  <button className="btn btn-primary btn-sm" disabled={votingId === t._id} onClick={() => castVote(t._id, 'yes')}>✓ Approve</button>
-                  <button className="btn btn-ghost btn-sm" disabled={votingId === t._id} onClick={() => castVote(t._id, 'no')}>✕ Reject</button>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

@@ -12,18 +12,40 @@ const TaskSubmission = require('../models/TaskSubmission');
 const Campaign = require('../models/Campaign');
 const WalletTransaction = require('../models/WalletTransaction');
 const MallPointAccount = require('../models/MallPointAccount');
-const { autoAssignReviewers } = require('../services/minesReviewService');
+const { autoAssignReviewers, checkAndResolve } = require('../services/minesReviewService');
 const { PLATFORMS, DEFAULT_DAILY_CAP_MLPTS, getDailyCapMlpts } = require('../config/socialRewardRates');
 const { computeCampaignRate, clampMultiplier, MIN_CAMPAIGN_MULTIPLIER, MAX_CAMPAIGN_MULTIPLIER } = require('../services/rewardEngineService');
 const { markActiveToday } = require('../utils/activityTracker');
 const { syncMallPointAccount, requireWalletAddress } = require('../services/mallpointsService');
 const { uploadProof, PROOFS_UPLOAD_DIR } = require('../middleware/upload');
 const { appendAuditEvent } = require('../services/auditChainService');
+const linkPolicy = require('../utils/linkPolicy');
 const fs = require('fs');
 const path = require('path');
 
 const SUBMISSION_CREATE_FIELDS = ['campaign_id', 'title', 'task_type', 'description', 'proof_url'];
 const SUBMISSION_UPDATE_FIELDS = ['title', 'task_type', 'description', 'proof_url'];
+
+// A submission that has already been paid or refused. The reviewer-vote path
+// (minesReviewService.settle) and both admin approve/reject routes write one
+// of these, and every route that moves money has to refuse to touch a
+// submission already in the set — otherwise a second approval (or a late
+// reviewer vote landing after an admin approval) pays the same task twice.
+const TERMINAL_STATUSES = ['auto_approved', 'approved', 'rejected'];
+
+/**
+ * Validates and normalizes an incoming `proof_url` for storage. Same rules on
+ * every write path: an uploaded screenshot ref owned by this user and
+ * present on disk, or a real http(s) URL. Anything else — including a
+ * `javascript:` payload that would later fire on whoever reviews the
+ * submission — is rejected with a message the submitter can act on.
+ */
+function storableProofUrl(value, userId) {
+  return linkPolicy.assertStorableProofUrl(value, {
+    userId,
+    proofExistsOnDisk: (name) => fs.existsSync(path.join(PROOFS_UPLOAD_DIR, name)),
+  });
+}
 
 function pick(obj, fields) {
   const out = {};
@@ -103,24 +125,45 @@ router.get('/campaigns/creator/:creatorId', async (req, res) => {
   } catch (e) { res.status(500).json(fail(e)); }
 });
 
-// Public: top Campaign Participants by lifetime Mallpoints / tasks completed
+// Public: top Campaign Participants by what Mines actually paid them.
+//
+// This used to rank every account by their *current* mlpts_balance and label
+// it "lifetime Mallpoints" — so the board rewarded anyone who had never
+// completed a task but had received a referral credit, and a top miner who
+// spent or staked their points fell down it. It also fell back to an email
+// local-part as the display name for users without a username, leaking a
+// piece of a PII field on an unauthenticated endpoint.
+// Now: sum the settled rewards on this user's approved submissions, show a
+// username or an anonymous handle, and skip banned accounts.
 router.get('/leaderboard', async (_req, res) => {
   try {
-    const rows = await User.find({ banned: false })
-      .sort({ mlpts_balance: -1 })
-      .limit(50)
-      .select('username email mlpts_balance tasks_completed rank_points')
-      .lean();
-    const leaderboard = rows.map((raw) => {
-      const u = User.decryptUserPii(raw);
-      return {
-        id: u._id.toString(),
-        name: u.username || (u.email ? u.email.split('@')[0] : 'user'),
-        earned: u.mlpts_balance || 0,
-        tasks: u.tasks_completed || 0,
-        rankPoints: u.rank_points || 0,
-      };
-    });
+    const ranked = await TaskSubmission.aggregate([
+      { $match: { status: { $in: ['auto_approved', 'approved'] }, miner_id: { $ne: null } } },
+      { $group: { _id: { $toString: '$miner_id' }, earnedMlpts: { $sum: '$reward_amount' }, tasks: { $sum: 1 } } },
+      { $sort: { earnedMlpts: -1, tasks: -1 } },
+      { $limit: 50 },
+      { $lookup: {
+        from: 'users',
+        let: { uid: '$_id' },
+        pipeline: [
+          { $project: { idStr: { $toString: '$_id' }, username: 1, banned: 1, rank_points: 1 } },
+          { $match: { $expr: { $eq: ['$idStr', '$$uid'] } } },
+        ],
+        as: 'user',
+      } },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+    ]);
+
+    const leaderboard = ranked
+      .filter((r) => r.user && r.user.banned !== true)
+      .map((r, i) => ({
+        id: r._id,
+        name: r.user.username || `participant ${String(r._id).slice(-6)}`,
+        earned: r.earnedMlpts || 0,
+        tasks: r.tasks || 0,
+        rankPoints: r.user.rank_points || 0,
+        position: i + 1,
+      }));
     res.json(ok(leaderboard));
   } catch (e) {
     res.json(ok([]));
@@ -138,7 +181,17 @@ function chainMinesAudit(req, action, target, payload = {}) {
 
 router.post('/campaigns', requireAdmin, async (req, res) => {
   try {
-    const row = await Campaign.create(req.body);
+    const body = { ...req.body };
+    // Same rule as self-serve creation: even an admin-authored campaign must
+    // not publish a link the participant UI cannot safely open.
+    if (body.content_link !== undefined) {
+      try {
+        body.content_link = linkPolicy.assertStorableContentLink(body.content_link);
+      } catch (e) {
+        return badRequest(res, e.message);
+      }
+    }
+    const row = await Campaign.create(body);
     chainMinesAudit(req, 'mines_campaign_created', `campaign:${row._id}`, { title: req.body?.title ?? null });
     res.json(ok(row));
   } catch (e) { res.status(400).json(fail(e)); }
@@ -167,6 +220,17 @@ router.post('/campaigns/create', minesAuth, async (req, res) => {
   if (!content_link || typeof content_link !== 'string') {
     return badRequest(res, 'content_link is required');
   }
+  // The link is published to every participant as a clickable "open the task"
+  // target, so it goes through the same allowlist as proof links: an http(s)
+  // URL only. `new URL("javascript:…")` parses, so a scheme check — not a
+  // parse check — is what keeps a creator from shipping a payload that runs
+  // in each participant's session.
+  let safeContentLink;
+  try {
+    safeContentLink = linkPolicy.assertStorableContentLink(content_link);
+  } catch (e) {
+    return badRequest(res, e.message);
+  }
 
   const clampedMultiplier = clampMultiplier(multiplier);
   const ratePerTask = computeCampaignRate({ platform, activity: activity_type, multiplier: clampedMultiplier });
@@ -194,7 +258,7 @@ router.post('/campaigns/create', minesAuth, async (req, res) => {
           creator_id: req.userId,
           title: `${platformDef.label} — ${activity_type.replace(/_/g, ' ')}`,
           description: description || '',
-          content_link,
+          content_link: safeContentLink,
           directive: directive || '',
           platform,
           activity_type,
@@ -312,8 +376,120 @@ router.get('/submissions/me', minesAuth, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
     const page = Math.max(parseInt(req.query.page || '0', 10), 0);
-    const rows = await TaskSubmission.find({ miner_id: req.userId }).sort({ created_at: -1 }).skip(page * limit).limit(limit).lean();
-    res.json(ok(rows));
+    // Hydrated documents, not .lean(): a submission whose voting window has
+    // closed still has to be settle()d, and settle() saves. There is no
+    // scheduler in this codebase, so reads are the sweep — reviewers already
+    // resolve expired tasks when they open their queue
+    // (taskAssignment.js /my-assigned); before this, a task assigned to
+    // reviewers who never opened the app stayed "pending" for its owner
+    // forever, with the campaign budget stuck behind it.
+    const rows = await TaskSubmission.find({ miner_id: req.userId })
+      .sort({ created_at: -1 }).skip(page * limit).limit(limit);
+
+    const out = [];
+    for (const t of rows) {
+      let doc = t;
+      if (['assigned', 'voting'].includes(t.assignment_status)
+        && t.voting_deadline && new Date(t.voting_deadline) < new Date()) {
+        try {
+          const resolved = await checkAndResolve(t);
+          if (resolved) doc = resolved;
+        } catch (e) {
+          // A settlement that cannot complete (e.g. the miner has no linked
+          // wallet yet) must not blank the list — show it as still pending.
+          logger.error('minesSweep', { submissionId: String(t._id), error: e.message || String(e) });
+        }
+      }
+      out.push(doc.toObject ? doc.toObject() : doc);
+    }
+    res.json(ok(out));
+  } catch (e) { res.status(500).json(fail(e)); }
+});
+
+/**
+ * Earnings summary for the Mines panels — computed from what the server
+ * actually paid, not from the wallet ledger.
+ *
+ * The Earnings/Analytics screens used to sum every MLPTS *credit* in
+ * WalletTransaction and label it "Total earned from campaigns", which counted
+ * referral payouts, conversions and admin credits as if they were mining
+ * rewards and left the "avg reward/task" figure wrong whenever any of those
+ * existed. Mining earnings only exist as settled TaskSubmissions, so that is
+ * what this reads: reward_amount on each approved submission, its completed_at
+ * for the window, and — for still-open ones — the campaign's committed
+ * rate_per_task as the amount at stake.
+ */
+router.get('/earnings/summary', minesAuth, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const approvedStatuses = ['auto_approved', 'approved'];
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [byStatus, weekly, balanceRow] = await Promise.all([
+      TaskSubmission.aggregate([
+        { $match: { miner_id: userId } },
+        { $group: { _id: '$status', count: { $sum: 1 }, mlpts: { $sum: '$reward_amount' } } },
+      ]),
+      TaskSubmission.aggregate([
+        { $match: { miner_id: userId, status: { $in: approvedStatuses }, completed_at: { $gte: weekAgo } } },
+        { $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$completed_at' } },
+          mlpts: { $sum: '$reward_amount' },
+          count: { $sum: 1 },
+        } },
+        { $sort: { _id: 1 } },
+      ]),
+      User.findById(userId).select('mlpts_balance tasks_completed').lean(),
+    ]);
+
+    const tally = (statuses) => byStatus.reduce((acc, r) => (
+      statuses.includes(r._id) ? { count: acc.count + r.count, mlpts: acc.mlpts + (r.mlpts || 0) } : acc
+    ), { count: 0, mlpts: 0 });
+
+    const approved = tally(approvedStatuses);
+    const rejected = tally(['rejected']);
+    const openCounts = byStatus
+      .filter((r) => !TERMINAL_STATUSES.includes(r._id))
+      .reduce((acc, r) => acc + r.count, 0);
+
+    // What the still-open submissions could pay if approved. Same tolerant
+    // lookup as checkCampaignAbuseLimits: campaign_id is Mixed and has been
+    // written as a string, so a plain localField/foreignField join against
+    // campaigns._id matches nothing.
+    const openPending = await TaskSubmission.aggregate([
+      { $match: { miner_id: userId, status: { $nin: TERMINAL_STATUSES } } },
+      { $lookup: {
+        from: 'campaigns',
+        let: { cid: { $toString: '$campaign_id' } },
+        pipeline: [
+          { $project: { idStr: { $toString: '$_id' }, rate_per_task: 1 } },
+          { $match: { $expr: { $eq: ['$idStr', '$$cid'] } } },
+        ],
+        as: 'campaign',
+      } },
+      { $unwind: { path: '$campaign', preserveNullAndEmptyArrays: true } },
+      { $group: { _id: null, atStake: { $sum: { $ifNull: ['$campaign.rate_per_task', 0] } }, known: { $sum: { $cond: [{ $eq: ['$campaign', null] }, 0, 1] } } } },
+    ]);
+
+    const pending = openPending[0] || { atStake: 0, known: 0 };
+
+    res.json(ok({
+      currency: 'MLPTS',
+      approvedCount: approved.count,
+      approvedMlpts: approved.mlpts,
+      rejectedCount: rejected.count,
+      pendingCount: openCounts,
+      pendingMlptsAtStake: pending.atStake,
+      pendingCampaignsUnresolved: openCounts - (pending.known || 0),
+      thisWeekMlpts: weekly.reduce((a, r) => a + (r.mlpts || 0), 0),
+      avgRewardMlpts: approved.count ? Math.round((approved.mlpts / approved.count) * 1000) / 1000 : 0,
+      daily: weekly.map((r) => ({ date: r._id, mlpts: r.mlpts, count: r.count })),
+      balanceMlpts: balanceRow?.mlpts_balance || 0,
+      tasksCompleted: balanceRow?.tasks_completed || 0,
+      // Honest provenance: these numbers count settled submissions only, so
+      // they never silently include referral or admin credits.
+      source: 'task_submissions',
+    }));
   } catch (e) { res.status(500).json(fail(e)); }
 });
 
@@ -401,6 +577,12 @@ router.post('/upload', minesAuth, uploadProof.single('proof'), (req, res) => {
 // /document — owner can read their own, admin/superadmin can read any
 // for review purposes. Path-traversal hardening mirrors kycController.js
 // (only the basename may be served), and every read is logged.
+//
+// "Owner or admin" was not enough for Mines: the reviewer queue is opened by
+// staked reviewers, who are neither the submitter nor an admin, so every proof
+// link this UI shows them answered 403. They were being asked to vote
+// yes/no on evidence they could not open. A reviewer is therefore allowed to
+// read a proof exactly while it is assigned to them.
 router.get('/proof/:ref', minesAuth, async (req, res) => {
   const userId = req.userId;
   const isAdmin = req.user?.role === 'admin' || req.user?.role === 'superadmin';
@@ -411,7 +593,15 @@ router.get('/proof/:ref', minesAuth, async (req, res) => {
   // caller is admin. Without this, any logged-in user could request
   // another user's proof filename and read it.
   if (!isAdmin && !ref.startsWith(`${userId}-`)) {
-    return res.status(403).json({ ok: false, error: 'forbidden' });
+    const assigned = await TaskSubmission.findOne({
+      proof_url: ref,
+      assigned_validators: { $in: [userId] },
+      assignment_status: { $in: ['assigned', 'voting'] },
+    }).lean();
+    if (!assigned) {
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
+    logger.info('minesProofReviewed', { submissionId: String(assigned._id), reviewerId: String(userId) });
   }
   res.sendFile(filePath, (err) => {
     if (err && !res.headersSent) res.status(404).json({ ok: false, error: 'not found' });
@@ -438,24 +628,14 @@ router.post('/submissions', minesAuth, async (req, res) => {
   // passing `https://example.com/x.png` does not satisfy the local-ref
   // branch, so submitters are pushed toward the upload path that
   // produces an actual on-disk image.
-  const looksLocalRef = /^[a-f0-9]{20,}-[\d]+-.+\.(png|jpg|jpeg)$/i.test(proof_url);
-  const looksExternalUrl = (() => {
-    try { const u = new URL(proof_url); return u.protocol === 'http:' || u.protocol === 'https:'; }
-    catch { return false; }
-  })();
-
-  if (!looksLocalRef && !looksExternalUrl) {
-    return badRequest(res, 'proof_url must be either an uploaded screenshot ref or an http(s) URL');
-  }
-  if (looksLocalRef) {
-    const safeName = path.basename(proof_url);
-    const onDisk = path.join(PROOFS_UPLOAD_DIR, safeName);
-    if (!fs.existsSync(onDisk)) {
-      return badRequest(res, 'proof screenshot not found on disk — upload via /api/mines/upload first');
-    }
-    if (!safeName.startsWith(`${req.userId}-`)) {
-      return badRequest(res, 'proof screenshot was not uploaded by this account');
-    }
+  // Identical rules now run on PUT /submissions/:id — before, an editable
+  // submission could be re-pointed at a `javascript:` string that POST would
+  // have refused, and reviewers clicked it.
+  let proof;
+  try {
+    proof = storableProofUrl(proof_url, req.userId);
+  } catch (e) {
+    return badRequest(res, e.message);
   }
 
   // Description validation if provided
@@ -512,7 +692,7 @@ router.post('/submissions', minesAuth, async (req, res) => {
         throw err;
       }
 
-      const body = { ...pick(req.body, SUBMISSION_CREATE_FIELDS), miner_id: req.userId };
+      const body = { ...pick(req.body, SUBMISSION_CREATE_FIELDS), proof_url: proof, miner_id: req.userId };
       [row] = await TaskSubmission.create([body], { session });
     });
     // Randomly assign up to 6 staked reviewers; if none are eligible yet the
@@ -537,9 +717,25 @@ router.put('/submissions/:id', minesAuth, async (req, res) => {
       return res.status(409).json(fail('submission can no longer be edited'));
     }
 
+    const updates = pick(req.body, SUBMISSION_UPDATE_FIELDS);
+    // The same proof rules as POST /submissions. Without this, editing a
+    // still-open submission replaced a legitimate screenshot ref with an
+    // arbitrary string — and the reviewer queue rendered it as an href, so a
+    // `javascript:` payload executed in the reviewer's own session.
+    if (updates.proof_url !== undefined) {
+      try {
+        updates.proof_url = storableProofUrl(updates.proof_url, req.userId);
+      } catch (e) {
+        return badRequest(res, e.message);
+      }
+    }
+    if (typeof updates.description === 'string' && updates.description.length > 500) {
+      return badRequest(res, 'Description must be under 500 characters');
+    }
+
     const row = await TaskSubmission.findByIdAndUpdate(
       req.params.id,
-      { $set: pick(req.body, SUBMISSION_UPDATE_FIELDS) },
+      { $set: updates },
       { new: true }
     ).lean();
     res.json(ok(row));
@@ -561,60 +757,103 @@ router.post('/submissions/:id/approve', requireAdmin, idempotency({ required: tr
     const sub = await TaskSubmission.findById(req.params.id).lean();
     if (!sub) return res.status(404).json(fail('submission not found'));
 
+    // Never re-pay a settled task. The idempotency middleware above only keys
+    // on the caller's Idempotency-Key header, so a second approval with a
+    // fresh key (or a different admin) would otherwise credit the reward
+    // again — and leaving assignment_status at 'assigned'/'voting' would also
+    // let a late reviewer vote re-run settle() and pay a third time.
+    if (TERMINAL_STATUSES.includes(sub.status)) {
+      return badRequest(res, `submission is already ${sub.status} — nothing to pay`, 409);
+    }
+
     // Determine reward: use provided amount, or auto-use campaign rate_per_task
-    let finalReward = rewardAmount || 0;
+    let finalReward = Number(rewardAmount) || 0;
     if (sub.campaign_id && !rewardAmount) {
       const campaign = await Campaign.findById(sub.campaign_id).lean();
       if (campaign && campaign.rate_per_task) {
         finalReward = campaign.rate_per_task;
       }
     }
+    // A negative or non-numeric rewardAmount from the request body would
+    // otherwise flow straight into $inc: the miner debited and the campaign
+    // budget inflated. Same clamp as adminPanel's approve route.
+    if (!Number.isFinite(finalReward) || finalReward < 0) finalReward = 0;
 
-    const updated = await TaskSubmission.findByIdAndUpdate(
-      req.params.id,
-      { $set: { status: 'auto_approved', completed_at: new Date().toISOString(), reward_amount: finalReward } },
-      { new: true }
-    ).lean();
-
-    // Use transaction for atomic balance update
+    // The claim and the payout share one transaction. Run separately, a
+    // failing credit (miner unlinked, dead session) left the row already
+    // marked 'auto_approved' while nothing was paid — the caller got a 500,
+    // and the retry then answered 409 "nothing was paid", which was no longer
+    // true. Inside one transaction a failed payout rolls the status write
+    // back too, so the submission stays reviewable and the retry is honest.
     const session = await mongoose.startSession();
+    let updated;
     try {
       await session.withTransaction(async () => {
-        // Fetch full user document (need walletAddress for MallPointAccount sync)
-        const user = await User.findById(sub.miner_id).session(session);
-        if (!user) {
-          throw new Error('miner user not found during transaction');
+        // Atomic claim: the status filter is part of the update itself, so two
+        // approvals racing (different idempotency keys, or admin + reviewer vote)
+        // cannot both land — the loser matches no document.
+        updated = await TaskSubmission.findOneAndUpdate(
+          { _id: req.params.id, status: { $nin: TERMINAL_STATUSES } },
+          { $set: {
+            status: 'auto_approved',
+            // Closing the voting state is what stops checkAndResolve() from
+            // settling this task a second time after an admin approves it first.
+            assignment_status: 'approved',
+            completed_at: new Date().toISOString(),
+            reward_amount: finalReward,
+          } },
+          { new: true, session }
+        ).lean();
+        if (!updated) {
+          const settled = new Error('already settled');
+          settled.alreadySettled = true;
+          throw settled;
         }
 
-        // GATE 61.1: Wallet-first enforcement — reject reward if no wallet linked
-        requireWalletAddress(user, { userId: sub.miner_id, flow: 'mining_approval' });
+        if (finalReward > 0) {
+          // Fetch full user document (need walletAddress for MallPointAccount sync)
+          const user = await User.findById(sub.miner_id).session(session);
+          if (!user) {
+            throw new Error('miner user not found during transaction');
+          }
 
-        // Create wallet transaction record
-        await WalletTransaction.create([{
-          user_id: sub.miner_id,
-          type: 'credit',
-          amount: finalReward,
-          currency: 'MLPTS',
-          description: 'Task reward approved by admin',
-        }], { session });
+          // GATE 61.1: Wallet-first enforcement — reject reward if no wallet linked
+          requireWalletAddress(user, { userId: sub.miner_id, flow: 'mining_approval' });
 
-        // Update user's mlpts_balance atomically
-        await User.findByIdAndUpdate(sub.miner_id, { $inc: { mlpts_balance: finalReward } }).session(session);
+          // Create wallet transaction record
+          await WalletTransaction.create([{
+            user_id: sub.miner_id,
+            type: 'credit',
+            amount: finalReward,
+            currency: 'MLPTS',
+            description: 'Task reward approved by admin',
+          }], { session });
 
-        // GATE 61: Synchronize mining reward to MallPointAccount (conversion-eligible ledger)
-        await syncMallPointAccount(User.decryptUserPii(user).walletAddress, finalReward, session, {
-          userId: sub.miner_id,
-          flow: 'mining_approval',
-        });
+          // Update user's mlpts_balance atomically
+          await User.findByIdAndUpdate(sub.miner_id, { $inc: { mlpts_balance: finalReward } }).session(session);
+
+          // GATE 61: Synchronize mining reward to MallPointAccount (conversion-eligible ledger)
+          await syncMallPointAccount(User.decryptUserPii(user).walletAddress, finalReward, session, {
+            userId: sub.miner_id,
+            flow: 'mining_approval',
+          });
+        }
+
+        if (sub.campaign_id) {
+          await Campaign.findByIdAndUpdate(sub.campaign_id, {
+            $inc: finalReward > 0
+              ? { completions_count: 1, budget_remaining: -finalReward }
+              : { completions_count: 1 },
+          }).session(session);
+        }
       });
+    } catch (e) {
+      if (e.alreadySettled) {
+        return badRequest(res, 'submission was settled by another review moments ago — nothing was paid', 409);
+      }
+      throw e;
     } finally {
       session.endSession();
-    }
-
-    if (sub.campaign_id) {
-      await Campaign.findByIdAndUpdate(sub.campaign_id, {
-        $inc: { completions_count: 1, budget_remaining: -finalReward },
-      });
     }
     const minerId = sub.miner_id.toString();
     // Template-required field names (campaign_name/reward_amount/

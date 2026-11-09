@@ -2,8 +2,10 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const TaskSubmission = require('../models/TaskSubmission');
+const Campaign = require('../models/Campaign');
 const MinesReviewer = require('../models/MinesReviewer');
 const User = require('../models/user');
+const WalletTransaction = require('../models/WalletTransaction');
 const AuditLog = require('../models/AuditLog');
 const { requireAdmin } = require('../middleware/adminAuth');
 const jwt = require('jsonwebtoken');
@@ -255,7 +257,32 @@ router.get('/my-assigned', verifyToken, async (req, res) => {
       has_voted: !!t.validator_votes?.[validatorId],
     }));
 
-    return res.json(ok(tasksWithVoteStatus));
+    // Hydrate the campaign each submission claims to satisfy. A reviewer
+    // voting on "did this person do the task" without seeing the task's
+    // published link and rate is guessing, and the proof they're shown is
+    // only half the evidence. campaign_id is a Mixed written as a string, so
+    // the lookup has to tolerate both shapes rather than assume an ObjectId.
+    const campaignIds = [...new Set(
+      tasksWithVoteStatus.map((t) => t.campaign_id).filter(Boolean).map(String)
+    )].map((id) => (mongoose.isValidObjectId(id) ? new mongoose.Types.ObjectId(id) : id));
+    const campaigns = await Campaign
+      .find({ _id: { $in: campaignIds } })
+      .select('title content_link platform rate_per_task status').lean().catch(() => []);
+    const byCampaign = new Map(campaigns.map((c) => [String(c._id), c]));
+
+    const hydrated = tasksWithVoteStatus.map((t) => {
+      const c = t.campaign_id ? byCampaign.get(String(t.campaign_id)) : null;
+      return {
+        ...t,
+        campaign_title: c?.title || '',
+        campaign_content_link: c?.content_link || '',
+        campaign_platform: c?.platform || '',
+        campaign_rate_per_task: c?.rate_per_task ?? null,
+        campaign_status: c?.status || '',
+      };
+    });
+
+    return res.json(ok(hydrated));
   } catch (e) { return res.status(500).json(fail(e)); }
 });
 
@@ -277,6 +304,18 @@ router.post('/tasks/:id/vote', verifyToken, async (req, res) => {
     const assignedList = (task.assigned_validators || []).map(String);
     if (!assignedList.includes(validatorId)) {
       return res.status(403).json(fail('you are not assigned to this task'));
+    }
+
+    // Assignments only ever come from the active (staked) pool, and
+    // /reviewer/unstake refuses to release a stake while a vote is still open,
+    // so a reviewer who reaches this line without an active stake acquired that
+    // state after being assigned — normally by being suspended for missed votes.
+    // Votes are weighted by reputation and pay MLPTS, so the bond is what makes
+    // the weight honest; without it the panel already says "you need an active
+    // reviewer stake" while still accepting the vote.
+    const votingReviewer = await MinesReviewer.findOne({ validator_id: validatorId }).lean();
+    if (!votingReviewer || votingReviewer.stakeStatus !== 'active') {
+      return res.status(403).json(fail('an active reviewer stake is required to vote'));
     }
 
     // Check if already voted
@@ -442,6 +481,13 @@ router.post('/reviewer/stake', verifyToken, async (req, res) => {
           userId: req.userId,
           flow: 'reviewer_stake',
         });
+        await WalletTransaction.create([{
+          user_id: req.userId,
+          type: 'debit',
+          amount,
+          currency: 'MLPTS',
+          description: `Reviewer stake locked (${reviewer.stakedAmount} MLPTS total)`,
+        }], { session });
       });
     } finally {
       session.endSession();
@@ -488,6 +534,13 @@ router.post('/reviewer/unstake', verifyToken, async (req, res) => {
           userId: req.userId,
           flow: 'reviewer_unstake',
         });
+        await WalletTransaction.create([{
+          user_id: req.userId,
+          type: 'credit',
+          amount,
+          currency: 'MLPTS',
+          description: `Reviewer stake returned (${reviewer.stakedAmount} MLPTS still locked)`,
+        }], { session });
       });
     } finally {
       session.endSession();

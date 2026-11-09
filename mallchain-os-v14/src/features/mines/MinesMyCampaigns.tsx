@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, fmtNum, StatusChip, toast } from '../../components/ui';
 import { minesApi, type MinesCampaign, type MinesProfile, type RewardRatesTable } from '../../services/minesApi';
+import { blockedLinkTitle, resolveContentLink } from '../../services/proofLink';
 import { PlatformIcon, PlatformBadge, PLATFORM_BRAND, PLATFORM_ORDER } from './platformIcons';
 
 /**
@@ -75,18 +76,30 @@ export default function MinesMyCampaigns() {
         </div>
       )}
 
-      {(campaigns || []).map((c) => (
-        <div key={c._id} className="card card-glow bg-gradient-card mb">
-          <div className="row" style={{ alignItems: 'center', gap: 8 }}>
-            {c.platform && <PlatformIcon platform={c.platform} />}
-            <div className="grow"><b>{c.title}</b> <StatusChip status={c.status} /></div>
-            <span className="chip">{fmtNum(c.rate_per_task)} MLPTS/task · budget {fmtNum(c.budget_remaining)}</span>
+      {(campaigns || []).map((c) => {
+        const link = resolveContentLink(c.content_link);
+        return (
+          <div key={c._id} className="card card-glow bg-gradient-card mb">
+            <div className="row" style={{ alignItems: 'center', gap: 8 }}>
+              {c.platform && <PlatformIcon platform={c.platform} />}
+              <div className="grow"><b>{c.title}</b> <StatusChip status={c.status} /></div>
+              <span className="chip">{fmtNum(c.rate_per_task)} MLPTS/task · budget {fmtNum(c.budget_remaining)}</span>
+            </div>
+            {c.description && <div className="tiny mt" style={{ color: 'var(--txt-2)' }}>{c.description}</div>}
+            {c.directive && <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>Directive: {c.directive}</div>}
+            {link.kind === 'external' ? (
+              <div className="tiny mt">
+                <a className="mc-link-open" href={link.href} target="_blank" rel="noopener noreferrer nofollow">🔗 Published task link · {link.label} <span aria-hidden>↗</span></a>
+              </div>
+            ) : c.content_link ? (
+              <div className="tiny mt mc-link-row--blocked" title={blockedLinkTitle(link)}>🔗 {link.display} — participants cannot open it</div>
+            ) : (
+              <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>No task link was published with this campaign.</div>
+            )}
+            <div className="tiny mt">{c.completions_count} completions so far</div>
           </div>
-          {c.description && <div className="tiny mt" style={{ color: 'var(--txt-2)' }}>{c.description}</div>}
-          {c.directive && <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>Directive: {c.directive}</div>}
-          <div className="tiny mt">{c.completions_count} completions so far</div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -199,11 +212,12 @@ function CampaignDetailsStep({
       return;
     }
     
-    // Validate content link is valid URL
-    try {
-      new URL(contentLink.trim());
-    } catch {
-      toast('Content link must be a valid URL', false);
+    // The link is published as a clickable "Open task" button for every
+    // participant (MinesDiscover.tsx), so the scheme has to be checked here
+    // with the same allowlist the backend enforces on POST /campaigns —
+    // `new URL()` alone also accepts javascript:, data: and file:.
+    if (resolveContentLink(contentLink).kind !== 'external') {
+      toast('Content link must be a full http(s) address, e.g. https://x.com/…', false);
       return;
     }
 
@@ -371,6 +385,9 @@ function CampaignDetailsStep({
           {directive.trim() && <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>Directive: {directive.trim()}</div>}
           {contentLink.trim() && (
             <div className="tiny mt" style={{ color: 'var(--cyan)', wordBreak: 'break-all' }}>{contentLink.trim()}</div>
+          )}
+          {contentLink.trim() && resolveContentLink(contentLink).kind !== 'external' && (
+            <div className="tiny mt" style={{ color: 'var(--red-2)' }}>⚠ Participants need a full http(s) address before this can launch.</div>
           )}
         </div>
       </div>

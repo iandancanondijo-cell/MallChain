@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, fmtNum } from '../../components/ui';
 import { minesApi, type MinesProfile, type MinesCampaign, type MinesSubmission } from '../../services/minesApi';
+import { submissionLabel, submissionState } from './submissionStatus';
 import { Compass, Clock, Wallet, ShieldCheck, AlertTriangle, Sparkles, ArrowRight } from 'lucide-react';
 
 /** Mines Command Center — discovery/rewards glassmorphism layout with real profile + campaign + submission data. */
@@ -51,7 +52,7 @@ export default function MinesHome({ navigate }: { navigate: (p: string) => void 
   useEffect(() => { load(); }, [load]);
 
   const pendingSubmissions =
-    submissions === null ? null : submissions.filter((s) => !['auto_approved', 'rejected'].includes(s.status)).length;
+    submissions === null ? null : submissions.filter((s) => submissionState(s) !== 'paid' && submissionState(s) !== 'rejected').length;
 
   const cards: Array<{
     label: string;
@@ -177,18 +178,40 @@ export default function MinesHome({ navigate }: { navigate: (p: string) => void 
         ) : submissions?.length === 0 ? (
           <div className="wallet-empty-inline">No submissions yet — join a campaign to get started.</div>
         ) : (
-          (submissions || []).slice(0, 6).map((s) => (
+          (submissions || []).slice(0, 6).map((s) => {
+            const state = submissionState(s);
+            return (
             <div key={s._id} className="list-row">
               <div className="grow">
                 <div className="t">{s.title || `Submission ${s._id}`}</div>
-                <div className="m" style={{ fontSize: 11.5, color: 'var(--txt-2)' }}>{s.status}</div>
+                <div className="m" style={{ fontSize: 11.5, color: 'var(--txt-2)' }}>{submissionLabel(s)}</div>
               </div>
-              {s.status === 'auto_approved' && (
-                <span style={{ color: 'var(--green-2)', fontWeight: 700, fontSize: 13 }}>+{s.reward_amount} MLPTS</span>
+              {state === 'paid' ? (
+                <span style={{ color: 'var(--green-2)', fontWeight: 700, fontSize: 13 }}>+{fmtNum(s.reward_amount)} {s.reward_currency || 'MLPTS'}</span>
+              ) : state === 'rejected' ? (
+                <span style={{ color: 'var(--red-2)', fontWeight: 700, fontSize: 12 }}>no reward</span>
+              ) : (
+                <span style={{ color: 'var(--txt-3)', fontSize: 12 }}>unpaid</span>
               )}
             </div>
-          ))
+            );
+          })
         )}
+      </div>
+
+      <div className="card card-glow bg-gradient-card mt">
+        <div className="sec-title"><h2>How a campaign pays</h2></div>
+        <ol className="mc-flow">
+          <li><b>1 · Discover</b><span>Pick an active campaign and see what it pays.</span></li>
+          <li><b>2 · Open the task</b><span>The creator's published link opens in a new tab.</span></li>
+          <li><b>3 · Do the activity</b><span>Follow the directive on the platform itself.</span></li>
+          <li><b>4 · Upload proof</b><span>A screenshot from your account, or the link to your post.</span></li>
+          <li><b>5 · Reviewers vote</b><span>Up to six staked reviewers decide, weighted by reputation. With nobody staked, an admin reviews it instead.</span></li>
+          <li><b>6 · Paid</b><span>Approved rewards land in your Mallpoints balance.</span></li>
+        </ol>
+        <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>
+          Nothing pays before step 6 — a submission sitting in review is not an earning yet.
+        </div>
       </div>
     </div>
   );

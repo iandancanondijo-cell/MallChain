@@ -1,25 +1,34 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useStoreVersion } from '../../components/ui';
-import { minesApi, type WalletTx } from '../../services/minesApi';
+import { useStoreVersion, fmtNum, StatusChip } from '../../components/ui';
+import { minesApi, type MinesSubmission } from '../../services/minesApi';
+import { resolveProofLink } from '../../services/proofLink';
+import { submissionChipToken, submissionState } from './submissionStatus';
 
-function dateKey(iso: string): string {
+function dayKey(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-/** History — real WalletTransaction timeline (backend/src/routes/mines.js: GET /transactions). */
+/**
+ * History — the campaign timeline, from GET /api/mines/submissions/me.
+ *
+ * This panel used to render the wallet ledger and call it "your campaign
+ * timeline", so referral bonuses, admin adjustments and sign-up credits all
+ * appeared as if they were Mines activity. Submissions are the only records
+ * that actually describe a campaign, and each one carries its own decision.
+ */
 export default function MinesHistory() {
   useStoreVersion();
 
-  const [txs, setTxs] = useState<WalletTx[] | null>(null);
+  const [subs, setSubs] = useState<MinesSubmission[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const result = await minesApi.getTransactions(200);
+    const result = await minesApi.mySubmissions(200);
     if (result.ok && result.data) {
-      setTxs(result.data);
+      setSubs(result.data);
     } else {
       setError(result.error || 'Failed to load history');
     }
@@ -30,12 +39,12 @@ export default function MinesHistory() {
     load();
   }, [load]);
 
-  const groups: Array<{ day: string; items: WalletTx[] }> = [];
-  for (const t of txs || []) {
-    const key = dateKey(t.created_at);
+  const groups: Array<{ day: string; items: MinesSubmission[] }> = [];
+  for (const s of subs || []) {
+    const key = dayKey(s.completed_at || s.created_at);
     let g = groups.find((x) => x.day === key);
     if (!g) { g = { day: key, items: [] }; groups.push(g); }
-    g.items.push(t);
+    g.items.push(s);
   }
 
   return (
@@ -58,13 +67,37 @@ export default function MinesHistory() {
       {groups.map((g) => (
         <div key={g.day} className="card card-glow bg-gradient-card mb">
           <div className="sec-title"><h2>{g.day}</h2></div>
-          {g.items.map((t) => (
-            <div key={t._id} className="list-row">
-              <span style={{ fontSize: 18 }}>{t.type === 'credit' ? '💰' : '➖'}</span>
-              <div className="grow"><div className="t">{t.description || t.type}</div><div className="m">{t.currency}</div></div>
-              <b className={t.type === 'credit' ? 'green' : 'red'}>{t.type === 'credit' ? '+' : '-'}{t.amount} {t.currency}</b>
-            </div>
-          ))}
+          {g.items.map((s) => {
+            const state = submissionState(s);
+            const paid = state === 'paid';
+            const proof = resolveProofLink(s.proof_url);
+            return (
+              <div key={s._id} className="list-row" style={{ flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 18 }}>{paid ? '💰' : state === 'rejected' ? '🚫' : '⏳'}</span>
+                <div className="grow">
+                  <div className="t">{s.title || `Submission ${s._id}`}</div>
+                  <div className="m">
+                    {paid
+                      ? `Approved${s.completed_at ? ` · ${new Date(s.completed_at).toLocaleTimeString()}` : ''}`
+                      : state === 'rejected'
+                        ? (s.rejection_note || 'Rejected by reviewers')
+                        : state === 'reviewing' ? 'Waiting on reviewer votes' : 'Waiting to be reviewed'}
+                  </div>
+                  {proof.kind !== 'none' && (
+                    <a className="mc-link-open" style={{ marginTop: 5 }} href={proof.href} target="_blank" rel="noopener noreferrer nofollow">
+                      {proof.kind === 'upload' ? '🖼 Proof screenshot' : `🔗 ${proof.label}`} <span aria-hidden>↗</span>
+                    </a>
+                  )}
+                </div>
+                <StatusChip status={submissionChipToken(s)} />
+                {paid
+                  ? <b className="green">+{fmtNum(s.reward_amount)} {s.reward_currency || 'MLPTS'}</b>
+                  : state === 'rejected'
+                    ? <b className="red">0 MLPTS</b>
+                    : <span className="muted" style={{ fontSize: 12 }}>unpaid</span>}
+              </div>
+            );
+          })}
         </div>
       ))}
     </div>

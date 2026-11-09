@@ -125,6 +125,7 @@ export interface AdminCampaign {
   creator_id: string;
   title: string;
   description?: string;
+  content_link?: string;
   rate_per_task: number;
   budget_remaining: number;
   status: 'active' | 'paused' | 'completed';
@@ -139,6 +140,7 @@ export interface AdminSubmission {
   proof_url?: string;
   campaign_id?: string;
   status: string;
+  reward_amount?: number;
   created_at: string;
 }
 

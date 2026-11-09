@@ -9,6 +9,10 @@ jest.mock('../models/MinesReviewer', () => ({
   findOneAndUpdate: jest.fn(),
   updateMany: jest.fn(),
 }));
+jest.mock('../models/TaskSubmission', () => ({
+  findOneAndUpdate: jest.fn(),
+  findById: jest.fn(),
+}));
 jest.mock('../models/user', () => ({
   findByIdAndUpdate: jest.fn(),
 }));
@@ -25,6 +29,7 @@ jest.mock('../services/notify', () => ({
 
 const mongoose = require('mongoose');
 const MinesReviewer = require('../models/MinesReviewer');
+const TaskSubmission = require('../models/TaskSubmission');
 const User = require('../models/user');
 const WalletTransaction = require('../models/WalletTransaction');
 const Campaign = require('../models/Campaign');
@@ -55,6 +60,7 @@ function chainable(resolvedValue) {
 
 function fakeTask(overrides = {}) {
   return {
+    _id: 'task-1',
     miner_id: 'submitter1',
     campaign_id: null,
     reward_amount: 0,
@@ -83,6 +89,11 @@ beforeEach(() => {
   MinesReviewer.findOneAndUpdate.mockImplementation(async (query) => ({ validator_id: query.validator_id }));
   MinesReviewer.findOne.mockReturnValue(chainable(null));
   MinesReviewer.updateMany.mockResolvedValue({});
+  // settle() claims the task with a conditional update before any money moves.
+  // Default the claim to a winner (and echo its $set back) so the payout tests
+  // exercise the paid path; the claim-loss test overrides it.
+  TaskSubmission.findOneAndUpdate.mockImplementation((_filter, update) => chainable({ ...update.$set }));
+  TaskSubmission.findById.mockReturnValue(chainable(null));
 });
 
 describe('computeWeight', () => {
@@ -273,5 +284,51 @@ describe('checkAndResolve — reward/penalty payout', () => {
     expect(noShowReviewer.mining_reputation).toBe(50 - MISSED_VOTE_PENALTY);
     expect(noShowReviewer.stakeStatus).toBe('suspended');
     expect(noShowReviewer.save).toHaveBeenCalled();
+  });
+});
+
+describe('checkAndResolve — concurrent settle', () => {
+  // Two reviewers' deciding votes (or a vote racing the queue's lazy sweep)
+  // can reach settle() for the same task at the same time. Only the writer
+  // that wins the conditional claim may move money.
+  test('a losing claim pays nothing and reports the row the winner settled', async () => {
+    TaskSubmission.findOneAndUpdate.mockReturnValue(chainable(null));
+    TaskSubmission.findById.mockReturnValue(
+      chainable({ _id: 'task-1', status: 'auto_approved', assignment_status: 'approved', reward_amount: 3 })
+    );
+
+    const task = fakeTask({
+      validator_votes: { r1: 'yes', r2: 'yes', r3: 'yes', r4: 'yes', r5: 'yes', r6: 'yes' },
+      votes_yes_weight: 3,
+      votes_no_weight: 0,
+    });
+
+    const resolved = await checkAndResolve(task);
+
+    expect(WalletTransaction.create).not.toHaveBeenCalled();
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(MinesReviewer.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(Campaign.findByIdAndUpdate).not.toHaveBeenCalled();
+    // The caller's copy is left as it arrived — stale, but not falsely paid.
+    expect(task.assignment_status).toBe('voting');
+    expect(resolved.assignment_status).toBe('approved');
+  });
+
+  test('a winning claim writes the terminal status with the vote still open', async () => {
+    const task = fakeTask({
+      validator_votes: { r1: 'yes', r2: 'yes', r3: 'yes', r4: 'yes', r5: 'yes', r6: 'yes' },
+      votes_yes_weight: 3,
+      votes_no_weight: 0,
+    });
+
+    await checkAndResolve(task);
+
+    expect(TaskSubmission.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: 'task-1', assignment_status: { $in: ['assigned', 'voting'] } },
+      expect.objectContaining({
+        $set: expect.objectContaining({ status: 'auto_approved', assignment_status: 'approved' }),
+      }),
+      expect.any(Object)
+    );
   });
 });
