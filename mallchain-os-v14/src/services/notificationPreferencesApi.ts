@@ -31,48 +31,86 @@ export interface NotificationPreferences {
   updatedAt: string;
 }
 
+/**
+ * A partial payload here used to blank out `frequency`/`channels` and crash the
+ * whole Settings section on `prefs.frequency[cat]`, so every response is merged
+ * over the defaults before any caller sees it.
+ */
+const DEFAULT_PREFS: NotificationPreferences = {
+  _id: '',
+  userId: '',
+  enableNotifications: true,
+  frequency: {
+    transactions: 'immediate',
+    campaigns: 'immediate',
+    governance: 'immediate',
+    security: 'immediate',
+    marketing: 'daily',
+    badgeAlerts: 'immediate',
+  },
+  doNotDisturb: { enabled: false, startTime: '22:00', endTime: '07:00', timezone: 'UTC', days: [] },
+  channels: { email: true, push: true, sms: false, whatsapp: false, inApp: true },
+  unsubscribedCategories: [],
+  createdAt: '',
+  updatedAt: '',
+};
+
+function withDefaults(data: NotificationPreferences): NotificationPreferences {
+  return {
+    ...DEFAULT_PREFS,
+    ...data,
+    frequency: { ...DEFAULT_PREFS.frequency, ...data.frequency },
+    doNotDisturb: { ...DEFAULT_PREFS.doNotDisturb, ...data.doNotDisturb },
+    channels: { ...DEFAULT_PREFS.channels, ...data.channels },
+  };
+}
+
+function prefResponse<T extends { data?: NotificationPreferences }>(res: T): T {
+  return res.data ? { ...res, data: withDefaults(res.data) } : res;
+}
+
 export const notificationPreferencesApi = {
   /**
    * Get user's notification preferences
    */
   async getPreferences() {
-    return api.get<NotificationPreferences>('/api/notification-preferences');
+    return prefResponse(await api.get<NotificationPreferences>('/api/notification-preferences'));
   },
 
   /**
    * Update notification frequency settings
    */
   async updateFrequency(frequency: NotificationPreferences['frequency']) {
-    return api.patch<NotificationPreferences>('/api/notification-preferences/frequency', {
+    return prefResponse(await api.patch<NotificationPreferences>('/api/notification-preferences/frequency', {
       frequency,
-    });
+    }));
   },
 
   /**
    * Update do-not-disturb settings
    */
   async updateDoNotDisturb(doNotDisturb: NotificationPreferences['doNotDisturb']) {
-    return api.patch<NotificationPreferences>('/api/notification-preferences/do-not-disturb', {
+    return prefResponse(await api.patch<NotificationPreferences>('/api/notification-preferences/do-not-disturb', {
       doNotDisturb,
-    });
+    }));
   },
 
   /**
    * Update notification channels
    */
   async updateChannels(channels: NotificationPreferences['channels']) {
-    return api.patch<NotificationPreferences>('/api/notification-preferences/channels', {
+    return prefResponse(await api.patch<NotificationPreferences>('/api/notification-preferences/channels', {
       channels,
-    });
+    }));
   },
 
   /**
    * Toggle all notifications on/off
    */
   async toggleGlobal(enableNotifications: boolean) {
-    return api.patch<NotificationPreferences>('/api/notification-preferences/global-toggle', {
+    return prefResponse(await api.patch<NotificationPreferences>('/api/notification-preferences/global-toggle', {
       enableNotifications,
-    });
+    }));
   },
 
   /**

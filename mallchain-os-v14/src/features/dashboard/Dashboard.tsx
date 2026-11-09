@@ -51,7 +51,7 @@ function KycPendingBanner() {
     }
   };
 
-  const label = status ? statusLabel(status.status) : { text: 'Loading...', color: 'info' as const };
+  const label = status?.status ? statusLabel(status.status) : { text: 'Loading...', color: 'info' as const };
 
   return (
     <Card variant="featured" className="kyc-banner">
