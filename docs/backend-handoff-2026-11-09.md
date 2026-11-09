@@ -99,3 +99,75 @@ parallel PBKDF2 + `VaultEntry` stack used only for the device-local encrypted ph
 copy under `mallchain_vault`. It never touches the server, which is correct, but it
 means two key-derivation parameters exist in the product. Backend action: none —
 informational, and relevant to anyone writing recovery tooling or a support runbook.
+
+## 8. Notifications: one account truth, three writers, and filters the API cannot answer
+
+Source: `commit 4326febe`. Everything below was read out of `backend/src/routes/notifications.js`,
+`services/notificationDispatcher.js`, `services/notificationEngine.js` and
+`services/blockchainListener.js`, then reproduced against a local stub that mirrors them.
+
+**a. A confirmed transaction writes two Notification rows.**
+`blockchainListener.js:76` calls `notify(userId, …)` and `:82` calls
+`notifyUser(user, …)` for the *same* status change — and `notifyUser` calls `notify`
+itself (`notificationEngine.js:526`). Every confirmed or failed transfer therefore
+lands twice in the inbox. Requested: one call, `notifyUser`, since it is the only one
+that also fans out to email/SMS/WhatsApp.
+
+**b. `notify()` ignores the global toggle and the category settings.**
+`notificationEngine.js:495-501` writes the in-app row before `notifyUser` consults
+`resolvePreferences` at `:528`, so a user who switched notifications off still
+accumulates in-app rows through this path, while the dispatcher path
+(`notificationDispatcher.js:126-150`) correctly skips them. Two entry points, two
+answers to "does this user want this". Requested: `notify()` consult the same
+preferences document, or route every in-app write through `dispatchNotification`.
+
+**c. The socket payload and the REST payload are different shapes.**
+`notificationDispatcher.js:222` emits `{ _id, type, title, message, data, read, createdAt }`;
+`GET /api/notifications` returns the Mongo document with the same field names, while
+the client's own type has spoken of `kind`/`body` since before this pass. The client
+now normalises both in `src/services/notificationWire.ts`, so nothing is broken — but
+the naming should be settled on one side. Requested: pick `type`/`message` and document
+it, so the wire bridge can be deleted.
+
+**d. A skipped send is reported in prose the UI has to print verbatim.**
+`POST /api/notifications/send` answers `200` with `{ ok: false, skipped: true,
+reason }`, and `reason` is `result.error` — a human sentence from the dispatcher
+(`'Notifications disabled'`, `'Category disabled'`, `'Unsubscribed from category'`,
+`'Do not disturb active'`). The feed shows it under the row as
+"Not saved to your account — <reason>", so any rewording of those strings silently
+changes user-facing copy. Requested: a stable `code`
+(`notifications_disabled | category_disabled | unsubscribed | dnd_active`) alongside a
+`message`; the client will display the message and key behaviour off the code.
+
+**e. The page's filters cannot be answered by the API.**
+`GET /api/notifications` accepts only `limit`, `offset` and `unreadOnly`. Searching by
+text or by `type` is therefore computed over whatever pages have been pulled, which is
+why the empty state says "None of your 50 **loaded** notifications match…" instead of a
+count. Requested: `type` (repeatable) and `q` parameters, with `total` reflecting the
+filtered count. Related: there is no way to list archived rows (`DELETE /:id` sets
+`archived: true` and the row is gone from every query), and no un-read — a notification
+can be marked read but never returned to unread. Requested: `archived=true` on the list
+route and `PATCH /:id/unread`.
+
+**f. Dead code in the notification path.**
+`controllers/notificationsController.js` is referenced by nothing in `backend/src`
+(grep for `notificationsController` returns only its own definition), and
+`services/notificationManager.js` is a six-line stub whose only `send: () => Promise.resolve()`
+is imported at `index.js:84` and never called. Both read as live notification systems
+to anyone auditing delivery. Requested: delete them, or wire the manager into the
+startup path it appears to describe.
+
+## 9. The published `/downloads/node/` bundle shares this origin with the dev app
+
+`storeSync.initialize()` (see `mallchain-os-v14/src/App.tsx:104`) broadcasts and accepts
+whole-app snapshots across every tab on the same origin. The node-download landing pages
+under `/downloads/node/` are served from that same origin and ship their own copy of the
+app store. Observed live: a tab left open on `/downloads/node/#/auth` overwrote the signed-in
+identity in the dev tab's `localStorage` — the bell and dashboard fell back to an empty,
+unauthenticated session while `/api/auth/me` still reported the real user.
+
+Requested on the backend/infra side: serve the published bundles from a separate origin
+(subdomain or distinct port) so their `localStorage` namespace cannot collide with the
+account app. Frontend will additionally harden `storeSync` so an inbound snapshot can
+never replace a server-verified identity, only wallet-local hints — tracked with the
+KYC-gate work in this branch.

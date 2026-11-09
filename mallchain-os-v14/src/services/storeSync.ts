@@ -20,14 +20,14 @@
  * into memory and notifies subscribers WITHOUT re-persisting (the snapshot is
  * already on disk — re-persisting would just be a redundant write).
  *
- * Merge semantics: whole-document last-write-wins. `store.commit()` always
- * persists the entire AppState on every mutation (no field-level diffing
- * exists anywhere in this app), so every `storage` event's `newValue` is
- * already a complete, internally-consistent snapshot as of the other tab's
- * most recent commit — the same last-write-wins behavior every slice already
- * implicitly has today (two tabs mutating the same slice already have the
- * second commit win). Not worth building conflict resolution for a
- * single-user wallet app.
+ * Merge semantics: whole-document last-write-wins, with one exception — a
+ * snapshot that claims a different signed-in account than this tab's verified
+ * identity is dropped rather than applied (see `claimsAnotherAccount`). Every
+ * `storage` event's `newValue` is already a complete, internally-consistent
+ * snapshot as of the other tab's most recent commit (`store.commit()` persists
+ * the entire AppState on every mutation; there is no field-level diffing
+ * anywhere in this app), so nothing is gained by building conflict resolution
+ * for a single-user wallet app.
  *
  * Implementation details:
  * - Listens to 'storage' event to detect changes in other tabs/windows
@@ -137,12 +137,35 @@ export class StoreSync {
     try {
       const parsed = JSON.parse(newValue) as AppState;
       if (parsed && parsed.version === 14) {
+        if (this.claimsAnotherAccount(parsed)) {
+          console.warn('[StoreSync] Ignored a snapshot from another tab that is signed in as a different account.');
+          return;
+        }
         store.applyExternalState(parsed);
       }
     } catch (error) {
       console.warn('[StoreSync] Ignoring corrupted OS_KEY snapshot from another tab:', (error as Error).message);
     }
   };
+
+  /**
+   * A snapshot only describes the same session when it agrees about who is
+   * signed in. Any same-origin tab can write OS_KEY — an older published
+   * bundle under /downloads/node/, or a second account signed in side by side —
+   * and last-write-wins on the whole document would paste that session's
+   * identity, wallet and balances over a tab whose identity the server just
+   * confirmed. A signed-out snapshot (no id, not authed) is still allowed
+   * through: that is what another tab's logout looks like, and the session
+   * marker carries the expiry regardless.
+   */
+  private claimsAnotherAccount(snapshot: AppState): boolean {
+    const local = store.state.user;
+    if (!local.authed || !local.id) return false;
+    const incoming = snapshot.user;
+    if (!incoming) return false;
+    if (incoming.id === local.id) return false;
+    return !!incoming.authed || !!incoming.id;
+  }
 
   /**
    * Handle external localStorage changes (e.g., from another tab).
