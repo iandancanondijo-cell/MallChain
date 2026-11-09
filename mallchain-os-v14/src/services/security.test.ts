@@ -52,9 +52,15 @@ describe('security.ts', () => {
       expect(result.error).toContain('8');
     });
 
-    it('should reject a PIN with non-digit characters', async () => {
-      const result = await hashPin('12a4');
-      expect(result.success).toBe(false);
+    it('accepts a mixed alphanumeric secret as a cipher', async () => {
+      // The Cipher Wall widened what a wallet secret may be: anything that is
+      // not all-digits is validated as a 4-12 glyph cipher rather than a PIN,
+      // so '12a4' is now a legitimate secret. What still must be refused is
+      // the shapes no unlock path accepts.
+      expect((await hashPin('12a4')).success).toBe(true);
+      expect((await hashPin('123')).success).toBe(false);
+      expect((await hashPin('123456789')).success).toBe(false);
+      expect((await hashPin('abc')).success).toBe(false);
     });
 
     it('should reject an empty PIN', async () => {
@@ -125,9 +131,14 @@ describe('security.ts', () => {
       expect(result.error).toBeTruthy();
     });
 
-    it('should reject an invalid PIN format', async () => {
-      const result = await encryptMnemonic(mnemonic, '12a4');
-      expect(result.success).toBe(false);
+    it('encrypts under a cipher-shaped secret and refuses the shapes that cannot unlock', async () => {
+      // Same widening as hashPin: '12a4' is a valid 4-glyph cipher, while a
+      // 13-glyph string or a control character is not a secret anything can
+      // present later.
+      expect((await encryptMnemonic(mnemonic, '12a4')).success).toBe(true);
+      expect((await encryptMnemonic(mnemonic, 'abcdefghijklm')).success).toBe(false);
+      // eslint-disable-next-line no-control-regex
+      expect((await encryptMnemonic(mnemonic, 'ab\u0007cd')).success).toBe(false);
     });
 
     it('should handle a mnemonic with extra whitespace', async () => {

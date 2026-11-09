@@ -77,6 +77,7 @@ export default function App() {
   // the PIN on plain reloads — it only asks once, when the device holds a
   // wallet the server hasn't been told about yet.
   const linkedAddressRef = useRef<string | null>(null);
+  const migrationNudgeShownRef = useRef(false);
   
   // Compliance state
   const complianceStatus = useComplianceStatus();
@@ -296,18 +297,23 @@ export default function App() {
   // One-time migration nudge: an account created before secret-gating existed
   // has its recovery phrase sitting in st.wallet.mnemonic in plaintext (see
   // services/mnemonicAccess.ts) with no pinHash/pinEncryptedMnemonic set.
-  // Route them to Security Settings — its "Set cipher" flow already
-  // recognizes this exact case (hasPinSet === false + legacy mnemonic
-  // present) and re-encrypts it under a Cipher Wall cipher, then wipes the
-  // plaintext field.
+  //
+  // This is a warning only — it deliberately does not navigate. The cipher
+  // walls the *wallet*, not the interface: an unencrypted key on disk is a
+  // reason to secure that key at the next signing prompt, not a reason to
+  // yank the user out of whatever page they opened. The migration itself now
+  // happens where it belongs — CipherChallenge.tsx sees the plaintext phrase
+  // with no ciphertext and goes straight to "Choose your cipher" the first
+  // time the wallet key is actually needed (Send, stake, vote, reveal), and
+  // Security Settings offers the same flow on demand.
   useEffect(() => {
     const needsMigration = !!st.wallet.mnemonic && !st.wallet.pinHash;
-    if (needsMigration && path !== '/security') {
-      toastKind('Secure your wallet — choose a cipher at the wall to continue', 'warning');
-      navigate('/security');
+    if (needsMigration && !migrationNudgeShownRef.current) {
+      migrationNudgeShownRef.current = true;
+      toastKind("This wallet's recovery phrase is still unsecured on this device — choose a cipher at your next wallet action", 'warning');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, st.wallet.mnemonic, st.wallet.pinHash]);
+  }, [st.wallet.mnemonic, st.wallet.pinHash]);
 
   // Auth guard: redirect unauthenticated users to landing page first, then
   // they can navigate to auth from there. Authenticated users on landing

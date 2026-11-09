@@ -6,8 +6,7 @@ import { handleApiError } from '../../services/errorHandler';
 import { useWizard } from '../../hooks/useWizard';
 import { validateMnemonicPhrase, generateNewMnemonic, deriveAddressFromMnemonic } from '../../services/wallet';
 import { chain } from '../../services/config';
-import { hashPin, encryptMnemonic as encryptMnemonicWithPin } from '../../services/security';
-import { api } from '../../services/api';
+import { saveWalletCredential } from './credentialSave';
 import { CipherSetup } from '../../components/CipherWall';
 import { Shield, Check, AlertTriangle, Key, Wallet, ArrowLeft, ChevronRight } from 'lucide-react';
 import { encryptMnemonic, decryptMnemonic, type VaultEntry } from './walletCrypto';
@@ -77,7 +76,9 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       setSeedWords(words);
       const info = await deriveAddressFromMnemonic(words.join(' '));
       setWalletAddress(info.address);
-    } catch { setError('Failed to generate mnemonic'); }
+    } catch (error) {
+      setError(`This browser could not generate a recovery phrase: ${error instanceof Error ? error.message : 'unexpected error'}`);
+    }
     setLoading(false);
   };
 
@@ -90,15 +91,30 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
   };
 
   const handleStoreEncrypted = async () => {
+    // The vault copy is keyed off the wallet password, so an unset password
+    // would encrypt under an empty key — "stored" on screen, unreadable ever
+    // after, with nothing left to blame but the user.
+    if (!password || password.length < 8) {
+      setError('Set a wallet password of at least 8 characters before storing the phrase here.');
+      return;
+    }
     try {
       const enc = await encryptMnemonic(seedWords.join(' '), password);
       const entry: VaultEntry = { address: walletAddress, ...enc, savedAt: Date.now() };
       const newVault = [...vault.filter(v => v.address !== walletAddress), entry];
+      try {
+        localStorage.setItem(WALLET_VAULT_STORAGE_KEY, JSON.stringify(newVault));
+      } catch (storageError) {
+        // Don't claim a copy the browser refused to keep.
+        setError(`This browser would not keep the encrypted phrase (${storageError instanceof Error ? storageError.name : 'storage unavailable'}). Use the downloaded backup or the cold-storage option instead.`);
+        return;
+      }
       setVault(newVault);
-      localStorage.setItem(WALLET_VAULT_STORAGE_KEY, JSON.stringify(newVault));
       setSecuredMethod(prev => ({ ...prev, stored: true }));
       toast('Phrase encrypted and stored');
-    } catch { setError('Failed to encrypt phrase'); }
+    } catch (error) {
+      setError(`Could not encrypt the phrase on this device: ${error instanceof Error ? error.message : 'the crypto operation failed'}`);
+    }
   };
 
   const handleDownloadBackup = () => {
@@ -125,8 +141,8 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       const info = await deriveAddressFromMnemonic(seedWords.join(' '));
       setPendingWallet({ mnemonic: seedWords.join(' '), address: info.address });
       goTo('set-cipher');
-    } catch {
-      setError('Failed to create wallet');
+    } catch (error) {
+      setError(`Could not finish creating the wallet: ${error instanceof Error ? error.message : 'unexpected error'}`);
       handleApiError({ ok: false, error: 'Wallet creation failed', code: 500 } as any, { action: 'creating wallet', endpoint: 'client-side derivation' }, false);
     }
     setLoading(false);
@@ -144,25 +160,50 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
         const enc = await encryptMnemonic(words.join(' '), importPassword);
         const entry: VaultEntry = { address: info.address, ...enc, savedAt: Date.now() };
         const newVault = [...vault.filter(v => v.address !== info.address), entry];
+        try {
+          localStorage.setItem(WALLET_VAULT_STORAGE_KEY, JSON.stringify(newVault));
+        } catch (storageError) {
+          setError(`This browser would not keep the encrypted phrase (${storageError instanceof Error ? storageError.name : 'storage unavailable'}), so the wallet was not imported. Free up storage and try again — your recovery phrase is unchanged.`);
+          setLoading(false);
+          return;
+        }
         setVault(newVault);
-        localStorage.setItem(WALLET_VAULT_STORAGE_KEY, JSON.stringify(newVault));
       }
-      if (passwordResetMode) { toast('Password reset — this wallet now unlocks with your new password.'); setPasswordResetMode(false); }
+      if (passwordResetMode) { toast('Password reset — this stored copy now unlocks with your new password.'); setPasswordResetMode(false); }
       setPendingWallet({ mnemonic: words.join(' '), address: info.address });
       goTo('set-cipher');
-    } catch { setError('Failed to import wallet'); }
+    } catch (error) {
+      setError(`Could not import this phrase: ${error instanceof Error ? error.message : 'unexpected error'}`);
+    }
     setLoading(false);
   };
 
   const handleRetrieveUnlock = async (index: number, pwd: string): Promise<string | null> => {
-    if (!vault[index]) return null;
+    const entry = vault[index];
+    if (!entry) return null;
+    if (!entry.saltB64 || !entry.ivB64 || !entry.cipherB64) {
+      // A truncated localStorage row is not a mistyped password, and saying it
+      // was is how a browser that evicted storage came to look like the user
+      // had forgotten their own secret.
+      setError('This stored copy is incomplete — it was never fully saved here, so no password will open it. Use your downloaded backup or your recovery phrase.');
+      return null;
+    }
     setLoading(true);
     try {
-      const phrase = await decryptMnemonic(vault[index], pwd);
+      const phrase = await decryptMnemonic(entry, pwd);
       toast('Phrase unlocked successfully');
       setLoading(false);
       return phrase;
-    } catch { setError('Incorrect password'); setLoading(false); return null; }
+    } catch (error) {
+      const name = error instanceof Error ? error.name : '';
+      setLoading(false);
+      // WebCrypto reports a bad key and a corrupt payload the same way
+      // (OperationError), so the honest answer covers both.
+      setError(name === 'NotSupportedError'
+        ? `This browser could not run the unlock: ${error instanceof Error ? error.message : 'unsupported crypto operation'}`
+        : 'That password does not open this stored copy — or the copy this browser kept is not the one that was saved. Try the other password, or use your recovery phrase directly.');
+      return null;
+    }
   };
 
   const handleRetrieveContinue = async (seedWords: string[]) => {
@@ -171,7 +212,7 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
       const info = await deriveAddressFromMnemonic(seedWords.join(' '));
       setPendingWallet({ mnemonic: seedWords.join(' '), address: info.address });
       goTo('set-cipher');
-    } catch { setError('Failed to restore wallet'); }
+    } catch (error) { setError(`Could not restore this wallet from the unlocked phrase: ${error instanceof Error ? error.message : 'unexpected error'}`); }
     setLoading(false);
   };
 
@@ -179,29 +220,26 @@ export default function WalletFlow({ navigate, onBack }: { navigate: (p: string)
     if (!pendingWallet) return;
     setLoading(true);
     try {
-      const hashResult = await hashPin(cipher);
-      if (!hashResult.success || !hashResult.hash) { setError(hashResult.error || 'Failed to set cipher'); setLoading(false); return; }
-      const encryptResult = await encryptMnemonicWithPin(pendingWallet.mnemonic, cipher);
-      if (!encryptResult.success || !encryptResult.encrypted) { setError(encryptResult.error || 'Failed to secure wallet'); setLoading(false); return; }
       st.wallet.address = pendingWallet.address;
       st.wallet.accountId = pendingWallet.address;
       st.wallet.chainId = chain.chainId;
-      st.wallet.pinHash = hashResult.hash;
-      st.wallet.pinEncryptedMnemonic = encryptResult.encrypted;
-      st.wallet.secretMode = 'cipher';
       st.wallet.createdAt = Date.now();
-      store.commit();
-      // Mirror the bcrypt hash of the cipher to the server so
-      // /api/wallet/pin/verify-pin can rate-limit/lock out brute force
-      // (which PinChallenge used to surface as "Incorrect PIN"). Best-effort:
-      // offline/device-only users still pass the local fallback.
-      api.post('/api/wallet/pin/set-pin', { pinHash: hashResult.hash }).then((r) => {
-        if (!r.ok) console.warn('[WalletFlow] cipher hash sync to server failed:', r.error);
-      });
+      // Hash, encrypt, save AND prove — see credentialSave.ts. This screen
+      // used to toast success off the in-memory assignment, so a browser that
+      // refused the write handed the user a cipher that could never unlock
+      // anything, and the next visit blamed them for typing it wrong.
+      const saved = await saveWalletCredential(pendingWallet.mnemonic, cipher);
+      if (!saved.ok) {
+        setError(saved.error);
+        setLoading(false);
+        return;
+      }
       setWalletAddress(pendingWallet.address);
       setPendingWallet(null);
       goTo('success');
-    } catch { setError('Failed to secure wallet'); }
+    } catch (error) {
+      setError(`Could not secure the wallet: ${error instanceof Error ? error.message : 'unexpected error'}`);
+    }
     setLoading(false);
   };
 

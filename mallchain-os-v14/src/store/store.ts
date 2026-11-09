@@ -42,8 +42,8 @@ export const WALLET_VAULT_STORAGE_KEY = 'mallchain_vault';
  *
  *   Plaintext mnemonic (st.wallet.mnemonic) is still stripped from
  *     localStorage — it's only ever populated by legacy wallets awaiting
- *     encryption migration (App.tsx's "needsMigration" effect), and
- *     Security Settings wipes it the moment the encryption runs.
+ *     encryption migration, and features/wallet/credentialSave.ts wipes it the
+ *     moment a cipher has been proven to open the encrypted copy.
  *
  *   The in-memory `memoryWalletSecrets` mirror below is kept for fast
  *   reads and as a fallback in applyExternalState; localStorage remains
@@ -138,11 +138,12 @@ export interface AppState {
     chainId: string;
     /**
      * Legacy field — new wallets never write a plaintext mnemonic here at
-     * all (see WalletFlow.tsx's mandatory PIN-setup step and
+     * all (see features/wallet/credentialSave.ts and
      * services/mnemonicAccess.ts). Only ever non-empty for an account
-     * created before PIN-gating existed; App.tsx's boot effect detects that
-     * and routes to Security Settings to migrate it into pinEncryptedMnemonic,
-     * then clears this field. Never read this directly for signing —
+     * created before PIN-gating existed; CipherChallenge.tsx detects that
+     * on the next request for the key and migrates it into
+     * pinEncryptedMnemonic (with Security Settings offering the same flow on
+     * demand), then clears this field. Never read this directly for signing —
      * use requestMnemonic() instead.
      */
     mnemonic: string;
@@ -433,6 +434,13 @@ function emptyValidators(): ValidatorsSlice {
 class Store {
   state: AppState;
   private listeners = new Set<() => void>();
+  /**
+   * Why the last localStorage read or write failed, or null when storage is
+   * healthy. Screens consult this before claiming anything was saved: the
+   * in-memory state is always whatever was just assigned, so it cannot
+   * answer whether the browser kept it.
+   */
+  storageError: string | null = null;
 
   constructor() {
     this.state = this.load();
@@ -448,8 +456,13 @@ class Store {
           parsed = p;
         }
       }
-    } catch {
-      /* corrupted store — start fresh */
+    } catch (error) {
+      // Corrupt or unreadable copy. Starting fresh is still the right
+      // recovery, but it is not silent any more: a wallet that "forgets" its
+      // cipher after this branch used to be indistinguishable from a wrong
+      // secret, and the user got blamed for it.
+      this.storageError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      console.error('[store] saved state unreadable, starting from defaults:', this.storageError);
     }
     const base = parsed ? this.merge(parsed) : emptyState();
 
@@ -522,9 +535,34 @@ class Store {
     return out;
   }
 
-  persist() {
-    this.persistMainStore(this.state);
+  /** Persist, and report whether the browser actually kept it. */
+  persist(): boolean {
+    const ok = this.persistMainStore(this.state);
     this.writeWalletSecrets(this.state.wallet.pinEncryptedMnemonic, this.state.wallet.pinHash);
+    return ok;
+  }
+
+  /**
+   * What survives a refresh — read straight off disk, not from the in-memory
+   * mirror. `state.wallet` cannot answer that: it holds whatever was just
+   * assigned even if the `localStorage.setItem` underneath it failed, which is
+   * how a saved-but-never-stored credential came back later as "wrong cipher".
+   */
+  readPersistedWalletSecrets(): { pinEncryptedMnemonic: string; pinHash: string; secretMode: '' | 'cipher' } | null {
+    try {
+      const raw = localStorage.getItem(OS_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as AppState;
+      const wallet = parsed?.wallet;
+      if (!wallet?.pinEncryptedMnemonic) return null;
+      return {
+        pinEncryptedMnemonic: wallet.pinEncryptedMnemonic,
+        pinHash: wallet.pinHash || '',
+        secretMode: wallet.secretMode === 'cipher' ? 'cipher' : '',
+      };
+    } catch {
+      return null;
+    }
   }
 
   private writeWalletSecrets(pinEncryptedMnemonic: string, pinHash: string) {
@@ -535,7 +573,7 @@ class Store {
     };
   }
 
-  private persistMainStore(state: AppState) {
+  private persistMainStore(state: AppState): boolean {
     try {
       const toPersist = { ...state };
       if (toPersist.wallet) {
@@ -553,8 +591,15 @@ class Store {
         };
       }
       localStorage.setItem(OS_KEY, JSON.stringify(toPersist));
-    } catch {
-      /* storage full/unavailable */
+      this.storageError = null;
+      return true;
+    } catch (error) {
+      // Quota, private mode, or a policy-locked browser. This used to be an
+      // empty catch, which is how "saved your cipher" and "nothing was ever
+      // written" became the same message on screen.
+      this.storageError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      console.error('[store] state could not be persisted to localStorage:', this.storageError);
+      return false;
     }
   }
 
@@ -735,6 +780,41 @@ class Store {
         /* listener error must not break the store */
       }
     });
+  }
+
+  /**
+   * Three failed verifications: this device stops holding the wallet.
+   *
+   * Deliberately destructive, and deliberately not a countdown. The point is
+   * that a person who has typed the wrong secret three times — a borrowed
+   * laptop, someone off the street with an unlocked phone — cannot keep
+   * trying, and cannot leave the key material sitting there for the next
+   * attempt. What is NOT lost: the funds live on-chain under the recovery
+   * phrase, and the phrase itself lives with the user. Re-connecting through
+   * "Connect existing wallet" re-imports it and sets fresh credentials.
+   * There is no "forgot cipher" route, because a recovery path for a secret
+   * the app never stored would be a backdoor into every wallet it protects.
+   */
+  disconnectWalletAfterFailedVerifications(): void {
+    const w = this.state.wallet;
+    w.mnemonic = '';
+    w.pinEncryptedMnemonic = '';
+    w.pinHash = '';
+    w.secretMode = '';
+    w.address = '';
+    w.accountId = '';
+    w.linkedOnServer = false;
+    memoryWalletSecrets = null;
+    // The device-local vault copies are key material too — a failed
+    // verification streak must not leave them behind to be pried at later.
+    localStorage.removeItem(WALLET_VAULT_STORAGE_KEY);
+    this.commit();
+    this.pushNotification(
+      'Wallet disconnected after 3 failed verifications',
+      'Too many incorrect ciphers, so this device dropped the wallet keys. Your funds are safe on-chain. To use the wallet again, reconnect with your 24-word recovery phrase — access resets with fresh credentials.',
+      'system',
+      'security',
+    );
   }
 
   reset() {

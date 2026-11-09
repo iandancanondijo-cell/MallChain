@@ -389,6 +389,8 @@ export function CipherSetup({ onSubmit, busy = false, error = null }: { onSubmit
   const [phase, setPhase] = useState<'choose' | 'confirm'>('choose');
   const [target, setTarget] = useState('');
   const [mismatch, setMismatch] = useState<string | null>(null);
+  /** The sequence that failed the confirm pass — what the verdict row grades. */
+  const [lastAttempt, setLastAttempt] = useState('');
 
   if (phase === 'choose') {
     return (
@@ -398,6 +400,7 @@ export function CipherSetup({ onSubmit, busy = false, error = null }: { onSubmit
         onSubmit={(cipher) => {
           setTarget(cipher);
           setMismatch(null);
+          setLastAttempt('');
           setPhase('confirm');
         }}
         busy={busy}
@@ -406,29 +409,132 @@ export function CipherSetup({ onSubmit, busy = false, error = null }: { onSubmit
     );
   }
 
+  // Slot-by-slot colours only mean something between two sequences of the
+  // same length; a short/long carve just gets told the count is wrong.
+  const verdicts = mismatch && [...target].length === [...lastAttempt].length
+    ? compareGlyphs(target, lastAttempt)
+    : null;
+
   return (
     <CipherWall
       actionLabel="Confirm cipher"
-      subtitle={`Carve the same sequence again to lock it in — ${CIPHER_MIN}-${CIPHER_MAX} glyphs, in order.`}
+      subtitle={
+        <>
+          {verdicts === null
+            ? `Carve the same sequence again to lock it in — ${CIPHER_MIN}-${CIPHER_MAX} glyphs, in order.`
+            : 'Fix the marked slots and carve it again.'}
+          {verdicts !== null && <GlyphVerdictRow attempt={lastAttempt} verdicts={verdicts} />}
+        </>
+      }
       onSubmit={(cipher) => {
         if (cipher === target) {
           onSubmit(target);
-        } else {
-          setMismatch('The two carvings did not match — choose your cipher again.');
-          setPhase('choose');
-          setTarget('');
+          return;
         }
+        // The carvings differ: stay in this phase and say *how*, instead of
+        // wiping the sequence and sending the user back to a blank wall.
+        setLastAttempt(cipher);
+        setMismatch('The two carvings did not match.');
       }}
       busy={busy}
       error={mismatch || error}
       footer={
         <div className="cw-controls">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setPhase('choose'); setTarget(''); setMismatch(null); }}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setPhase('choose'); setTarget(''); setMismatch(null); setLastAttempt(''); }}>
             ← Choose again
           </button>
         </div>
       }
     />
+  );
+}
+
+export type GlyphVerdict = 'exact' | 'transposed' | 'elsewhere' | 'absent';
+
+const VERDICT_WORDS: Record<GlyphVerdict, string> = {
+  exact: 'right glyph, right slot',
+  transposed: 'right glyph — carved one slot too early or too late',
+  elsewhere: 'in your cipher, just not here',
+  absent: 'not in your cipher',
+};
+
+/**
+ * Slot-by-slot comparison of a re-carved cipher against the sequence the user
+ * just chose — green where it matches, orange for a glyph that belongs one
+ * slot away, yellow for one that belongs somewhere else, red for a glyph that
+ * isn't in the cipher at all.
+ *
+ * Enrollment is the ONLY place this may be computed. The "answer" here is the
+ * sequence the user is holding in their own hands, a few seconds before it
+ * becomes anything. On the unlock wall the same four colours would be a
+ * decomposition oracle: every failed attempt would leak which glyphs the
+ * cipher contains and where they sit, so a 12-glyph secret would fall apart
+ * one confirmed glyph at a time instead of all-or-nothing. Unlock therefore
+ * answers with one bit — it opened, or it did not — and CipherWall never
+ * learns this function.
+ */
+export function compareGlyphs(target: string, attempt: string): GlyphVerdict[] {
+  const t = [...target];
+  const a = [...attempt];
+  // Different lengths make "same slot" meaningless; CipherSetup falls back to
+  // the plain mismatch message in that case.
+  if (t.length !== a.length) return a.map(() => 'absent');
+
+  const verdict: GlyphVerdict[] = a.map(() => 'absent');
+  const consumedTarget = t.map(() => false);
+
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === t[i]) {
+      verdict[i] = 'exact';
+      consumedTarget[i] = true;
+    }
+  }
+
+  // A swapped pair is two adjacent slots that would be exact if traded.
+  for (let i = 0; i + 1 < a.length; i++) {
+    if (verdict[i] === 'exact' || verdict[i + 1] === 'exact') continue;
+    if (a[i] === t[i + 1] && a[i + 1] === t[i]) {
+      verdict[i] = 'transposed';
+      verdict[i + 1] = 'transposed';
+      consumedTarget[i] = true;
+      consumedTarget[i + 1] = true;
+    }
+  }
+
+  const spare = new Map<string, number>();
+  t.forEach((glyph, i) => {
+    if (!consumedTarget[i]) spare.set(glyph, (spare.get(glyph) || 0) + 1);
+  });
+  for (let i = 0; i < a.length; i++) {
+    if (verdict[i] !== 'absent') continue;
+    const left = spare.get(a[i]) || 0;
+    if (left > 0) {
+      verdict[i] = 'elsewhere';
+      spare.set(a[i], left - 1);
+    }
+  }
+  return verdict;
+}
+
+function GlyphVerdictRow({ attempt, verdicts }: { attempt: string; verdicts: GlyphVerdict[] }) {
+  const glyphs = [...attempt];
+  return (
+    <div className="gv-wrap" role="status">
+      <div className="gv-row">
+        {glyphs.map((glyph, i) => (
+          <span key={`${i}-${glyph}`} className={`gv-box gv-${verdicts[i]}`} title={VERDICT_WORDS[verdicts[i]]}>
+            {glyph}
+            <span className="sr-only">{`: ${VERDICT_WORDS[verdicts[i]]}`}</span>
+          </span>
+        ))}
+      </div>
+      <div className="gv-legend">
+        <span><i className="gv-swatch gv-exact" />{VERDICT_WORDS.exact}</span>
+        <span><i className="gv-swatch gv-transposed" />{VERDICT_WORDS.transposed}</span>
+        <span><i className="gv-swatch gv-elsewhere" />{VERDICT_WORDS.elsewhere}</span>
+        <span><i className="gv-swatch gv-absent" />{VERDICT_WORDS.absent}</span>
+      </div>
+    </div>
   );
 }
 
@@ -443,6 +549,19 @@ const CW_CSS = `
 .cw-shake{animation:cwShake 0.5s ease;}
 .cw-shake .cw-slot{border-color:#e2823f !important;box-shadow:0 0 14px rgba(226,130,63,0.6);}
 @keyframes cwShake{0%,100%{transform:translateX(0);}20%{transform:translateX(-6px);}40%{transform:translateX(6px);}60%{transform:translateX(-4px);}80%{transform:translateX(4px);}}
+/* Enrollment confirm verdicts. Green = the slot is right, orange = right glyph
+   carved one slot early/late, yellow = glyph belongs elsewhere in the cipher,
+   red = glyph isn't in the cipher. Enrollment only — see compareGlyphs(). */
+.gv-wrap{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
+.gv-row{display:flex;gap:6px;flex-wrap:wrap;}
+.gv-box{width:34px;height:40px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#120c04;border:1px solid rgba(0,0,0,0.35);font-family:'Noto Sans Egyptian Hieroglyphs','Segoe UI Historic','Antiqua',serif;}
+.gv-exact{background:#3fbf6a;box-shadow:0 0 12px rgba(63,191,106,0.6);}
+.gv-transposed{background:#ff8a3d;box-shadow:0 0 10px rgba(255,138,61,0.45);}
+.gv-elsewhere{background:#f3ba2f;box-shadow:0 0 10px rgba(243,186,47,0.4);}
+.gv-absent{background:#6a6a72;color:#e9e6df;}
+.gv-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--txt-3,#c9c2b4);}
+.gv-legend span{display:inline-flex;align-items:center;gap:5px;}
+.gv-swatch{width:10px;height:10px;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,0.3);}
 .cw-scene{position:relative;width:100%;height:400px;border-radius:14px;overflow:hidden;border:1px solid rgba(212,165,55,0.2);box-shadow:0 20px 60px rgba(0,0,0,0.6);touch-action:pan-y;}
 .cw-scene.cw-locked{opacity:0.55;pointer-events:none;}
 .cw-stone{position:absolute;inset:0;background:

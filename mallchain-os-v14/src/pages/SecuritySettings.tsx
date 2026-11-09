@@ -15,8 +15,8 @@ import React, { useState, useRef } from 'react';
 import QRCode from 'qrcode';
 import { store, type Activity } from '../store/store';
 import { useStoreVersion, toast } from '../components/ui';
-import { verifyPin, hashPin, encryptMnemonic, decryptMnemonic } from '../services/security';
-import { api } from '../services/api';
+import { verifyPin, decryptMnemonic } from '../services/security';
+import { saveWalletCredential } from '../features/wallet/credentialSave';
 import { authService } from '../services/auth';
 import { settingsApi, type UserSettingsData } from '../services/settingsApi';
 import { requestMnemonic } from '../services/mnemonicAccess';
@@ -182,40 +182,14 @@ export function SecuritySettings() {
   };
 
   // Task 11.2-11.3 (cipher edition): persist a freshly enrolled Cipher Wall
-  // sequence. The modal already proved knowledge of the old secret and
-  // recovered the plaintext mnemonic locally; here we hash the new cipher
-  // (bcrypt), re-encrypt the mnemonic under it (PBKDF2+AES-GCM,
-  // services/security.ts) so PrivateKeyExport and every signing surface keep
-  // working, and mirror the hash to the server so /api/wallet/pin/verify-pin
-  // rate-limits brute force on the new secret too. Returns an error string
-  // or null on success.
+  // sequence. Delegates to the one save-and-prove path
+  // (features/wallet/credentialSave.ts), so a cipher set here is held to the
+  // same standard as one set during wallet creation: the copy that lands on
+  // disk has to unlock with it before this screen reports success.
+  // Returns an error string or null on success.
   const saveNewCipher = async (cipher: string, mnemonic: string): Promise<string | null> => {
-    try {
-      const hashResult = await hashPin(cipher);
-      if (!hashResult.success || !hashResult.hash) {
-        return hashResult.error || 'Failed to hash cipher';
-      }
-      const encryptResult = await encryptMnemonic(mnemonic, cipher);
-      if (!encryptResult.success || !encryptResult.encrypted) {
-        return encryptResult.error || 'Failed to secure wallet with new cipher';
-      }
-
-      st.wallet.pinHash = hashResult.hash;
-      st.wallet.pinEncryptedMnemonic = encryptResult.encrypted;
-      st.wallet.secretMode = 'cipher';
-      // Clears the legacy plaintext field once it's safely re-encrypted —
-      // a no-op for the normal path, where it's already empty.
-      st.wallet.mnemonic = '';
-      store.commit();
-
-      // Server sync (same rationale as WalletFlow.handleSetCipher).
-      api.post('/api/wallet/pin/set-pin', { pinHash: hashResult.hash }).then((r) => {
-        if (!r.ok) console.warn('[SecuritySettings] cipher hash sync to server failed:', r.error);
-      });
-      return null;
-    } catch (error) {
-      return `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
-    }
+    const saved = await saveWalletCredential(mnemonic, cipher);
+    return saved.ok ? null : saved.error;
   };
 
   // Task 11.8: Session timeout — persisted via the real settings API

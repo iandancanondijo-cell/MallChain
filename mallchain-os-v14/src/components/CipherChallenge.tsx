@@ -21,6 +21,11 @@
  *  - Legacy numeric-PIN wallet that wants to switch: "unlock with your old
  *    PIN and engrave a cipher" migration (verify PIN → decrypt → CipherSetup
  *    → re-encrypt under the cipher → mirror hash to server).
+ *  - Pre-secret-gating wallet whose phrase is still plaintext on this device:
+ *    straight to CipherSetup — there is no old secret to verify — and the
+ *    plaintext is destroyed only once the new cipher provably opens the copy
+ *    on disk. This is the whole migration surface; the app does not interrupt
+ *    navigation over it, because the cipher guards the wallet, not the UI.
  *  - Server says "no PIN hash stored" for an account whose local secret
  *    exists → local bcrypt fallback + one-time backfill (self-heals per
  *    device, same as PinChallenge did).
@@ -28,17 +33,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Wallet } from 'lucide-react';
 import { store } from '../store/store';
-import { decryptMnemonic, verifyPin, hashPin, encryptMnemonic } from '../services/security';
+import { decryptMnemonic, verifyPin } from '../services/security';
 import { api, getPinChallengeLock } from '../services/api';
 import { config } from '../services/config';
 import { authService } from '../services/auth';
 import { mnemonicRequestBus, type MnemonicRequest } from '../services/mnemonicAccess';
-import { Modal } from './ui';
+import { Modal, toast } from './ui';
 import PINInput from './PINInput';
 import { CipherWall, CipherSetup } from './CipherWall';
+import { saveWalletCredential } from '../features/wallet/credentialSave';
 
+/** Verifications a session may mis-type before the wallet comes off this device. */
 const MAX_ATTEMPTS = 3;
-const LOCKOUT_SECONDS = 60;
 
 type Phase = 'wall' | 'legacy' | 'setup' | 'no_wallet';
 
@@ -72,7 +78,16 @@ export function CipherChallengeHost() {
         hasCiphertext: !!st.pinEncryptedMnemonic,
         isCipher: st.secretMode === 'cipher',
       };
-      setPhase(deviceStateRef.current.hasCiphertext ? 'wall' : 'no_wallet');
+      // Accounts predating secret-gating hold the phrase in plaintext with
+      // nothing to unlock. Rather than send them through the connect flow to
+      // re-type a phrase this browser already has, go straight to cipher
+      // enrollment: `saveWalletCredential` encrypts under the new cipher,
+      // proves the copy on disk opens with it, and only then wipes the
+      // plaintext field.
+      const legacyPlaintext = !deviceStateRef.current.hasCiphertext && st.mnemonic
+        ? st.mnemonic
+        : null;
+      setPhase(legacyPlaintext ? 'setup' : deviceStateRef.current.hasCiphertext ? 'wall' : 'no_wallet');
       setPending(req);
       setPin('');
       setError(null);
@@ -80,7 +95,7 @@ export function CipherChallengeHost() {
       setBusy(false);
       setLockedUntil(null);
       setRemainingSeconds(0);
-      migrationMnemonicRef.current = null;
+      migrationMnemonicRef.current = legacyPlaintext;
     };
     mnemonicRequestBus.listeners.add(fn);
     return () => { mnemonicRequestBus.listeners.delete(fn); };
@@ -93,7 +108,11 @@ export function CipherChallengeHost() {
         setRemainingSeconds(remaining);
         if (remaining === 0) {
           setLockedUntil(null);
-          setAttempts(0);
+          // Attempts are NOT reset here. This timer is the server's
+          // brute-force cool-down, not a fresh set of guesses: a session that
+          // has already mis-typed the secret still has only the strikes it has
+          // left, so a slow verification service cannot buy an attacker more
+          // tries. The counter resets when the modal opens for a new request.
           setError(null);
           if (timerRef.current) {
             clearInterval(timerRef.current);
@@ -120,18 +139,36 @@ export function CipherChallengeHost() {
     migrationMnemonicRef.current = null;
   };
 
+  /**
+   * One failed verification. A wrong secret is the only thing that can burn a
+   * strike — unreachable services and CSRF rotations return before this.
+   *
+   * On the third one the wallet comes off this device instead of waiting out a
+   * timer: see store.disconnectWalletAfterFailedVerifications(). No countdown
+   * here means nobody can sit at a locked screen and trickle guesses in, and
+   * nobody inherits your key material.
+   */
   const burnAttempt = (serverRemaining?: number) => {
     const nextAttempts = attempts + 1;
     setAttempts(nextAttempts);
-    const left = typeof serverRemaining === 'number' ? serverRemaining : MAX_ATTEMPTS - nextAttempts;
-    if (left <= 0) {
-      setLockedUntil(Date.now() + (typeof serverRemaining === 'number' ? 300 : LOCKOUT_SECONDS) * 1000);
-      setError(typeof serverRemaining === 'number'
-        ? 'Too many failed attempts. Try again in 300s.'
-        : `Too many failed attempts. Try again in ${LOCKOUT_SECONDS}s.`);
-    } else {
-      setError(`Wrong cipher — ${left} attempt${left === 1 ? '' : 's'} remaining`);
+    // The server's count and this device's bound different things: /verify-pin
+    // rate-limits the account, while these strikes decide how long this browser
+    // keeps offering someone's key material to guesses. The stricter number
+    // wins, so a lenient (or default-configured) server can never buy extra
+    // attempts on this device, and an earlier server lockout is still honoured.
+    const localLeft = MAX_ATTEMPTS - nextAttempts;
+    const left = typeof serverRemaining === 'number' ? Math.min(serverRemaining, localLeft) : localLeft;
+    if (left > 0) {
+      setError(`Wrong cipher — ${left} attempt${left === 1 ? '' : 's'} left before this device disconnects the wallet`);
+      return;
     }
+    setBusy(false);
+    pending.resolve(null);
+    setPending(null);
+    migrationMnemonicRef.current = null;
+    store.disconnectWalletAfterFailedVerifications();
+    toast('Wallet disconnected after 3 failed verifications — reconnect with your recovery phrase', false);
+    window.location.hash = '#/wallet/connect';
   };
 
   /**
@@ -181,7 +218,32 @@ export function CipherChallengeHost() {
     }
 
     if (!verifyResponse.ok) {
-      if (verifyData.locked) {
+      // Only a body saying "this secret was compared and rejected" may burn a
+      // strike. `valid: false` / `attemptsRemaining` are what routes/
+      // walletPin.js returns after bcrypt.compare; a bare `{ error: 'invalid
+      // token' }` from middleware/requireAuth.js is this session running out,
+      // and a 500-class body is the service's own problem. Counting either as a
+      // wrong cipher is how a correctly saved secret got blamed for a failure
+      // that was never the user's.
+      const wasCompared = verifyData.valid === false
+        || typeof verifyData.attemptsRemaining === 'number'
+        || verifyData.code === 'no_pin_set';
+      if (!wasCompared) {
+        setBusy(false);
+        setError(verifyResponse.status === 401
+          ? 'Your session ran out before the wallet could be checked — sign in again, then unlock. This was not counted against your cipher.'
+          : `The wallet service could not check your cipher (${verifyData.error || `HTTP ${verifyResponse.status}`}) — this was not counted against it.`);
+        return false;
+      }
+
+      // A 401 means this exact secret was checked and rejected, so it counts as
+      // a strike even when it also tripped the account lockout: backend/src/
+      // routes/walletPin.js answers the third failure with BOTH `locked: true`
+      // and `attemptsRemaining: 0`, and letting the lock flag win is what made
+      // a 5-minute timer stand in for dropping the keys off this device. A 429
+      // is different — nothing was evaluated there, that is a previous streak's
+      // cool-down, so it waits instead of striking.
+      if (verifyData.locked && verifyResponse.status !== 401) {
         setLockedUntil(Date.now() + (verifyData.remainingTime || 300) * 1000);
         setError(`Account locked for ${verifyData.remainingTime || 300} seconds. Too many failed attempts.`);
         setBusy(false);
@@ -282,26 +344,20 @@ export function CipherChallengeHost() {
     }
     setBusy(true);
     try {
-      const hashResult = await hashPin(cipher);
-      const encryptResult = await encryptMnemonic(mnemonic, cipher);
-      if (!hashResult.success || !hashResult.hash || !encryptResult.success || !encryptResult.encrypted) {
-        setError(hashResult.error || encryptResult.error || 'Failed to secure wallet with the new cipher');
+      // Save-and-prove (features/wallet/credentialSave.ts): the cipher is only
+      // accepted once the copy on disk unlocks with it, so this modal can no
+      // longer report success for a secret that would fail on the next visit.
+      const saved = await saveWalletCredential(mnemonic, cipher);
+      if (!saved.ok) {
+        setError(saved.error);
         setBusy(false);
         return;
       }
-      const st = store.state.wallet;
-      st.pinHash = hashResult.hash;
-      st.pinEncryptedMnemonic = encryptResult.encrypted;
-      st.secretMode = 'cipher';
-      store.commit();
-      api.post('/api/wallet/pin/set-pin', { pinHash: hashResult.hash }).then((r) => {
-        if (!r.ok) console.warn('[CipherChallenge] cipher-hash sync to server failed:', r.error);
-      });
       migrationMnemonicRef.current = null;
       pending.resolve(mnemonic);
       setPending(null);
-    } catch {
-      setError('Failed to secure wallet with the new cipher');
+    } catch (error) {
+      setError(`Could not secure the wallet with the new cipher: ${error instanceof Error ? error.message : 'unexpected error'}`);
       setBusy(false);
     }
   };
@@ -368,9 +424,18 @@ export function CipherChallengeHost() {
   }
 
   if (phase === 'setup') {
+    // The legacy path reaches this without ever unlocking anything: the
+    // phrase was already readable on this device, so there is no secret to
+    // verify first — only a cipher to engrave over it.
+    const isLegacySweep = !deviceStateRef.current.hasCiphertext;
     return (
       <Modal title="Choose your cipher" onClose={cancel} wide>
         <div style={{ padding: '4px 4px 8px' }}>
+          {isLegacySweep && (
+            <p style={{ fontSize: 13, color: 'var(--txt-3)', margin: '0 0 12px' }}>
+              This wallet's recovery phrase is still sitting unencrypted in this browser. Choose a cipher — the phrase gets sealed under it and the plaintext copy is destroyed. Nothing is saved until a test unlock with the new cipher actually opens it.
+            </p>
+          )}
           <CipherSetup onSubmit={onCipherEnrolled} busy={busy} error={error} />
         </div>
       </Modal>
