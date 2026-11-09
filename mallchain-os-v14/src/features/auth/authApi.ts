@@ -100,6 +100,13 @@ export const authApi = {
         authService.clearCooldown();
 
         const loginBody = await res.json();
+        // Signing in over an account that is still live in this browser must
+        // not inherit its wallet, vault or address book. Same-account re-login
+        // keeps them, so a personal device doesn't lose its encrypted phrase.
+        const incomingId = loginBody?.user?.id;
+        if (incomingId && store.state.user.id && store.state.user.id !== incomingId) {
+          store.reset();
+        }
         if (typeof loginBody?.expiresAt === 'number') {
           authService.setSession(loginBody.expiresAt);
         }
