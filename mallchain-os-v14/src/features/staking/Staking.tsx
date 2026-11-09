@@ -51,7 +51,7 @@ export default function Staking() {
         kind: 'debit',
         note: `Staked ${a} MLPTS`,
         notifTitle: `Staked ${a} MLPTS`,
-        notifKind: 'tx',
+        notifKind: 'transaction',
         notifCategory: 'governance',
         activityText: `Staked ${a} MLPTS (tx ${result.txHash.slice(0, 10)}…)`,
         status: 'confirmed',
@@ -72,13 +72,12 @@ export default function Staking() {
     try {
       const result = await unstake({ mnemonic, fromAddress: address, stakeId });
       toast(`Unstaked — principal + rewards paid out (tx ${result.txHash.slice(0, 10)}…)`);
-      
-      // Send notification through all channels
+      // Raise it in the user's notification feed.
       store.pushNotification(
         'Unstaked Successfully',
         'Your principal and rewards have been paid out',
-        'tx',
-        'governance'
+        'transaction',
+        'transactions'
       );
       
       load();

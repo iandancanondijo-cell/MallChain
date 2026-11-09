@@ -120,11 +120,11 @@ export default function Marketplace({ navigate, products = PRODUCTS }: { navigat
       store.commit();
       toast(`Escrow locked for ${newOrders.length} order(s) — funds held until delivery confirmed`);
       
-      // Send notification through all channels
+      // Raise it in the user's notification feed.
       store.pushNotification(
         'Order Confirmed',
         `${newOrders.length} order(s) placed with escrow protection`,
-        'tx',
+        'transaction',
         'transactions'
       );
       
@@ -159,11 +159,11 @@ export default function Marketplace({ navigate, products = PRODUCTS }: { navigat
         o.releaseTxHash = txHash;
         store.commit();
         
-        // Send notification through all channels
+        // Raise it in the user's notification feed.
         store.pushNotification(
           'Delivery Confirmed',
           'Escrow released to seller — order complete',
-          'tx',
+          'transaction',
           'transactions'
         );
         
@@ -195,11 +195,11 @@ export default function Marketplace({ navigate, products = PRODUCTS }: { navigat
       o.status = 'disputed';
       store.commit();
       
-      // Send notification through all channels
+      // Raise it in the user's notification feed.
       store.pushNotification(
         'Dispute Filed',
         'Dispute opened on-chain — awaiting resolution',
-        'tx',
+        'transaction',
         'transactions'
       );
       

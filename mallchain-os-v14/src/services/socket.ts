@@ -41,6 +41,7 @@
 
 import { io, Socket } from 'socket.io-client';
 import { config } from './config';
+import { normalizeNotification, type AppNotification } from './notificationWire';
 
 /**
  * Wallet data structure received from socket events
@@ -100,15 +101,16 @@ export interface PriceData {
   changes: Record<string, number>;
 }
 
-/** A live-pushed notification (see backend/src/services/notify.js). */
-export interface NotificationData {
-  _id: string;
-  kind: string;
-  title: string;
-  body: string;
-  read: boolean;
-  createdAt: string;
-}
+/**
+ * A live-pushed notification, as this client exposes it.
+ *
+ * Aliased to the shape the REST list returns (see notificationWire.ts) so a
+ * socket row and a fetched row are the same thing downstream. The server sends
+ * `{type, message}`; normalizing here is what stops every real-time
+ * notification from arriving with `kind`/`body` undefined, which is what the
+ * bell panel used to do.
+ */
+export type NotificationData = AppNotification;
 
 /** A live-pushed chat message (see backend/src/routes/messaging.js). */
 export interface MessageData {
@@ -262,9 +264,17 @@ class SocketManager {
       this.emit('system', data);
     });
 
-    // Live notification push (see backend services/notify.js)
-    this.socket.on('notification', (data: NotificationData) => {
-      this.emit('notification', data);
+    // Live notification push (see backend/src/services/notificationEngine.js).
+    // The payload is the server's wire shape — `{type, message}` — not this
+    // client's `{kind, body}`, so it is normalized at the boundary.
+    this.socket.on('notification', (raw: unknown) => {
+      if (!raw || typeof raw !== 'object') return;
+      const notification = normalizeNotification(raw as Record<string, unknown>);
+      // A row with no id cannot be deduped against the REST page, marked read
+      // or archived, so passing it along would put an unactionable item in the
+      // feed. The next GET /api/notifications still shows it.
+      if (!notification._id) return;
+      this.emit('notification', notification);
     });
 
     // Live chat message push (see backend routes/messaging.js)

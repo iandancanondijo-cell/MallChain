@@ -3,7 +3,7 @@
  * with separate settings and notifications panels.
  * Admin route shows only notifications and network status.
  */
-import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { Search, Bell, Settings, ShieldAlert, Wrench, Menu, X, ArrowRight, ArrowLeftRight, ShieldCheck, Megaphone, Award, Package, Vote } from 'lucide-react';
 import { store } from '../store/store';
 import { useStoreVersion, fmtNum, toast, BadgeCheckmark } from './ui';
@@ -11,22 +11,20 @@ import { config } from '../services/config';
 import { COMMON_CURRENCIES } from '../services/locale';
 import { useSupportedCurrencies } from '../services/currency';
 import SocketStatus from './SocketStatus';
-import { notificationsApi, type AppNotification } from '../services/notificationsApi';
-import { socketManager } from '../services/socket';
+import { groupByDay, timeAgo, useNotificationFeed, type FeedEntry } from '../services/notificationFeed';
 import { t } from '../services/i18n';
 import { useMaintenanceStatus } from '../services/maintenanceApi';
 import { openCommandPalette } from './CommandPalette';
 const LANGS = ['EN', 'FR', 'ES', 'SW'];
 const ACCENTS = ['gold', 'cyan', 'purple', 'emerald'];
 
+/** Keyed by `models/Notification.js`'s `type` enum — the only values that can arrive. */
 const KIND_ICONS: Record<string, typeof Bell> = {
   transaction: ArrowLeftRight,
-  transactions: ArrowLeftRight,
   security: ShieldCheck,
   governance: Vote,
-  campaigns: Megaphone,
+  campaign: Megaphone,
   marketing: Megaphone,
-  badgeAlerts: Award,
   badge: Award,
   system: Package,
 };
@@ -36,26 +34,10 @@ function kindIcon(kind: string) {
   return <Icon size={14} aria-hidden="true" />;
 }
 
-function relativeTime(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diff = Math.max(0, now - then);
-  const secs = Math.floor(diff / 1000);
-  if (secs < 60) return t('just now');
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d`;
-  return new Date(dateStr).toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
 export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { navigate: (p: string) => void; isAdminRoute?: boolean; onToggleMobileNav?: () => void }) {
   const [q, setQ] = useState('');
   const [openPanel, setOpenPanel] = useState<'settings' | 'notifications' | null>(null);
   const [nf, setNf] = useState<'all' | 'unread'>('all');
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const panelRef = useRef<HTMLDivElement>(null);
   useStoreVersion();
   const st = store.state;
@@ -63,21 +45,24 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
   const maintenance = useMaintenanceStatus();
   const maintenanceActive = maintenance.global || Object.values(maintenance.scopes).some(Boolean);
 
-  const loadNotifications = useCallback(async () => {
-    if (!st.user.authed) return;
-    const res = await notificationsApi.list();
-    if (res.ok && res.data) setNotifications(res.data.notifications);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [st.user.authed]);
+  // The bell is the app-wide owner of the feed: it is mounted for every
+  // session, so it binds the feed to the signed-in account and keeps it
+  // ticking. The /notifications page reads the same store without starting a
+  // second poll.
+  const { state: feedState, entries, unread, hasMore, feed } = useNotificationFeed(st.user.authed ? st.user.id : null);
 
+  // Announce a push that lands while the session is already open. Deliberately
+  // keyed on the newest timestamp rather than "the head row changed": the head
+  // also changes when something is dismissed or a re-fetch reorders, and
+  // treating those as new arrivals is how a notification sound becomes noise.
+  const newestSeenRef = useRef(0);
   useEffect(() => {
-    loadNotifications();
-    const unsubscribe = socketManager.onNotification((n) => {
-      setNotifications((prev) => [{ _id: n._id, kind: n.kind, title: n.title, body: n.body, read: n.read, createdAt: n.createdAt }, ...prev]);
-      toastLocal(n.title);
-    });
-    return unsubscribe;
-  }, [loadNotifications]);
+    const head = feedState.items[0];
+    if (!head) return;
+    const at = Date.parse(head.createdAt);
+    if (newestSeenRef.current && at > newestSeenRef.current && !head.read) toastLocal(head.title);
+    newestSeenRef.current = Math.max(newestSeenRef.current, at);
+  }, [feedState.items]);
 
   useEffect(() => {
     if (!openPanel) return;
@@ -90,20 +75,28 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
   }, [openPanel]);
 
-  const unread = notifications.filter((n) => !n.read).length;
-
   const currencyButtons = useMemo(() => COMMON_CURRENCIES, []);
   const languageButtons = useMemo(() => LANGS, []);
   const accentButtons = useMemo(() => ACCENTS, []);
 
-  const markAllRead = () => {
-    notificationsApi.markAllRead();
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    toastLocal('All notifications marked as read');
+  const markAllRead = async () => {
+    if (await feed.markAllRead()) toastLocal('All notifications marked as read');
+    else toast(feed.getSnapshot().error || 'Could not mark your notifications as read', false);
   };
-  const dismiss = (id: string) => {
-    notificationsApi.markRead(id);
-    setNotifications((prev) => prev.filter((n) => n._id !== id));
+
+  const dismiss = async (entry: FeedEntry) => {
+    if (await feed.dismiss(entry.key)) return;
+    toast(feed.getSnapshot().error || 'Could not dismiss that notification', false);
+  };
+
+  const openEntry = async (entry: FeedEntry) => {
+    if (entry.source === 'device') {
+      if (!entry.read) feed.markDeviceRead(entry.key);
+      return;
+    }
+    if (entry.read) return;
+    if (await feed.markRead(entry.key)) return;
+    toast(feed.getSnapshot().error || 'Could not mark that notification as read', false);
   };
 
   const applyAccent = (a: string) => {
@@ -130,7 +123,8 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
     navigate('/notifications');
   };
 
-  const filtered = notifications.filter((n) => (nf === 'all' ? true : !n.read));
+  const shownEntries = nf === 'unread' ? entries.filter((e) => !e.read) : entries;
+  const sections = groupByDay(shownEntries);
 
   return (
     <header className="topbar">
@@ -258,19 +252,20 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
             <div className="panel-head">
               <Bell size={14} aria-hidden="true" style={{ color: 'var(--txt-3)' }} />
               <span className="grow">{t('Notifications')}</span>
+              {feedState.loading && <span className="tb-nf-spin" role="status" aria-label={t('Refreshing')} />}
               {unread > 0 && (
-                <button type="button" className="chip gold" onClick={markAllRead}>{t('Mark all read')}</button>
+                <button type="button" className="chip gold" onClick={() => void markAllRead()}>{t('Mark all read')}</button>
               )}
               <button type="button" className="panel-close" aria-label={t('Close')} onClick={() => setOpenPanel(null)}>
                 <X size={14} />
               </button>
             </div>
 
-            {/* Filter tabs */}
+            {/* Filter tabs — `total` is the account's whole feed, not this page */}
             <div className="tb-nf-tabs">
               <button type="button" className={'tb-nf-tab' + (nf === 'all' ? ' active' : '')} onClick={() => setNf('all')}>
                 {t('All')}
-                <span className="tb-nf-count">{notifications.length}</span>
+                <span className="tb-nf-count">{feedState.total}</span>
               </button>
               <button type="button" className={'tb-nf-tab' + (nf === 'unread' ? ' active' : '')} onClick={() => setNf('unread')}>
                 {t('Unread')}
@@ -278,34 +273,93 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
               </button>
             </div>
 
-            {/* Notifications list */}
+            {feedState.error && (
+              <div className="tb-nf-error" role="alert">
+                <span>{feedState.error}</span>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => void feed.refresh()}>{t('Retry')}</button>
+              </div>
+            )}
+
             <div className="tb-nf-list">
-              {filtered.length === 0 && (
+              {feedState.loading && sections.length === 0 && (
+                <div className="tb-nf-skel" aria-hidden="true">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="tb-nf-skel-row"><span className="sk-ico" /><span className="sk-line" /><span className="sk-line short" /></div>
+                  ))}
+                </div>
+              )}
+              {!feedState.loading && sections.length === 0 && (
                 <div className="tb-nf-empty">
                   <Bell size={28} strokeWidth={1.2} />
                   <span>{nf === 'unread' ? t('All caught up') : t('No notifications yet')}</span>
+                  {nf === 'unread' && unread === 0 && feedState.total > 0 && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNf('all')}>{t('Show all')}</button>
+                  )}
                 </div>
               )}
-              {filtered.map((n) => (
-                <div key={n._id} className={'tb-nf-item' + (n.read ? '' : ' unread')}>
-                  <div className={'tb-nf-icon kind-' + (n.kind || 'system')}>
-                    {kindIcon(n.kind)}
-                  </div>
-                  <div className="tb-nf-content">
-                    <div className="tb-nf-title">{n.title}</div>
-                    {n.body && <div className="tb-nf-body">{n.body}</div>}
-                    <div className="tb-nf-meta">
-                      <span className="tb-nf-time">{relativeTime(n.createdAt)}</span>
-                      <span className="tb-nf-kind">{n.kind}</span>
+              {sections.map((section) => (
+                <div key={section.label}>
+                  <div className="tb-nf-day">{t(section.label)}</div>
+                  {section.entries.map((entry) => (
+                    <div
+                      key={entry.key}
+                      role="button"
+                      tabIndex={0}
+                      className={'tb-nf-item' + (entry.read ? '' : ' unread') + (entry.source === 'device' ? ' device' : '')}
+                      onClick={() => void openEntry(entry)}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' && e.key !== ' ') return;
+                        e.preventDefault();
+                        void openEntry(entry);
+                      }}
+                    >
+                      <div className={'tb-nf-icon kind-' + entry.kind}>
+                        {kindIcon(entry.kind)}
+                      </div>
+                      <div className="tb-nf-content">
+                        <div className="tb-nf-title">{entry.title}</div>
+                        {entry.body && <div className="tb-nf-body">{entry.body}</div>}
+                        <div className="tb-nf-meta">
+                          <span className="tb-nf-time">{timeAgo(entry.createdAt)}</span>
+                          <span className="tb-nf-kind">{entry.kind}</span>
+                          {entry.source === 'device' && (
+                            <span
+                              className={'tb-nf-sync' + (entry.sync === 'unsynced' ? ' unsynced' : '')}
+                              title={entry.sync === 'unsynced' ? `Not saved to your account — ${entry.reason || 'the notification service did not accept it'}` : t('Saving to your account…')}
+                            >
+                              {entry.sync === 'unsynced' ? t('This device only') : t('Saving…')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {!entry.read && <span className="tb-nf-dot" aria-label={t('Unread')} />}
+                      <button
+                        type="button"
+                        className="tb-nf-dismiss"
+                        aria-label={t('Dismiss')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void dismiss(entry);
+                        }}
+                      >
+                        <X size={12} />
+                      </button>
                     </div>
-                  </div>
-                  {!n.read && <span className="tb-nf-dot" aria-label={t('Unread')} />}
-                  <button type="button" className="tb-nf-dismiss" aria-label={t('Dismiss')} onClick={() => dismiss(n._id)}>
-                    <X size={12} />
-                  </button>
+                  ))}
                 </div>
               ))}
             </div>
+
+            {feedState.total > shownEntries.length && shownEntries.length > 0 && (
+              <div className="tb-nf-foot">
+                <span className="tiny">{shownEntries.length} / {feedState.total}</span>
+                {hasMore && (
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={feedState.loadingMore} onClick={() => void feed.loadMore()}>
+                    {feedState.loadingMore ? t('Loading…') : t('Load older')}
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* View all link */}
             <button type="button" className="tb-nf-view-all" onClick={goNotifications}>

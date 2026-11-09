@@ -11,6 +11,9 @@
 import { config } from '../services/config';
 import { detectDefaultCurrency } from '../services/locale';
 import { ADDRESS_BOOK_STORAGE_KEY } from '../services/addressBookStore';
+// Type-only: the runtime modules stay behind the dynamic import in
+// pushNotification, so this never joins the api → auth → store cycle.
+import type { NotifCategory, NotifKind } from '../services/notificationsApi';
 
 export const OS_KEY = 'mallchain_os_v1_v14';
 export const WALLET_VAULT_STORAGE_KEY = 'mallchain_vault';
@@ -80,15 +83,6 @@ export interface Tx {
   note?: string;
 }
 
-export interface Notification {
-  id: string;
-  kind: 'tx' | 'system' | 'mines' | 'validators' | 'governance' | 'market' | 'social';
-  title: string;
-  body?: string;
-  read: boolean;
-  ts: number;
-}
-
 export interface Activity {
   id: string;
   text: string;
@@ -119,8 +113,6 @@ export interface AppState {
   };
   balances: Balance;
   txs: Tx[];
-  notifications: Notification[];
-  notifs: Array<{ id: string; ico: string; text: string; time: string; read: boolean; kind: string }>;
   activity: Activity[];
   prefs: {
     accent: 'gold' | 'cyan' | 'purple' | 'emerald';
@@ -366,7 +358,6 @@ function emptyState(): AppState {
     },
     balances: { MALL: 0, MLPTS: 0, USD_M: 0, KES: 0, EUR: 0, GBP: 0 },
     txs: [],
-    notifications: [],
     activity: [],
     prefs: { accent: 'gold', currency: detectDefaultCurrency(), lang: 'EN' },
     settings: { theme: 'dark', network: config.network },
@@ -388,7 +379,6 @@ function emptyState(): AppState {
     explorer: { blocks: [], txs: [] },
     messaging: { conversations: [] },
     referrals: { code: '', earned: 0, count: 0, claimed: 0 },
-    notifs: [],
     contracts: [],
     devhub: { keys: [] },
     careers: { list: [
@@ -631,8 +621,8 @@ class Store {
     fee?: number;
     note?: string;
     notifTitle?: string;
-    notifKind?: Notification['kind'];
-    notifCategory?: 'transactions' | 'campaigns' | 'governance' | 'security' | 'marketing' | 'badgeAlerts';
+    notifKind?: NotifKind;
+    notifCategory?: NotifCategory;
     activityText?: string;
     status?: Tx['status'];
   }): { ok: boolean; error?: string; tx?: Tx } {
@@ -657,15 +647,13 @@ class Store {
     this.state.txs.unshift(tx);
     if (this.state.txs.length > 200) this.state.txs.length = 200;
     
-    // Send notification through real API with multi-channel support
+    // Raise it on the live feed. `applyTx` is a synchronous store mutation and
+    // the feed needs the notifications service, so the reference arrives
+    // through the deferred call below — that keeps the api.ts → auth.ts →
+    // store.ts cycle out of module initialization (the setTimeout is what this
+    // file has always used for that reason, not an arbitrary delay).
     if (opts.notifTitle) {
-      this.sendNotificationAsync(
-        opts.notifTitle,
-        opts.note || '',
-        opts.notifKind || 'tx',
-        opts.notifCategory || 'transactions',
-        tx.id
-      );
+      this.pushNotification(opts.notifTitle, opts.note || '', opts.notifKind || 'transaction', opts.notifCategory || 'transactions', { txId: tx.id });
     }
     
     if (opts.activityText) {
@@ -684,52 +672,35 @@ class Store {
     return this.applyTx({ type, amount, asset, kind: 'debit', note });
   }
 
-  pushNotification(title: string, body = '', kind: Notification['kind'] = 'system', category: 'transactions' | 'campaigns' | 'governance' | 'security' | 'marketing' | 'badgeAlerts' = 'security') {
-    // Add to local state for immediate UI display
-    this.state.notifications.unshift({ id: 'n' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), kind, title, body, read: false, ts: Date.now() });
-    if (this.state.notifications.length > 80) this.state.notifications.length = 80;
-    
-    // Send through real API asynchronously
-    this.sendNotificationAsync(title, body, kind, category, undefined);
-  }
-
   /**
-   * Send notification through real backend API with multi-channel support
-   * Non-blocking async operation that respects user preferences
+   * Raise an event the app just caused, in the user's notification feed.
+   *
+   * This used to push onto `state.notifications`, an array no component ever
+   * read: an order placed, a vote cast or a wallet disconnected after three
+   * failed verifications was "notified" to a page of localStorage while the
+   * bell and the notifications page showed only server rows. Producers were
+   * silent successes. It now goes to services/notificationFeed.ts, which both
+   * surfaces render, and the feed is what decides whether the row became real
+   * on the server or is honestly labelled device-only.
    */
-  private sendNotificationAsync(
+  pushNotification(
     title: string,
-    body: string,
-    kind: Notification['kind'] = 'system',
-    category: 'transactions' | 'campaigns' | 'governance' | 'security' | 'marketing' | 'badgeAlerts' = 'security',
-    metadata?: unknown
+    body = '',
+    kind: NotifKind = 'system',
+    category: NotifCategory = 'security',
+    metadata?: Record<string, unknown>,
   ) {
-    // Only send if user is authenticated
     if (!this.state.user.authed) return;
-
-    // Send notification async without blocking user flow
-    // Using setTimeout to avoid circular import issues
+    // Deferred for the circular-import reason noted in applyTx; the feed's own
+    // module never imports the store.
     setTimeout(() => {
-      import('../services/notificationsApi').then(({ notificationsApi }) => {
-        notificationsApi.send({
-          title,
-          body,
-          kind,
-          category,
-          channels: {
-            email: true,
-            sms: true,
-            whatsapp: true,
-            inApp: true,
-          },
-          metadata: metadata ? { metadata } : undefined,
-        }).catch((err: unknown) => {
-          // Log errors but don't interrupt user flow
-          console.error('Failed to send notification:', err);
+      import('../services/notificationFeed')
+        .then(({ notificationFeed }) => {
+          notificationFeed.pushDevice({ kind, title, body, category, metadata });
+        })
+        .catch((err: unknown) => {
+          console.error('Failed to raise notification:', err);
         });
-      }).catch((err: unknown) => {
-        console.error('Failed to import notificationsApi:', err);
-      });
     }, 0);
   }
 

@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
-import { notificationsApi, type AppNotification } from '../../services/notificationsApi';
+import {
+  NOTIF_KINDS,
+  NOTIF_KIND_LABEL,
+  type NotifKind,
+} from '../../services/notificationsApi';
+import {
+  groupByDay,
+  timeAgo,
+  useNotificationFeed,
+  type FeedEntry,
+} from '../../services/notificationFeed';
 
 /** Small utility views — Careers, Learning, Social Tasks, Notifications,
  *  Analytics, Help — mirroring v14's ecosystem group. */
@@ -140,50 +150,262 @@ export const SocialTasks = () => {
   );
 };
 
-const KIND_ICONS: Record<string, string> = { mines: '⛏', validators: '🛡', system: '⚙', wallet: '💰', governance: '⚖' };
+const KIND_ICONS: Record<NotifKind, string> = {
+  transaction: '↔',
+  security: '🛡',
+  governance: '⚖',
+  campaign: '📣',
+  badge: '🏅',
+  marketing: '📣',
+  system: '⚙',
+};
+
+/** Only primitives get rendered out of a notification's `data` payload — the
+ *  backend stores it as Mixed, so a nested object or array would otherwise
+ *  show up as "[object Object]" or crash on React's child rules. */
+function dataFields(data: unknown): Array<[string, string]> {
+  if (!data || typeof data !== 'object') return [];
+  return Object.entries(data as Record<string, unknown>)
+    .filter(([, v]) => v === null || ['string', 'number', 'boolean'].includes(typeof v))
+    .slice(0, 6)
+    .map(([k, v]) => [fieldLabel(k), v === null ? '—' : String(v)]);
+}
+
+/** Keys arrive as whatever the producer called them (`txHash`, `proof_url`,
+ *  `ip`) — a detail list that reads like a database dump is not finished. */
+const FIELD_ABBREVIATIONS: Record<string, string> = {
+  ip: 'IP', id: 'ID', url: 'URL', tx: 'Transaction', kyc: 'KYC', api: 'API',
+  usd: 'USD', kes: 'KES', pin: 'Cipher', otp: 'OTP', ref: 'Reference',
+};
+
+function fieldLabel(key: string): string {
+  const words = key
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .trim()
+    .split(' ');
+  return words
+    .map((word) => FIELD_ABBREVIATIONS[word.toLowerCase()] ?? word[0].toUpperCase() + word.slice(1))
+    .join(' ');
+}
 
 export const NotificationsView = () => {
   useStoreVersion();
-  const [filter, setFilter] = useState('all');
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const st = store.state;
+  const [kindFilter, setKindFilter] = useState<'all' | NotifKind>('all');
+  const [readFilter, setReadFilter] = useState<'all' | 'unread'>('all');
+  const [query, setQuery] = useState('');
 
-  const load = useCallback(async () => {
-    const res = await notificationsApi.list();
-    if (res.ok && res.data) setNotifications(res.data.notifications);
-  }, []);
+  // TopBar owns the background refresh; this page reads the same store, so a
+  // row marked read here is already read in the bell when the panel next opens.
+  const { state: feedState, entries, unread, hasMore, feed } =
+    useNotificationFeed(st.user.authed ? st.user.id : null, { pollMs: 0 });
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const counts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const entry of entries) out[entry.kind] = (out[entry.kind] || 0) + 1;
+    return out;
+  }, [entries]);
 
-  const list = notifications.filter((n) => filter === 'all' || n.kind === filter);
+  const needle = query.trim().toLowerCase();
+  const shown = entries.filter((e) =>
+    (kindFilter === 'all' || e.kind === kindFilter)
+    && (readFilter === 'all' || !e.read)
+    && (!needle || `${e.title} ${e.body}`.toLowerCase().includes(needle)),
+  );
+  const sections = groupByDay(shown);
+
   const markAll = async () => {
-    await notificationsApi.markAllRead();
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    toast('All notifications marked read');
+    if (await feed.markAllRead()) toast('All notifications marked read');
+    else toast(feedState.error || 'Could not mark your notifications as read', false);
   };
-  const dismiss = async (id: string) => {
-    await notificationsApi.markRead(id);
-    setNotifications((prev) => prev.filter((n) => n._id !== id));
+  const dismiss = async (entry: FeedEntry) => {
+    if (await feed.dismiss(entry.key)) return;
+    toast(feedState.error || 'Could not dismiss that notification', false);
   };
+  const openEntry = async (entry: FeedEntry) => {
+    if (entry.read) return;
+    if (entry.source === 'device') {
+      feed.markDeviceRead(entry.key);
+      return;
+    }
+    if (await feed.markRead(entry.key)) return;
+    toast(feedState.error || 'Could not mark that notification as read', false);
+  };
+
+  const filtersActive = kindFilter !== 'all' || readFilter !== 'all' || !!needle;
+  const clearFilters = () => { setQuery(''); setKindFilter('all'); setReadFilter('all'); };
+  // Filters did work, there is simply nothing to show. The empty state below
+  // offers the way out, so the toolbar must not offer the same button twice.
+  const nothingMatches = !feedState.loading && entries.length > 0 && shown.length === 0;
+
+  // A fragment list ("are type Security, matching “badge”") is only grammatical
+  // for one filter at a time. Naming the active filters after a colon reads
+  // correctly for every combination.
+  const activeFilters = [
+    kindFilter !== 'all' ? NOTIF_KIND_LABEL[kindFilter].toLowerCase() : '',
+    readFilter === 'unread' ? 'unread only' : '',
+    needle ? `“${query.trim()}”` : '',
+  ].filter(Boolean);
 
   return (
     <div>
-      <div className="view-head"><h1 className="text-gradient">Notifications</h1><span className="sub">{notifications.filter((n) => !n.read).length} unread</span><button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={markAll}>Mark all read</button></div>
-      <div className="mc-subnav" style={{ marginBottom: 16 }}>
-        {['all', 'wallet', 'mines', 'validators', 'governance', 'system'].map((f) => (
-          <button key={f} className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f}</button>
+      <div className="view-head">
+        <h1 className="text-gradient">Notifications</h1>
+        <span className="sub">{unread > 0 ? `${unread} unread` : 'All caught up'}</span>
+        <span className="nc-head-actions">
+          {unread > 0 && (
+            <button className="btn btn-ghost btn-sm" onClick={() => void markAll()}>Mark all read</button>
+          )}
+          <a className="btn btn-ghost btn-sm" href="#/settings">Notification settings</a>
+        </span>
+      </div>
+
+      {feedState.error && (
+        <div className="card card-glow nc-error mb" role="alert">
+          <span>{feedState.error}</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => void feed.refresh()}>Try again</button>
+        </div>
+      )}
+
+      <div className="mc-subnav" style={{ marginBottom: 10 }}>
+        {(['all', 'unread'] as const).map((f) => (
+          <button key={f} className={readFilter === f ? 'on' : ''} onClick={() => setReadFilter(f)}>
+            {f === 'all' ? `All${feedState.total ? ` (${feedState.total})` : ''}` : `Unread${unread ? ` (${unread})` : ''}`}
+          </button>
         ))}
       </div>
-      {list.length === 0 && <div className="empty-state"><div className="es-ico">🔔</div><div className="es-t">No notifications</div><div className="es-m">Notifications from wallet, mines and validators appear here.</div></div>}
-      <div className="stagger">
-      {list.map((n) => (
-        <div key={n._id} className={'card card-glow bg-gradient-card card-hover mb list-row' + (!n.read ? ' unread' : '')}>
-          <span style={{ fontSize: 16 }}>{KIND_ICONS[n.kind] || '🔔'}</span>
-          <div className="grow"><div className="t">{n.title}</div><div className="m">{n.body || new Date(n.createdAt).toLocaleString()}</div></div>
-          <button className="btn btn-ghost btn-sm" onClick={() => dismiss(n._id)}>✕</button>
+
+      {/* One chip per value the server's `type` enum can actually hold. The
+          tabs this page used before — wallet, mines, validators — matched
+          nothing in that enum, so three of the six were permanently empty. */}
+      <div className="nc-chips">
+        <button className={kindFilter === 'all' ? 'on' : ''} onClick={() => setKindFilter('all')}>All types</button>
+        {NOTIF_KINDS.map((k) => (
+          <button key={k} className={kindFilter === k ? 'on' : ''} onClick={() => setKindFilter(k)}>
+            {KIND_ICONS[k]} {NOTIF_KIND_LABEL[k]}{counts[k] ? ` ${counts[k]}` : ''}
+          </button>
+        ))}
+      </div>
+
+      <div className="nc-search">
+        <input
+          type="search"
+          aria-label="Search your notifications"
+          placeholder="Search your notifications…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {filtersActive && !nothingMatches && (
+          <button className="btn btn-ghost btn-sm" onClick={clearFilters}>Clear filters</button>
+        )}
+      </div>
+
+      {feedState.loading && entries.length === 0 && (
+        <div className="nc-skel" aria-hidden="true">
+          {[0, 1, 2, 3].map((i) => <div key={i} className="nc-skel-row"><span className="sk-ico" /><span className="sk-line" /><span className="sk-line short" /></div>)}
         </div>
+      )}
+
+      {!feedState.loading && entries.length === 0 && (
+        <div className="empty-state">
+          <div className="es-ico">🔔</div>
+          <div className="es-t">Nothing here yet</div>
+          <div className="es-m">
+            {feedState.owner
+              ? 'Wallet, marketplace, governance and security events land here as they happen. Everything you see is the server’s copy for this account, so it is the same on any device you sign in from.'
+              : 'Notifications belong to your account — sign in to see them.'}
+          </div>
+        </div>
+      )}
+
+      {nothingMatches && (
+        <div className="empty-state">
+          <div className="es-ico">🔍</div>
+          <div className="es-t">No notifications match</div>
+          <div className="es-m">
+            {`None of your ${entries.length} loaded notifications match${activeFilters.length ? `: ${activeFilters.join(', ')}` : ' the current filters'}.`}
+            {hasMore && ' Older notifications are still waiting below — load them and search again.'}
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={clearFilters}>Clear filters</button>
+        </div>
+      )}
+
+      {sections.map((section) => (
+        <section key={section.label} className="nc-day">
+          <div className="nc-day-head">{section.label}</div>
+          <div className="stagger">
+            {section.entries.map((entry) => {
+              const fields = dataFields(entry.data);
+              return (
+                <article
+                  key={entry.key}
+                  role="button"
+                  tabIndex={0}
+                  className={'card card-glow bg-gradient-card card-hover mb list-row nc-item' + (entry.read ? '' : ' unread')}
+                  onClick={() => void openEntry(entry)}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    e.preventDefault();
+                    void openEntry(entry);
+                  }}
+                >
+                  <span className="nc-ico" aria-hidden="true">{KIND_ICONS[entry.kind]}</span>
+                  <div className="grow">
+                    <div className="t">{entry.title}</div>
+                    {entry.body && <div className="m">{entry.body}</div>}
+                    <div className="nc-meta">
+                      <span className="chip">{NOTIF_KIND_LABEL[entry.kind]}</span>
+                      <span className="tiny nc-time" title={new Date(entry.createdAt).toLocaleString()}>{timeAgo(entry.createdAt)}</span>
+                      {entry.source === 'device' && (
+                        <span className={'chip ' + (entry.sync === 'unsynced' ? 'red' : 'gold')}>
+                          {entry.sync === 'unsynced' ? 'This device only' : 'Saving…'}
+                        </span>
+                      )}
+                      {entry.source === 'device' && entry.sync === 'unsynced' && entry.reason && (
+                        <span className="tiny nc-reason">Not saved to your account — {entry.reason}.</span>
+                      )}
+                    </div>
+                    {fields.length > 0 && (
+                      <details className="nc-data" onClick={(e) => e.stopPropagation()}>
+                        <summary>Details</summary>
+                        <dl>
+                          {fields.map(([k, v]) => (
+                            <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
+                          ))}
+                        </dl>
+                      </details>
+                    )}
+                  </div>
+                  {!entry.read && <span className="nc-dot" aria-label="Unread" />}
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    aria-label="Dismiss"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void dismiss(entry);
+                    }}
+                  >
+                    ✕
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        </section>
       ))}
+
+      {(hasMore || feedState.loadingMore) && (
+        <div className="nc-foot">
+          <span className="tiny">{feedState.loadedCount} of {feedState.total} loaded</span>
+          <button className="btn btn-ghost btn-sm" disabled={feedState.loadingMore} onClick={() => void feed.loadMore()}>
+            {feedState.loadingMore ? 'Loading…' : 'Load older'}
+          </button>
+        </div>
+      )}
+
+      <div className="tiny nc-note">
+        Dismissing archives a notification on your account — it disappears from every device and stops counting towards your unread total. Filters and search apply to the notifications loaded here; older ones arrive as you load them.
       </div>
     </div>
   );

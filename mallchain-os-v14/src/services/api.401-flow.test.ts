@@ -30,7 +30,6 @@ vi.mock('../store/store', () => ({
       user: { authed: true },
       balances: {},
       txs: [],
-      notifications: [],
       activity: [],
       mines: { campaigns: [] },
       validators: { rewardsLeaderboard: { validators: [] } },

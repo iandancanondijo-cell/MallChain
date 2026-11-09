@@ -96,11 +96,11 @@ export default function Governance() {
       toast(`Vote cast — tx ${result.txHash.slice(0, 10)}…`);
       setSel((cur) => (cur ? { ...cur, userVote: { voted: true, option } } : cur));
       
-      // Send notification through all channels
+      // Raise it in the user's notification feed.
       store.pushNotification(
         `Vote Cast: ${option}`,
         `You voted ${option} on proposal #${sel.id}`,
-        'tx',
+        'transaction',
         'governance'
       );
       
@@ -149,11 +149,11 @@ export default function Governance() {
       });
       toast(`Proposal submitted — tx ${result.txHash.slice(0, 10)}…`);
       
-      // Send notification through all channels
+      // Raise it in the user's notification feed.
       store.pushNotification(
         'Proposal Submitted',
         `"${npTitle.trim()}" submitted with ${amt} STAKE deposit`,
-        'tx',
+        'transaction',
         'governance'
       );
       

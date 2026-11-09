@@ -20,6 +20,8 @@ import { CipherChallengeHost } from './CipherChallenge';
 import { requestMnemonic } from '../services/mnemonicAccess';
 import { store, WALLET_VAULT_STORAGE_KEY } from '../store/store';
 import { decryptMnemonic, encryptMnemonic } from '../services/security';
+import { notificationFeed } from '../services/notificationFeed';
+import { notificationsApi } from '../services/notificationsApi';
 
 const PHRASE = 'scheme menu ridge verify spoon insane unable crouch craft danger file myth yoke browse van obvious purse ridge fog cruise zebra rhythm hat crouch';
 const OS_KEY = 'mallchain_os_v1_v14';
@@ -49,12 +51,27 @@ function seedLegacyWallet() {
   store.commit();
 }
 
+/** A device-raised feed entry by title, newest first, or undefined. */
+function deviceEvent(title: RegExp) {
+  return notificationFeed.getSnapshot().devices.find((d) => title.test(d.title));
+}
+
 describe('CipherChallengeHost', () => {
   beforeEach(() => {
     localStorage.clear();
-    // The store is a module singleton, so the previous test's disconnect
-    // notification would otherwise still be sitting here.
-    store.state.notifications = [];
+    notificationFeed.reset();
+    // Producers only raise feed events for a signed-in account, and the store
+    // is a module singleton — so the previous test's "wallet disconnected"
+    // trail would otherwise still be sitting in the feed here.
+    store.state.user.authed = true;
+    store.state.user.id = 'cipher-test-user';
+    // The feed's POST is the server's business, not the wall's. Left unstubbed
+    // it would race the shared fetch mock below for an unrelated reason.
+    vi.spyOn(notificationsApi, 'send').mockResolvedValue({
+      ok: false,
+      error: 'feed sync is out of scope here',
+      data: { ok: false, skipped: true, reason: 'not sent in this test' },
+    });
     vi.stubGlobal('matchMedia', vi.fn().mockImplementation(() => ({
       matches: false, media: '', addEventListener: vi.fn(), removeEventListener: vi.fn(),
       addListener: vi.fn(), removeListener: vi.fn(),
@@ -65,6 +82,9 @@ describe('CipherChallengeHost', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    notificationFeed.reset();
+    store.state.user.authed = false;
+    store.state.user.id = '';
     localStorage.clear();
   });
 
@@ -133,7 +153,7 @@ describe('CipherChallengeHost', () => {
     // still here with two strikes in reserve.
     expect(store.state.wallet.pinEncryptedMnemonic).not.toBe('');
     expect(store.state.wallet.address).not.toBe('');
-    expect(store.state.notifications.some((n) => /disconnected/i.test(n.title))).toBe(false);
+    expect(deviceEvent(/disconnected/i)).toBeUndefined();
 
     // Closing the wall is a cancel, not a verdict — nothing was ever burned.
     fireEvent.click(screen.getByRole('button', { name: /×|close/i }));
@@ -187,6 +207,10 @@ describe('CipherChallengeHost', () => {
     expect(store.readPersistedWalletSecrets()).toBeNull();
     expect(localStorage.getItem(WALLET_VAULT_STORAGE_KEY)).toBeNull();
     expect(screen.queryByText(/Account locked for/i)).toBeNull();
-    expect(store.state.notifications[0].title).toMatch(/disconnected after 3 failed verifications/i);
+    // The disconnect is announced on the live feed, not to a private array in
+    // the store. Deferred for the circular-import reason in store.ts, so wait
+    // for the feed module to arrive rather than assert on a tick.
+    await waitFor(() => expect(deviceEvent(/disconnected after 3 failed verifications/i)).toBeTruthy());
+    expect(deviceEvent(/disconnected/i)!.kind).toBe('system');
   }
 });
