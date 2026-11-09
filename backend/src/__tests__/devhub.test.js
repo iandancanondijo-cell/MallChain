@@ -1,7 +1,7 @@
 const request = require('supertest');
 const express = require('express');
 
-jest.mock('../models/ApiKey', () => ({
+jest.mock('../models/devhubApiKey', () => ({
   find: jest.fn(),
   create: jest.fn(),
   findOneAndUpdate: jest.fn(),
@@ -13,7 +13,7 @@ jest.mock('../middleware/auth', () =>
   })
 );
 
-const ApiKey = require('../models/ApiKey');
+const ApiKey = require('../models/devhubApiKey');
 const devhubRoutes = require('../routes/devhub');
 
 describe('devhub routes', () => {

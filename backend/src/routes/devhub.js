@@ -3,7 +3,7 @@ const router = express.Router();
 const crypto = require('crypto');
 const logger = require('../utils/logger');
 const auth = require('../middleware/auth');
-const ApiKey = require('../models/ApiKey');
+const ApiKey = require('../models/devhubApiKey');
 
 function ok(data) { return { ok: true, data }; }
 function fail(err) {

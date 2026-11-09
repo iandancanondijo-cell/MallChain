@@ -18,7 +18,7 @@ function mockModel(overrides = {}) {
 jest.mock('../models/user', () => mockModel());
 jest.mock('../models/kyc', () => mockModel());
 jest.mock('../models/UserSettings', () => mockModel());
-jest.mock('../models/ApiKey', () => mockModel());
+jest.mock('../models/devhubApiKey', () => mockModel());
 jest.mock('../models/Contract', () => mockModel());
 jest.mock('../models/Notification', () => mockModel());
 jest.mock('../models/ValidatorApplication', () => mockModel());
@@ -45,7 +45,7 @@ const B2CPayout = require('../models/B2CPayout');
 const LiquidityPoolActivity = require('../models/LiquidityPoolActivity');
 const Notification = require('../models/Notification');
 const UserSettings = require('../models/UserSettings');
-const ApiKey = require('../models/ApiKey');
+const ApiKey = require('../models/devhubApiKey');
 const Contract = require('../models/Contract');
 const AuditLog = require('../models/AuditLog');
 
