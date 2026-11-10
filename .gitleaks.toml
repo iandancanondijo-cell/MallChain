@@ -26,3 +26,17 @@ regexes = [
   # — literal fake strings like 'withdraw-key-1', not real credentials.
   '''withdraw-key-\d+''',
 ]
+
+# gitleaks' default ruleset has no BIP-39 coverage, which is why four funded
+# genesis seed phrases sat committed in backend/test_p2p_transfer.js unnoticed.
+[[rules]]
+id = "bip39-mnemonic"
+description = "BIP-39 seed phrase (12 or 24 lowercase words)"
+keywords = ["mnemonic", "seedphrase", "seed_phrase", "recovery_phrase"]
+regex = '''(?i)(mnemonic|seed_?phrase|recovery_phrase)["']?\s*[:=]\s*["']([a-z]{3,9}( [a-z]{3,9}){11,23})["']'''
+
+[[rules]]
+id = "cosmos-bech32-private-key"
+description = "Cosmos armored/hex private key material"
+keywords = ["private_key", "privkey"]
+regex = '''(?i)(private_?key)["']?\s*[:=]\s*["']([0-9a-fA-F]{64}|6[0-9a-fA-F]{73}|[45][0-9a-zA-Z]{31})["']'''

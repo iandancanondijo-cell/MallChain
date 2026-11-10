@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
+const fs = require('fs');
 const logger = require('../utils/logger')
 const mongoose = require('mongoose');
 const User = require('../models/user');
@@ -29,24 +31,80 @@ const { limiters } = require('../middleware/rateLimiter');
 const MAINTENANCE_SCOPES = ['send', 'withdraw', 'buy', 'payment', 'marketplace', 'staking', 'vault', 'key-vault', 'badge', 'dex'];
 
 // ============ BOOTSTRAP: Create first admin (only works when no admins exist) ============
+//
+// This route deliberately sits above `router.use(requireAdmin)` further down —
+// it is what creates the first admin. Its only guard used to be "no admin
+// exists yet", so anyone who reached the API on a fresh deploy (or one where
+// every admin had been removed) could claim superadmin for themselves, and the
+// precondition was a read-then-write that two concurrent requests could both
+// pass.
+//
+// Now fail-closed on two axes: an out-of-band secret must be configured and
+// supplied, and "no admin exists" is enforced by the database in one atomic
+// upsert rather than a check-then-create pair.
+const BOOTSTRAP_SECRET_HEADER = 'x-bootstrap-key';
+const MIN_BOOTSTRAP_PASSWORD_LENGTH = 12;
+
+/**
+ * Resolved per request rather than at module load: operators commonly start a
+ * first boot without this variable and add it before running bootstrap.
+ */
+function configuredBootstrapSecret() {
+  if (process.env.BOOTSTRAP_SECRET_FILE) {
+    try {
+      return fs.readFileSync(process.env.BOOTSTRAP_SECRET_FILE, 'utf8').trim() || null;
+    } catch (e) {
+      // A configured-but-unreadable file is a misconfiguration, not an
+      // invitation to fall back to the env value.
+      logger.error('adminPanel', 'BOOTSTRAP_SECRET_FILE unreadable', e);
+      return null;
+    }
+  }
+  return process.env.BOOTSTRAP_SECRET || null;
+}
+
+// Both sides hashed to 32 bytes first: timingSafeEqual throws when lengths
+// differ, and throw-vs-no-match would leak the configured secret's length.
+function bootstrapSecretMatches(supplied) {
+  const expected = configuredBootstrapSecret();
+  if (!expected) return { configured: false, matches: false };
+  if (!supplied) return { configured: true, matches: false };
+
+  const a = crypto.createHash('sha256').update(String(supplied)).digest();
+  const b = crypto.createHash('sha256').update(expected).digest();
+  return { configured: true, matches: crypto.timingSafeEqual(a, b) };
+}
+
 router.post('/bootstrap', limiters.strict, async (req, res) => {
   try {
-    const adminExists = await User.findOne({ role: { $in: ['admin', 'superadmin'] } });
-    if (adminExists) {
-      return res.status(403).json({ ok: false, error: 'Admin already exists. Use normal admin auth to manage users.' });
+    const { configured, matches } = bootstrapSecretMatches(req.get(BOOTSTRAP_SECRET_HEADER));
+    if (!configured) {
+      // 404 rather than 403: a deployment that never enabled bootstrap should
+      // not advertise that a privileged route is here waiting for a key.
+      return res.status(404).json({ ok: false, error: 'not found' });
+    }
+    if (!matches) {
+      await AuditLog.create({ action: 'admin_bootstrap_denied', actor: req.body?.email || 'unknown', details: 'bootstrap key missing or invalid', outcome: 'failure' }).catch(() => null);
+      return res.status(403).json({ ok: false, error: 'invalid bootstrap key' });
     }
 
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
     if (!email || !password) {
       return res.status(400).json({ ok: false, error: 'email and password are required' });
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email))) {
+      return res.status(400).json({ ok: false, error: 'email is not valid' });
+    }
+    if (String(password).length < MIN_BOOTSTRAP_PASSWORD_LENGTH) {
+      return res.status(400).json({ ok: false, error: `password must be at least ${MIN_BOOTSTRAP_PASSWORD_LENGTH} characters` });
+    }
 
-    // findOneAndUpdate(..., {upsert: true}) here would silently overwrite
-    // the password and promote an EXISTING regular user's account the
-    // moment this endpoint's only guard (zero admins in the DB) is ever
-    // true — a fresh deploy, or every admin having been deleted — with no
-    // verification the caller controls that email. Create-only: never touch
-    // an existing user document.
+    // Create-only: never touch an existing user document. An
+    // updateOne(..., {upsert: true}) keyed on email would promote whoever
+    // registered that address the first time this endpoint's precondition
+    // (zero admins in the DB) happens to hold, with no verification that the
+    // caller controls the address. The unique index still covers the race —
+    // the duplicate key is reported as 409 in the catch below.
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(409).json({ ok: false, error: 'An account with this email already exists. Bootstrap only creates a brand-new superadmin account.' });
@@ -55,14 +113,38 @@ router.post('/bootstrap', limiters.strict, async (req, res) => {
     const bcrypt = require('bcryptjs');
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const user = await User.create({ email, password: hashedPassword, role: 'superadmin' });
-    const publicUser = user.toObject();
-    delete publicUser.password;
+    // The filter IS the guard. If any admin/superadmin already exists the
+    // upsert degenerates to an update of that document with nothing in $set —
+    // a no-op — so `upsertedId` stays null and we report 403. Only a genuinely
+    // admin-free database inserts, and it does so atomically.
+    const result = await User.updateOne(
+      { role: { $in: ['admin', 'superadmin'] } },
+      {
+        $setOnInsert: {
+          email,
+          password: hashedPassword,
+          role: 'superadmin',
+          createdAt: new Date(),
+        },
+      },
+      { upsert: true }
+    );
+
+    if (!result.upsertedId) {
+      return res.status(403).json({ ok: false, error: 'Admin already exists. Use normal admin auth to manage users.' });
+    }
+
+    const created = await User.findById(result.upsertedId).select('-password').lean();
 
     await AuditLog.create({ action: 'admin_bootstrap', actor: email, details: 'First superadmin created via bootstrap', outcome: 'success' });
 
-    return res.json({ ok: true, user: publicUser, message: 'Superadmin created successfully' });
+    return res.json({ ok: true, user: created, message: 'Superadmin created successfully' });
   } catch (err) {
+    // Two bootstraps racing on the same email hit the unique index — report
+    // the conflict, not a 500.
+    if (err && err.code === 11000) {
+      return res.status(409).json({ ok: false, error: 'An account with this email already exists.' });
+    }
     return res.status(500).json({ ok: false, error: err.message });
   }
 });

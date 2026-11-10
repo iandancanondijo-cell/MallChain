@@ -3,6 +3,17 @@ import { useStoreVersion, fmtNum, toast } from '../../components/ui';
 import { minesApi, type AssignedTask, type ReviewerProfile } from '../../services/minesApi';
 
 /**
+ * proof_url is submitted by an untrusted miner and rendered to reviewers.
+ * Only http(s) may reach an href — `javascript:` and `data:` URIs run in the
+ * reviewer's own authenticated session. The backend validates this too
+ * (models/TaskSubmission.js); this is the layer that actually renders it.
+ */
+function safeExternalUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  return /^https?:\/\/\S+$/i.test(url) ? url : undefined;
+}
+
+/**
  * Proof Reviewer queue — real content-review game: submissions are randomly
  * assigned to 6 staked reviewers, votes are reputation-weighted, and the
  * submitter is rewarded once the weighted threshold resolves. See
@@ -97,7 +108,7 @@ export default function MinesValidatorQueue() {
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 5 }}>
                 <span className="chip">Votes: <b>{t.votes_yes + t.votes_no} / {t.votes_required}</b></span>
                 {t.voting_deadline && <span className="chip">Deadline: {new Date(t.voting_deadline).toLocaleString()}</span>}
-                {t.proof_url && <a className="chip" href={t.proof_url} target="_blank" rel="noreferrer">View proof ↗</a>}
+                {safeExternalUrl(t.proof_url) && <a className="chip" href={safeExternalUrl(t.proof_url)} target="_blank" rel="noreferrer">View proof ↗</a>}
               </div>
             </div>
             <div style={{ textAlign: 'right' }}>

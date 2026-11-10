@@ -369,7 +369,17 @@ router.post('/submissions', verifyToken, async (req, res) => {
         throw err;
       }
 
-      const body = { ...req.body, miner_id: req.userId };
+      // Whitelist, never spread. This route used to do
+      // `{ ...req.body, miner_id }`, and reward_amount, reward_currency,
+      // status, assignment_status, validator_votes, votes_yes and
+      // votes_required are all real schema fields — so a miner could post a
+      // submission that set its own payout or pre-filled the reviewer votes.
+      // settle() reads task.reward_amount as its fallback reward, so that
+      // path credits the attacker's wallet on approval.
+      const body = { miner_id: req.userId };
+      for (const field of ['campaign_id', 'title', 'task_type', 'description', 'proof_url']) {
+        if (req.body && req.body[field] !== undefined) body[field] = req.body[field];
+      }
       [row] = await TaskSubmission.create([body], { session });
     });
     // Randomly assign up to 6 staked reviewers; if none are eligible yet the

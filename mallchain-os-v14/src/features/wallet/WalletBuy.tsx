@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
-import { buyApi, type BuyConfig, type BuyQuote } from '../../services/buyApi';
+import { buyApi, type BuyConfig, type PaymentStatus } from '../../services/buyApi';
 
 type Step = 'form' | 'awaiting_payment' | 'crediting' | 'done';
 
@@ -19,7 +19,7 @@ export default function WalletBuy() {
   const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<Step>('form');
-  const [quote, setQuote] = useState<BuyQuote | null>(null);
+  const [quote, setQuote] = useState<PaymentStatus | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
 
   const buyRateKes = config?.rates?.buyPriceKes || FALLBACK_KES_PER_MLCNS;

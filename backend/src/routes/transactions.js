@@ -1,69 +1,70 @@
 const router = require('express').Router()
+const Joi = require('joi')
 const Transaction = require('../models/transaction')
 const { getTransactionQueue } = require('../queue/transactionQueue')
-const crypto = require('crypto')
-const bech32 = require('bech32')
 const { asyncHandler } = require('../utils/errorHandler')
+const auth = require('../middleware/auth')
+const { validateRequest, addressSchema, amountSchema } = require('../utils/validationSchemas')
+const { createUserLimiter } = require('../middleware/rateLimiter')
+const { limitPayloadSize, preventNoSQLInjection, sanitizeInputs } = require('../middleware/inputValidation')
 
-function pubkeyToAddress(pubkeyBase64, prefix = process.env.CHAIN_PREFIX || process.env.COSMOS_PREFIX || 'mall') {
-  // pubkeyBase64 expected to be base64-encoded raw secp256k1 compressed pubkey (33 bytes)
-  const pub = Buffer.from(pubkeyBase64, 'base64')
-  const sha = crypto.createHash('sha256').update(pub).digest()
-  const rip = crypto.createHash('ripemd160').update(sha).digest()
-  const words = bech32.toWords(rip)
-  return bech32.encode(prefix, words)
-}
+const financialLimiter = createUserLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'rate_limit_exceeded', message: 'Too many financial operations. Please try again later.' }
+})
 
+// signedTx is mandatory. This route used to accept an unsigned {from,to,amount}
+// and fall back to signing MsgSend with the operator key, which let anyone who
+// could name the (public, on-chain-observable) operator address get the server
+// to move system funds. Server-side signing of user transfers is removed;
+// see sendController.sendMallcoins, which enforces the same txBytes rule.
+const sendSchema = Joi.object({
+  from: addressSchema,
+  to: addressSchema,
+  amount: amountSchema,
+  denom: Joi.string().max(128).default(process.env.CHAIN_BASE_DENOM || 'stake'),
+  signedTx: Joi.string()
+    .base64()
+    .max(64 * 1024)
+    .required()
+    .messages({
+      'any.required': 'signedTx is required — transactions must be signed in the wallet client',
+      'string.base64': 'signedTx must be base64-encoded transaction bytes',
+      'string.max': 'signedTx exceeds the maximum length',
+    }),
+})
 
-router.post('/send', asyncHandler(async (req, res) => {
-    const {
-      from,
-      to,
-      amount,
-      denom
-    } = req.body
+const OBJECT_ID_RE = /^[a-fA-F0-9]{24}$/
 
-    // If frontend provided a signed tx, do basic signature verification: require signerPubKey or signerAddress
-    if (req.body.signedTx) {
-      const signerPubKey = req.body.signerPubKey // base64
-      const signerAddress = req.body.signerAddress
-      if (!signerPubKey && !signerAddress) {
-        return res.status(400).json({ error: 'signedTx requires signerPubKey or signerAddress for verification' })
-      }
-      if (signerPubKey) {
-        try {
-          const derived = pubkeyToAddress(signerPubKey)
-          if (derived !== from && derived !== signerAddress) {
-            return res.status(400).json({ error: 'signature verification failed: pubkey does not match from address' })
-          }
-        } catch (e) {
-          return res.status(400).json({ error: 'invalid signerPubKey', detail: e.message })
-        }
-      }
-    }
+router.post('/send',
+  auth,
+  financialLimiter,
+  limitPayloadSize(0.5),
+  preventNoSQLInjection,
+  sanitizeInputs,
+  validateRequest(sendSchema),
+  asyncHandler(async (req, res) => {
+    const { from, to, amount, denom, signedTx } = req.validatedBody
 
     const transaction = await Transaction.create({
+      userId: req.user._id,
       from,
       to,
-      amount,
+      amount: String(amount),
       denom,
       status: 'queued'
     })
 
-    const jobData = {
-      transactionId: transaction._id,
-      from,
-      to,
-      amount,
-      denom
-    }
-    if (req.body.signedTx) jobData.signedTx = req.body.signedTx
-    if (req.body.serverSign) jobData.serverSign = Boolean(req.body.serverSign)
-
     await getTransactionQueue().add(
       'broadcast',
       {
-        ...jobData
+        transactionId: transaction._id,
+        from,
+        to,
+        amount,
+        denom,
+        signedTx
       },
       { jobId: transaction._id.toString(), removeOnComplete: true }
     )
@@ -73,10 +74,16 @@ router.post('/send', asyncHandler(async (req, res) => {
       transactionId: transaction._id,
       status: transaction.status
     })
-}))
+  }))
 
 
-router.get('/:id', asyncHandler(async (req, res) => {
+router.get('/:id',
+  auth,
+  asyncHandler(async (req, res) => {
+    if (!OBJECT_ID_RE.test(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid transaction id' })
+    }
+
     const tx = await Transaction.findById(req.params.id)
 
     if (!tx) {
@@ -85,7 +92,20 @@ router.get('/:id', asyncHandler(async (req, res) => {
       })
     }
 
+    const isPrivileged = req.user.role === 'admin' || req.user.role === 'superadmin'
+    const isOwner =
+      (tx.userId && tx.userId.toString() === req.user._id.toString()) ||
+      (req.user.walletAddress && tx.from === req.user.walletAddress)
+
+    // 404 rather than 403: a 403 confirms the id exists, which is the
+    // enumeration this route previously allowed outright.
+    if (!isPrivileged && !isOwner) {
+      return res.status(404).json({
+        error: 'Transaction not found'
+      })
+    }
+
     res.json(tx)
-}))
+  }))
 
 module.exports = router

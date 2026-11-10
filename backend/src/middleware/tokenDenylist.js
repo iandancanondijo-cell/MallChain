@@ -22,7 +22,7 @@
  */
 const IORedis = require('ioredis');
 const logger = require('../utils/logger');
-const { redisTlsOptions } = require('../utils/redisTlsOptions');
+const { redisTlsOptions, redisAuthOptions } = require('../utils/redisTlsOptions');
 
 const TEST_MODE = process.env.NODE_ENV === 'test';
 // Comfortably longer than the longest realistic SESSION_TTL_MIN, so a
@@ -42,6 +42,7 @@ function getClient() {
       enableOfflineQueue: false,
       retryStrategy: null,
       connectTimeout: Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 2000),
+      ...redisAuthOptions(),
       ...redisTlsOptions(),
     });
     redis.on('error', err => {

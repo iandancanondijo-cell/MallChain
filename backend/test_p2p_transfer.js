@@ -9,29 +9,41 @@ const { transferFromMnemonic } = require('./src/services/mallcoinTxBuilder');
 
 const BACKEND_URL = 'http://localhost:4000';
 
-// Provided wallets
+// Seed phrases come from the environment only. Never commit them: a funded
+// genesis mnemonic in this repo is a direct claim on the token supply, since
+// these addresses are the premined allocations in the genesis file.
+function requireMnemonic(envVar, label) {
+  const mnemonic = process.env[envVar];
+  if (!mnemonic) {
+    throw new Error(
+      `${envVar} is not set. Export the ${label} test wallet's seed phrase before running this script.`
+    );
+  }
+  return mnemonic.trim();
+}
+
 const WALLETS = {
   FOUNDER: {
     address: 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg',
-    mnemonic: 'creek away short hammer ramp mechanic stage truck crouch occur army inch autumn define impulse aerobic situate wear mango valve anger sword can vessel',
+    mnemonic: requireMnemonic('TEST_MNEMONIC_FOUNDER', 'FOUNDER'),
     allocation: 160000000,
     status: 'locked'
   },
   AFA: {
     address: 'mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6',
-    mnemonic: 'acid great mixed body canal mango hole lawn ranch midnight code furnace shed above lazy wise sick dizzy document charge dog alien meat easily',
+    mnemonic: requireMnemonic('TEST_MNEMONIC_AFA', 'AFA'),
     allocation: 1500000,
     status: 'unlocked'
   },
   TEAM: {
     address: 'mall1fgfc4hdtsdy59jqgswu3d4jpvnx6cn8zxewqa5',
-    mnemonic: 'black soft phrase ensure mixed path fabric kite layer agree bus planet need spoil habit stairs avoid fine solar bomb ethics occur rescue organ',
+    mnemonic: requireMnemonic('TEST_MNEMONIC_TEAM', 'TEAM'),
     allocation: 90000000,
     status: 'unlocked'
   },
   ORTHOPHARM: {
     address: 'mall1nma8m9jl3e5mscr0rrn93hq43thw7ve6xfee4f',
-    mnemonic: 'select toe river present maze crawl dice short lounge venture gossip leaf address civil infant crisp thought flight ribbon hen drift extend metal area',
+    mnemonic: requireMnemonic('TEST_MNEMONIC_ORTHOPHARM', 'ORTHOPHARM'),
     allocation: 3000000,
     status: 'unlocked'
   }

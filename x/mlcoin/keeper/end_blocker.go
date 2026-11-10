@@ -348,24 +348,35 @@ func (k Keeper) DistributeFees(ctx context.Context) error {
 		return nil
 	}
 
-	// AccumulateFees only ever deducted this amount from senders' custom
-	// WalletBalance ledger entries — it never minted any real x/bank
-	// "mlcoin" coins to back it, so every SendCoinsFromModuleToAccount call
-	// below (which moves real bank coins) had nothing to send: fees were
-	// silently destroyed every distribution cycle (the reset at the bottom
-	// of this function ran regardless of whether the sends actually
-	// succeeded). Minting the total here, into this module's own account,
-	// is what "collecting" the fee actually requires — GetTreasuryBalance
-	// (query_treasury.go) already reads real bank balance for this same
-	// module/denom, confirming that was always the intended design.
-	if err := k.bankKeeper.MintCoins(sdkCtx, types.ModuleName, sdk.NewCoins(sdk.NewCoin("mlcoin", math.NewIntFromUint64(totalFees)))); err != nil {
-		sdkCtx.Logger().Error("Failed to mint accumulated fees for distribution", "error", err)
-		return err
+	// Fees are accrued against this module's custom WalletBalance ledger,
+	// which is not x/bank: no code path ever moves real "mlcoin" coins INTO
+	// this module account (SendCoinsFromAccountToModule appears only in the
+	// dex, marketplace, governance and crosschain modules, never for
+	// mlcoin). Minting totalFees here therefore created net-new supply every
+	// distribution cycle, uncapped, and any user could trigger it because
+	// MsgTransferMallcoin's fee floors to 1 base unit.
+	//
+	// Distribute only what the module actually holds in bank. The
+	// undistributed remainder stays accrued so the ledger remains truthful
+	// and a future migration to real coin collection can settle it.
+	moduleAddr := authtypes.NewModuleAddress(types.ModuleName)
+	available := k.bankKeeper.GetBalance(sdkCtx, moduleAddr, "mlcoin")
+
+	distributable := totalFees
+	if available.Amount.Uint64() < distributable {
+		distributable = available.Amount.Uint64()
+	}
+
+	if distributable == 0 {
+		// Nothing bank-backed to pay out. Record the cycle time so the
+		// accumulator's staleness is visible, but mint nothing.
+		fees.LastDistributionTime = sdkCtx.BlockTime().Unix()
+		return k.FeesAccumulated.Set(ctx, fees)
 	}
 
 	// Distribute fees: 50% to stakers, 50% to treasury
-	stakersShareAmount := totalFees / 2
-	treasuryShareAmount := totalFees - stakersShareAmount
+	stakersShareAmount := distributable / 2
+	treasuryShareAmount := distributable - stakersShareAmount
 
 	// Collect all active stakers and their total stake
 	var activeStakers []struct {
@@ -397,6 +408,11 @@ func (k Keeper) DistributeFees(ctx context.Context) error {
 		}
 	}
 
+	// paidOut tracks coins actually transferred this cycle. A failed send
+	// must not clear its accrual, or the ledger silently destroys fees again
+	// the way the pre-fix mint-and-reset path did.
+	var paidOut uint64
+
 	// Distribute to each active staker proportionally
 	if stakersShareAmount > 0 && totalStaked > 0 {
 		for _, staker := range activeStakers {
@@ -424,6 +440,7 @@ func (k Keeper) DistributeFees(ctx context.Context) error {
 				// Update staker's rewards earned
 				staker.record.RewardsEarned += stakerShare
 				_ = k.StakingRecords.Set(ctx, staker.key, staker.record)
+				paidOut += stakerShare
 			}
 		}
 	}
@@ -441,13 +458,25 @@ func (k Keeper) DistributeFees(ctx context.Context) error {
 		); err != nil {
 			// Log error but don't fail the entire function
 			sdkCtx.Logger().Error("Failed to send treasury share", "error", err)
+		} else {
+			paidOut += treasuryShareAmount
 		}
 	}
 
-	// Reset accumulated fees
-	fees.TransactionFees = 0
-	fees.TradingFees = 0
-	fees.ConversionFees = 0
+	// Clear only the amount actually paid out; anything undistributed stays
+	// accrued for a later cycle.
+	remaining := paidOut
+	for _, acc := []*uint64{&fees.TransactionFees, &fees.TradingFees, &fees.ConversionFees} {
+		if remaining == 0 {
+			break
+		}
+		take := *acc
+		if take > remaining {
+			take = remaining
+		}
+		*acc -= take
+		remaining -= take
+	}
 	fees.LastDistributionTime = sdkCtx.BlockTime().Unix()
 
 	return k.FeesAccumulated.Set(ctx, fees)

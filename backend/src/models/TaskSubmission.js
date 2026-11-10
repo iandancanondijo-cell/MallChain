@@ -8,7 +8,16 @@ const TaskSubmissionSchema = new Schema({
   title: { type: String, default: '' },
   task_type: { type: String, default: '' },
   description: { type: String, default: '' },
-  proof_url: { type: String, default: '' },
+  // http(s) only. Reviewers render this as an <a href>, and a
+  // `javascript:` / `data:` URI there executes in the reviewer's session.
+  proof_url: {
+    type: String,
+    default: '',
+    validate: {
+      validator: (v) => !v || /^https?:\/\/\S+$/i.test(v),
+      message: 'proof_url must be an http(s) URL',
+    },
+  },
 
   // Status: pending_assignment | assigned | voting | approved | rejected
   status: { type: String, default: 'manual_review', index: true },

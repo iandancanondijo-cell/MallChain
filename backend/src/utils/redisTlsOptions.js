@@ -21,6 +21,36 @@
  */
 const fs = require('fs');
 
+/**
+ * AUTH counterpart to redisTlsOptions(). Same six clients, same spread
+ * pattern (plus src/queue/transactionQueue.js, which hands BullMQ a plain
+ * options object).
+ *
+ * Without this, every client connects with no credentials — which was fine
+ * only while the Redis nodes themselves accepted unauthenticated traffic.
+ * docker-compose.prod.yml now starts them with --requirepass, so leaving the
+ * app side credential-free would take the whole backend down.
+ *
+ * Unset REDIS_PASSWORD and this returns {}, so local dev against a plain
+ * `redis-server` keeps working.
+ *
+ * Sentinel note: ioredis needs `sentinelPassword` separately when a client
+ * talks to Sentinels that have their own `requirepass`. These clients connect
+ * straight to the master by host/port (REDIS_SENTINEL_HOSTS is set in
+ * compose but read nowhere in this codebase), so it does not apply yet — if
+ * sentinel discovery is ever wired up, add it here.
+ */
+function redisAuthOptions() {
+  if (!process.env.REDIS_PASSWORD) return {};
+  return {
+    password: process.env.REDIS_PASSWORD,
+    // Only meaningful for ACL users (Redis 6+); default user needs no username.
+    ...(process.env.REDIS_USERNAME ? { username: process.env.REDIS_USERNAME } : {}),
+  };
+}
+
+module.exports = { redisTlsOptions, redisAuthOptions };
+
 function redisTlsOptions() {
   if (String(process.env.REDIS_TLS).toLowerCase() !== 'true') return {};
 
@@ -38,5 +68,3 @@ function redisTlsOptions() {
 
   return { tls };
 }
-
-module.exports = { redisTlsOptions };

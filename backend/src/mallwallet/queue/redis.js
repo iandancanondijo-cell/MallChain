@@ -1,5 +1,5 @@
 const Redis = require('ioredis')
-const { redisTlsOptions } = require('../../utils/redisTlsOptions')
+const { redisTlsOptions, redisAuthOptions } = require('../../utils/redisTlsOptions')
 
 let connection = null
 
@@ -13,6 +13,7 @@ function getConnection() {
       enableOfflineQueue: false,
       retryStrategy: null,
       connectTimeout: Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 2000),
+      ...redisAuthOptions(),
       ...redisTlsOptions(),
     })
 

@@ -19,7 +19,6 @@ async function testMnemonic(mnemonic, walletName = 'Test Wallet') {
   try {
     console.log(`\n${'='.repeat(70)}`);
     console.log(`📋 Testing: ${walletName}`);
-    console.log(`${mnemonic.substring(0, 40)}...`);
     console.log(`${'='.repeat(70)}\n`);
 
     const prefixes = ['marketplace', 'mall', 'cosmos'];
@@ -58,7 +57,7 @@ This script tests your mnemonic phrase against different blockchain prefixes
 and checks if it matches any known blockchain wallets.
 
 Example:
-  node find_wallet_address.js "concert load couple harbor equip island argue slogan kitten food gate coral"
+  node find_wallet_address.js "<your 12 or 24 word seed phrase>"
 
 Known Blockchain Wallets:
   Founder: ${BLOCKCHAIN_WALLETS.founder}

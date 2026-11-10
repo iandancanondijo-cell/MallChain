@@ -8,7 +8,7 @@ const {
 } = require('./mallcoinTxBuilder');
 const { DirectSecp256k1Wallet, DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
 const Redis = require('ioredis');
-const { redisTlsOptions } = require('../utils/redisTlsOptions');
+const { redisTlsOptions, redisAuthOptions } = require('../utils/redisTlsOptions');
 const logger = require('../utils/logger');
 
 const IS_TEST_ENV = process.env.NODE_ENV === 'test';
@@ -23,6 +23,7 @@ if (!IS_TEST_ENV) {
     port: config.redis.port || 6379,
     lazyConnect: true,
     retryStrategy: () => null,
+    ...redisAuthOptions(),
     ...redisTlsOptions(),
   });
 

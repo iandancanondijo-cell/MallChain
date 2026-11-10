@@ -45,12 +45,22 @@ data "aws_iam_policy_document" "github_actions_trust" {
     # required or every production (tag) deploy gets AccessDenied here.
     # Widen further (e.g. "repo:${var.github_repo}:pull_request") only if a
     # deploy workflow genuinely needs to run from PRs, which most shouldn't.
+    #
+    # The tag pattern mirrors deploy.yml's `v[0-9]+.[0-9]+.[0-9]+*`. IAM
+    # StringLike globs have no character classes, so this is the closest
+    # expression of it. It used to be `refs/tags/*`, which is broader than any
+    # deploy trigger: release.yml runs on `on: push` — i.e. on every tag, and
+    # every branch push — so `refs/tags/anything` already produced an OIDC
+    # token that satisfied the old condition. Today release.yml asks for no AWS
+    # credentials, so nothing was exploitable; but the day any workflow other
+    # than deploy.yml is given this role ARN, the trust policy would hand it
+    # production image-push rights on a tag that was never meant to deploy.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
         "repo:${var.github_repo}:ref:refs/heads/main",
-        "repo:${var.github_repo}:ref:refs/tags/*",
+        "repo:${var.github_repo}:ref:refs/tags/v*.*.*",
       ]
     }
   }
@@ -65,10 +75,24 @@ resource "aws_iam_role" "github_actions_deploy" {
 # EKS deployment) — deliberately NOT AdministratorAccess. Extend this policy
 # only as specific, named actions turn out to be needed.
 data "aws_iam_policy_document" "github_actions_deploy_permissions" {
+  # GetAuthorizationToken is the one ECR call that cannot be scoped to a
+  # repository ARN, so it keeps `*` on its own. Everything that can write to a
+  # registry is limited to the three repositories this stack creates — with the
+  # actions listed here, `resources = ["*"]` meant any repository in the
+  # account, including ones holding images this pipeline must not touch (and,
+  # because these actions accept `ecr:PutImage` on a repo the deploy role can
+  # now overwrite, the blast radius was the whole registry).
   statement {
     effect = "Allow"
     actions = [
       "ecr:GetAuthorizationToken",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
       "ecr:BatchCheckLayerAvailability",
       "ecr:GetDownloadUrlForLayer",
       "ecr:PutImage",
@@ -76,7 +100,11 @@ data "aws_iam_policy_document" "github_actions_deploy_permissions" {
       "ecr:UploadLayerPart",
       "ecr:CompleteLayerUpload",
     ]
-    resources = ["*"] # ecr:GetAuthorizationToken does not support resource-level restriction
+    resources = [
+      aws_ecr_repository.backend.arn,
+      aws_ecr_repository.frontend.arn,
+      aws_ecr_repository.marketplaced.arn,
+    ]
   }
 
   statement {

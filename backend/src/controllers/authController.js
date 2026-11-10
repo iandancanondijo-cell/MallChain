@@ -442,10 +442,11 @@ exports.googleCallback = async (req, res) => {
   let user = await User.findOne({ googleId: profile.id });
   if (!user) {
     user = await User.create({ email, googleId: profile.id });
-    // GET /google (routes/auth.js) echoes the referral code through as the
-    // OAuth `state` param — Google returns it verbatim on the callback.
-    const referralCode = typeof req.query.state === 'string' ? req.query.state : undefined;
-    await assignReferralCode(user, referralCode);
+    // Referral code recovered from the signed oauth-state cookie by
+    // requireOAuthState in routes/auth.js, which verified it belongs to this
+    // same browser attempt. Never read req.query.state here — that value is
+    // attacker-supplied until the nonce check passes.
+    await assignReferralCode(user, req.oauthReferralCode);
   }
   const { token, sessionTtlMin } = signToken(user);
   setAuthCookie(res, token, sessionTtlMin);

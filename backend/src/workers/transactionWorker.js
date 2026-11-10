@@ -22,8 +22,9 @@ const worker = new Worker(
       tx.status = 'broadcasting'
       await tx.save()
 
-      // Prefer server-side signing if operator mnemonic exists
-      const serverSign = Boolean(process.env.OPERATOR_MNEMONIC)
+      // Only client-signed bytes are ever broadcast. Deriving serverSign from
+      // the mere presence of OPERATOR_MNEMONIC made every queued job an
+      // operator-key signing request.
       const signedTx = job.data.signedTx || null
 
       const result = await broadcastTransaction({
@@ -31,8 +32,7 @@ const worker = new Worker(
         to,
         amount,
         denom,
-        signedTxBase64: signedTx,
-        serverSign
+        signedTxBase64: signedTx
       })
 
       // Normalize tx hash and height

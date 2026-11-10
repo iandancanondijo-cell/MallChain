@@ -9,7 +9,7 @@
 const { config } = require('../config');
 const Redis = require('ioredis');
 const logger = require('./logger');
-const { redisTlsOptions } = require('./redisTlsOptions');
+const { redisTlsOptions, redisAuthOptions } = require('./redisTlsOptions');
 
 const IS_TEST_ENV = process.env.NODE_ENV === 'test';
 
@@ -23,6 +23,7 @@ if (!IS_TEST_ENV) {
     port: config.redis.port || 6379,
     lazyConnect: true,
     retryStrategy: () => null,
+    ...redisAuthOptions(),
     ...redisTlsOptions(),
   });
 } else {

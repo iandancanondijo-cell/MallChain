@@ -15,6 +15,8 @@ const idempotency = require('../middleware/idempotency');
 const { config } = require('../config');
 const { recordWithdrawLiquidityActivity } = require('../services/liquidityActivityService');
 const { requireAdmin } = require('../middleware/adminAuth');
+const optionalAuth = require('../middleware/optionalAuth');
+const { ownsRecord, redactIdentity } = require('../utils/recordOwnership');
 
 function autoPayoutEnabled() {
   return config.payment.safaricom.autoPayoutEnabled;
@@ -198,14 +200,15 @@ router.post('/mpesa', requireAdmin, idempotency({ required: true }), validateReq
   }
 });
 
-router.get('/status/:withdrawalId', async (req, res) => {
+router.get('/status/:withdrawalId', optionalAuth, async (req, res) => {
   try {
     const withdrawal = await WithdrawalRequest.findOne({ withdrawalId: req.params.withdrawalId });
     if (!withdrawal) return res.status(404).json({ error: 'withdrawal not found' });
 
     await syncWithdrawalStatus(withdrawal);
 
-    return res.json(withdrawalSummary(withdrawal));
+    const summary = withdrawalSummary(withdrawal);
+    return res.json(ownsRecord(req.user, withdrawal) ? summary : redactIdentity(summary));
   } catch (error) {
     logger.error('withdraw', 'withdraw status error', error);
     return res.status(500).json({ error: error.message || 'status failed' });

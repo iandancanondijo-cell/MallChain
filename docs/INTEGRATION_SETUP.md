@@ -158,6 +158,8 @@ This guide covers configuring and running both the Mallchain backend and mallcha
    - [ ] SESSION_SECRET is 32+ characters and cryptographically random
    - [ ] MONGO_URI uses secure password, not in logs
    - [ ] REDIS_PASSWORD is set and secure
+   - [ ] Every Redis client and the exporter carry that password (docker-compose.prod.yml starts the nodes with `--requirepass`; an app with no `REDIS_PASSWORD` will now fail to authenticate)
+   - [ ] BOOTSTRAP_SECRET is unset — or, if you used `POST /api/admin/bootstrap` to mint the first superadmin, removed afterwards. The route 404s without it
    - [ ] FRONTEND_URL is HTTPS
    - [ ] CORS_ORIGINS contains only production domains
    - [ ] NODE_ENV is explicitly set to "production"
