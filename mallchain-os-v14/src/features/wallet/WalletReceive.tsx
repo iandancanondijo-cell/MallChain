@@ -10,6 +10,7 @@ import { useWalletData } from '../../hooks/useWalletData';
 import { useLivePrice } from '../../hooks/useLivePrice';
 import { useCurrencyConverter } from '../../services/currency';
 import { receiveApi, type ReceiveIntentView } from '../../services/receiveApi';
+import { AccountPicture } from '../../components/WalletIdentity';
 
 /**
  * Receive — QR showcase + copy/share + live "awaiting payment".
@@ -297,6 +298,8 @@ export default function WalletReceive() {
 
         <div className="wo-address-display">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+            {/* Your picture beside the address you are about to hand someone. */}
+            <AccountPicture avatarUrl={st.user.avatarUrl} name={st.user.name} initial={st.user.avatarInitial} size={18} />
             <QrCode size={12} style={{ color: 'var(--txt-3)' }} />
             <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--txt-3)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Your address</span>
           </div>

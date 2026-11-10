@@ -101,6 +101,39 @@ export function resolveProofLink(value?: string | null): ProofLink {
   };
 }
 
+/**
+ * Client mirror of linkPolicy.pointsAtSpecificContent: does the address name
+ * one piece of content, or the app itself?
+ *
+ * This is a product-quality rule, not a security one — `resolveContentLink`
+ * stays the only gate on what may receive an href. The backend refuses to
+ * publish `https://instagram.com` as a task because a campaign pays for a
+ * specific action and a bare home page tells nobody which one; every real
+ * share link (instagram.com/p/…, x.com/…/status/…, youtu.be/…) carries a path.
+ *
+ * The scheme is checked before the path is read because `new
+ * URL('javascript:alert(1)')` has a pathname, and a predicate that a form
+ * reuses for a friendly hint must not describe that as specific content.
+ */
+export function pointsAtSpecificContent(value?: string | null): boolean {
+  const url = value ? parseSafeUrl(value) : null;
+  if (!url) return false;
+  const path = url.pathname.replace(/\/+$/, '');
+  return path.length > 0 && path !== '/';
+}
+
+/**
+ * Warning for a link that is safe to open but useless as a task, or null.
+ * `resolveContentLink` is silent about this case on purpose — reviewers still
+ * need to open whatever the creator published.
+ */
+export function specificContentWarning(value?: string | null): string | null {
+  if (!value || !parseSafeUrl(value)) return null;
+  if (pointsAtSpecificContent(value)) return null;
+  const url = parseSafeUrl(value) as URL;
+  return `That is the ${hostLabel(url)} home page. Participants are paid for one specific action, so publish the exact post, video, reel or profile they should open.`;
+}
+
 /** Client-side mirror of the backend's write rules, used to reject before uploading. */
 export function isStorableProof(value: string): boolean {
   const trimmed = value.trim();

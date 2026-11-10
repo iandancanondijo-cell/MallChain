@@ -18,6 +18,7 @@ import { useStoreVersion, fmtNum, StatusChip, toast } from '../components/ui';
 import { useTransactionData } from '../hooks/useTransactionData';
 import { LoadingState } from '../components/LoadingState';
 import { TransactionDetailModal } from '../features/wallet/TransactionDetailModal';
+import { AddressIdentity } from '../components/WalletIdentity';
 import { type Transaction } from '../services/walletApi';
 import '../styles/transaction-history.css';
 
@@ -405,6 +406,8 @@ export default function TransactionHistory() {
             {sortedTransactions.map((t) => {
               const blockExplorerUrl = getBlockExplorerUrl(t.hash);
               const shortHash = formatHashForDisplay(t.hash);
+              // The other side of this transfer, whichever end the record names.
+              const party = t.type === 'receive' ? t.from : (t.to || t.from);
 
               return (
                 <div
@@ -424,7 +427,12 @@ export default function TransactionHistory() {
                       {t.type.charAt(0).toUpperCase() + t.type.slice(1)} · {fmtNum(t.amount)} {t.asset}
                     </div>
                     <div className="tx-detail mono">
-                      {t.note || t.to || t.from || shortHash || ''} · {new Date(t.ts).toLocaleString()}
+                      {t.note
+                        ? t.note
+                        : party
+                          ? <AddressIdentity address={party} label={t.type === 'receive' ? 'From' : 'To'} size={18} />
+                          : (shortHash || '')}
+                      {' · '}{new Date(t.ts).toLocaleString()}
                     </div>
                   </div>
 

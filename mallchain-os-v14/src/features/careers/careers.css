@@ -1,0 +1,139 @@
+/* Careers — a board of real openings. Uses the app's own surfaces and type
+   scale; the only new shapes are the role card, the fact grid and the inbox. */
+
+.cr-root { --cr-radius: 14px; }
+
+.cr-error {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--red);
+  background: var(--red-dark);
+  color: var(--red-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.cr-loading { padding: 28px 4px; color: var(--txt-3); font-size: 13px; }
+
+.cr-verify-card { border-color: rgba(243, 186, 47, 0.35); background: rgba(243, 186, 47, 0.06); padding: 14px; }
+.cr-verify-card b { font-size: 13px; }
+.cr-verify-card .tiny { margin-top: 3px; }
+
+/* ── filters ── */
+.cr-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  padding: 14px;
+  align-items: center;
+}
+.cr-filter-search { grid-column: span 1; }
+.cr-filters .btn { justify-self: start; }
+
+/* ── board ── */
+.cr-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 14px;
+}
+.cr-role { padding: 16px; display: flex; flex-direction: column; gap: 9px; }
+.cr-role-title { font-size: 15px; line-height: 1.3; }
+.cr-role-meta { font-size: 11.5px; color: var(--txt-2); line-height: 1.5; }
+.cr-role-pay { font-size: 13px; font-weight: 700; color: var(--green-2); }
+.cr-role-foot { color: var(--txt-3); line-height: 1.5; }
+.cr-role-author { color: var(--txt-3); }
+.cr-role-actions { gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 4px; }
+.cr-role-actions .btn { flex: 0 0 auto; }
+.cr-danger { color: var(--red-2); }
+.cr-more { justify-content: center; padding: 16px 0; }
+
+.cr-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cr-skill { font-size: 10.5px; }
+.cr-skill-soft { opacity: 0.55; }
+
+.cr-status-open { color: var(--green-2); border-color: rgba(34, 197, 94, 0.4); background: rgba(34, 197, 94, 0.1); }
+.cr-status-closed { color: var(--txt-3); }
+.cr-status-filled { color: var(--gold); border-color: rgba(243, 186, 47, 0.4); background: rgba(243, 186, 47, 0.1); }
+.cr-mode { color: var(--blue); border-color: rgba(96, 165, 250, 0.35); background: rgba(96, 165, 250, 0.09); flex: 0 0 auto; }
+
+.cr-app-submitted { color: var(--txt-2); }
+.cr-app-shortlisted { color: var(--blue); border-color: rgba(96, 165, 250, 0.4); background: rgba(96, 165, 250, 0.1); }
+.cr-app-rejected { color: var(--red-2); border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.08); }
+.cr-app-hired { color: var(--green-2); border-color: rgba(34, 197, 94, 0.4); background: rgba(34, 197, 94, 0.1); }
+.cr-app-withdrawn { color: var(--txt-3); }
+
+/* ── detail ── */
+.cr-detail { display: flex; flex-direction: column; gap: 16px; }
+.cr-detail-head { display: flex; flex-direction: column; gap: 8px; }
+.cr-byline { color: var(--txt-3); }
+
+.cr-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1px;
+  background: var(--line-1);
+  border: 1px solid var(--line-1);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.cr-fact { background: var(--bg-2); padding: 10px 12px; }
+.cr-fact-k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--txt-3); font-weight: 700; }
+.cr-fact-v { font-size: 12.5px; color: var(--txt-1); margin-top: 3px; line-height: 1.4; }
+
+.cr-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--txt-2); margin: 0 0 8px; }
+.cr-prose { font-size: 13px; line-height: 1.65; color: var(--txt-1); margin: 0; white-space: pre-wrap; }
+.cr-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.cr-list li { font-size: 12.5px; line-height: 1.6; color: var(--txt-2); }
+
+.cr-apply {
+  border-top: 1px solid var(--line-1);
+  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cr-apply h3 { font-size: 13px; margin: 0; }
+.cr-apply-hint { margin: 0; }
+.cr-apply-input { min-height: 110px; resize: vertical; }
+.cr-apply-actions { justify-content: space-between; align-items: center; gap: 10px; }
+.cr-note { font-size: 12.5px; color: var(--txt-2); line-height: 1.6; padding: 12px; border-radius: 10px; background: var(--bg-3); }
+.cr-gate { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 10px; background: rgba(243, 186, 47, 0.06); border: 1px solid rgba(243, 186, 47, 0.3); }
+.cr-gate p { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--txt-2); }
+.cr-applied { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; background: var(--bg-3); }
+.cr-applied-head { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+
+/* ── posting form ── */
+.cr-form { display: flex; flex-direction: column; }
+.cr-form-intro { font-size: 12.5px; line-height: 1.6; color: var(--txt-2); margin: 0 0 14px; }
+.cr-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.cr-pay { display: grid; grid-template-columns: 1fr 1fr 90px 110px; gap: 12px; }
+.cr-pay-hint { margin: -6px 0 14px; }
+.cr-field-error { font-size: 11.5px; color: var(--red-2); margin-top: 5px; line-height: 1.45; }
+.cr-form-actions { justify-content: flex-end; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line-1); margin-top: 6px; }
+
+/* ── inbox / my applications ── */
+.cr-inbox { display: flex; flex-direction: column; gap: 12px; }
+.cr-inbox-count { color: var(--txt-3); }
+.cr-application { padding: 14px; display: flex; flex-direction: column; gap: 9px; }
+.cr-message { color: var(--txt-2); }
+.cr-note-sent { color: var(--txt-3); }
+.cr-note-input { font-size: 12px; }
+.cr-answer-actions { gap: 8px; flex-wrap: wrap; align-items: center; }
+.cr-author-note {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--txt-1);
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(96, 165, 250, 0.07);
+  border: 1px solid rgba(96, 165, 250, 0.25);
+}
+
+@media (max-width: 720px) {
+  .cr-board { grid-template-columns: 1fr; }
+  .cr-filters { grid-template-columns: 1fr 1fr; }
+  .cr-filter-search { grid-column: 1 / -1; }
+  .cr-two, .cr-pay { grid-template-columns: 1fr; }
+  .cr-apply-actions { flex-direction: column; align-items: stretch; }
+  .cr-role-actions .btn { flex: 1 1 auto; }
+}

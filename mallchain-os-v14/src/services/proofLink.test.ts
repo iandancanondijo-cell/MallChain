@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { blockedLinkTitle, resolveContentLink, resolveProofLink, isStorableProof } from './proofLink';
+import { blockedLinkTitle, pointsAtSpecificContent, resolveContentLink, resolveProofLink, isStorableProof, specificContentWarning } from './proofLink';
 
 const OWNED_REF = '507f1f77bcf86cd799439011-1730000000000-proof.png';
 
@@ -97,5 +97,61 @@ describe('isStorableProof', () => {
     expect(isStorableProof('javascript:alert(1)')).toBe(false);
     expect(isStorableProof('x.com/a')).toBe(false);
     expect(isStorableProof('')).toBe(false);
+  });
+});
+
+// The creator-side mirror of linkPolicy.pointsAtSpecificContent. The backend
+// refuses to publish these campaigns (POST /campaigns/create), so the wizard
+// has to disagree with the creator before the request, not after.
+describe('pointsAtSpecificContent', () => {
+  it.each([
+    'https://instagram.com/mallchain',
+    'https://x.com/mallchain/status/1870000000000000000',
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    'https://youtu.be/dQw4w9WgXcQ',
+    'https://www.tiktok.com/@mallchain/video/7400000000000000000',
+  ])('accepts a real share link: %p', (value) => {
+    expect(pointsAtSpecificContent(value)).toBe(true);
+  });
+
+  // A query or a fragment decorates the home page; it does not name content.
+  it.each([
+    'https://instagram.com',
+    'https://instagram.com/',
+    'https://x.com/',
+    'https://x.com/?lang=en',
+    'https://www.tiktok.com/#top',
+    'https://facebook.com/',
+  ])('refuses an app home: %p', (value) => {
+    expect(pointsAtSpecificContent(value)).toBe(false);
+  });
+
+  it.each(['javascript:alert(1)', 'data:text/html,<p>x</p>', 'not a url', ''])('refuses %p', (value) => {
+    expect(pointsAtSpecificContent(value)).toBe(false);
+  });
+
+  it('treats a null or missing link as not specific', () => {
+    expect(pointsAtSpecificContent(null)).toBe(false);
+    expect(pointsAtSpecificContent(undefined)).toBe(false);
+  });
+});
+
+describe('specificContentWarning', () => {
+  it('stays silent about an empty field and about a link that is not a URL at all', () => {
+    // Those cases belong to resolveContentLink, which blocks the href outright.
+    expect(specificContentWarning('')).toBeNull();
+    expect(specificContentWarning('javascript:alert(1)')).toBeNull();
+    expect(specificContentWarning(undefined)).toBeNull();
+  });
+
+  it('names the host the creator has to go deeper than', () => {
+    const w = specificContentWarning('https://www.instagram.com/');
+    expect(w).toMatch(/instagram\.com home page/);
+    // The whole URL is what the creator just typed; repeating it adds nothing.
+    expect(w).not.toMatch(/https?:/);
+  });
+
+  it('is silent for a link that points at one piece of content', () => {
+    expect(specificContentWarning('https://x.com/mallchain/status/1')).toBeNull();
   });
 });

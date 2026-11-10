@@ -211,15 +211,26 @@ export function SecuritySettings() {
       toast('Your settings are still loading — try again in a moment', false);
       return;
     }
+    const previousTimeout = state.sessionTimeout;
+    const previousSettings = settings;
     setState(prev => ({ ...prev, sessionTimeout: timeout }));
     const updatedSecurity = { ...settings.security, sessionTimeout: timeout };
     setSettings({ ...settings, security: updatedSecurity });
     const res = await settingsApi.update({ security: updatedSecurity });
-    if (res.ok) {
-      toast(timeout === null ? 'Next sign-in uses the service default' : `Next sign-in ends after ${timeout} minutes`, true);
-    } else {
+    if (!res.ok) {
+      // The highlighted button is a claim about when this session ends, so a
+      // write the server refused must not leave the new choice highlighted.
+      setState(prev => ({ ...prev, sessionTimeout: previousTimeout }));
+      setSettings(previousSettings);
       toast(res.error || 'Failed to save session timeout', false);
+      return;
     }
+    // The route answers with the merged document, so the answer is what gets
+    // shown; only when it carries nothing does the clicked value stand.
+    const stored = res.data?.security.sessionTimeout ?? timeout;
+    if (res.data) setSettings(res.data);
+    setState(prev => ({ ...prev, sessionTimeout: stored }));
+    toast(stored === null ? 'Next sign-in uses the service default' : `Next sign-in ends after ${stored} minutes`, true);
   };
 
   // Task 11.10: Sign out everywhere — revokes every token issued to this

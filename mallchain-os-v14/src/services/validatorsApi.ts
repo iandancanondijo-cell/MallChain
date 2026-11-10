@@ -14,7 +14,9 @@ export interface ChainValidator {
   commission: number;
   apr: number;
   totalStaked: number;
-  uptime: number;
+  /** null when the chain's /cosmos/slashing signing record for this validator
+   * could not be read — "unknown", not 100 and not 0. */
+  uptime: number | null;
   logo: string;
   status: string;
 }
@@ -29,11 +31,16 @@ export interface ValidatorLeaderboardEntry {
   totalStaked: number;
   votingPower: number;
   status: string;
-  uptime: number;
-  missedBlocks: number;
+  /** null = no signing record readable for this validator, so uptime is
+   * unknown rather than perfect. */
+  uptime: number | null;
+  missedBlocks: number | null;
   jailed: boolean;
   tokens: number;
   reputationScore: number;
+  /** Which terms reputationScore was computed from — says so when uptime was
+   * missing instead of letting a 55%-uptime score read as if it counted it. */
+  reputationBasis: string;
 }
 
 export interface ValidatorApplication {

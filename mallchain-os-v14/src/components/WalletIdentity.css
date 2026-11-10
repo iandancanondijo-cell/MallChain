@@ -1,0 +1,37 @@
+/* One line: the account's picture, its name if it has one, and the address
+   that picture was looked up from. Sized for a transaction row, where the
+   address used to sit alone in monospace. */
+.wi-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  vertical-align: middle;
+  /* Where the chip carries only the picture, the text it belongs to follows it
+     in the same line and needs the gap back. */
+  margin-inline-end: 6px;
+}
+
+.wi-chip .avatar {
+  /* The shared .avatar rule is 32px; a row chip is smaller and must not
+     inherit the menu bar's shadow. */
+  box-shadow: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.wi-name {
+  font-weight: 700;
+  color: var(--txt-1);
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wi-address {
+  color: var(--txt-3);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

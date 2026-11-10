@@ -228,7 +228,7 @@ export function ScoreRing({ pct, size = 72, label }: { pct: number; size?: numbe
 export function BarChart({ data, labels, height = 150, color }: { data: number[]; labels?: string[]; height?: number; color?: string }) {
   const max = Math.max(...data, 1);
   const bars = data.map((v, i) => (
-    <div key={i} className="chart-bar" style={{ height: `${(v / max) * 100}%`, background: color ? `linear-gradient(180deg, ${color}, ${color}44)` : undefined }}>
+    <div key={i} className="chart-bar" style={{ height: `${(v / max) * 100}%`, background: color ? `linear-gradient(180deg, ${color}, transparent)` : undefined }}>
       <span className="tip">{labels?.[i] ?? ''} — {v}</span>
     </div>
   ));
@@ -269,6 +269,93 @@ export function LineChart({ data, height = 150, color = 'var(--gold)', labels, f
         </div>
       )}
       {labels && labels.length > 0 && <div className="chart-x">{labels.map((l, i) => <span key={i}>{l}</span>)}</div>}
+    </div>
+  );
+}
+
+/* ---------------- Multi-series charts ---------------- */
+export interface ChartSeries { name: string; color: string; data: number[] }
+
+export function ChartLegend({ series }: { series: ChartSeries[] }) {
+  return (
+    <div className="chart-legend">
+      {series.map((s) => (
+        <span key={s.name}><i style={{ background: s.color }} />{s.name}</span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Bars for two or more series, sharing one y-scale.
+ *
+ * The scale is the whole design: "tasks that appeared on your screen" and
+ * "tasks you actually did" only mean something measured against each other,
+ * and a chart that rescaled each series to its own maximum would make an idle
+ * week look as busy as a productive one. Zero days are drawn as a sliver
+ * rather than nothing, so an empty day is still a day you can hover and read.
+ */
+export function GroupedBarChart({ series, labels, height = 170 }: { series: ChartSeries[]; labels: string[]; height?: number }) {
+  const max = Math.max(...series.flatMap((s) => s.data), 1);
+  return (
+    <div className="chart-wrap">
+      <ChartLegend series={series} />
+      <div className="chart-groups" style={{ height }} role="img"
+        aria-label={series.map((s) => `${s.name}: ${labels.map((l, i) => `${l} ${s.data[i] ?? 0}`).join(', ')}`).join(' | ')}>
+        {labels.map((label, i) => (
+          <div key={`${label}-${i}`} className="chart-group">
+            {series.map((s) => (
+              <div key={s.name} className="chart-bar"
+                style={{ height: `${((s.data[i] ?? 0) / max) * 100}%`, backgroundColor: s.color }}>
+                <span className="tip">{label} — {s.name}: {s.data[i] ?? 0}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div className="chart-x">{labels.map((l, i) => <span key={`${l}-${i}`}>{l}</span>)}</div>
+    </div>
+  );
+}
+
+/**
+ * The same comparison as lines, for reading the trend rather than the day.
+ * Vertices stay HTML for the reason LineChart documents: the viewBox is
+ * stretched to the container, so in-SVG markers distort and their hit areas
+ * land anywhere between a few and a few dozen real pixels.
+ */
+export function MultiLineChart({ series, labels, height = 170, formatValue }: { series: ChartSeries[]; labels: string[]; height?: number; formatValue?: (v: number) => string }) {
+  const w = 300;
+  const h = height;
+  const all = series.flatMap((s) => s.data);
+  const max = Math.max(...all, 1);
+  const min = Math.min(...all, 0);
+  const yFor = (v: number) => h - ((v - min) / Math.max(max - min, 1)) * (h - 20) - 10;
+  const show = formatValue ?? ((v: number) => String(v));
+  return (
+    <div className="chart-wrap">
+      <ChartLegend series={series} />
+      <div className="chart-body">
+        <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height }} preserveAspectRatio="none" role="img"
+          aria-label={`Line chart, ${labels.length} days: ${series.map((s) => `${s.name} ${s.data.map(show).join(', ')}`).join('; ')}`}>
+          {series.map((s) => (
+            <polyline key={s.name}
+              points={labels.map((_, i) => `${(i / Math.max(labels.length - 1, 1)) * w},${yFor(s.data[i] ?? 0)}`).join(' ')}
+              fill="none" stroke={s.color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          ))}
+        </svg>
+        {series.map((s) => (
+          <div key={s.name} className="chart-hit-layer" style={{ ['--_lc' as string]: s.color, height }}>
+            {labels.map((label, i) => (
+              <span key={`${label}-${i}`} className="chart-hit"
+                style={{ left: `${(i / Math.max(labels.length - 1, 1)) * 100}%`, top: `${(yFor(s.data[i] ?? 0) / h) * 100}%` }}>
+                <span className="tip">{label} — {s.name}: {show(s.data[i] ?? 0)}</span>
+              </span>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div className="chart-x">{labels.map((l, i) => <span key={`${l}-${i}`}>{l}</span>)}</div>
     </div>
   );
 }

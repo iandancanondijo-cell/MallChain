@@ -16,6 +16,11 @@ const CampaignSchema = new mongoose.Schema({
   base_rate_mlpts: { type: Number, default: null },
   multiplier: { type: Number, default: 1, min: 0.5, max: 5 },
   rate_per_task: { type: Number, required: true, min: 0 },
+  // What the creator paid in at launch. `budget_remaining` is all the payout
+  // path touches, so without the funded total a participant cannot be shown
+  // "how much is left of this campaign" — and rows created before this field
+  // existed simply report no total rather than a guessed one.
+  budget_total: { type: Number, default: null, min: 0 },
   budget_remaining: { type: Number, required: true, min: 0 },
   status: { type: String, enum: ['active', 'paused', 'completed'], default: 'active' },
   completions_count: { type: Number, default: 0 },

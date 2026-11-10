@@ -1,206 +1,106 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useStoreVersion, toast } from '../../components/ui';
-import { devhubApi, type DevApiKey } from '../../services/devhubApi';
-import { config } from '../../services/config';
+import { useCallback, useState } from 'react';
+import { store } from '../../store/store';
+import { useStoreVersion } from '../../components/ui';
+import { chain } from '../../services/config';
+import { displayApiBase } from '../../services/devhubApi';
+import type { WasmInspection } from '../../services/wasmInspect';
+import { CommandConsole } from './CommandConsole';
+import { WasmDeploy } from './WasmDeploy';
+import { ApiKeys } from './ApiKeys';
+import { Endpoints } from './Endpoints';
+import { RunNode } from './RunNode';
+import './devhub.css';
+
+type Tab = 'console' | 'deploy' | 'keys' | 'endpoints' | 'node';
+
+const TABS: Array<{ id: Tab; label: string; icon: string }> = [
+  { id: 'console', label: 'Console', icon: '›_' },
+  { id: 'deploy', label: 'Deploy', icon: '⬡' },
+  { id: 'keys', label: 'API keys', icon: '🔑' },
+  { id: 'endpoints', label: 'Endpoints', icon: '⇄' },
+  { id: 'node', label: 'Run a node', icon: '🖧' },
+];
 
 /**
- * Live bundle listing served by backend/src/routes/downloads.js at
- * /downloads/node/. The backend discovers the newest artifacts by mtime, so
- * this page must never hardcode a version string — after every
- * scripts/build-validator-bundle.sh run the names, sizes and checksums change.
+ * Developer Hub.
+ *
+ * Every panel here does something real: the console parses a sentence into one
+ * exact transaction and signs it with the app's own builders, the deploy bench
+ * inspects a compiled module and uploads it, the key panel manages keys the
+ * backend actually authenticates, and the endpoint list is read from the server
+ * and runnable. The previous version advertised `npm i @mallchain/sdk` and
+ * `pip install mallchain` — neither package is published, and the files under
+ * sdk/ are TypeScript with .js extensions that no runtime can load. Those
+ * claims are gone rather than replaced with new ones.
+ *
+ * Panels stay mounted when hidden so a session log, an inspected module and a
+ * half-filled request survive switching tabs.
  */
-interface NodeDownloads {
-  bundles?: Record<string, { fileName?: string; bytes?: number; sha256?: string }>;
-  fullBundle?: { fileName?: string; bytes?: number };
-}
-
-/** Node bundles are published by the backend under /downloads/node/. */
-const NODE_DOWNLOAD_BASE = `${config.apiBaseUrl.replace(/\/$/, '')}/downloads/node`;
-
-const mb = (bytes?: number) => (bytes ? `${Math.round(bytes / 1024 / 1024)} MB` : '—');
-
-/** strip the trailing '.zip' so the unzip target matches the folder inside. */
-const dirOf = (zip?: string) => (zip ? zip.replace(/\.zip$/, '') : 'the unpacked folder');
-
-/**
- * 'mallchain-node-v3cdd575d-pricing-band-linux-amd64.zip' → the middle part,
- * which is what `marketplaced version` prints.
- */
-const versionOf = (zip?: string) => {
-  const m = /^mallchain-node-(.+)-linux-[a-z0-9]+\.zip$/.exec(zip || '');
-  return m ? m[1] : 'live listing unavailable';
-};
-
-/** Developer Hub — real API-key management (backend/src/routes/devhub.js). */
 export default function DevHub() {
   useStoreVersion();
-  const [keys, setKeys] = useState<DevApiKey[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [keyName, setKeyName] = useState('');
-  const [copied, setCopied] = useState('');
-  const [nodeDl, setNodeDl] = useState<NodeDownloads | null>(null);
+  const [tab, setTab] = useState<Tab>('console');
+  const [wasm, setWasm] = useState<WasmInspection | null>(null);
+  const [seed, setSeed] = useState<{ text: string; id: number } | null>(null);
+  const [tryKey, setTryKey] = useState<string | undefined>(undefined);
+  const [keyCount, setKeyCount] = useState(0);
+  const wallet = store.state.wallet.address;
+  // Existence only, never the phrase: an address can be loaded on a device that
+  // holds no key material, and calling that "signing wallet" is a lie of
+  // implication. This mirrors the snapshot CipherChallenge takes when the wall
+  // opens, so the strip and the wall agree before you are interrupted by it.
+  const canSign = !!store.state.wallet.pinEncryptedMnemonic || !!store.state.wallet.mnemonic;
+  const apiBase = displayApiBase();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const res = await devhubApi.listKeys();
-    if (res.ok && res.data) setKeys(res.data);
-    else setError(res.error || 'Failed to load API keys');
-    setLoading(false);
+  const useInConsole = useCallback((text: string) => {
+    setSeed({ text, id: Date.now() });
+    setTab('console');
   }, []);
 
-  useEffect(() => {
-    load();
-    // Best-effort: the listing is public, but DevHub must still render if the
-    // backend is offline, so failures only affect the bundle-name line below.
-    fetch(`${NODE_DOWNLOAD_BASE}/`)
-      .then((r) => (r.ok ? (r.json() as Promise<NodeDownloads>) : null))
-      .then((d) => d && setNodeDl(d))
-      .catch(() => undefined);
-  }, [load]);
-
-  const createKey = async () => {
-    if (!keyName.trim()) return toast('Key name required', false);
-    const res = await devhubApi.createKey(keyName.trim());
-    if (res.ok) {
-      toast('API key created');
-      setKeyName('');
-      load();
-    } else {
-      toast(res.error || 'Failed to create key', false);
-    }
-  };
-
-  const testKey = async (key: string) => {
-    const res = await devhubApi.testKey(key);
-    if (res.ok && res.data) {
-      toast(`Key valid — ${res.data.used} total call${res.data.used === 1 ? '' : 's'}`);
-      load();
-    } else {
-      toast(res.error || 'Key test failed', false);
-    }
-  };
-
-  const revoke = async (id: string) => {
-    const res = await devhubApi.revokeKey(id);
-    if (res.ok) {
-      toast('Key revoked');
-      load();
-    } else {
-      toast(res.error || 'Failed to revoke key', false);
-    }
-  };
-
-  const copy = (k: string) => {
-    const ta = document.createElement('textarea');
-    ta.value = k; document.body.appendChild(ta); ta.select();
-    document.execCommand('copy'); ta.remove();
-    setCopied(k);
-    setTimeout(() => setCopied(''), 1500);
-  };
-
-  const snippets = [
-    { lang: 'JavaScript', code: `import { MallchainClient } from '@mallchain/sdk';\n\nconst client = new MallchainClient({ apiKey: process.env.MALLCHAIN_API_KEY });\nconst balance = await client.wallet.balance('mall1…');` },
-    { lang: 'Python', code: `from mallchain import MallchainClient\n\nclient = MallchainClient(api_key="mk_…")\nbalance = client.wallet.balance("mall1…")\nprint(balance)` },
-    { lang: 'cURL', code: `curl http://localhost:4000/api/wallet/mall1… \\\n  -H "Authorization: Bearer <token>"` },
-  ];
-
-  const nodeSnippets = [
-    {
-      lang: 'Verify download',
-      code: `unzip ${nodeDl?.fullBundle?.fileName ?? 'mallchain-node-<version>.zip'} && cd ${dirOf(nodeDl?.bundles?.amd64?.fileName)}\nsha256sum -c SHA256SUMS.txt   # every file must report OK`,
-    },
-    {
-      lang: 'Verify chain data yourself',
-      code: `# your own node, your own truth — no mallchain.com backend involved\nRPC="http://127.0.0.1:26657"; API="http://127.0.0.1:1317"\ncurl -s $RPC/status | jq '.result.sync_info'          # height + latest_app_hash\ncurl -s $API/cosmos/staking/v1beta1/validators | jq '.validators|length'\ncurl -s $API/cosmos/bank/v1beta1/supply | jq          # real supply, straight from state`,
-    },
-  ];
+  const pane = (id: Tab, node: React.ReactNode) => (
+    <div key={id} style={{ display: tab === id ? undefined : 'none' }} role="tabpanel" id={`dh-panel-${id}`} aria-labelledby={`dh-tab-${id}`}>
+      {node}
+    </div>
+  );
 
   return (
-    <div>
-      <div className="view-head"><h1 className="text-gradient">Developer Hub</h1><span className="sub">build on Mallchain</span></div>
-
-      {error && (
-        <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
-          <div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {error}</div>
-        </div>
-      )}
-
-      <div className="grid-2 stagger">
-        <div className="card card-glow bg-gradient-card">
-          <div className="sec-title"><h2>SDKs</h2></div>
-          <div className="row">
-            <span className="chip gold">JavaScript · npm i @mallchain/sdk</span>
-            <span className="chip">Python · pip install mallchain</span>
-          </div>
-          <div className="sec-title mt"><h2>Endpoints</h2></div>
-          <div className="tiny mono" style={{ lineHeight: 2 }}>
-            GET /api/wallet/:address<br />POST /api/send/mallcoins<br />GET /api/explorer/latest<br />GET /api/mines/campaigns/active<br />GET /api/staking/summary/:address
-          </div>
-        </div>
-
-        <div className="card card-glow bg-gradient-card">
-          <div className="sec-title"><h2>API keys</h2></div>
-          {!loading && keys?.length === 0 && <div className="tiny" style={{ padding: 12 }}>No API keys yet.</div>}
-          {(keys || []).map((k) => (
-            <div key={k._id} className="list-row">
-              <div className="grow"><div className="t">{k.name}</div><div className="m mono" style={{ fontSize: 11 }}>{k.key}</div></div>
-              <span className="chip">{k.used} calls</span>
-              <button className="btn btn-ghost btn-sm" onClick={() => testKey(k.key)}>Test key</button>
-              <button className="btn btn-ghost btn-sm" onClick={() => copy(k.key)}>{copied === k.key ? '✓ copied' : 'Copy'}</button>
-              <button className="btn btn-danger btn-sm" onClick={() => revoke(k._id)}>Revoke</button>
-            </div>
-          ))}
-          <div className="row mt">
-            <input className="input" placeholder="Key name…" value={keyName} onChange={(e) => setKeyName(e.target.value)} />
-            <button className="btn btn-primary" onClick={createKey}>Create key</button>
-          </div>
-        </div>
+    <div className="dh-root">
+      <div className="view-head">
+        <h1 className="text-gradient">Developer Hub</h1>
+        <span className="sub">write a sentence, sign a transaction, run a node</span>
       </div>
 
-      <div className="card mt card-glow bg-gradient-card">
-        <div className="sec-title"><h2>Run a Node</h2><span className="sub">don't trust, verify</span></div>
-        <div className="tiny" style={{ lineHeight: 1.8, marginBottom: 12 }}>
-          Anyone in the world can run a Mallchain validator or full node on their own PC. A node needs
-          <b> only</b> the chain binary, <span className="mono">genesis.json</span> and a peer list — never our
-          Express backend or MongoDB (those are the web app's off-chain API layer, not consensus). Your node
-          re-executes every block itself and checks app hashes, so you verify the ledger instead of trusting it.
-          <br />
-          <b>In the bundle:</b> <span className="mono">marketplaced</span> + <span className="mono">gen-node-home</span> binaries (linux/amd64 &amp; arm64, statically linked),
-          verified <span className="mono">genesis.json</span>, config templates (correct ports, gRPC safely disabled), real peer ID, <span className="mono">INSTALL.md</span>, <span className="mono">PEERS.md</span>, <span className="mono">CREATE_VALIDATOR.sh</span>, <span className="mono">VERSION.txt</span> and <span className="mono">SHA256SUMS.txt</span>.
-        </div>
-        <div className="row">
-          <a className="btn btn-primary" href={`${NODE_DOWNLOAD_BASE}/amd64.zip`} download>Download node bundle (linux/amd64)</a>
-          <a className="btn btn-primary" href={`${NODE_DOWNLOAD_BASE}/arm64.zip`} download>Download node bundle (linux/arm64)</a>
-          <a className="btn btn-ghost" href={`${NODE_DOWNLOAD_BASE}/full.zip`} download>Combined zip</a>
-          <a className="btn btn-ghost" href={`${NODE_DOWNLOAD_BASE}/sha256sums.txt`}>SHA256 checksums</a>
-          <a className="btn btn-ghost" href={`${NODE_DOWNLOAD_BASE}/docs`} target="_blank" rel="noreferrer">Setup guide</a>
-        </div>
-        <div className="tiny mono" style={{ marginTop: 10, opacity: 0.75 }}>
-          Per-arch bundles {mb(nodeDl?.bundles?.amd64?.bytes)} (amd64) / {mb(nodeDl?.bundles?.arm64?.bytes)} (arm64),
-          combined {mb(nodeDl?.fullBundle?.bytes)} · {versionOf(nodeDl?.bundles?.amd64?.fileName)} · served live by the
-          backend at <span className="mono">{NODE_DOWNLOAD_BASE}/</span> (index lists checksums and sizes).
-          If a route 404s the bundle is missing from <span className="mono">backend/build/validator-bundle/zips/</span>;
-          rebuild with <span className="mono">scripts/build-validator-bundle.sh</span>.
-        </div>
-        {nodeSnippets.map((s) => (
-          <div key={s.lang} className="code-block">
-            <div className="code-head"><span className="chip">{s.lang}</span><button className="btn btn-ghost btn-sm" onClick={() => copy(s.code)}>{copied === s.code ? '✓ copied' : 'Copy'}</button></div>
-            <pre>{s.code}</pre>
-          </div>
+      <div className="dh-env">
+        <div className="dh-env-cell"><div className="dh-env-k">Chain ID</div><div className="dh-env-v gold">{chain.chainId}</div></div>
+        <div className="dh-env-cell"><div className="dh-env-k">Address prefix</div><div className="dh-env-v">{chain.addressPrefix}1…</div></div>
+        <div className="dh-env-cell"><div className="dh-env-k">Gas price</div><div className="dh-env-v">{chain.gasPrice}</div></div>
+        <div className="dh-env-cell"><div className="dh-env-k">API base</div><div className="dh-env-v" title={apiBase}>{apiBase}</div></div>
+        <div className="dh-env-cell"><div className="dh-env-k">{wallet && !canSign ? 'Wallet address' : 'Signing wallet'}</div><div className="dh-env-v" title={wallet}>{wallet || 'not connected'}</div></div>
+      </div>
+
+      <div className="dh-tabs" role="tablist" aria-label="Developer Hub sections">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            id={`dh-tab-${t.id}`}
+            className="dh-tab"
+            role="tab"
+            aria-selected={tab === t.id}
+            aria-controls={`dh-panel-${t.id}`}
+            onClick={() => setTab(t.id)}
+          >
+            <span className="dh-tab-ico" aria-hidden="true">{t.icon}</span>
+            {t.label}
+            {t.id === 'keys' && keyCount > 0 && <span className="dh-tab-count">{keyCount}</span>}
+            {t.id === 'deploy' && wasm && <span className="dh-tab-count">{wasm.ok ? 'ready' : 'bad'}</span>}
+          </button>
         ))}
       </div>
 
-      <div className="card mt card-glow bg-gradient-card">
-        <div className="sec-title"><h2>Code examples</h2></div>
-        {snippets.map((s) => (
-          <div key={s.lang} className="code-block">
-            <div className="code-head"><span className="chip">{s.lang}</span><button className="btn btn-ghost btn-sm" onClick={() => copy(s.code)}>{copied === s.code ? '✓ copied' : 'Copy'}</button></div>
-            <pre>{s.code}</pre>
-          </div>
-        ))}
-      </div>
+      {pane('console', <CommandConsole wasm={wasm} onOpenDeploy={() => setTab('deploy')} seed={seed} />)}
+      {pane('deploy', <WasmDeploy wasm={wasm} onInspect={setWasm} onUseInConsole={useInConsole} />)}
+      {pane('keys', <ApiKeys onTryKey={(k) => { setTryKey(k.key); setTab('endpoints'); }} onCount={setKeyCount} />)}
+      {pane('endpoints', <Endpoints initialKey={tryKey} keysVersion={keyCount} />)}
+      {pane('node', <RunNode />)}
     </div>
   );
 }

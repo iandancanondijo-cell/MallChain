@@ -43,17 +43,23 @@ export default function Staking() {
       const result = await stakeMlcns({ mnemonic, fromAddress: address, amountMlcns: a });
       toast(`Staked ${a} MLCNS — tx ${result.txHash.slice(0, 10)}…`);
       
-      // Send notification through all channels
+      // Send notification through all channels.
+      //
+      // `asset` is the ledger the local balance moves on: this stake takes the
+      // chain coin (the same balance the sufficiency check above reads), not
+      // Mallpoints. It previously said MLPTS, which debited the user's Mallpoint
+      // balance for a coin they had never spent and put "50 MLPTS" next to a
+      // transaction that moved MALL.
       store.applyTx({
         type: 'stake',
         amount: a,
-        asset: 'MLPTS',
+        asset: 'MALL',
         kind: 'debit',
-        note: `Staked ${a} MLPTS`,
-        notifTitle: `Staked ${a} MLPTS`,
+        note: `Staked ${a} MALL`,
+        notifTitle: `Staked ${a} MALL`,
         notifKind: 'transaction',
         notifCategory: 'governance',
-        activityText: `Staked ${a} MLPTS (tx ${result.txHash.slice(0, 10)}…)`,
+        activityText: `Staked ${a} MALL (tx ${result.txHash.slice(0, 10)}…)`,
         status: 'confirmed',
       });
       

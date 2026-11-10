@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, fmtNum } from '../../components/ui';
 import { minesApi, type MinesProfile, type MinesCampaign, type MinesSubmission } from '../../services/minesApi';
 import { submissionLabel, submissionState } from './submissionStatus';
-import { Compass, Clock, Wallet, ShieldCheck, AlertTriangle, Sparkles, ArrowRight } from 'lucide-react';
+import { Compass, Clock, Wallet, ShieldCheck, AlertTriangle, Sparkles, ArrowRight, Camera } from 'lucide-react';
 
 /** Mines Command Center — discovery/rewards glassmorphism layout with real profile + campaign + submission data. */
 export default function MinesHome({ navigate }: { navigate: (p: string) => void }) {
@@ -10,6 +10,8 @@ export default function MinesHome({ navigate }: { navigate: (p: string) => void 
 
   const [profile, setProfile] = useState<MinesProfile | null>(null);
   const [campaigns, setCampaigns] = useState<MinesCampaign[] | null>(null);
+  const [earnable, setEarnable] = useState<number | null>(null);
+  const [opensAwaitingProof, setOpensAwaitingProof] = useState<number | null>(null);
   const [submissions, setSubmissions] = useState<MinesSubmission[] | null>(null);
   const [reviewQueueCount, setReviewQueueCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -20,28 +22,36 @@ export default function MinesHome({ navigate }: { navigate: (p: string) => void 
     setLoading(true);
     setError(null);
     setFailedModules([]);
-    const [profileResult, campaignsResult, submissionsResult, queueResult] = await Promise.all([
+    const [profileResult, campaignsResult, submissionsResult, queueResult, opensResult] = await Promise.all([
       minesApi.getProfile(),
-      minesApi.listActiveCampaigns(),
+      minesApi.listAvailableCampaigns(),
       minesApi.mySubmissions(),
       minesApi.getQueue(),
+      minesApi.pendingOpens(),
     ]);
 
     const failures: string[] = [];
     if (profileResult.ok && profileResult.data) setProfile(profileResult.data);
     else failures.push('Profile');
-    if (campaignsResult.ok && campaignsResult.data) setCampaigns(campaignsResult.data);
-    else failures.push('Campaigns');
+    // The per-user feed, not the public list: this card counts what the
+    // account can still attempt, so it has to exclude its own campaigns and
+    // everything it already touched — the same screen Discover shows.
+    if (campaignsResult.ok && campaignsResult.data) {
+      setCampaigns(campaignsResult.data.campaigns);
+      setEarnable(campaignsResult.data.available_mlpts);
+    } else failures.push('Campaigns');
     if (submissionsResult.ok && submissionsResult.data) setSubmissions(submissionsResult.data);
     else failures.push('Submissions');
     if (queueResult.ok && queueResult.data) setReviewQueueCount(queueResult.data.length);
     else failures.push('Review Queue');
+    if (opensResult.ok && opensResult.data) setOpensAwaitingProof(opensResult.data.length);
+    else failures.push('Open Tasks');
 
     if (failures.length > 0) {
-      const firstError = profileResult.error || campaignsResult.error || submissionsResult.error || queueResult.error;
+      const firstError = profileResult.error || campaignsResult.error || submissionsResult.error || queueResult.error || opensResult.error;
       setFailedModules(failures);
       setError(
-        failures.length === 4
+        failures.length === 5
           ? `Mines service unavailable — ${firstError || 'backend not reachable'}`
           : `Some Mines data could not load (${failures.join(', ')}). ${firstError || ''}`
       );
@@ -64,13 +74,27 @@ export default function MinesHome({ navigate }: { navigate: (p: string) => void 
     color: string;
   }> = [
     {
-      label: 'Active Campaigns',
+      label: 'Tasks New to You',
       icon: <Compass size={20} />,
       value: failedModules.includes('Campaigns') ? 'N/A' : campaigns?.length ?? '—',
-      sub: failedModules.includes('Campaigns') ? 'data unavailable' : 'live',
+      sub: failedModules.includes('Campaigns')
+        ? 'data unavailable'
+        : earnable === null ? 'live' : `${fmtNum(earnable)} MLPTS earnable`,
       path: '/mines/discover',
       degraded: failedModules.includes('Campaigns'),
       color: 'rgba(var(--section-accent-rgb),0.12)',
+    },
+    {
+      // The attempt a link open spent and the screenshot has not yet paid for.
+      // Discover drops these, so if the snapshot dropped them too the user
+      // would have nowhere that reminds them the attempt is still live.
+      label: 'Awaiting Your Screenshot',
+      icon: <Camera size={20} />,
+      value: failedModules.includes('Open Tasks') ? 'N/A' : opensAwaitingProof ?? '—',
+      sub: failedModules.includes('Open Tasks') ? 'data unavailable' : 'open, unproven',
+      path: '/mines/participation',
+      degraded: failedModules.includes('Open Tasks'),
+      color: 'rgba(251,191,36,0.12)',
     },
     {
       label: 'My Pending Submissions',

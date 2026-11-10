@@ -85,12 +85,54 @@ function assertStorableProofUrl(value, { userId, proofExistsOnDisk }) {
   throw new Error('proof_url must be either an uploaded screenshot ref or an http(s) URL');
 }
 
+/**
+ * True when the address names a piece of content rather than the app itself.
+ *
+ * A campaign pays for doing a specific task, so the published link has to say
+ * which post, video, reel or profile the participant should open. A bare
+ * `https://instagram.com` asks them to go hunting; the reward then pays for
+ * whatever they happened to do and no reviewer can check it against anything.
+ * Only a path counts — `?lang=en` and `#top` decorate the home page, they do
+ * not name content, and every real share link on the supported platforms
+ * (instagram.com/p/…, x.com/…/status/…, youtu.be/…, tiktok.com/@user/video/…)
+ * carries one.
+ */
+function pointsAtSpecificContent(value) {
+  if (typeof value !== 'string') return false;
+  let parsed;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    return false;
+  }
+  // Scheme first: `new URL('javascript:alert(1)')` has a pathname, and a
+  // predicate that callers reuse for display decisions must not call that
+  // specific content.
+  if (!SAFE_URL_PROTOCOLS.has(parsed.protocol)) return false;
+  const path = parsed.pathname.replace(/\/+$/, '');
+  return path.length > 0 && path !== '/';
+}
+
+/** Hostname for a safe link, or null — used in messages that must not echo the whole URL. */
+function safeUrlHost(value) {
+  try {
+    return new URL(String(value).trim()).hostname.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+}
+
 /** Validates a campaign creator's content_link before it is published. */
 function assertStorableContentLink(value) {
   const candidate = typeof value === 'string' ? value.trim() : '';
   if (!candidate) throw new Error('content_link is required');
   if (!isSafeExternalUrl(candidate)) {
     throw new Error('content_link must be an http(s) URL participants can open');
+  }
+  if (!pointsAtSpecificContent(candidate)) {
+    throw new Error(
+      `content_link must point at the specific post, reel or profile to open — not just the ${safeUrlHost(candidate) || 'app'} home`
+    );
   }
   return candidate;
 }
@@ -99,6 +141,8 @@ module.exports = {
   SAFE_URL_PROTOCOLS,
   MAX_LINK_LENGTH,
   isSafeExternalUrl,
+  pointsAtSpecificContent,
+  safeUrlHost,
   looksLikeLocalProofRef,
   localProofRefOwnedBy,
   assertStorableProofUrl,

@@ -237,12 +237,6 @@ export interface AppState {
     claimed: number;
   };
   contracts: Array<{ id: string; name: string; addr: string; type: string; txs: number }>;
-  devhub: {
-    keys: Array<{ id: string; name: string; used: number; created: string }>;
-  };
-  careers: {
-    list: Array<{ title: string; dept: string; loc: string; applied: boolean }>;
-  };
   learning: boolean[];
   socialTasks: boolean[];
   /** Durable-tier in-progress wizard/flow state, keyed by flow id. See hooks/useWizard.ts. */
@@ -380,14 +374,6 @@ function emptyState(): AppState {
     messaging: { conversations: [] },
     referrals: { code: '', earned: 0, count: 0, claimed: 0 },
     contracts: [],
-    devhub: { keys: [] },
-    careers: { list: [
-      { title: 'Senior Frontend Engineer', dept: 'Engineering', loc: 'Remote · Nairobi', applied: false },
-      { title: 'Smart Contract Developer', dept: 'Engineering', loc: 'Remote', applied: false },
-      { title: 'Community Manager', dept: 'Growth', loc: 'Remote · East Africa', applied: false },
-      { title: 'QA Automation Engineer', dept: 'Engineering', loc: 'Remote', applied: false },
-      { title: 'Product Designer', dept: 'Design', loc: 'Remote', applied: false },
-    ] },
     learning: [false, false, false, false],
     socialTasks: [false, false, false, false],
     flows: {},
@@ -522,6 +508,12 @@ class Store {
       referrals: { ...base.referrals, ...saved.referrals },
       flows: { ...base.flows, ...saved.flows },
     };
+    // Careers used to be a seeded local list, and DevHub a local list of API
+    // keys. `...saved` would resurrect both for every returning browser, so the
+    // old slices are dropped on read: the board and the keys are whatever the
+    // server has, and nothing else.
+    delete (out as unknown as Record<string, unknown>).careers;
+    delete (out as unknown as Record<string, unknown>).devhub;
     return out;
   }
 
@@ -574,11 +566,6 @@ class Store {
         // PIN and lock the user out forever).
         const { mnemonic: _m, ...safeWallet } = toPersist.wallet as typeof toPersist.wallet & { mnemonic?: string };
         toPersist.wallet = { ...safeWallet, mnemonic: '' } as typeof toPersist.wallet;
-      }
-      if (toPersist.devhub?.keys) {
-        toPersist.devhub = {
-          keys: toPersist.devhub.keys.map(({ id, name, used, created }) => ({ id, name, used, created })),
-        };
       }
       localStorage.setItem(OS_KEY, JSON.stringify(toPersist));
       this.storageError = null;

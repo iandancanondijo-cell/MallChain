@@ -5,6 +5,7 @@
 // src/services/proofLink.ts, which mirrors this file).
 const {
   isSafeExternalUrl,
+  pointsAtSpecificContent,
   looksLikeLocalProofRef,
   localProofRefOwnedBy,
   assertStorableProofUrl,
@@ -95,6 +96,38 @@ describe('looksLikeLocalProofRef / localProofRefOwnedBy', () => {
   });
 });
 
+describe('pointsAtSpecificContent', () => {
+  test.each([
+    'https://instagram.com/mallchain',
+    'https://x.com/mallchain/status/1987654',
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    'https://youtu.be/dQw4w9WgXcQ',
+    'https://tiktok.com/@mallchain/video/1234',
+  ])('names content in %s', (value) => {
+    expect(pointsAtSpecificContent(value)).toBe(true);
+  });
+
+  test.each([
+    'https://instagram.com',
+    'https://instagram.com/',
+    'https://x.com/?lang=en',
+    'https://tiktok.com/#top',
+    'https://',
+    'not a url',
+    42,
+  ])('does not name content in %s', (value) => {
+    expect(pointsAtSpecificContent(value)).toBe(false);
+  });
+
+  // The predicate is exported for the SPA too, so it must stand on its own:
+  // `new URL("javascript:alert(1)")` has a pathname, and calling that
+  // "specific content" would be enough to get it rendered as a link.
+  test('never calls a non-http(s) payload specific content', () => {
+    expect(pointsAtSpecificContent('javascript:alert(1)')).toBe(false);
+    expect(pointsAtSpecificContent('data:text/html,x')).toBe(false);
+  });
+});
+
 describe('assertStorableProofUrl', () => {
   test('returns an owned ref unchanged apart from trimming', () => {
     expect(assertStorableProofUrl(`  ${OWNED_REF}  `, { userId: UID })).toBe(OWNED_REF);
@@ -160,5 +193,27 @@ describe('assertStorableContentLink', () => {
   // uploaded-file ref — only a real http(s) address.
   test.each(['javascript:alert(1)', 'https://', OWNED_REF])('refuses %s', (value) => {
     expect(() => assertStorableContentLink(value)).toThrow(/must be an http\(s\) URL/);
+  });
+
+  // The link has to name the task. A bare app home pays for whatever the
+  // participant decided to do, which nobody can review.
+  test.each([
+    'https://instagram.com',
+    'https://instagram.com/',
+    'https://x.com/?lang=en',
+  ])('refuses the app home %s', (value) => {
+    expect(() => assertStorableContentLink(value)).toThrow(/not just the/);
+  });
+
+  test('the refusal names the host, not the whole submitted URL', () => {
+    expect(() => assertStorableContentLink('https://tiktok.com/')).toThrow(/tiktok\.com/);
+  });
+
+  test.each([
+    'https://x.com/mallchain/status/1987654',
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    'https://instagram.com/p/Can9FgA/??',
+  ])('accepts specific content %s', (value) => {
+    expect(() => assertStorableContentLink(value)).not.toThrow();
   });
 });

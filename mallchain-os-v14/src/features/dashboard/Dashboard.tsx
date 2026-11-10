@@ -14,6 +14,7 @@ import NetworkDots from './NetworkDots';
 import WalletFlowChart from './WalletFlowChart';
 import { useWalletGate, reportLinkFailure, linkAttemptGuard } from '../wallet/walletGate';
 import WalletGateNotice from '../wallet/WalletGateNotice';
+import { AddressIdentity } from '../../components/WalletIdentity';
 import { TrendingUp, Wallet, Zap, Shield, ArrowUpRight, ArrowDownLeft, Repeat, Sparkles, CheckCircle2, XCircle, Bell, RefreshCw } from 'lucide-react';
 import { Button, Card, Badge, Heading, Text } from '../../components/shared';
 import './Dashboard.css';
@@ -283,6 +284,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
 
   const [submissions, setSubmissions] = useState<MinesSubmission[]>([]);
   const [campaigns, setCampaigns] = useState<MinesCampaign[]>([]);
+  const [campaignMlpts, setCampaignMlpts] = useState<number | null>(null);
   const [reviewer, setReviewer] = useState<ReviewerProfile | null>(null);
   const [earnings, setEarnings] = useState<WalletTx[]>([]);
   const [staking, setStaking] = useState<StakingSummary | null>(null);
@@ -293,13 +295,16 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
   const loadMinesSnapshot = useCallback(async () => {
     const [subResult, campResult, reviewerResult, txResult, stakingResult] = await Promise.all([
       minesApi.mySubmissions(),
-      minesApi.listActiveCampaigns(),
+      minesApi.listAvailableCampaigns(),
       minesApi.getReviewerProfile(),
       minesApi.getTransactions(30),
       st.wallet.address ? stakingApi.getSummary(st.wallet.address) : Promise.resolve({ ok: false as const }),
     ]);
     if (subResult.ok && subResult.data) setSubmissions(subResult.data);
-    if (campResult.ok && campResult.data) setCampaigns(campResult.data);
+    if (campResult.ok && campResult.data) {
+      setCampaigns(campResult.data.campaigns);
+      setCampaignMlpts(campResult.data.available_mlpts);
+    }
     if (reviewerResult.ok && reviewerResult.data) setReviewer(reviewerResult.data);
     if (txResult.ok && txResult.data) setEarnings(txResult.data);
     if (stakingResult.ok && 'data' in stakingResult && stakingResult.data) setStaking(stakingResult.data.summary);
@@ -615,7 +620,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
                 <div className="dash-tx-icon">{txIcon(t.type)}</div>
                 <div className="grow">
                   <div className="t">{t.type.charAt(0).toUpperCase() + t.type.slice(1)} {fmtNum(t.amount)} {t.asset}</div>
-                  <div className="m">{t.note || t.to || ''}</div>
+                  <div className="m">{t.note || <AddressIdentity address={t.type === 'receive' ? t.from : (t.to || t.from)} label={t.type === 'receive' ? 'From' : 'To'} size={18} />}</div>
                 </div>
                 <StatusChip status={t.status} />
               </div>
@@ -659,7 +664,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
             <button className="dash-snap-row" onClick={() => navigate('/mines')}>
               <div className="grow">
                 <div className="t">Mines</div>
-                <div className="m">{activeMines} active · {pendingValidation} pending review · {campaigns.length} campaigns available</div>
+                <div className="m">{activeMines} active · {pendingValidation} pending review · {campaigns.length} new to you{campaignMlpts != null ? ` · ${fmtNum(campaignMlpts)} MLPTS earnable` : ''}</div>
               </div>
               <span style={{ color: 'var(--txt-3)', fontSize: 12 }}>View →</span>
             </button>

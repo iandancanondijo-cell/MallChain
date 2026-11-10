@@ -48,6 +48,10 @@ const SOCIAL_PLATFORMS = [
 
 export function SocialAccounts({ onUpdate }: SocialAccountsProps) {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
+  // Only the first read may blank the grid out. A re-read after a save used to
+  // swap ten cards for "Loading…" on every keystroke-then-Save, which read as
+  // though the handle had been lost even when the server had already kept it.
+  const [firstRead, setFirstRead] = useState(true);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [editingPlatform, setEditingPlatform] = useState<string | null>(null);
@@ -58,18 +62,22 @@ export function SocialAccounts({ onUpdate }: SocialAccountsProps) {
   }, []);
 
   const loadAccounts = async () => {
-    setLoading(true);
+    if (firstRead) setLoading(true);
     try {
       const res = await settingsApi.getSocialAccounts();
-      if (res.ok && res.data) {
+      // `/api/settings/social` answers an array, and every card below looks
+      // itself up with accounts.find(). Anything else would throw during
+      // render, so it is refused here and said out loud instead.
+      if (res.ok && Array.isArray(res.data)) {
         setAccounts(res.data);
       } else {
-        toast(res.error || 'Saved social handles could not be loaded.', false);
+        toast(res.ok ? 'Saved social handles could not be loaded.' : (res.error || 'Saved social handles could not be loaded.'), false);
       }
     } catch {
       toast('Saved social handles could not be loaded.', false);
     }
     setLoading(false);
+    setFirstRead(false);
   };
 
   const handleConnect = async (platformId: string) => {

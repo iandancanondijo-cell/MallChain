@@ -8,6 +8,7 @@ import { authService } from '../../services/auth';
 import { LoadingState } from '../../components/LoadingState';
 import { useWalletGate, reportLinkFailure, linkAttemptGuard } from './walletGate';
 import WalletGateNotice from './WalletGateNotice';
+import { AccountPicture, AddressIdentity } from '../../components/WalletIdentity';
 import {
   ArrowUpRight, ArrowDownLeft, CreditCard, Building2, Sparkles,
   Repeat, Clock, BarChart3, Wallet, Copy, ExternalLink, Settings, Lock, Banknote
@@ -161,6 +162,9 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
             <h1 className="text-gradient">Wallet</h1>
             {isWalletConnected && (
               <button className="wallet-addr-chip" onClick={copyAddress} title="Copy address">
+                {/* This wallet is registered to this account, so the account's
+                    own picture belongs beside its address. */}
+                <AccountPicture avatarUrl={st.user.avatarUrl} name={st.user.name} initial={st.user.avatarInitial} size={18} />
                 <span className="mono">{walletAddress.slice(0, 8)}...{walletAddress.slice(-4)}</span>
                 <Copy size={11} />
               </button>
@@ -322,7 +326,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
                 }} />
                 <div className="grow">
                   <div className="t">{t.type.charAt(0).toUpperCase() + t.type.slice(1)} {fmtNum(t.amount)} {t.asset}</div>
-                  <div className="m">{t.note || t.to || ''}</div>
+                  <div className="m">{t.note || <AddressIdentity address={t.type === 'receive' ? t.from : (t.to || t.from)} label={t.type === 'receive' ? 'From' : 'To'} size={18} />}</div>
                 </div>
                 <span className="chip" style={{ fontSize: 10 }}>{t.status}</span>
               </div>

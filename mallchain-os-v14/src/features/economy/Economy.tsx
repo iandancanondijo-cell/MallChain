@@ -89,7 +89,9 @@ export default function Economy() {
               <div style={{ textAlign: 'center', padding: '12px 0' }}>
                 <BarChart3 size={36} style={{ color: 'rgb(var(--section-accent-rgb))', marginBottom: 8 }} />
                 <div style={{ fontSize: 12, color: 'var(--txt-3)' }}>Live on-chain data</div>
-                <div style={{ fontSize: 11, color: 'var(--txt-3)', marginTop: 2 }}>Halving every 36 months</div>
+                <div style={{ fontSize: 11, color: 'var(--txt-3)', marginTop: 2 }}>
+                  Halving every {data.schedule.phaseMonths} months
+                </div>
               </div>
             </div>
           </div>
@@ -139,7 +141,9 @@ export default function Economy() {
                   <tr><td className="muted">Months left in schedule</td><td>{data.emission.monthsRemaining}</td></tr>
                 </tbody>
               </table>
-              <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>Emission halves every 36 months across 5 phases, from 3,000,000 MLCNS/month down to 187,500 MLCNS/month.</div>
+              <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>
+                {`Emission halves every ${data.schedule.phaseMonths} months across ${data.schedule.phases.length} phases, from ${data.schedule.phases[0]?.monthly ?? '—'} down to ${data.schedule.phases[data.schedule.phases.length - 1]?.monthly ?? '—'} MLCNS/month.`}
+              </div>
             </div>
 
             <div className="card card-glow bg-gradient-card">

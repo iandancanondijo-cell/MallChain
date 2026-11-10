@@ -9,9 +9,9 @@ export interface Product { id: string; name: string; seller: string; sellerAddre
 // x/marketplace escrow holds real bank-module coins (see
 // x/marketplace/keeper/escrow.go), not the custom MLCNS ledger — so escrow
 // amounts are denominated in the chain's native gas token ("stake",
-// displayed MAL, 6 decimals), not MLCNS. There's no fiat/MAL exchange rate
-// pipeline wired up for this demo catalog, so product "price" is treated as
-// a MAL amount directly (documented simplification, not a bug).
+// displayed MAL, 6 decimals), not MLCNS. A listing's `price` is therefore a
+// MAL amount as the seller states it; there is no fiat/exchange-rate pipeline
+// in front of it (documented simplification, not a bug).
 const GAS_DENOM = 'stake';
 const GAS_DECIMALS = 6;
 const DISPUTE_WINDOW_SECONDS = 7 * 24 * 3600;
@@ -20,20 +20,16 @@ function toBaseUnits(amount: number): string {
   return Math.round(amount * 10 ** GAS_DECIMALS).toString();
 }
 
-// Real genesis wallet addresses (blockchain_working/config/genesis.json),
-// standing in for each demo seller's own wallet.
-// TODO: Replace with real marketplace API endpoint to pool products from the Mallchain network
-const PRODUCTS: Product[] = [];
-
 const CATS = ['All', 'Food', 'Fashion', 'Home', 'Tech'];
 const SHIP_FLOW = ['processing', 'shipped', 'transit', 'delivered'] as const;
 
 /**
- * `products` defaults to the (currently empty) on-chain-pending catalog; it is
- * an explicit seam so tests and future callers can drive the checkout flow
- * with a given catalog without reintroducing hardcoded demo data.
+ * There is no marketplace catalog endpoint yet, so nothing is listed and the
+ * page shows its empty state. `products` stays an explicit seam so the
+ * escrow/checkout flow can be driven (by tests, and later by the real
+ * catalog) without reintroducing hardcoded sellers.
  */
-export default function Marketplace({ navigate, products = PRODUCTS }: { navigate: (p: string) => void; products?: Product[] }) {
+export default function Marketplace({ navigate, products = [] }: { navigate: (p: string) => void; products?: Product[] }) {
   useStoreVersion();
   const st = store.state;
   const cur = st.prefs.currency;
@@ -227,7 +223,23 @@ export default function Marketplace({ navigate, products = PRODUCTS }: { navigat
         ))}
       </div>
 
-      {list.length === 0 && <div className="empty-state"><div className="es-ico">🛍</div><div className="es-t">Marketplace Coming Soon</div><div className="es-m">Products will appear here once the marketplace endpoints are connected to the Mallchain network.</div></div>}
+      {list.length === 0 && (
+        <div className="empty-state">
+          <div className="es-ico">🛍</div>
+          {products.length === 0 ? (
+            <>
+              <div className="es-t">Marketplace Coming Soon</div>
+              <div className="es-m">Products will appear here once the marketplace catalog endpoint is connected to the Mallchain network. Escrow, checkout and disputes below are live — there is simply nothing listed to buy yet.</div>
+            </>
+          ) : (
+            <>
+              <div className="es-t">No products match</div>
+              <div className="es-m">Nothing in {cat === 'All' ? 'any category' : cat} matches {q ? `“${q}”` : 'this search'}.</div>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setQ(''); setCat('All'); }}>Clear filters</button>
+            </>
+          )}
+        </div>
+      )}
       <div className="c-grid stagger">
         {list.map((p) => (
           <div key={p.id} className="c-card card-hover card-glow bg-gradient-card">

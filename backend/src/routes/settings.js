@@ -470,9 +470,21 @@ router.put('/security', auth, async (req, res) => {
   }
 });
 
+// The three choices the Profile & Settings visibility control offers.
+// POST /api/identity/resolve (routes/identity.js) reads this field to decide
+// whether an account's name and picture may be attached to its wallet address
+// on someone else's transaction list, so an arbitrary string stored here would
+// silently mean "public" for that lookup. Anything outside the enum is refused.
+const PROFILE_VISIBILITY_CHOICES = ['public', 'contacts', 'private'];
+
 // PUT /api/settings/privacy - Privacy settings
 router.put('/privacy', auth, async (req, res) => {
   try {
+    if (req.body.profileVisibility !== undefined
+      && !PROFILE_VISIBILITY_CHOICES.includes(req.body.profileVisibility)) {
+      return res.status(400).json(fail(`profileVisibility must be one of ${PROFILE_VISIBILITY_CHOICES.join(', ')}`));
+    }
+
     const settings = await getOrCreateSettings(req.user._id);
 
     const allowedFields = ['profileVisibility', 'showActivity', 'showBalance', 'allowMessages', 'dataSharing'];

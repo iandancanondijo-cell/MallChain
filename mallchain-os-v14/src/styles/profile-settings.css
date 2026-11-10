@@ -1,0 +1,220 @@
+/* Profile & Settings — rebuilt layout.
+ *
+ * Two things this exists to fix: the old page arranged cards in two columns in
+ * the order they happened to be written, so related decisions were split across
+ * the page (notifications in one column, the phone number that delivers them in
+ * the other); and every card was visually identical, so nothing told you where
+ * you were or how far you had to go.
+ *
+ * Cards themselves keep using the shared .card / .flag-row / .switch rules from
+ * global.css — only the arrangement is defined here.
+ */
+
+.ps-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+
+@media (min-width: 1080px) {
+  .ps-page {
+    grid-template-columns: 224px minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+/* ---- nav rail ---- */
+.ps-nav {
+  position: sticky;
+  top: 74px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+@media (max-width: 1079px) {
+  /* Stacked above the cards on narrow screens, where a rail would push the
+     first actual setting below the fold. */
+  .ps-nav {
+    position: static;
+    max-height: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}
+
+.ps-nav-group {
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--txt-3);
+  margin: 10px 0 2px;
+}
+
+@media (max-width: 1079px) {
+  .ps-nav-group { display: none; }
+}
+
+.ps-nav button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: var(--txt-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 8px;
+  text-align: left;
+  border-radius: 0 8px 8px 0;
+}
+
+@media (max-width: 1079px) {
+  .ps-nav button {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 10px;
+  }
+}
+
+.ps-nav button:hover { background: var(--surface-alt); color: var(--txt-1); }
+.ps-nav button[aria-current='true'] {
+  border-left-color: var(--accent);
+  background: var(--surface-alt);
+  color: var(--txt-1);
+  font-weight: 700;
+}
+
+.ps-nav .n {
+  flex: none;
+  width: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--txt-3);
+  font-size: 11px;
+}
+
+.ps-nav .dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--txt-3);
+  opacity: 0.35;
+  margin-left: auto;
+}
+
+.ps-nav .dot[data-state='unread'] { background: var(--warning); opacity: 1; }
+.ps-nav .dot[data-state='changed'] { background: var(--accent); opacity: 1; }
+
+/* ---- steps ---- */
+.ps-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.ps-step { scroll-margin-top: 84px; }
+
+.ps-card { margin-bottom: 0; }
+
+.ps-hint {
+  font-size: 12.5px;
+  color: var(--txt-3);
+  margin: -4px 0 12px;
+  line-height: 1.5;
+}
+
+.ps-missing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--txt-2);
+  background: var(--surface-alt);
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.ps-footer { margin-top: 12px; }
+
+/* Two facts per row where they belong together, one per row otherwise. */
+.ps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 4px 22px;
+}
+
+.ps-sub {
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--txt-3);
+  margin: 16px 0 6px;
+}
+
+.ps-note {
+  font-size: 12px;
+  color: var(--txt-3);
+  line-height: 1.55;
+  margin-top: 6px;
+}
+
+.ps-note[data-tone='warn'] { color: var(--warning); }
+
+/* ---- avatar ---- */
+.ps-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.ps-avatar-stage { position: relative; flex: none; }
+
+.ps-avatar-ring {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  font-size: 30px;
+  font-weight: 800;
+  color: var(--txt-2);
+}
+
+.ps-avatar-ring img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.ps-avatar-ring[data-pending='true'] { opacity: 0.55; }
+
+.ps-avatar-actions { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ps-avatar-name { font-weight: 800; font-size: 15px; display: flex; align-items: center; gap: 6px; }
+
+/* The drop target is the whole stage, so the picture is the button. */
+.ps-avatar-stage[data-drag='true'] .ps-avatar-ring {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
+}
+
+.ps-avatar-status { font-size: 12px; color: var(--txt-3); line-height: 1.5; }
+.ps-avatar-status[data-tone='bad'] { color: var(--red); }
+.ps-avatar-status[data-tone='ok'] { color: var(--green); }
+
+/* ---- grouped rows inside a card ---- */
+.ps-pair { display: grid; gap: 14px; }
+@media (min-width: 720px) {
+  .ps-pair { grid-template-columns: 1fr 1fr; }
+}

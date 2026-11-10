@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, fmtNum, StatusChip, toast } from '../../components/ui';
 import { minesApi, type MinesCampaign, type MinesProfile, type RewardRatesTable } from '../../services/minesApi';
-import { blockedLinkTitle, resolveContentLink } from '../../services/proofLink';
+import { blockedLinkTitle, pointsAtSpecificContent, resolveContentLink, specificContentWarning } from '../../services/proofLink';
 import { PlatformIcon, PlatformBadge, PLATFORM_BRAND, PLATFORM_ORDER } from './platformIcons';
 
 /**
@@ -212,12 +212,19 @@ function CampaignDetailsStep({
       return;
     }
     
-    // The link is published as a clickable "Open task" button for every
-    // participant (MinesDiscover.tsx), so the scheme has to be checked here
-    // with the same allowlist the backend enforces on POST /campaigns —
-    // `new URL()` alone also accepts javascript:, data: and file:.
+    // The scheme is checked here with the same allowlist the backend enforces
+    // on POST /campaigns (see utils/linkPolicy.js) — `new URL()` alone also
+    // accepts javascript:, data: and file:, and this address becomes the href
+    // every participant's task panel opens.
     if (resolveContentLink(contentLink).kind !== 'external') {
       toast('Content link must be a full http(s) address, e.g. https://x.com/…', false);
+      return;
+    }
+    // POST /campaigns/create also refuses an app home: the link is handed out
+    // once per participant as the whole task, so it has to name one piece of
+    // content. Catching it here saves the creator a failed publish.
+    if (!pointsAtSpecificContent(contentLink)) {
+      toast(specificContentWarning(contentLink) || 'Link the specific post, video or profile to open.', false);
       return;
     }
 
@@ -297,9 +304,16 @@ function CampaignDetailsStep({
             className="input"
             value={contentLink}
             onChange={(e) => setContentLink(e.target.value)}
-            placeholder="https://…"
+            placeholder="https://… the exact post, video or profile"
             disabled={busy}
           />
+          <div className="hint">
+            Participants get this address once each — the moment they open it, an attempt is spent. Publish the exact post, reel or
+            video, not the {platform} home page, or there is nothing for reviewers to check their screenshot against.
+          </div>
+          {specificContentWarning(contentLink) && (
+            <div className="hint" style={{ color: 'var(--red-2)' }}>⚠ {specificContentWarning(contentLink)}</div>
+          )}
         </div>
 
         <div className="field">
@@ -388,6 +402,11 @@ function CampaignDetailsStep({
           )}
           {contentLink.trim() && resolveContentLink(contentLink).kind !== 'external' && (
             <div className="tiny mt" style={{ color: 'var(--red-2)' }}>⚠ Participants need a full http(s) address before this can launch.</div>
+          )}
+          {resolveContentLink(contentLink).kind === 'external' && !specificContentWarning(contentLink) && (
+            <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>
+              This opens once per participant. They then upload a screenshot, and {fmtNum(previewRate)} MLPTS move only if reviewers approve it.
+            </div>
           )}
         </div>
       </div>

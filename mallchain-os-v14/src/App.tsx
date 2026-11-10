@@ -17,6 +17,7 @@ import { store } from './store/store';
 import { useStoreVersion } from './components/ui';
 import { storeSync } from './services/storeSync';
 import { socketManager } from './services/socket';
+import { applyAccent } from './services/theme';
 import { api } from './services/api';
 import { authService } from './services/auth';
 import { chain } from './services/config';
@@ -59,7 +60,6 @@ function getSectionId(path: string): string {
   if (p.startsWith('/referrals')) return 'referrals';
   if (p.startsWith('/admin')) return 'admin';
   if (p.startsWith('/help') || p.startsWith('/edu')) return 'help';
-  if (p.startsWith('/analytics')) return 'dashboard';
   if (p.startsWith('/notifications')) return 'messaging';
   return 'dashboard';
 }
@@ -117,7 +117,7 @@ export default function App() {
         // unconditionally) so a first-time, never-authenticated visitor
         // doesn't trigger a spurious 401 → "session expired" toast.
         if (authService.isAuthenticated() || cameFromOAuthRedirect) {
-          const res = await api.get<{ user?: { id: string; banned: boolean; banReason?: string | null; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string; walletAddress?: string | null; hasBadge?: boolean; adminCategory?: 'users' | 'blockchain' | 'validator' | 'kyc' | 'mining' | 'treasury' | 'marketplace' | 'mlpts' | 'reports' | null }; expiresAt?: number }>('/api/auth/me');
+          const res = await api.get<{ user?: { id: string; banned: boolean; banReason?: string | null; kycLevel: number; role: 'user' | 'admin' | 'superadmin'; name?: string | null; username?: string | null; email?: string; walletAddress?: string | null; avatarUrl?: string | null; hasBadge?: boolean; adminCategory?: 'users' | 'blockchain' | 'validator' | 'kyc' | 'mining' | 'treasury' | 'marketplace' | 'mlpts' | 'reports' | null }; expiresAt?: number }>('/api/auth/me');
           if (res.ok && res.data?.user) {
             const u = res.data.user;
             if (res.data.expiresAt) authService.setSession(res.data.expiresAt);
@@ -139,6 +139,12 @@ export default function App() {
             if (realName) {
               store.state.user.name = realName;
               store.state.user.avatarInitial = realName[0]?.toUpperCase() || store.state.user.avatarInitial;
+            }
+            // The picture belongs to the account, not to this browser: mirror
+            // whatever the record holds, including the absence of one, so a
+            // path left in local storage cannot outlive the file it names.
+            if (typeof u.avatarUrl === 'string' || u.avatarUrl === null) {
+              store.state.user.avatarUrl = u.avatarUrl || null;
             }
             // Seed the wallet address from the account's server-side link so
             // a connected wallet survives reloads and carries to other
@@ -194,12 +200,7 @@ export default function App() {
     initializeAuth();
 
   // Apply saved accent
-    const map: Record<string, string> = { gold: '#f3ba2f', cyan: '#22d3ee', purple: '#a78bfa', emerald: '#34d399' };
-    const rgb: Record<string, string> = { gold: '243, 186, 47', cyan: '34, 211, 238', purple: '167, 139, 250', emerald: '52, 211, 153' };
-    const a = map[st.prefs.accent] || '#f3ba2f';
-    document.documentElement.style.setProperty('--accent', a);
-    document.documentElement.style.setProperty('--accent-2', a === '#22d3ee' ? '#0ea5e9' : a === '#a78bfa' ? '#8b5cf6' : a === '#34d399' ? '#10b981' : '#f59e0b');
-    document.documentElement.style.setProperty('--accent-rgb', rgb[st.prefs.accent] || '243, 186, 47');
+    applyAccent(st.prefs.accent);
 
     // Apply saved language to the document's lang attribute (screen readers
     // and browser translation tools use it, not just the in-app t() calls).

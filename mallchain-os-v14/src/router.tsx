@@ -65,11 +65,9 @@ const Edu = lazy(() => import('./features/edu/Edu'));
 const SearchResults = lazy(() => import('./features/search/SearchResults'));
 
 /* misc views — named exports from one shared module, so each gets its own .then() to pick the right export */
-const Careers = lazy(() => import('./features/misc/MiscViews').then(m => ({ default: m.Careers })));
+const Careers = lazy(() => import('./features/careers/Careers'));
 const Learning = lazy(() => import('./features/misc/MiscViews').then(m => ({ default: m.Learning })));
-const SocialTasks = lazy(() => import('./features/misc/MiscViews').then(m => ({ default: m.SocialTasks })));
 const NotificationsView = lazy(() => import('./features/misc/MiscViews').then(m => ({ default: m.NotificationsView })));
-const AnalyticsView = lazy(() => import('./features/misc/MiscViews').then(m => ({ default: m.AnalyticsView })));
 const Help = lazy(() => import('./features/help/HelpCenter'));
 
 /* routes: specific-before-generic */
@@ -141,9 +139,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/run-node', title: 'Run a Node', render: (n) => <RunANode navigate={n} /> },
   { path: '/careers', title: 'Careers', render: () => <Careers /> },
   { path: '/learning', title: 'Learning', render: () => <Learning /> },
-  { path: '/social-tasks', title: 'Social Tasks', render: () => <SocialTasks /> },
   { path: '/notifications', title: 'Notifications', render: () => <NotificationsView /> },
-  { path: '/analytics', title: 'Analytics', render: () => <AnalyticsView /> },
   { path: '/help', title: 'Help Center', render: () => <Help /> },
   { path: '/search', title: 'Search', render: (n) => <SearchResults navigate={n} /> },
   { path: '/dmca', title: 'DMCA Policy', render: () => <Dmca /> },

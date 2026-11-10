@@ -38,6 +38,19 @@ export type NotificationFrequencyValue = 'immediate' | 'daily' | 'weekly' | 'dis
  *  the only one any dispatcher reads is `inApp`. */
 export type NotificationMatrixColumn = 'email' | 'push' | 'sms' | 'whatsapp';
 
+/** What each column is called in the product, named once so the grid header and
+ *  the toast that confirms a cell cannot drift apart. */
+export const COLUMN_LABEL: Record<NotificationMatrixColumn, string> = {
+  email: 'Email',
+  // The in-app column. `push` is the key the per-category document uses; the
+  // per-channel document's own `push` field is read by nothing and is not
+  // offered here — that is the switch that used to sit under "Notification
+  // Channels" and change no behaviour.
+  push: 'In-app',
+  sms: 'SMS',
+  whatsapp: 'WhatsApp',
+};
+
 export interface NotificationCell {
   /** Whether that channel may carry that category right now. */
   on: boolean;

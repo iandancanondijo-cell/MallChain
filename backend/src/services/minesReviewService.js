@@ -6,6 +6,7 @@ const WalletTransaction = require('../models/WalletTransaction');
 const Campaign = require('../models/Campaign');
 const { notify } = require('./notify');
 const { syncMallPointAccount, requireWalletAddress } = require('./mallpointsService');
+const validatorEligibility = require('./validatorEligibility');
 
 /**
  * Mines "Proof Reviewer" content-review game: random 6-reviewer assignment,
@@ -72,10 +73,15 @@ function shuffle(arr) {
 }
 
 /**
- * Randomly assign up to REVIEWERS_PER_TASK eligible (staked & active) reviewers
- * to a freshly-submitted task, excluding the submitter. If zero reviewers are
- * eligible, leaves the task untouched — it falls back to the existing
- * admin manual-review queue (status stays 'manual_review').
+ * Randomly assign up to REVIEWERS_PER_TASK eligible reviewers to a
+ * freshly-submitted task, excluding the submitter. "Eligible" is both halves of
+ * the validator rule (see services/validatorEligibility.js): staked AND approved
+ * by an admin. The stake-only query this replaces paid MLPTS to anyone who
+ * deposited 50 of them, whoever they were — approval was checked by no caller at
+ * all. If zero reviewers are eligible, leaves the task untouched — it falls back
+ * to the existing admin manual-review queue (status stays 'manual_review'), and
+ * that is also what a failed allow-list read does: guessing who is approved is
+ * the one thing this pool must not do.
  */
 async function autoAssignReviewers(task) {
   const pool = await MinesReviewer.find({
@@ -83,9 +89,19 @@ async function autoAssignReviewers(task) {
     validator_id: { $ne: task.miner_id },
   }).lean();
 
-  if (pool.length === 0) return task;
+  let allowedKeys = null;
+  try {
+    allowedKeys = await validatorEligibility.allowedAccountKeys();
+  } catch (err) {
+    allowedKeys = null;
+  }
+  const eligible = allowedKeys === null
+    ? []
+    : pool.filter((r) => allowedKeys.has(String(r.validator_id)));
 
-  const picked = shuffle(pool).slice(0, REVIEWERS_PER_TASK);
+  if (eligible.length === 0) return task;
+
+  const picked = shuffle(eligible).slice(0, REVIEWERS_PER_TASK);
   const votingDeadline = new Date(Date.now() + VOTING_WINDOW_MS);
 
   task.assigned_validators = picked.map((r) => r.validator_id);

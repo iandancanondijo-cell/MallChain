@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, fmtNum, toast } from '../../components/ui';
-import { minesApi, type AssignedTask, type ReviewerProfile } from '../../services/minesApi';
+import { minesApi, type AssignedTask, type ReviewerProfile, type ReviewerQueueSummary } from '../../services/minesApi';
 import { blockedLinkTitle, resolveContentLink, resolveProofLink } from '../../services/proofLink';
 
 /**
@@ -8,12 +8,20 @@ import { blockedLinkTitle, resolveContentLink, resolveProofLink } from '../../se
  * assigned to 6 staked reviewers, votes are reputation-weighted, and the
  * submitter is rewarded once the weighted threshold resolves. See
  * backend/src/services/minesReviewService.js.
+ *
+ * The queue list is only the slice of the network's work that
+ * /my-assigned handed this account, so on its own it cannot tell "nothing
+ * needs reviewing" from "nobody has claimed this yet" — and the second case is
+ * the one where a stake actually changes anything. GET
+ * /api/task-assignment/reviewer/queue-summary counts the submissions
+ * themselves, and its numbers drive the cards above the list.
  */
 export default function MinesValidatorQueue() {
   useStoreVersion();
 
   const [profile, setProfile] = useState<ReviewerProfile | null>(null);
   const [tasks, setTasks] = useState<AssignedTask[] | null>(null);
+  const [queue, setQueue] = useState<ReviewerQueueSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [votingId, setVotingId] = useState<string | null>(null);
@@ -21,13 +29,18 @@ export default function MinesValidatorQueue() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const [profileResult, queueResult] = await Promise.all([minesApi.getReviewerProfile(), minesApi.getQueue()]);
+    const [profileResult, queueResult, summaryResult] = await Promise.all([
+      minesApi.getReviewerProfile(),
+      minesApi.getQueue(),
+      minesApi.reviewerQueueSummary(),
+    ]);
     if (profileResult.ok && profileResult.data) setProfile(profileResult.data);
     if (queueResult.ok && queueResult.data) {
       setTasks(queueResult.data);
     } else if (!queueResult.ok) {
       setError(queueResult.error || 'Failed to load your review queue');
     }
+    setQueue(summaryResult.ok && summaryResult.data ? summaryResult.data : null);
     setLoading(false);
   }, []);
 
@@ -56,21 +69,82 @@ export default function MinesValidatorQueue() {
   };
 
   const eligible = profile?.stakeStatus === 'active';
+  // Both halves are needed (see services/validatorEligibility.js): a reviewer
+  // who is staked but has no approved application is refused by the vote
+  // route, so their buttons have to say which half is missing rather than
+  // pointing at a stake they already hold.
+  const approvalMissing = profile?.review_eligible === false && eligible;
+  const canVote = eligible && !approvalMissing;
 
   return (
     <div>
       <div className="view-head">
         <h1 className="text-gradient">Proof Reviewer Queue</h1>
         <span className="sub">Randomly assigned submissions — vote is weighted by your reputation</span>
-        <span className="chip gold">{tasks?.length ?? 0} assigned</span>
+        <span className="chip gold">{tasks?.length ?? 0} assigned to you</span>
+        {queue && queue.awaiting_assignment > 0 && (
+          <span className="chip">{fmtNum(queue.awaiting_assignment)} nobody has claimed</span>
+        )}
       </div>
 
       {profile && (
-        <div className="mc-stats-grid stagger" style={{ marginBottom: 16 }}>
-          <div className="card card-hover"><div className="lbl">Stake status</div><div className="num" style={{ fontSize: 14 }}>{profile.stakeStatus || 'unstaked'}</div></div>
-          <div className="card card-hover"><div className="lbl">Staked</div><div className="num">{fmtNum(profile.stakedAmount)} MLPTS</div></div>
-          <div className="card card-hover"><div className="lbl">Reputation</div><div className="num">{profile.mining_reputation}</div></div>
-          <div className="card card-hover"><div className="lbl">Earnings</div><div className="num">{fmtNum(profile.total_earnings)} MLPTS</div></div>
+        <div className="earn-grid stagger" style={{ marginBottom: 16 }}>
+          <div className="card earn-card">
+            <div className="lbl">Tasks awaiting verification</div>
+            <div className="num">{fmtNum(queue?.awaiting_verification ?? 0)}</div>
+            <div className="def">
+              {queue
+                ? queue.awaiting_assignment > 0
+                  ? `${fmtNum(queue.awaiting_assignment)} of them no reviewer has claimed yet, so nobody is looking. ${fmtNum(queue.settled_last_24h)} decided in the last 24 hours.`
+                  : `Every one is with a reviewer. ${fmtNum(queue.settled_last_24h)} decided in the last 24 hours.`
+                : 'This server does not report the queue behind your assignments.'}
+            </div>
+            <div className="src">
+              {queue?.oldest_waiting_since
+                ? `task_submissions · oldest waiting since ${new Date(queue.oldest_waiting_since).toLocaleDateString()}`
+                : 'task_submissions · non-terminal'}
+            </div>
+          </div>
+          <div className="card earn-card">
+            <div className="lbl">Waiting on your vote</div>
+            <div className="num">{fmtNum(queue?.waiting_for_my_vote ?? 0)}</div>
+            <div className="def">
+              {fmtNum(queue?.assigned_to_me ?? 0)} submission{queue?.assigned_to_me === 1 ? '' : 's'} carry your validator id; the rest of them are already voted. Only a vote from an active stake counts toward a decision.
+            </div>
+            <div className="src">task_submissions · assigned_validators</div>
+          </div>
+          <div className="card earn-card">
+            <div className="lbl">Stake status</div>
+            <div className="num" style={{ fontSize: 16 }}>{profile.stakeStatus || 'unstaked'}</div>
+            <div className="def">
+              {profile.stakeStatus === 'active'
+                ? profile.validator_allowed === false
+                  ? 'Staked, but no approved validator application covers this account, so nothing is assigned to you.'
+                  : profile.validator_allowed === null || profile.validator_allowed === undefined
+                    ? 'Stake half met. Whether an admin has approved a validator application for this account was not reported.'
+                    : 'Both halves met — approved application plus active bond — so random assignment can reach you.'
+                : `Nothing is assigned to an unstaked reviewer. The minimum is ${fmtNum(profile.minRequiredStake)} MLPTS.`}
+            </div>
+            <div className="src">mines_reviewers · stakeStatus + validator_applications · status</div>
+          </div>
+          <div className="card earn-card">
+            <div className="lbl">Staked</div>
+            <div className="num">{fmtNum(profile.stakedAmount)} <span className="unit" style={{ fontSize: 11 }}>MLPTS</span></div>
+            <div className="def">Locked while you review and returned when you unstake; a bad streak of missed votes is what puts it at risk.</div>
+            <div className="src">mines_reviewers · stakedAmount</div>
+          </div>
+          <div className="card earn-card">
+            <div className="lbl">Reputation</div>
+            <div className="num">{profile.mining_reputation}</div>
+            <div className="def">The weight your vote carries when a panel resolves a submission — not a score you can spend.</div>
+            <div className="src">mines_reviewers · mining_reputation</div>
+          </div>
+          <div className="card earn-card">
+            <div className="lbl">Review earnings</div>
+            <div className="num">{fmtNum(profile.total_earnings)} <span className="unit" style={{ fontSize: 11 }}>MLPTS</span></div>
+            <div className="def">Paid for deciding other people&rsquo;s submissions, separately from anything you earned as a participant.</div>
+            <div className="src">mines_reviewers · total_earnings</div>
+          </div>
         </div>
       )}
 
@@ -96,7 +170,15 @@ export default function MinesValidatorQueue() {
       <div className="card card-glow bg-gradient-card">
         {loading && !tasks && <div className="tiny">Loading…</div>}
         {tasks?.length === 0 && (
-          <div className="empty-state"><div className="es-ico">🛂</div><div className="es-t">Queue empty — nothing assigned to you right now</div><div className="es-m">New submissions are randomly assigned to eligible reviewers as they arrive.</div></div>
+          <div className="empty-state">
+            <div className="es-ico">🛂</div>
+            <div className="es-t">Queue empty — nothing assigned to you right now</div>
+            <div className="es-m">
+              {queue && queue.awaiting_verification > 0
+                ? `${fmtNum(queue.awaiting_verification)} submission${queue.awaiting_verification === 1 ? '' : 's'} still await a decision network-wide; assignment is random among eligible reviewers.`
+                : 'New submissions are randomly assigned to eligible reviewers as they arrive.'}
+            </div>
+          </div>
         )}
         {(tasks || []).map((t) => {
           const proof = resolveProofLink(t.proof_url);
@@ -147,12 +229,17 @@ export default function MinesValidatorQueue() {
                   <span className="mc-badge b-approved">voted {t.my_vote}</span>
                 ) : (
                   <div className="row">
-                    {/* The server refuses a vote without an active stake, so an
-                        enabled button here would only produce a refusal. */}
-                    <button className="btn btn-primary btn-sm" disabled={votingId === t._id || !eligible} onClick={() => castVote(t._id, 'yes')}>✓ Approve</button>
-                    <button className="btn btn-ghost btn-sm" disabled={votingId === t._id || !eligible} onClick={() => castVote(t._id, 'no')}>✕ Reject</button>
-                    {!eligible && (
-                      <span className="tiny" style={{ color: 'var(--txt-3)' }}>Stake required — <a href="#/mines/reviewer/stake">Stake now</a></span>
+                    {/* The server refuses a vote unless both halves are in
+                        place, so an enabled button here would only produce a
+                        refusal. */}
+                    <button className="btn btn-primary btn-sm" disabled={votingId === t._id || !canVote} onClick={() => castVote(t._id, 'yes')}>✓ Approve</button>
+                    <button className="btn btn-ghost btn-sm" disabled={votingId === t._id || !canVote} onClick={() => castVote(t._id, 'no')}>✕ Reject</button>
+                    {!canVote && (
+                      <span className="tiny" style={{ color: 'var(--txt-3)' }}>
+                        {approvalMissing
+                          ? <>Validator approval required — <a href="#/validators/apply">apply</a></>
+                          : <>Stake required — <a href="#/mines/reviewer/stake">Stake now</a></>}
+                      </span>
                     )}
                   </div>
                 )}

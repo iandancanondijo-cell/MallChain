@@ -55,7 +55,9 @@ export async function generateConsensusKeypair(): Promise<GeneratedConsensusKey>
 
 /** Derives the "…valoper1…" operator address from a regular "mall1…" account address — same key, different bech32 prefix. */
 export function toValoperAddress(accountAddress: string): string {
-  const { data } = fromBech32(accountAddress, undefined);
+  // Explicit limit: the installed @cosmjs/encoding forwards a default of
+  // Infinity to @scure/base, which rejects it with a RangeError.
+  const { data } = fromBech32(accountAddress, 1000);
   return toBech32(chain.addressPrefix + VALOPER_SUFFIX, data);
 }
 

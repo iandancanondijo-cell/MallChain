@@ -3,6 +3,7 @@ import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, StatusChip, toast } from '../../components/ui';
 import { useTransactionData } from '../../hooks/useTransactionData';
 import { TransactionDetailModal } from './TransactionDetailModal';
+import { AddressIdentity } from '../../components/WalletIdentity';
 import { LoadingState } from '../../components/LoadingState';
 
 /**
@@ -161,7 +162,12 @@ export default function WalletHistory() {
         ) : (
           <>
             {/* Task 13.6: Display only real transactions */}
-            {transactions.map((t) => (
+            {transactions.map((t) => {
+              // The row's other side: a received tx came *from* someone,
+              // everything else went *to* someone. Swap/stake records carry a
+              // `to` when they have one at all.
+              const party = t.type === 'receive' ? t.from : (t.to || t.from);
+              return (
               <div
                 key={t.id}
                 className="list-row"
@@ -178,12 +184,20 @@ export default function WalletHistory() {
                     {t.type} · {fmtNum(t.amount)} {t.asset}
                   </div>
                   <div className="m mono">
-                    {t.note || t.to || t.from || t.hash?.slice(0, 8) || ''} · {new Date(t.ts).toLocaleString()}
+                    {t.note
+                      ? t.note
+                      : party
+                        ? <AddressIdentity address={party} label={t.type === 'receive' ? 'From' : 'To'} size={18} />
+                        // No counterparty on this record at all — the hash is
+                        // the only thing left that identifies it.
+                        : (t.hash?.slice(0, 8) || '')}
+                    {' · '}{new Date(t.ts).toLocaleString()}
                   </div>
                 </div>
                 <StatusChip status={t.status} />
               </div>
-            ))}
+              );
+            })}
           </>
         )}
       </div>

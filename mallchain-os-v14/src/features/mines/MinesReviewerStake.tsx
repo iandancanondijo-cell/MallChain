@@ -2,7 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, fmtNum, toast } from '../../components/ui';
 import { minesApi, type ReviewerProfile } from '../../services/minesApi';
 
-/** Stake MLPTS to become eligible for random Proof Reviewer assignment. Separate from x/mlcoin StakingRecords and real chain validator bonding. */
+/**
+ * Stake MLPTS toward becoming a Proof Reviewer. This deposit is one of two
+ * required halves — the other is an approved validator application — and
+ * GET /reviewer/profile reports both, because the page used to promise that
+ * staking alone made the reader assignable. Separate from x/mlcoin
+ * StakingRecords and from real chain validator bonding.
+ */
 export default function MinesReviewerStake() {
   useStoreVersion();
 
@@ -60,7 +66,7 @@ export default function MinesReviewerStake() {
 
   return (
     <div>
-      <div className="view-head"><h1 className="text-gradient">Stake to Review</h1><span className="sub">Reviewer-specific MLPTS deposit — required to be randomly assigned Mines submissions</span></div>
+      <div className="view-head"><h1 className="text-gradient">Stake to Review</h1><span className="sub">Reviewer-specific MLPTS deposit — one half of what assignment requires; the other is an approved validator application</span></div>
 
       {error && (
         <div className="card" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 16, marginBottom: 16 }}>
@@ -72,8 +78,29 @@ export default function MinesReviewerStake() {
         <div className="card card-hover"><div className="lbl">Current stake</div><div className="num">{loading ? '—' : fmtNum(profile?.stakedAmount ?? 0)} MLPTS</div></div>
         <div className="card card-hover"><div className="lbl">Minimum required</div><div className="num">{loading ? '—' : fmtNum(profile?.minRequiredStake ?? 0)} MLPTS</div></div>
         <div className="card card-hover"><div className="lbl">Status</div><div className="num" style={{ fontSize: 14 }}>{loading ? '—' : profile?.stakeStatus ?? 'unstaked'}</div></div>
+        <div className="card card-hover"><div className="lbl">Validator approval</div><div className="num" style={{ fontSize: 14 }}>{loading ? '—' : profile?.validator_allowed === null ? 'not reported' : profile?.validator_allowed ? 'approved' : 'not approved'}</div></div>
         <div className="card card-hover"><div className="lbl">Review earnings</div><div className="num">{loading ? '—' : fmtNum(profile?.total_earnings ?? 0)} MLPTS</div></div>
       </div>
+
+      {profile && profile.review_eligible === false && (
+        <div className="card mb" style={{ borderColor: 'var(--gold)', backgroundColor: 'var(--bg-2)' }}>
+          <div className="tiny" style={{ color: 'var(--txt-2)' }}>
+            {profile.stakeStatus !== 'active' && profile.validator_allowed === false
+              ? 'Neither half is in place: no approved validator application and no active stake. Assignments need both.'
+              : profile.stakeStatus !== 'active'
+                ? `Your application is approved, but this bond is ${profile.stakeStatus} — top up to at least ${fmtNum(profile.minRequiredStake)} MLPTS below to complete the pair.`
+                : 'The stake half is met, but no admin has approved a validator application for this account, so submissions will not be assigned to you. Apply on the Validators page.'}
+          </div>
+        </div>
+      )}
+
+      {profile && profile.review_eligible === null && profile.stakeStatus === 'active' && (
+        <div className="card mb" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-2)' }}>
+          <div className="tiny" style={{ color: 'var(--txt-2)' }}>
+            Your stake is active. The approval list could not be read just now, so whether you are assignable is unknown — this page is not claiming you are not approved.
+          </div>
+        </div>
+      )}
 
       {profile && profile.stakeStatus === 'suspended' && (
         <div className="card mb" style={{ borderColor: 'var(--red)', backgroundColor: 'var(--red-dark)' }}>
@@ -90,7 +117,7 @@ export default function MinesReviewerStake() {
           <input className="input" type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 50" />
           <div className="hint">
             {profile?.minRequiredStake
-              ? `At least ${fmtNum(profile.minRequiredStake)} MLPTS total makes you eligible for random assignment. It is held by the review system, not sent anywhere.`
+              ? `At least ${fmtNum(profile.minRequiredStake)} MLPTS total is the stake half of the rule; an approved validator application is the other. It is held by the review system, not sent anywhere.`
               : 'Loading the minimum stake…'}
           </div>
           {profile && profile.stakedAmount < (profile.minRequiredStake ?? 0) && (

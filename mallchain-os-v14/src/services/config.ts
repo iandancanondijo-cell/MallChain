@@ -69,13 +69,32 @@ function validateApiUrl(url: string): string {
   
   // Basic URL validation: try to parse as URL object
   // Catches invalid URLs like "http://invalid..url" (double dots)
+  let parsed: URL;
   try {
-    const urlObj = new URL(url);
-    // Valid URL
-    return url;
-  } catch (err) {
+    parsed = new URL(url);
+  } catch {
     throw new Error(`VITE_API_BASE_URL is not a valid URL: ${url}`);
   }
+
+  // A production bundle bakes this origin into every request, so building it
+  // against the loopback address silently produces a site that only works on
+  // the machine serving the backend — the classic static-hosting mistake.
+  // This runs at module load, so such a build fails loudly on first page load
+  // instead of shipping users' requests to a localhost that isn't there.
+  // VITE_ALLOW_LOCAL_API=1 is the opt-out for a deliberate local build
+  // (vite preview smoke tests, offline demos).
+  if (
+    import.meta.env.PROD &&
+    /^(localhost|127\.|0\.0\.0\.0|::1)/.test(parsed.hostname) &&
+    import.meta.env.VITE_ALLOW_LOCAL_API !== '1'
+  ) {
+    throw new Error(
+      `VITE_API_BASE_URL points at a loopback address (${url}) in a production build. ` +
+      'Set it to the API origin your deployed users can reach, or pass VITE_ALLOW_LOCAL_API=1 for a deliberate local build.'
+    );
+  }
+
+  return url;
 }
 
 // Read and validate API base URL from environment

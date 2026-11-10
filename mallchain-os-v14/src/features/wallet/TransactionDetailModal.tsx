@@ -8,6 +8,7 @@
 import { useState, useEffect } from 'react';
 import { walletApi, type Transaction } from '../../services/walletApi';
 import { fmtNum, StatusChip } from '../../components/ui';
+import { AddressIdentity } from '../../components/WalletIdentity';
 
 interface TransactionDetailModalProps {
   transactionId: string;
@@ -131,6 +132,13 @@ export function TransactionDetailModal({ transactionId, isOpen, onClose }: Trans
               {transaction.from && (
                 <div style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid var(--bg-2)' }}>
                   <div style={{ fontSize: '12px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>From</div>
+                  {/* Whose wallet this is, when the account behind the address
+                      has a picture and has not hidden its profile. The address
+                      itself stays below in full — this adds the face, it does
+                      not replace the thing you would copy. */}
+                  <div style={{ marginBottom: '8px' }}>
+                    <AddressIdentity address={transaction.from} label="From" size={22} showAddress={false} />
+                  </div>
                   <div
                     style={{
                       fontFamily: 'monospace',
@@ -150,6 +158,9 @@ export function TransactionDetailModal({ transactionId, isOpen, onClose }: Trans
               {transaction.to && (
                 <div style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid var(--bg-2)' }}>
                   <div style={{ fontSize: '12px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>To</div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <AddressIdentity address={transaction.to} label="To" size={22} showAddress={false} />
+                  </div>
                   <div
                     style={{
                       fontFamily: 'monospace',

@@ -3,6 +3,7 @@ import { CreditCard, Phone, Coins, CheckCircle2, Loader2, Smartphone, ShoppingBa
 import { api } from '../services/api';
 import { store } from '../store/store';
 import { authService } from '../services/auth';
+import { useLivePrice } from '../hooks/useLivePrice';
 import { useStoreVersion, toast } from '../components/ui';
 import { useWalletGate, reportLinkFailure, linkAttemptGuard } from '../features/wallet/walletGate';
 import WalletGateNotice from '../features/wallet/WalletGateNotice';
@@ -10,13 +11,19 @@ import WalletGateNotice from '../features/wallet/WalletGateNotice';
 type Step = 'form' | 'awaiting_payment' | 'stalled' | 'crediting' | 'done';
 
 /**
- * Mallpoints price in KES — a fixed product constant (backend default:
- * MALLPOINT_PRICE_KES=2, see backend/src/routes/mallpointsPurchase.js).
+ * The Mallpoints rate is whatever the server's economy constants say (`MALLPOINT_PRICE_KES`,
+ * bundled into /api/economy/state) — the same number the reserve quote divides
+ * by. Quoting a total from a client-side constant would show a buyer one figure
+ * and STK-push them another the moment a deployment moves off the default, so
+ * there is deliberately no fallback rate here: with no rate loaded, nothing can
+ * be paid.
+ *
  * The purchase lifecycle mirrors WalletBuy's MLCNS flow: reserve a quote →
  * M-Pesa STK push → poll status → credit the MLPTS balance.
  */
-const MALLPOINT_PRICE_KES = 2;
-const MIN_MLPTS = 5; // backend enforces amount_kes >= 10
+// routes/mallpointsPurchase.js refuses a quote under KSH 10; the field asks for
+// MLPTS, so that floor is expressed through the live rate.
+const MIN_KES = 10;
 
 // 40 × 3s ≈ 2 minutes with no callback means the prompt was never answered.
 const STALL_TICKS = 40;
@@ -36,12 +43,21 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
   // MLPTS credit to a wallet, a wallet links to an account, and the link needs
   // a verified identity — the gate is checked before any of those are offered.
   const { gate, refresh: refreshGate } = useWalletGate();
+  const livePrice = useLivePrice();
+  /** Null until the server states it — the rate is never assumed. */
+  const rateKes = livePrice.pointPriceKes;
+  const minMlpts = rateKes ? Math.ceil(MIN_KES / rateKes) : null;
 
   const [amount, setAmount] = useState(50);
   const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<Step>('form');
   const [quoteId, setQuoteId] = useState<string | null>(null);
+  /** The server's own figures for the reserved quote, shown while it is being paid. */
+  const [quote, setQuote] = useState<{ kes: number; mlpts: number } | null>(null);
+  /** Set when a payment confirmed but the credit call refused — the id is the
+   *  support reference, so the form keeps it visible until a new quote replaces it. */
+  const [uncreditedQuoteId, setUncreditedQuoteId] = useState<string | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [walletAddress, setWalletAddress] = useState('');
   const [credited, setCredited] = useState(0);
@@ -145,7 +161,14 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
     );
   }
 
-  const totalKes = Math.max(0, amount) * MALLPOINT_PRICE_KES;
+  const totalKes = rateKes ? Math.max(0, amount) * rateKes : 0;
+
+  /** Leave the payment screens: the quote reference goes with them. */
+  const backToForm = () => {
+    setStep('form');
+    setQuoteId(null);
+    setQuote(null);
+  };
 
   /** Poll the quote every 3s until Safaricom's callback confirms or fails it. */
   const pollStatus = (id: string) => {
@@ -169,7 +192,11 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
         const creditRes = await api.post<{ ok: boolean; mallpointsCredited: number; newBalance: number }>('/api/mallpoints/purchase/credit', { quoteId: id });
         if (!creditRes.ok || !creditRes.data?.ok) {
           toast(creditRes.error || 'Payment received but crediting failed — contact support with your quote id', false);
+          // The money moved. The quote id is the only thing support can work
+          // from, so it stays on screen after returning to the form.
+          setUncreditedQuoteId(id);
           setStep('form');
+          setQuote(null);
           setBusy(false);
           return;
         }
@@ -182,7 +209,7 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
       } else if (res.data.status === 'failed') {
         if (pollRef.current) clearInterval(pollRef.current);
         toast('Payment failed — no Mallpoints were credited', false);
-        setStep('form');
+        backToForm();
         setBusy(false);
       }
     }, 3000);
@@ -191,7 +218,7 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
   const cancelPayment = () => {
     if (pollRef.current) clearInterval(pollRef.current);
     setBusy(false);
-    setStep('form');
+    backToForm();
   };
 
   const submit = async () => {
@@ -199,8 +226,12 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
       toast('No wallet connected — reload the page or log in again', false);
       return;
     }
-    if (!Number.isFinite(amount) || amount < MIN_MLPTS) {
-      toast(`Minimum purchase is ${MIN_MLPTS} MLPTS (KSH ${MIN_MLPTS * MALLPOINT_PRICE_KES})`, false);
+    if (!rateKes || !minMlpts) {
+      toast('The Mallpoints rate is not loaded — reload to get the current price', false);
+      return;
+    }
+    if (!Number.isFinite(amount) || amount < minMlpts) {
+      toast(`Minimum purchase is KSH ${MIN_KES} — ${minMlpts} MLPTS at ${rateKes} KES each`, false);
       return;
     }
     const normalized = phone.replace(/\s/g, '').replace(/^0/, '254');
@@ -211,7 +242,13 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
 
     setBusy(true);
 
-    const reserveRes = await api.post<{ ok: boolean; quoteId: string; mallpointsAmount: number }>('/api/mallpoints/purchase/reserve', {
+    const reserveRes = await api.post<{
+      ok: boolean;
+      quoteId: string;
+      amountKes?: number;
+      mallpointsAmount?: number;
+      pricePerMallpoint?: number;
+    }>('/api/mallpoints/purchase/reserve', {
       amount_kes: totalKes,
       address: walletAddress,
     });
@@ -223,6 +260,17 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
 
     const id = reserveRes.data.quoteId;
     setQuoteId(id);
+    setUncreditedQuoteId(null);
+    // Once the server has priced the quote its figures are the truth for this
+    // payment — if the rate moved between page load and reserve, the STK push
+    // settles the quote's amount, not the one previewed on the form.
+    setQuote({
+      kes: reserveRes.data.amountKes ?? totalKes,
+      mlpts: reserveRes.data.mallpointsAmount ?? amount,
+    });
+    if (reserveRes.data.pricePerMallpoint && reserveRes.data.pricePerMallpoint !== rateKes) {
+      toast(`Rate updated to ${reserveRes.data.pricePerMallpoint} KES / MLPTS for this quote`);
+    }
 
     const stkRes = await api.post<{ ok: boolean }>('/api/mallpoints/purchase/mpesa', {
       quoteId: id,
@@ -271,6 +319,17 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
       <div className="wo-card card-glow bg-gradient-card" style={{ maxWidth: 520 }}>
         {step === 'form' && (
           <>
+            {uncreditedQuoteId && (
+              <div className="wo-status" role="alert" style={{ padding: '12px 14px', marginBottom: 14, textAlign: 'left' }}>
+                <div className="wo-status-title" style={{ color: 'var(--warning, var(--gold))', fontSize: 14 }}>
+                  A payment landed but was not credited
+                </div>
+                <div className="wo-status-text" style={{ fontSize: 12.5 }}>
+                  Quote <span className="mono">{uncreditedQuoteId}</span> was confirmed and the balance credit failed.
+                  Contact support with that id — do not pay the same quote again.
+                </div>
+              </div>
+            )}
             <div className="field mb">
               <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Coins size={13} style={{ color: 'var(--gold)' }} /> Amount (MLPTS)
@@ -278,14 +337,18 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
               <input
                 className="input"
                 type="number"
-                min={MIN_MLPTS}
+                min={minMlpts ?? undefined}
                 step={1}
                 value={amount}
                 onChange={(e) => setAmount(Number(e.target.value))}
                 disabled={busy}
               />
               <div className="hint" style={{ fontSize: 11.5, color: 'var(--txt-3)', marginTop: 4 }}>
-                Your balance: {balance === null ? '…' : balance} MLPTS · minimum {MIN_MLPTS} MLPTS (KSH {MIN_MLPTS * MALLPOINT_PRICE_KES})
+                Your balance: {balance === null ? '…' : balance} MLPTS
+                {' · '}
+                {rateKes && minMlpts
+                  ? `minimum ${minMlpts} MLPTS (KSH ${MIN_KES})`
+                  : 'minimum KSH 10'}
               </div>
             </div>
 
@@ -310,11 +373,13 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
             <div className="wo-summary" style={{ marginBottom: 16 }}>
               <div className="wo-summary-row">
                 <span className="wo-summary-label">You receive</span>
-                <span className="wo-summary-value" style={{ color: 'var(--gold)' }}>{Math.max(0, amount) || 0} MLPTS</span>
+                <span className="wo-summary-value" style={{ color: 'var(--gold)' }}>
+                  {rateKes ? `${Math.max(0, amount) || 0} MLPTS` : '—'}
+                </span>
               </div>
               <div className="wo-summary-row">
                 <span className="wo-summary-label">You pay</span>
-                <span className="wo-summary-value">{totalKes.toLocaleString()} KES</span>
+                <span className="wo-summary-value">{rateKes ? `${totalKes.toLocaleString()} KES` : '—'}</span>
               </div>
               <div className="wo-summary-row">
                 <span className="wo-summary-label">Phone</span>
@@ -322,9 +387,26 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
               </div>
               <div className="wo-summary-row total">
                 <span className="wo-summary-label">Rate</span>
-                <span className="wo-summary-value">{MALLPOINT_PRICE_KES} KES / MLPTS</span>
+                <span className="wo-summary-value">
+                  {rateKes
+                    ? `${rateKes} KES / MLPTS`
+                    : livePrice.loading
+                      ? 'loading the current rate…'
+                      : 'rate unavailable'}
+                </span>
               </div>
             </div>
+
+            {/* Nothing here is priced until the server states the rate; the
+                reserve quote would still be right, but showing a "You pay"
+                figure we made up next to real money is not. */}
+            {!rateKes && (
+              <div className="tiny" style={{ marginBottom: 10, color: 'var(--warning, var(--gold))' }}>
+                {livePrice.loading
+                  ? 'Waiting for the current Mallpoints rate from the network…'
+                  : 'Could not load the current Mallpoints rate. Check your connection and reload — paying is disabled until the rate is known.'}
+              </div>
+            )}
 
             {walletAddress && (
               <div className="tiny" style={{ marginBottom: 10, color: 'var(--txt-3)' }}>
@@ -335,7 +417,7 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
             <button
               className="btn btn-primary btn-block"
               onClick={submit}
-              disabled={busy || !walletAddress}
+              disabled={busy || !walletAddress || !rateKes}
               style={{ gap: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
             >
               {busy ? <><span className="wo-spinner" /> Processing…</> : <><CreditCard size={14} /> Pay with M-Pesa <ArrowRight size={14} /></>}
@@ -353,7 +435,9 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
             </div>
             <div className="wo-status-title">Check your phone</div>
             <div className="wo-status-text">
-              Complete the M-Pesa prompt sent to <b className="mono">{phone}</b> for <b>{totalKes.toLocaleString()} KES</b>.
+              Complete the M-Pesa prompt sent to <b className="mono">{phone}</b> for{' '}
+              <b>{(quote?.kes ?? totalKes).toLocaleString()} KES</b>
+              {' · '}{quote ? `${quote.mlpts} MLPTS` : `${Math.max(0, amount) || 0} MLPTS`}.
             </div>
             {quoteId && <div className="wo-hash" style={{ marginTop: 12 }}>Quote {quoteId}</div>}
             <div className="wo-status-text" style={{ marginTop: 6, fontSize: 12, color: 'var(--txt-3)' }}>
@@ -375,7 +459,7 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
               We did not get a payment from <b className="mono">{phone}</b>. The prompt may have expired or been missed — check the handset and start a new request.
             </div>
             {quoteId && <div className="wo-hash" style={{ marginTop: 12 }}>Quote {quoteId}</div>}
-            <button className="btn btn-primary" onClick={() => { setStep('form'); setQuoteId(null); }} style={{ marginTop: 20 }}>
+            <button className="btn btn-primary" onClick={backToForm} style={{ marginTop: 20 }}>
               Try again
             </button>
           </div>
@@ -409,7 +493,7 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
             {quoteId && <div className="wo-hash" style={{ marginTop: 12 }}>Quote {quoteId}</div>}
             <button
               className="btn btn-primary"
-              onClick={() => { setStep('form'); setQuoteId(null); }}
+              onClick={backToForm}
               style={{ marginTop: 20 }}
             >
               New purchase

@@ -10,6 +10,8 @@ const idempotency = require('../middleware/idempotency');
 const User = require('../models/user');
 const TaskSubmission = require('../models/TaskSubmission');
 const Campaign = require('../models/Campaign');
+const CampaignOpen = require('../models/CampaignOpen');
+const CampaignImpression = require('../models/CampaignImpression');
 const WalletTransaction = require('../models/WalletTransaction');
 const MallPointAccount = require('../models/MallPointAccount');
 const { autoAssignReviewers, checkAndResolve } = require('../services/minesReviewService');
@@ -110,10 +112,351 @@ router.get('/campaigns/active', async (_req, res) => {
   try {
     const q = { status: 'active', budget_remaining: { $gt: 0 } };
     const rows = await Campaign.find(q).sort({ rate_per_task: -1 }).limit(50).lean();
+    // `content_link` is deliberately not part of the list. A campaign link is
+    // worth a reward, so it may only be handed out by POST
+    // /campaigns/:id/open, which records the open and spends the slot. Any
+    // other surface — an anchor in the card, a cached list, a shared link —
+    // lets a participant reach the content without ever telling us, and then
+    // "open once, then submit or forfeit" is a slogan instead of a rule.
+    for (const row of rows) delete row.content_link;
     res.json(ok(rows));
   } catch (e) {
     // Return empty array if DB not configured for this collection
     res.json(ok([]));
+  }
+});
+
+/**
+ * campaign_id is Mixed and was written as a string by older paths, so every
+ * lookup of a campaign's rows accepts both shapes.
+ */
+function campaignIdFilter(campaignId) {
+  return { $in: [campaignId, String(campaignId)] };
+}
+
+/**
+ * UTC calendar day as 'YYYY-MM-DD' — the same bucket `$dateToString` gives the
+ * rewards aggregation below, so two series fetched different ways still line
+ * up on one x-axis.
+ */
+function dayKey(when) {
+  return new Date(when).toISOString().slice(0, 10);
+}
+
+/**
+ * Note which campaigns appeared on this account's screen today.
+ *
+ * Upserted per (user, campaign, day) rather than per feed load, because the
+ * metric being charted is "how many tasks crossed your window", not how many
+ * times the browser asked. A refresh therefore cannot inflate it, and the
+ * collection stays bounded at one row per task per day.
+ *
+ * Fire-and-forget on purpose, and called after the response is already sent:
+ * a counter nobody can read is worth less than a Discover that stopped
+ * working because the write failed.
+ */
+function recordImpressions(userId, campaigns) {
+  if (!campaigns.length) return;
+  const day = dayKey(Date.now());
+  const now = new Date();
+  CampaignImpression.bulkWrite(
+    campaigns.map((c) => ({
+      updateOne: {
+        filter: { user_id: userId, campaign_id: c._id, day },
+        update: { $set: { last_seen_at: now }, $setOnInsert: { first_seen_at: now } },
+        upsert: true,
+      },
+    })),
+    { ordered: false },
+  ).catch((e) => logger.warn('campaign impressions not recorded', { error: e.message }));
+}
+
+/**
+ * The participant's feed: what this account may still do, and nothing else.
+ *
+ * Three exclusions, each one a rule rather than a nicety:
+ *  - campaigns the caller created — a creator must not merely be hidden from
+ *    Discover, they must never be handed their own task at all (the same
+ *    boundary is enforced where the money is, in /open and /submissions);
+ *  - campaigns they have opened — that attempt is spent and the work now
+ *    belongs to Participation as "finish your screenshot";
+ *  - campaigns they have submitted — with reviewers, paid or refused, it has
+ *    already crossed their path once and Discover must not show it again.
+ *
+ * `available_mlpts` is what the cards on this screen can actually pay this
+ * account: rate x remaining slots per campaign, capped by what is left of that
+ * campaign's budget. It is computed here rather than summed in the browser
+ * because the slots a person has left is not list data — it is their history.
+ */
+router.get('/campaigns/available', minesAuth, async (req, res) => {
+  try {
+    const userId = String(req.userId);
+    const [rows, opened, submitted] = await Promise.all([
+      Campaign.find({ status: 'active', budget_remaining: { $gt: 0 } })
+        .sort({ rate_per_task: -1 }).limit(200).lean(),
+      CampaignOpen.distinct('campaign_id', { user_id: req.userId }),
+      TaskSubmission.distinct('campaign_id', { miner_id: req.userId }),
+    ]);
+    const touched = new Set([...opened, ...submitted].map((id) => String(id)));
+    const campaigns = rows
+      .filter((c) => String(c.creator_id || '') !== userId)
+      .filter((c) => !touched.has(String(c._id)))
+      .slice(0, 50);
+    for (const c of campaigns) delete c.content_link;
+    const availableMlpts = campaigns.reduce((sum, c) => {
+      const slots = Number(c.max_completions_per_user) || 1;
+      const perCompletion = Number(c.rate_per_task) || 0;
+      const left = Number(c.budget_remaining) || 0;
+      return sum + Math.min(slots * perCompletion, left);
+    }, 0);
+    res.json(ok({
+      campaigns,
+      available_mlpts: Math.round(availableMlpts * 100) / 100,
+    }));
+    recordImpressions(userId, campaigns);
+  } catch (e) { res.status(500).json(fail(e)); }
+});
+
+/**
+ * Link opens this account spent and never attached a screenshot to. Discover
+ * drops a campaign the moment it is touched, so without this list the rule
+ * "open once, then upload or forfeit" would strand the attempt: the offer has
+ * to stay reachable somewhere until it is either completed or closed.
+ */
+router.get('/opens/pending', minesAuth, async (req, res) => {
+  try {
+    const userId = String(req.userId);
+    const opens = await CampaignOpen.find({ user_id: req.userId, status: 'awaiting_proof' })
+      .sort({ opened_at: -1 }).limit(50).lean();
+    const ids = [...new Set(opens.map((o) => String(o.campaign_id)))];
+    // campaign_id is Mixed, so a lookup accepts both stored shapes.
+    const idFilter = ids.flatMap((id) => (
+      mongoose.isValidObjectId(id) ? [new mongoose.Types.ObjectId(id), id] : [id]
+    ));
+    const rows = ids.length
+      ? await Campaign.find({ _id: { $in: idFilter } })
+        .select('title platform rate_per_task budget_remaining status creator_id').lean()
+      : [];
+    const byId = new Map(rows.map((c) => [String(c._id), c]));
+    res.json(ok(opens.filter((o) => {
+      // A row written before /open refused creators would otherwise keep
+      // offering the creator their own task.
+      const c = byId.get(String(o.campaign_id));
+      return String(c?.creator_id || '') !== userId;
+    }).map((o) => {
+      const c = byId.get(String(o.campaign_id)) || null;
+      return {
+        open_id: String(o._id),
+        campaign_id: String(o.campaign_id),
+        slot: o.slot || 1,
+        opened_at: o.opened_at || null,
+        // Already released to this account by /open — showing it again costs
+        // nothing, because the slot is spent either way.
+        content_link: o.content_link || '',
+        title: c?.title || '',
+        platform: c?.platform || '',
+        rate_per_task: c?.rate_per_task ?? null,
+        campaign_status: c?.status || 'unknown',
+      };
+    })));
+  } catch (e) { res.status(500).json(fail(e)); }
+});
+
+/**
+ * Everything a participant needs to judge a task before spending their one
+ * link open: who published it, when, what it pays, what is left of the
+ * budget, what the owner actually asked for, and which stage of
+ * open → screenshot → approval they are at.
+ */
+router.get('/campaigns/:id/task', minesAuth, async (req, res) => {
+  try {
+    const campaign = await Campaign.findById(req.params.id).lean();
+    if (!campaign) return res.status(404).json(fail('campaign not found'));
+    // A creator is not a participant, even as a reader. This endpoint is the
+    // participant's view of a task, so reaching it for one's own campaign is
+    // refused rather than rendered — "never meet your own creation" has to
+    // hold for a deep link someone pastes in, not just for a list they scroll.
+    if (String(campaign.creator_id || '') === String(req.userId)) {
+      return badRequest(res, 'this campaign is yours — you cannot take part in your own task', 403);
+    }
+
+    const platformDef = PLATFORMS[campaign.platform];
+    const activityDef = platformDef?.activities?.[campaign.activity_type];
+    const allowance = Number(campaign.max_completions_per_user) || 1;
+
+    const [opens, submissions, creator] = await Promise.all([
+      CampaignOpen.find({ user_id: req.userId, campaign_id: campaignIdFilter(campaign._id) })
+        .sort({ opened_at: 1 }).lean(),
+      TaskSubmission.find({ miner_id: req.userId, campaign_id: campaignIdFilter(campaign._id) })
+        .sort({ created_at: -1 })
+        .select('status assignment_status reward_amount reward_currency created_at completed_at rejection_note proof_url task_type')
+        .lean(),
+      campaign.creator_id
+        ? User.findById(campaign.creator_id).select('username name banned role').lean()
+        : Promise.resolve(null),
+    ]);
+
+    const openableLink = linkPolicy.isSafeExternalUrl(campaign.content_link);
+    let linkHost = null;
+    if (openableLink) {
+      try { linkHost = new URL(String(campaign.content_link).trim()).hostname.replace(/^www\./, ''); } catch (_) { /* left null */ }
+    }
+    const pendingOpen = opens.find((o) => o.status === 'awaiting_proof');
+    res.json(ok({
+      task: {
+        id: String(campaign._id),
+        title: campaign.title || '',
+        description: campaign.description || '',
+        directive: campaign.directive || '',
+        platform: campaign.platform || '',
+        platform_label: platformDef?.label || campaign.platform || '',
+        activity_type: campaign.activity_type || '',
+        activity_label: activityDef?.label || campaign.activity_type || '',
+        status: campaign.status,
+        created_at: campaign.created_at || null,
+        updated_at: campaign.updated_at || null,
+      },
+      owner: {
+        // Username or profile name only — an email local-part on a
+        // participant-facing endpoint is a PII leak, see /leaderboard above.
+        display_name: creator?.username || creator?.name || null,
+        banned: creator?.banned === true,
+      },
+      reward: {
+        rate_per_task: Number(campaign.rate_per_task) || 0,
+        currency: 'MLPTS',
+        daily_cap_mlpts: getDailyCapMlpts(campaign.platform),
+        // The promise the whole flow is built on: nothing is credited when the
+        // link opens, and nothing is credited when the screenshot uploads.
+        paid_when: 'reviewers approve the proof',
+      },
+      budget: {
+        funded: Number.isFinite(campaign.budget_total) ? campaign.budget_total : null,
+        remaining: Number(campaign.budget_remaining) || 0,
+        completions: Number(campaign.completions_count) || 0,
+      },
+      rules: {
+        max_completions_per_user: allowance,
+        cooldown_seconds: Number(campaign.cooldown_seconds) || 0,
+      },
+      link: {
+        openable: openableLink,
+        host: linkHost,
+        // The address itself is only ever released by POST /campaigns/:id/open
+        // (or below, for a slot that is already spent), so no listing, cache or
+        // shared link can hand out a task without burning an open.
+        released: Boolean(pendingOpen),
+      },
+      me: {
+        allowance,
+        openings_used: opens.length,
+        openings_left: Math.max(0, allowance - opens.length),
+        pending_open: pendingOpen
+          ? {
+              slot: pendingOpen.slot,
+              opened_at: pendingOpen.opened_at,
+              // Already spent slots keep showing their destination: a popup
+              // blocker or a reload must not destroy the only open a
+              // participant is allowed. It is the *second* open that is gone.
+              content_link: pendingOpen.content_link,
+            }
+          : null,
+        rewarded_submissions: submissions.filter((s) => s.status !== 'rejected').length,
+        submissions: submissions.map((s) => ({
+          id: String(s._id),
+          status: s.status,
+          assignment_status: s.assignment_status,
+          reward_amount: s.reward_amount,
+          currency: s.reward_currency || 'MLPTS',
+          created_at: s.created_at,
+          completed_at: s.completed_at || null,
+          rejection_note: s.rejection_note || null,
+          proof_url: s.proof_url || '',
+        })),
+      },
+    }));
+  } catch (e) { res.status(500).json(fail(e)); }
+});
+
+/**
+ * Spend one link open. Returns the task destination exactly once per slot:
+ * the record it writes is what makes the second click, the refresh and the
+ * second device all hit the same wall.
+ */
+router.post('/campaigns/:id/open', minesAuth, async (req, res) => {
+  try {
+    const campaign = await Campaign.findById(req.params.id).lean();
+    if (!campaign) return res.status(404).json(fail('campaign not found'));
+    if (campaign.status !== 'active' || !(Number(campaign.budget_remaining) > 0)) {
+      return badRequest(res, `campaign is ${campaign.status} or out of budget — no task links are being issued`);
+    }
+    if (!linkPolicy.isSafeExternalUrl(campaign.content_link)) {
+      return badRequest(res, 'this campaign published no openable task link — the owner must fix the address before it can be attempted');
+    }
+    if (!campaign.creator_id) return badRequest(res, 'campaign has no creator — cannot validate task origin');
+    // A creator is not a participant in their own campaign. Without this, the
+    // budget they funded could be paid straight back to themselves through the
+    // reviewer path, and "never meet your own creation" would only be a rule
+    // about which list the campaign appears in.
+    if (String(campaign.creator_id) === String(req.userId)) {
+      return badRequest(res, 'this campaign is yours — you cannot open or complete your own task', 403);
+    }
+    const creator = await User.findById(campaign.creator_id).select('banned creator_level role').lean();
+    if (!creator) return badRequest(res, 'campaign creator no longer exists');
+    if (creator.banned === true) return badRequest(res, 'campaign creator is banned — this task is closed');
+    if ((creator.role === 'admin' || creator.role === 'superadmin') ? false : (Number(creator.creator_level) || 0) < 1) {
+      return badRequest(res, 'campaign creator is no longer authorized to run campaigns');
+    }
+
+    const allowance = Number(campaign.max_completions_per_user) || 1;
+    const filter = { user_id: req.userId, campaign_id: campaignIdFilter(campaign._id) };
+    const opens = await CampaignOpen.find(filter).sort({ opened_at: 1 }).lean();
+    const pending = opens.find((o) => o.status === 'awaiting_proof');
+    if (pending) {
+      return res.status(409).json({
+        ok: false,
+        error: `you opened this task ${pending.slot ? `for slot ${pending.slot}` : 'already'} — the link does not open twice. Upload the screenshot or this slot earns nothing.`,
+      });
+    }
+    if (opens.length >= allowance) {
+      return res.status(409).json({
+        ok: false,
+        error: `all ${allowance} link open${allowance === 1 ? '' : 's'} for this campaign are spent — a task you opened without submitting proof cannot be reopened`,
+      });
+    }
+
+    // The same bounds POST /submissions applies. Checked before the open is
+    // burned, because failing the cap or the cooldown afterwards would leave
+    // the participant with a spent slot and no way to use it.
+    const abuseCheck = await checkCampaignAbuseLimits(req.userId, campaign._id, null);
+    if (!abuseCheck.ok) return badRequest(res, abuseCheck.error, 429);
+
+    const row = await CampaignOpen.create({
+      campaign_id: campaign._id,
+      user_id: req.userId,
+      slot: opens.length + 1,
+      content_link: String(campaign.content_link).trim(),
+    });
+
+    chainMinesAudit(req, 'mines_campaign_link_opened', `campaign:${campaign._id}`, {
+      userId: req.userId,
+      slot: row.slot,
+    });
+
+    res.json(ok({
+      opened: true,
+      slot: row.slot,
+      allowance,
+      opened_at: row.opened_at,
+      content_link: row.content_link,
+    }));
+  } catch (e) {
+    // The unique (user_id, campaign_id, slot) index is the tie-breaker when
+    // two clicks race for the same slot; only one of them may win a link.
+    if (e?.code === 11000) {
+      return res.status(409).json({ ok: false, error: 'this task link was already opened by your account — upload the screenshot for the open you already have' });
+    }
+    res.status(400).json(fail(e));
   }
 });
 
@@ -265,6 +608,7 @@ router.post('/campaigns/create', minesAuth, async (req, res) => {
           base_rate_mlpts: ratePerTask / clampedMultiplier,
           multiplier: clampedMultiplier,
           rate_per_task: ratePerTask,
+          budget_total: budget,
           budget_remaining: budget,
           status: 'active',
         }], { session });
@@ -418,6 +762,13 @@ router.get('/submissions/me', minesAuth, async (req, res) => {
  * what this reads: reward_amount on each approved submission, its completed_at
  * for the window, and — for still-open ones — the campaign's committed
  * rate_per_task as the amount at stake.
+ *
+ * It also answers the owner's other question, "what appeared against what I
+ * did", as `activity`: per day, `shown` from the impressions the Discover feed
+ * recorded, `opened` from CampaignOpen, `done` from submissions and `paid_*`
+ * from settled rewards. `impressions_since` is the first day that counting
+ * existed, because any earlier day would read as an empty screen when it was
+ * simply an unmeasured one.
  */
 router.get('/earnings/summary', minesAuth, async (req, res) => {
   try {
@@ -473,6 +824,54 @@ router.get('/earnings/summary', minesAuth, async (req, res) => {
 
     const pending = openPending[0] || { atStake: 0, known: 0 };
 
+    // Screen-vs-action, for the Earnings charts: how many tasks appeared on
+    // this account's window, how many it opened, how many it actually did, and
+    // what was paid — per UTC day for the last seven.
+    //
+    // Days with nothing in them are still emitted. A chart that only carries
+    // the days something happened turns "you did not act" into "nothing was
+    // offered", and that gap is precisely the thing being measured.
+    const days = [];
+    for (let i = 6; i >= 0; i -= 1) days.push(dayKey(Date.now() - i * 24 * 60 * 60 * 1000));
+
+    const [shownRows, openedRows, doneRows, firstSeen] = await Promise.all([
+      CampaignImpression.aggregate([
+        { $match: { user_id: userId, day: { $gte: days[0] } } },
+        { $group: { _id: '$day', count: { $sum: 1 } } },
+      ]),
+      CampaignOpen.aggregate([
+        { $match: { user_id: userId, opened_at: { $gte: weekAgo } } },
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$opened_at' } }, count: { $sum: 1 } } },
+      ]),
+      TaskSubmission.aggregate([
+        { $match: { miner_id: userId, created_at: { $gte: weekAgo } } },
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } }, count: { $sum: 1 } } },
+      ]),
+      // The oldest day this account has on the books, so the screen can say
+      // where the comparison begins instead of implying it has always been
+      // measured: days before this one were never counted at all.
+      CampaignImpression.findOne({ user_id: userId }).sort({ day: 1 }).select('day').lean(),
+    ]);
+
+    const byDay = (rows) => new Map(rows.map((r) => [r._id, r.count]));
+    const shownBy = byDay(shownRows);
+    const openedBy = byDay(openedRows);
+    const doneBy = byDay(doneRows);
+    const paidBy = new Map(weekly.map((r) => [r._id, r]));
+
+    const activity = days.map((date) => {
+      const paid = paidBy.get(date);
+      return {
+        date,
+        shown: shownBy.get(date) || 0,
+        opened: openedBy.get(date) || 0,
+        done: doneBy.get(date) || 0,
+        paid_count: paid?.count || 0,
+        paid_mlpts: paid?.mlpts || 0,
+      };
+    });
+    const totalOf = (key) => activity.reduce((a, r) => a + r[key], 0);
+
     res.json(ok({
       currency: 'MLPTS',
       approvedCount: approved.count,
@@ -481,9 +880,14 @@ router.get('/earnings/summary', minesAuth, async (req, res) => {
       pendingCount: openCounts,
       pendingMlptsAtStake: pending.atStake,
       pendingCampaignsUnresolved: openCounts - (pending.known || 0),
-      thisWeekMlpts: weekly.reduce((a, r) => a + (r.mlpts || 0), 0),
+      // Same seven UTC days the chart below draws, so the headline figure and
+      // the bars can never disagree at a day boundary — two definitions of
+      // "this week" on one screen is how a panel starts to look wrong.
+      thisWeekMlpts: Math.round(totalOf('paid_mlpts') * 1000) / 1000,
       avgRewardMlpts: approved.count ? Math.round((approved.mlpts / approved.count) * 1000) / 1000 : 0,
       daily: weekly.map((r) => ({ date: r._id, mlpts: r.mlpts, count: r.count })),
+      activity,
+      impressions_since: firstSeen?.day || null,
       balanceMlpts: balanceRow?.mlpts_balance || 0,
       tasksCompleted: balanceRow?.tasks_completed || 0,
       // Honest provenance: these numbers count settled submissions only, so
@@ -620,6 +1024,23 @@ router.post('/submissions', minesAuth, async (req, res) => {
     return badRequest(res, 'proof_url is required (screenshot ref or external URL)');
   }
 
+  // The campaign is read before the proof is validated, because for a creator
+  // the answer is "this is yours, and a task you published is not a task you
+  // take part in" — and that is more useful than a complaint about their
+  // screenshot. Same valid-task enforcement as below.
+  let campaign;
+  try {
+    campaign = await Campaign.findById(campaign_id).lean();
+  } catch (_) {
+    campaign = null;
+  }
+  if (!campaign) {
+    return badRequest(res, 'campaign not found');
+  }
+  if (String(campaign.creator_id || '') === String(req.userId)) {
+    return badRequest(res, 'this campaign is yours — you cannot submit proof for your own task', 403);
+  }
+
   // proof_url must be EITHER a local screenshot ref produced by /upload
   // (filename starts with the userId- prefix and lives in PROOFS_UPLOAD_DIR)
   // OR a real external URL. Two separate rules instead of one permissive
@@ -649,15 +1070,6 @@ router.post('/submissions', minesAuth, async (req, res) => {
   // guard, a previously-valid campaign keeps paying out rewards long
   // after its creator lost the right to run one — turning the Mines
   // queue into a way for banned accounts to launder activity.
-  let campaign;
-  try {
-    campaign = await Campaign.findById(campaign_id).lean();
-  } catch (_) {
-    campaign = null;
-  }
-  if (!campaign) {
-    return badRequest(res, 'campaign not found');
-  }
   if (campaign.status !== 'active') {
     return badRequest(res, `campaign is ${campaign.status} — no longer accepting submissions`);
   }
@@ -677,6 +1089,34 @@ router.post('/submissions', minesAuth, async (req, res) => {
     return badRequest(res, 'campaign creator is no longer authorized to run campaigns');
   }
 
+  // The issued link is the task. Proof only counts when it closes an open
+  // this account was actually given, otherwise a submission could be filed
+  // against a campaign whose content was never seen — and "open once, then
+  // upload or forfeit" would be decorative. Campaigns that publish no
+  // openable link (admin-authored rows predating the rule) keep accepting
+  // proof directly so their participants are not stranded.
+  const linkIssued = linkPolicy.isSafeExternalUrl(campaign.content_link);
+  if (linkIssued) {
+    if (!linkPolicy.localProofRefOwnedBy(proof, req.userId)) {
+      return badRequest(res, 'attach the screenshot you uploaded — for a campaign with a task link, a URL is not proof');
+    }
+    const awaitingOpen = await CampaignOpen.findOne({
+      user_id: req.userId,
+      campaign_id: campaignIdFilter(campaign._id),
+      status: 'awaiting_proof',
+    }).lean();
+    if (!awaitingOpen) {
+      const usedOpens = await CampaignOpen.countDocuments({
+        user_id: req.userId,
+        campaign_id: campaignIdFilter(campaign._id),
+        status: 'proof_submitted',
+      });
+      return badRequest(res, usedOpens > 0
+        ? `you already filed proof for that link — a campaign allows ${Number(campaign.max_completions_per_user) || 1} completion(s), each needing its own open`
+        : 'open the task link first — proof is only accepted for a task this account was sent to', 409);
+    }
+  }
+
   // The check-then-create below must be atomic: without a transaction,
   // concurrent requests for the same campaign can all read the same
   // under-limit submission count before any of their creates land,
@@ -684,6 +1124,7 @@ router.post('/submissions', minesAuth, async (req, res) => {
   const session = await mongoose.startSession();
   try {
     let row;
+    let closedOpen;
     await session.withTransaction(async () => {
       const abuseCheck = await checkCampaignAbuseLimits(req.userId, req.body?.campaign_id, session);
       if (!abuseCheck.ok) {
@@ -692,8 +1133,37 @@ router.post('/submissions', minesAuth, async (req, res) => {
         throw err;
       }
 
+      // Consume the open here, not before: a submission that fails the abuse
+      // limits above must leave the slot spendable, and two proofs racing for
+      // one open must only let one of them file.
+      if (linkIssued) {
+        const live = await CampaignOpen.findOne({
+          user_id: req.userId,
+          campaign_id: campaignIdFilter(campaign._id),
+          status: 'awaiting_proof',
+        }).session(session).sort({ opened_at: 1 }).lean();
+        if (!live) {
+          const err = new Error('this task link open has already been used — submit once per open');
+          err.linkOpenUsed = true;
+          throw err;
+        }
+        closedOpen = await CampaignOpen.findOneAndUpdate(
+          { _id: live._id, status: 'awaiting_proof' },
+          { $set: { status: 'proof_submitted', proof_submitted_at: new Date() } },
+          { session, new: true }
+        ).lean();
+        if (!closedOpen) {
+          const err = new Error('this task link open has already been used — submit once per open');
+          err.linkOpenUsed = true;
+          throw err;
+        }
+      }
+
       const body = { ...pick(req.body, SUBMISSION_CREATE_FIELDS), proof_url: proof, miner_id: req.userId };
       [row] = await TaskSubmission.create([body], { session });
+      if (closedOpen) {
+        await CampaignOpen.updateOne({ _id: closedOpen._id }, { $set: { submission_id: row._id } }).session(session);
+      }
     });
     // Randomly assign up to 6 staked reviewers; if none are eligible yet the
     // submission is untouched and falls back to the admin manual-review queue.
@@ -702,6 +1172,7 @@ router.post('/submissions', minesAuth, async (req, res) => {
     res.json(ok(row));
   } catch (e) {
     if (e.abuseCheck) return badRequest(res, e.message, 429);
+    if (e.linkOpenUsed) return badRequest(res, e.message, 409);
     res.status(400).json(fail(e));
   } finally {
     session.endSession();

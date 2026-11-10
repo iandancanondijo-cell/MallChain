@@ -9,7 +9,7 @@
  */
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import Marketplace from './Marketplace';
+import Marketplace, { type Product } from './Marketplace';
 import { store } from '../../store/store';
 import { createEscrow } from '../../services/marketplaceTx';
 import { requestMnemonic } from '../../services/mnemonicAccess';
@@ -28,15 +28,16 @@ vi.mock('../../services/mnemonicAccess', () => ({
 const BUYER_ADDRESS = 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg';
 const MNEMONIC = Array(12).fill('abandon').join(' ');
 
-// The hardcoded demo catalog was intentionally removed from Marketplace.tsx in
-// 4106262f (hardcoded-data cleanup; the page now shows "Coming Soon" until the
-// real marketplace API endpoint is wired up). The checkout/escrow path itself
-// is unchanged and still real, so the tests inject a catalog through the
-// component's `products` seam instead of relying on hardcoded data.
-// Seller addresses are real genesis addresses, mirroring the old demo catalog.
-const DEMO_PRODUCTS = [
-  { id: 'prod-1', name: 'Nairobi Roast Coffee — 500g', seller: 'Safari Beans Co.', sellerAddress: 'mall1y2tvfjcm6p23cgmzn3gw3y87wznxexzca4lc7l', price: 32.5, rating: 4.8, img: '☕', cat: 'Food' },
-  { id: 'prod-2', name: 'Maasai Beaded Bracelet', seller: 'Maa Crafts', sellerAddress: 'mall1x9vewxjw4k748lc5sd4vgy273tka3thdyvvxm6', price: 14.0, rating: 4.9, img: '📿', cat: 'Fashion' },
+// The page ships with no catalog — listings arrive from a marketplace endpoint
+// that is not built yet — so these fixtures are injected through the component's
+// `products` seam to drive the (real) escrow flow. The addresses are shaped like
+// accounts, not actual ones: nothing here should be a funded wallet anyone owns.
+const SELLER_ONE = 'mall1sellershareaddressxxxxxxxxxxxxxxxx';
+const SELLER_TWO = 'mall1sellershoptwoaddressxxxxxxxxxxxxxxxx';
+
+const CATALOG: Product[] = [
+  { id: 'prod-1', name: 'Nairobi Roast Coffee — 500g', seller: 'Safari Beans Co.', sellerAddress: SELLER_ONE, price: 32.5, rating: 4.8, img: '☕', cat: 'Food' },
+  { id: 'prod-2', name: 'Maasai Beaded Bracelet', seller: 'Maa Crafts', sellerAddress: SELLER_TWO, price: 14.0, rating: 4.9, img: '📿', cat: 'Fashion' },
 ];
 
 describe('Marketplace checkout', () => {
@@ -53,7 +54,7 @@ describe('Marketplace checkout', () => {
   test('adding a product and checking out builds and broadcasts a real MsgCreateEscrow, not a local simulation', async () => {
     vi.mocked(createEscrow).mockResolvedValue({ txHash: 'ESCROWTXHASH', escrowId: 'escrow-1' });
 
-    render(<Marketplace navigate={() => {}} products={DEMO_PRODUCTS} />);
+    render(<Marketplace navigate={() => {}} products={CATALOG} />);
 
     const firstProductCard = screen.getAllByText('Add to cart')[0].closest('.c-card') as HTMLElement;
     const productName = within(firstProductCard).getByText(/./, { selector: '.nm' }).textContent;
@@ -67,8 +68,8 @@ describe('Marketplace checkout', () => {
     const call = vi.mocked(createEscrow).mock.calls[0][0];
     expect(call.mnemonic).toBe(MNEMONIC);
     expect(call.buyer).toBe(BUYER_ADDRESS);
-    // seller is one of the real genesis addresses assigned to demo products,
-    // not a placeholder/local-only value.
+    // The seller on the escrow is the address the listing carries, taken
+    // through to the chain rather than replaced with a local stand-in.
     expect(call.seller).toMatch(/^mall1[a-z0-9]{20,}$/);
     expect(call.description).toContain(productName);
 
@@ -83,7 +84,7 @@ describe('Marketplace checkout', () => {
     store.state.wallet.pinEncryptedMnemonic = '';
     store.commit();
 
-    render(<Marketplace navigate={() => {}} products={DEMO_PRODUCTS} />);
+    render(<Marketplace navigate={() => {}} products={CATALOG} />);
 
     fireEvent.click(screen.getAllByText('Add to cart')[0]);
     fireEvent.click(screen.getByText(/🛒 Cart \(1\)/));
@@ -95,7 +96,7 @@ describe('Marketplace checkout', () => {
   test('a failed escrow broadcast leaves the cart intact instead of silently clearing it', async () => {
     vi.mocked(createEscrow).mockRejectedValue(new Error('insufficient funds'));
 
-    render(<Marketplace navigate={() => {}} products={DEMO_PRODUCTS} />);
+    render(<Marketplace navigate={() => {}} products={CATALOG} />);
 
     fireEvent.click(screen.getAllByText('Add to cart')[0]);
     fireEvent.click(screen.getByText(/🛒 Cart \(1\)/));
@@ -106,5 +107,27 @@ describe('Marketplace checkout', () => {
     // Cart button should still show the item — checkout did not silently
     // "succeed" locally despite the real broadcast failing.
     expect(screen.getByText(/🛒 Cart \(1\)/)).toBeInTheDocument();
+  });
+
+  test('with no catalog loaded the page invents nothing', () => {
+    render(<Marketplace navigate={() => {}} />);
+
+    expect(screen.queryByText('Add to cart')).toBeNull();
+    expect(screen.queryAllByText('Details')).toHaveLength(0);
+    expect(screen.getByText('Marketplace Coming Soon')).toBeInTheDocument();
+    expect(screen.getByText(/marketplace catalog endpoint/)).toBeInTheDocument();
+  });
+
+  test('a catalog with nothing matching the filters says so instead of claiming there is no marketplace', () => {
+    render(<Marketplace navigate={() => {}} products={CATALOG} />);
+
+    fireEvent.change(screen.getByPlaceholderText(/Search products/), { target: { value: 'zzz-nothing' } });
+
+    expect(screen.getByText('No products match')).toBeInTheDocument();
+    expect(screen.queryByText('Marketplace Coming Soon')).toBeNull();
+
+    fireEvent.click(screen.getByText('Clear filters'));
+
+    expect(screen.getAllByText('Add to cart')).toHaveLength(CATALOG.length);
   });
 });

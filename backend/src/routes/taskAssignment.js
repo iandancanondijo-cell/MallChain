@@ -10,6 +10,7 @@ const AuditLog = require('../models/AuditLog');
 const { requireAdmin } = require('../middleware/adminAuth');
 const jwt = require('jsonwebtoken');
 const minesReviewService = require('../services/minesReviewService');
+const validatorEligibility = require('../services/validatorEligibility');
 const { notify } = require('../services/notify');
 const { syncMallPointAccount } = require('../services/mallpointsService');
 const logger = require('../utils/logger');
@@ -75,62 +76,44 @@ router.get('/tasks/voting', requireAdmin, async (_req, res) => {
   } catch (e) { return res.status(500).json(fail(e)); }
 });
 
-// Get all active validators with their mining activity stats for the assignment window
+// Get the accounts this window may hand a task to.
+//
+// Two halves, both required (see services/validatorEligibility.js): an admin
+// approved the account's validator application ("allowed"), and it holds an
+// active reviewer bond ("staked"). This route used to derive the first half
+// from a user's *role* — every admin/superadmin account was listed as an
+// approved validator whether or not it had ever applied — which is how an
+// account with no application and no stake ended up in an assignment list
+// whose votes /tasks/:id/vote would then refuse. Rows here are annotated
+// rather than hidden: an approved-but-unbonded moniker is something the admin
+// can act on (ask for the stake), while an admin role with no application is
+// simply not a validator and is not listed at all.
 router.get('/validators/active', requireAdmin, async (_req, res) => {
   try {
-    // Get all approved validators
-    const approvedValidators = await User.find({ role: { $in: ['admin', 'superadmin'] } })
-      .select('-password')
-      .lean();
+    const { byKey } = await validatorEligibility.allowedValidatorMap();
+    const keys = [...byKey.keys()];
+    const activities = await MinesReviewer.find({ validator_id: { $in: keys } }).lean();
+    const activityMap = new Map(activities.map((a) => [String(a.validator_id), a]));
 
-    // Also get validator applications that are approved
-    const ValidatorApplication = require('../models/ValidatorApplication');
-    const activeApps = await ValidatorApplication.find({ status: 'approved', isActiveValidator: true }).lean();
-
-    // Merge and deduplicate - create a combined list
-    const validatorMap = new Map();
-
-    // Add users with admin/superadmin roles
-    for (const raw of approvedValidators) {
-      const u = User.decryptUserPii(raw);
-      validatorMap.set(u._id.toString(), {
-        _id: u._id,
-        validator_id: u._id.toString(),
-        email: u.email,
-        moniker: u.email ? u.email.split('@')[0] : 'admin',
-        type: 'user',
-      });
-    }
-
-    // Add approved validator applications
-    for (const v of activeApps) {
-      const vid = v.validatorAddress || v.applicantAddress || v._id.toString();
-      if (!validatorMap.has(vid)) {
-        validatorMap.set(vid, {
-          _id: v._id,
-          validator_id: vid,
-          validator_address: v.validatorAddress || '',
-          applicant_address: v.applicantAddress || '',
-          moniker: v.moniker || 'Unknown Validator',
-          type: 'validator',
-          selfDelegationAmount: v.selfDelegationAmount,
-        });
-      }
-    }
-
-    // Get activity stats for each validator
-    const validatorIds = [...validatorMap.keys()];
-    const activities = await MinesReviewer.find({ validator_id: { $in: validatorIds } }).lean();
-    const activityMap = new Map();
-    for (const a of activities) {
-      activityMap.set(a.validator_id, a);
-    }
-
-    // Combine validator info with activity stats
-    const validators = [...validatorMap.values()].map(v => {
-      const activity = activityMap.get(v.validator_id) || {};
+    const validators = keys.map((key) => {
+      const app = byKey.get(key);
+      const activity = activityMap.get(key) || {};
+      const staked = activity.stakeStatus === 'active';
       return {
-        ...v,
+        _id: app.userId || key,
+        validator_id: key,
+        validator_address: app.validatorAddress || '',
+        applicant_address: app.applicantAddress || '',
+        moniker: app.moniker || 'Unknown Validator',
+        type: 'validator',
+        selfDelegationAmount: app.selfDelegationAmount,
+        application_reviewed_at: app.reviewedAt || null,
+        allowed: true,
+        staked,
+        stake_status: activity.stakeStatus || 'unstaked',
+        staked_amount: activity.stakedAmount || 0,
+        min_required_stake: activity.minRequiredStake ?? minesReviewService.MIN_REVIEWER_STAKE,
+        eligible: staked,
         tasks_assigned: activity.tasks_assigned || 0,
         tasks_voted: activity.tasks_voted || 0,
         tasks_approved: activity.tasks_approved || 0,
@@ -143,8 +126,8 @@ router.get('/validators/active', requireAdmin, async (_req, res) => {
       };
     });
 
-    // Sort by mining_reputation descending (best validators first)
-    validators.sort((a, b) => b.mining_reputation - a.mining_reputation);
+    // Assignable candidates first, then the best-reputation ones.
+    validators.sort((a, b) => Number(b.eligible) - Number(a.eligible) || b.mining_reputation - a.mining_reputation);
 
     return res.json(ok(validators));
   } catch (e) { return res.status(500).json(fail(e)); }
@@ -163,6 +146,25 @@ router.post('/tasks/:id/assign', requireAdmin, async (req, res) => {
 
     if (task.assignment_status !== 'none' && task.assignment_status !== 'pending_assignment') {
       return res.status(400).json(fail(`task is already in status: ${task.assignment_status}`));
+    }
+
+    // The gate itself, checked at the moment duties (and later, MLPTS) are
+    // handed out rather than only in whatever UI listed the candidates:
+    // /validators/active can show an approved moniker that has not bonded yet,
+    // and a stale browser tab can post ids that were never eligible.
+    const assignedIds = validator_ids.map(String);
+    const [{ byKey }, bondRows] = await Promise.all([
+      validatorEligibility.allowedValidatorMap(),
+      MinesReviewer.find({ validator_id: { $in: assignedIds } }).lean(),
+    ]);
+    const bondByKey = new Map(bondRows.map((r) => [String(r.validator_id), r]));
+    const notAllowed = assignedIds.filter((id) => !byKey.has(id));
+    const notStaked = assignedIds.filter((id) => bondByKey.get(id)?.stakeStatus !== 'active');
+    if (notAllowed.length > 0 || notStaked.length > 0) {
+      const parts = [];
+      if (notAllowed.length > 0) parts.push(`no approved validator application: ${notAllowed.slice(0, 6).join(', ')}`);
+      if (notStaked.length > 0) parts.push(`no active reviewer stake: ${notStaked.slice(0, 6).join(', ')}`);
+      return res.status(400).json(fail(`every assigned validator must be approved and staked — ${parts.join('; ')}`));
     }
 
     // Set voting deadline: 48 hours from now
@@ -306,16 +308,19 @@ router.post('/tasks/:id/vote', verifyToken, async (req, res) => {
       return res.status(403).json(fail('you are not assigned to this task'));
     }
 
-    // Assignments only ever come from the active (staked) pool, and
-    // /reviewer/unstake refuses to release a stake while a vote is still open,
-    // so a reviewer who reaches this line without an active stake acquired that
-    // state after being assigned — normally by being suspended for missed votes.
-    // Votes are weighted by reputation and pay MLPTS, so the bond is what makes
-    // the weight honest; without it the panel already says "you need an active
-    // reviewer stake" while still accepting the vote.
+    // Assignments only ever come from the eligible (approved *and* staked)
+    // pool, and /reviewer/unstake refuses to release a stake while a vote is
+    // still open, so a reviewer who reaches this line without both halves got
+    // that state after being assigned — normally by being suspended for missed
+    // votes, or by an admin withdrawing their approval mid-round. Votes are
+    // weighted by reputation and pay MLPTS, so the bond is what makes the
+    // weight honest and the approval is what makes the reviewer one at all.
     const votingReviewer = await MinesReviewer.findOne({ validator_id: validatorId }).lean();
     if (!votingReviewer || votingReviewer.stakeStatus !== 'active') {
       return res.status(403).json(fail('an active reviewer stake is required to vote'));
+    }
+    if (!(await validatorEligibility.allowedAccountKeys()).has(String(validatorId))) {
+      return res.status(403).json(fail('your validator approval no longer covers this review'));
     }
 
     // Check if already voted
@@ -550,11 +555,73 @@ router.post('/reviewer/unstake', verifyToken, async (req, res) => {
   } catch (e) { return res.status(400).json(fail(e)); }
 });
 
-// Reviewer: my stake/reputation/earnings profile
+// Reviewer: how much verification work exists, and how much of it is this
+// reviewer's.
+//
+// The queue screen can only list what /my-assigned hands it, so an empty queue
+// used to read as "nothing needs reviewing" even when submissions were sitting
+// unassigned — the case where a reviewer's stake is most needed. These counts
+// come from the submissions themselves. They are deliberately not resolved
+// against the voting deadlines first: /my-assigned sweeps expired rounds as it
+// reads, so the same row can appear here a moment before it settles elsewhere.
+// `pending_count` is therefore the honest "awaiting a decision" number, and the
+// oldest one is dated rather than aged into a claim about how long it has been
+// stuck. See routes/mines.js's TERMINAL_STATUSES — the same three statuses end a
+// submission here as everywhere else.
+router.get('/reviewer/queue-summary', verifyToken, async (req, res) => {
+  try {
+    const validatorId = req.userId;
+    const TERMINAL = ['auto_approved', 'approved', 'rejected'];
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const [awaiting, unassigned, settledRows, mine, oldest] = await Promise.all([
+      TaskSubmission.countDocuments({ status: { $nin: TERMINAL } }),
+      TaskSubmission.countDocuments({
+        status: { $nin: TERMINAL },
+        $or: [{ assigned_validators: { $size: 0 } }, { assigned_validators: null }],
+      }),
+      TaskSubmission.countDocuments({ status: { $in: TERMINAL }, completed_at: { $gte: dayAgo } }),
+      TaskSubmission.find({
+        assigned_validators: validatorId,
+        assignment_status: { $in: ['assigned', 'voting'] },
+      }).select('validator_votes').lean(),
+      TaskSubmission.findOne({ status: { $nin: TERMINAL } }).sort({ created_at: 1 }).select('created_at').lean(),
+    ]);
+
+    // One submission is assigned to several reviewers at once, so
+    // `assigned_to_me` cannot be subtracted from `awaiting` to find the
+    // unclaimed work — that is counted from the assignment array itself.
+    res.json(ok({
+      awaiting_verification: awaiting,
+      awaiting_assignment: unassigned,
+      assigned_to_me: mine.length,
+      waiting_for_my_vote: mine.filter((t) => !t.validator_votes || !t.validator_votes[validatorId]).length,
+      settled_last_24h: settledRows,
+      oldest_waiting_since: oldest?.created_at || null,
+      currency: 'MLPTS',
+      source: 'task_submissions',
+    }));
+  } catch (e) { return res.status(500).json(fail(e)); }
+});
+
+// Reviewer: my stake/reputation/earnings profile, plus both halves of the
+// validator rule. stakeStatus on its own used to read as "you are a reviewer"
+// to the UI while an account with no approved application was never eligible
+// for assignment at all — the two states are reported separately so the page
+// can name the half that is missing. A failed allow-list read is null ("not
+// reported"), never false, because false would tell someone their application
+// was withdrawn when nothing checked it.
 router.get('/reviewer/profile', verifyToken, async (req, res) => {
   try {
     const reviewer = await MinesReviewer.findOne({ validator_id: req.userId }).lean();
-    return res.json(ok(reviewer || {
+    let allowed = null;
+    try {
+      allowed = (await validatorEligibility.allowedAccountKeys()).has(String(req.userId));
+    } catch (e) {
+      logger.error('taskAssignment', { route: '/reviewer/profile', error: e.message });
+    }
+    const staked = Boolean(reviewer && reviewer.stakeStatus === 'active');
+    const base = reviewer || {
       validator_id: req.userId,
       stakedAmount: 0,
       minRequiredStake: minesReviewService.MIN_REVIEWER_STAKE,
@@ -563,6 +630,11 @@ router.get('/reviewer/profile', verifyToken, async (req, res) => {
       tasks_assigned: 0,
       tasks_voted: 0,
       total_earnings: 0,
+    };
+    return res.json(ok({
+      ...base,
+      validator_allowed: allowed,
+      review_eligible: allowed === null ? null : allowed && staked,
     }));
   } catch (e) { return res.status(500).json(fail(e)); }
 });

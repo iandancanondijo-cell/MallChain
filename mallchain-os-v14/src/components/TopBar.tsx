@@ -8,6 +8,8 @@ import { Search, Bell, Settings, ShieldAlert, Wrench, Menu, X, ArrowRight, Arrow
 import { store } from '../store/store';
 import { useStoreVersion, fmtNum, toast, BadgeCheckmark } from './ui';
 import { config } from '../services/config';
+import { savePreference } from '../services/preferences';
+import { AccountPicture } from './WalletIdentity';
 import { COMMON_CURRENCIES } from '../services/locale';
 import { useSupportedCurrencies } from '../services/currency';
 import SocketStatus from './SocketStatus';
@@ -99,13 +101,15 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
     toast(feed.getSnapshot().error || 'Could not mark that notification as read', false);
   };
 
-  const applyAccent = (a: string) => {
-    const map: Record<string, string> = { gold: '#f3ba2f', cyan: '#22d3ee', purple: '#a78bfa', emerald: '#34d399' };
-    document.documentElement.style.setProperty('--accent', map[a] || '#f3ba2f');
-    document.documentElement.style.setProperty('--accent-2', map[a] || '#f59e0b');
-    st.prefs.accent = a as never;
-    store.commit();
-    toastLocal('Theme accent → ' + a);
+  // The three pickers in this menu mirror the ones on Profile & Settings, so
+  // they go through that page's write path. They used to be local-only: the
+  // toast said "Currency → USD", the value applied, and the next Settings load
+  // replaced st.prefs with the stored document — the choice reverted while the
+  // message claiming it was saved was still on screen.
+  const pick = async (key: 'accent' | 'currency' | 'lang', value: string) => {
+    const label = key === 'accent' ? 'Theme' : key[0].toUpperCase() + key.slice(1);
+    const res = await savePreference(key, value, label);
+    toast(res.message, res.ok);
   };
 
   const search = (e: React.KeyboardEvent) => {
@@ -213,7 +217,7 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
                 <label>{t('Currency')}</label>
                 <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
                   {currencyButtons.map((c) => (
-                    <button key={c} className={'btn btn-ghost btn-sm' + (st.prefs.currency === c ? ' gold' : '')} onClick={() => { st.prefs.currency = c as never; store.commit(); toastLocal('Currency → ' + c); }}>
+                    <button key={c} className={'btn btn-ghost btn-sm' + (st.prefs.currency === c ? ' gold' : '')} onClick={() => { void pick('currency', c); }}>
                       {c}
                     </button>
                   ))}
@@ -223,7 +227,7 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
                 <label>{t('Language')}</label>
                 <div className="row" style={{ gap: 6, marginTop: 6 }}>
                   {languageButtons.map((l) => (
-                    <button key={l} className={'btn btn-ghost btn-sm' + (st.prefs.lang === l ? ' gold' : '')} onClick={() => { st.prefs.lang = l as never; document.documentElement.lang = l.toLowerCase(); store.commit(); toastLocal('Language → ' + l); }}>
+                    <button key={l} className={'btn btn-ghost btn-sm' + (st.prefs.lang === l ? ' gold' : '')} onClick={() => { void pick('lang', l); }}>
                       {l}
                     </button>
                   ))}
@@ -233,7 +237,7 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
                 <label>{t('Theme')}</label>
                 <div className="row" style={{ gap: 6, marginTop: 6 }}>
                   {accentButtons.map((a) => (
-                    <button key={a} className={'btn btn-ghost btn-sm' + (st.prefs.accent === a ? ' gold' : '')} onClick={() => applyAccent(a)}>
+                    <button key={a} className={'btn btn-ghost btn-sm' + (st.prefs.accent === a ? ' gold' : '')} onClick={() => { void pick('accent', a); }}>
                       {a}
                     </button>
                   ))}
@@ -391,18 +395,18 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
   );
 }
 
-// Renders the uploaded avatar when present (resolved against the API origin
-// since the backend stores a relative `/uploads/avatars/...` path), otherwise
-// falls back to the initial-in-a-circle placeholder.
+// The menu bar's own picture. The rule for showing it lives in
+// components/WalletIdentity.tsx so the bar, the Profile card and a transaction
+// row can never disagree about whether an account has a picture.
 function UserAvatar() {
   const st = store.state;
-  const src = st.user.avatarUrl
-    ? (st.user.avatarUrl.startsWith('http') ? st.user.avatarUrl : `${config.apiBaseUrl}${st.user.avatarUrl}`)
-    : null;
-  if (src) {
-    return <img className="avatar avatar-img" src={src} alt="" role="img" />;
-  }
-  return <div className="avatar" aria-hidden="true">{st.user.avatarInitial || 'C'}</div>;
+  return (
+    <AccountPicture
+      avatarUrl={st.user.avatarUrl}
+      name={st.user.name}
+      initial={st.user.avatarInitial || 'C'}
+    />
+  );
 }
 
 function toastLocal(text: string) {

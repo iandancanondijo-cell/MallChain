@@ -65,6 +65,7 @@ const adminPanelRoutes = require('./routes/adminPanel');
 const consoleDataRoutes = require('./routes/consoleData');
 const maintenanceStatusRoutes = require('./routes/maintenanceStatus');
 const contractsRoutes = require('./routes/contracts');
+const careersRoutes = require('./routes/careers');
 const devhubRoutes = require('./routes/devhub');
 const settingsRoutes = require('./routes/settings');
 const rewardsRoutes = require('./routes/rewards');
@@ -216,7 +217,7 @@ app.use(cors({
   // PIN UI for exactly the cool-down window. Browsers hide every non-simple
   // response header on cross-origin reads unless it is explicitly exposed
   // here — without this, api.ts would see the 429 but never its Retry-After.
-  exposedHeaders: ['RateLimit', 'RateLimit-Policy', 'Retry-After'],
+  exposedHeaders: ['RateLimit', 'RateLimit-Policy', 'Retry-After', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
@@ -473,6 +474,18 @@ app.use('/uploads/products', express.static(path.join(__dirname, '..', 'uploads'
 app.use('/uploads/store', express.static(path.join(__dirname, '..', 'uploads', 'store')));
 app.use('/uploads/courses', express.static(path.join(__dirname, '..', 'uploads', 'courses')));
 app.use('/uploads/documents', express.static(path.join(__dirname, '..', 'uploads', 'documents')));
+
+// The same tree, reachable under /api as well. The SPA is frequently deployed
+// apart from this server, and its dev proxy forwards only /api — so a stored
+// '/uploads/avatars/x.jpg' resolves to the page's own origin and 404s there.
+// One mount for every category, because a per-directory list is what drifted
+// out of sync with the categories routes/upload.js actually writes.
+// dotfiles/index are off: a directory listing of every user's uploads is not a
+// feature, and the stored paths always name a file.
+app.use(
+  '/api/uploads',
+  express.static(path.join(__dirname, '..', 'uploads'), { index: false, dotfiles: 'ignore' }),
+);
 
 app.use('/api/auth', authRoutes);
 
@@ -771,12 +784,18 @@ if (EXPLORER_ENABLED && EXPLORER_BACKEND_URL) {
 // Previously-written but unmounted routes: registering existing, already-
 // implemented handlers — no new backend logic.
 app.use('/api/contracts', contractsRoutes);
+app.use('/api/careers', careersRoutes);
 app.use('/api/devhub', devhubRoutes);
 app.use('/api/settings', settingsRoutes);
 const whatsappWebhookRoutes = require('./routes/whatsappWebhook');
 app.use('/api/whatsapp', whatsappWebhookRoutes);
 app.use('/api/rewards', rewardsRoutes);
 app.use('/api/address', addressMapRoutes);
+// Wallet address → public display identity (name + picture), the lookup the
+// transaction lists use to show a face beside an address. See
+// routes/identity.js for what it does and deliberately does not reveal.
+const identityRoutes = require('./routes/identity');
+app.use('/api/identity', identityRoutes);
 app.use('/api/search', limiters.standard, searchRoutes);
 
 // Public node-download bundles (landing-page CTAs hit ${API_BASE}/downloads/node/...).

@@ -92,6 +92,30 @@ describe('Staking', () => {
     );
   });
 
+  test('the ledger row a stake writes moves the chain coin, not Mallpoints', async () => {
+    vi.mocked(stakingApi.getSummary).mockResolvedValue({ ok: true, data: { summary: emptySummary() } });
+    vi.mocked(stakeMlcns).mockResolvedValue({ txHash: 'STAKETXHASH', stakeId: 's1' } as never);
+
+    store.state.balances.MLPTS = 100;
+    store.commit();
+
+    render(<Staking />);
+    await waitFor(() => expect(stakingApi.getSummary).toHaveBeenCalledWith(ADDRESS));
+
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '50' } });
+    fireEvent.click(screen.getByText('Stake'));
+    await waitFor(() => expect(stakeMlcns).toHaveBeenCalled());
+
+    // It used to record asset 'MLPTS', which took 50 points out of a balance
+    // the user never spent and labelled the row with the wrong token.
+    expect(store.state.balances.MLPTS).toBe(100);
+    expect(store.state.balances.MALL).toBe(450);
+
+    const row = store.state.txs.find((t) => t.type === 'stake');
+    expect(row?.asset).toBe('MALL');
+    expect(row?.note).toContain('MALL');
+  });
+
   test('does not call stakeMlcns for an amount exceeding the wallet balance', async () => {
     vi.mocked(stakingApi.getSummary).mockResolvedValue({ ok: true, data: { summary: emptySummary() } });
 

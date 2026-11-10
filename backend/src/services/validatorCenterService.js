@@ -48,11 +48,22 @@ function normalizeCommission(commission) {
   return Math.round(rate * 10000) / 100;
 }
 
+/**
+ * uptime is null (not 0, and not a flattering 100) when the chain gave us no
+ * signing record for this validator. Two different reasons can produce that —
+ * the /cosmos/slashing query failing outright, or this particular validator
+ * having no entry in it — and neither means "missed nothing", which is exactly
+ * what a defaulted missed_blocks_counter of 0 reads as on a scoreboard.
+ */
 function scoreFromPerformance(uptime, stakeShare, commission) {
-  const uptimeScore = uptime;
   const stakeScore = Math.min(100, stakeShare * 100);
   const commissionScore = Math.max(0, 100 - commission);
-  return Math.round((uptimeScore * 0.55) + (stakeScore * 0.25) + (commissionScore * 0.20));
+  if (uptime === null) {
+    // Same weighting, over the two terms that are actually known (0.55 of the
+    // score is re-spread across stake and commission rather than dropped).
+    return Math.round((stakeScore * (0.25 / 0.45)) + (commissionScore * (0.20 / 0.45)));
+  }
+  return Math.round((uptime * 0.55) + (stakeScore * 0.25) + (commissionScore * 0.20));
 }
 
 function buildValidatorRecord(validator, signingInfo, totalBonded) {
@@ -60,8 +71,11 @@ function buildValidatorRecord(validator, signingInfo, totalBonded) {
   const tokens = safeNumber(validator.tokens || validator.tokens || '0');
   const commission = normalizeCommission(validator.commission || validator);
   const stakeShare = totalBonded > 0 ? tokens / totalBonded : 0;
-  const missedBlocks = safeNumber(signingInfo?.missed_blocks_counter || 0);
-  const uptime = Math.max(0, Math.min(100, 100 - Math.min(100, missedBlocks / 10)));
+  const uptimeKnown = Boolean(signingInfo);
+  const missedBlocks = uptimeKnown ? safeNumber(signingInfo.missed_blocks_counter) : null;
+  const uptime = uptimeKnown
+    ? Math.max(0, Math.min(100, 100 - Math.min(100, missedBlocks / 10)))
+    : null;
   const reputationScore = scoreFromPerformance(uptime, stakeShare, commission);
 
   return {
@@ -79,6 +93,10 @@ function buildValidatorRecord(validator, signingInfo, totalBonded) {
     jailed: validator.jailed || false,
     tokens,
     reputationScore,
+    // Says which terms went into reputationScore, so a reader told they are
+    // "ranked by uptime, stake share & commission" can see when uptime was
+    // missing from that ranking instead of assuming it was perfect.
+    reputationBasis: uptimeKnown ? 'uptime + stake share + commission' : 'stake share + commission (no signing record)',
     signingInfo: signingInfo || null,
   };
 }
@@ -187,7 +205,14 @@ async function getValidatorDetail(operatorAddress) {
   const direct = await fetchValidatorAnyStatus(operatorAddress);
   if (direct) {
     const [signingInfos, totalBonded] = await Promise.all([fetchSigningInfos(), fetchTotalBonded()]);
-    return buildValidatorRecord(direct, signingInfos[operatorAddress], totalBonded);
+    // Same keying rule getValidatorLeaderboard documents: signing_infos is
+    // addressed by consensus address, so this used to look up
+    // signingInfos[operatorAddress] — a mallvaloper1... key that can never be
+    // present — and hand buildValidatorRecord `undefined` for every validator
+    // detail read. With the uptime term now null rather than a defaulted 100,
+    // a missed lookup is at least visible instead of silently flattering.
+    const consAddress = consensusAddressFromPubkey(direct.consensus_pubkey?.key);
+    return buildValidatorRecord(direct, consAddress ? signingInfos[consAddress] : null, totalBonded);
   }
 
   const leaderboard = await getValidatorLeaderboard();

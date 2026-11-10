@@ -6,6 +6,12 @@
 import { api } from './api';
 import { type ApiResult } from './api';
 
+/**
+ * '' is the state a contract that was never shared sits in, which is different
+ * from 'revoked' (offered, then withdrawn) — the UI words them differently.
+ */
+export type ContractOfferStatus = '' | 'offered' | 'accepted' | 'declined' | 'revoked';
+
 export interface ContractRecord {
   _id: string;
   name: string;
@@ -17,6 +23,19 @@ export interface ContractRecord {
   deployedAt: string;
   txs: number;
   status: 'active' | 'paused';
+  // Sharing. counterpartyAddress is what the owner typed; offerStatus is where
+  // that offer stands. party only travels on the detail/share/accept responses
+  // and says which side of the offer this account is on.
+  counterpartyAddress?: string;
+  counterpartyUserId?: string | null;
+  offerStatus?: ContractOfferStatus;
+  offerNote?: string;
+  offeredAt?: string | null;
+  respondedAt?: string | null;
+  /** Only on the offers read: the deployer's own linked address, so you know
+   * who is asking. Empty when that account has not linked a wallet. */
+  ownerAddress?: string;
+  party?: 'owner' | 'counterparty';
 }
 
 interface Envelope<T> { ok: boolean; data?: T; error?: string; }
@@ -49,6 +68,27 @@ class ContractsApi {
 
   async broadcast(txBytes: string): Promise<ApiResult<{ txHash: string; txResponse: unknown }>> {
     return unwrap(api.post('/api/contracts/broadcast', { txBytes }));
+  }
+
+  /** Everything shared with this account, answered or not, newest offer first. */
+  async offers(): Promise<ApiResult<ContractRecord[]>> {
+    return unwrap(api.get('/api/contracts/offers'));
+  }
+
+  async share(id: string, address: string, note?: string): Promise<ApiResult<ContractRecord>> {
+    return unwrap(api.post(`/api/contracts/${encodeURIComponent(id)}/share`, { address, note }));
+  }
+
+  async accept(id: string): Promise<ApiResult<ContractRecord>> {
+    return unwrap(api.post(`/api/contracts/${encodeURIComponent(id)}/accept`, {}));
+  }
+
+  async decline(id: string): Promise<ApiResult<ContractRecord>> {
+    return unwrap(api.post(`/api/contracts/${encodeURIComponent(id)}/decline`, {}));
+  }
+
+  async revoke(id: string): Promise<ApiResult<ContractRecord>> {
+    return unwrap(api.post(`/api/contracts/${encodeURIComponent(id)}/revoke`, {}));
   }
 
   async remove(id: string): Promise<ApiResult<{ deleted: boolean }>> {

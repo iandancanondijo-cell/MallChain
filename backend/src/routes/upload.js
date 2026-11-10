@@ -56,7 +56,12 @@ const uploadAvatar = multer({
   fileFilter: (_req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/webp'];
     if (!allowed.includes(file.mimetype)) {
-      return cb(new Error('Only JPG, PNG, or WebP files are accepted for avatars'));
+      // Tagged so multerErrors() can answer 400 with this text instead of
+      // letting errorHandler() mask it as a generic 500.
+      return cb(Object.assign(
+        new Error('Only JPG, PNG, or WebP files are accepted for avatars'),
+        { code: 'UPLOAD_MIMETYPE' },
+      ));
     }
     cb(null, true);
   },
@@ -121,6 +126,31 @@ const uploadProductImages = multer({
 // ROUTES
 // ============================================================================
 
+// multer reports its own failures — a file over the size limit, a mimetype its
+// fileFilter refused, an unexpected field — by handing an Error to next().
+// utils/errorHandler.js masks any non-AppError as 500 'Internal server error'
+// unless DEBUG_ERRORS is on, so a 6MB screenshot looked to the user exactly like
+// a dead database, and the text multer already had was thrown away. These
+// messages name nothing but the request's own limits, so translating them here
+// restores the detail without widening what the global handler leaks. An error
+// carrying none of these codes is a genuine internal failure and goes on
+// untouched.
+function multerErrors(label, maxMb) {
+  return (err, _req, res, next) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ error: `${label} must be ${maxMb}MB or smaller` });
+      }
+      return res.status(400).json({ error: err.message });
+    }
+    if (err.code === 'UPLOAD_MIMETYPE') {
+      return res.status(400).json({ error: err.message });
+    }
+    next(err);
+  };
+}
+
 /**
  * POST /api/upload/avatar
  * Upload user avatar
@@ -131,6 +161,7 @@ router.post(
   auth,
   limiters.standard,
   uploadAvatar.single('file'),
+  multerErrors('Avatar image', 2),
   uploadCtrl.uploadAvatar
 );
 

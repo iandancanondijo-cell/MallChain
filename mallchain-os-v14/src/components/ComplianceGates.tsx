@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react';
 import { store } from '../store/store';
 import { api } from '../services/api';
+import { kycApi } from '../services/kycApi';
 import './ComplianceGates.css';
 
 interface ComplianceStatus {
@@ -247,15 +248,108 @@ export function TOSAcceptanceModal({ onAccept }: { onAccept: () => void }) {
 
 /**
  * KYC/AML status alert
+ *
+ * Deliberately NOT driven by `User.kycLevel` alone. kycLevel only reaches 2 on
+ * the admin approve path (backend routes/adminPanel.js), while the server's own
+ * verdict — middleware/requireKyc.js kycVerdict() and GET /api/kyc/status — also
+ * counts an approved KYC record. A read of `kycLevel` on its own therefore kept
+ * nagging accounts that were already verified, and told an account whose
+ * submission is under review that it still had work to do. This is the same
+ * verdict KYCGate, Settings, and the wallet gate consult.
  */
+type KycBannerState =
+  | 'checking'   // the verdict read is still in flight — nothing is claimed yet
+  | 'unverified' // nothing submitted, or only wizard progress saved
+  | 'review'     // submitted and awaiting the admin decision
+  | 'rejected'   // a decision came back against it, with the admin's reason
+  | 'quiet';     // approved, or the read failed — no banner is asserted from a failure
+
 export function KYCStatusAlert() {
   const st = store.state;
   const kycLevel = st.user.kycLevel || 0;
   const isAdmin = st.user.role === 'admin' || st.user.role === 'superadmin';
+  // kycLevel >= 2 is one of the two things the server itself accepts, so it
+  // settles the question without a read. It is never used to say the opposite.
+  const settled = kycLevel >= 2 || isAdmin;
+  const [state, setState] = useState<KycBannerState>(settled ? 'quiet' : 'checking');
+  const [detail, setDetail] = useState<{ notes?: string; submittedAt?: string }>({});
 
-  // Admin users are exempt from KYC restrictions
-  if (kycLevel >= 2 || isAdmin) {
-    return null; // KYC complete or admin (exempt)
+  useEffect(() => {
+    if (settled) return;
+    let cancelled = false;
+    const read = () => {
+      kycApi.getStatus().then((res) => {
+        if (cancelled) return;
+        if (!res.ok || !res.data) {
+          setState('quiet');
+          return;
+        }
+        const s = res.data.status;
+        if (s === 'approved') setState('quiet');
+        else if (s === 'pending' || s === 'review') {
+          setDetail({ submittedAt: res.data.submittedAt });
+          setState('review');
+        } else if (s === 'rejected') {
+          setDetail({ notes: res.data.notes, submittedAt: res.data.submittedAt });
+          setState('rejected');
+        } else setState('unverified');
+      });
+    };
+    read();
+    // Leaving and returning to the /kyc wizard is how this answer can change
+    // without a reload; hashchange is how this app moves between routes.
+    window.addEventListener('hashchange', read);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('hashchange', read);
+    };
+  }, [settled, st.user.id]);
+
+  if (settled || state === 'checking' || state === 'quiet') return null;
+
+  const submitted = detail.submittedAt ? new Date(detail.submittedAt).toLocaleDateString() : null;
+
+  if (state === 'review') {
+    return (
+      <div className="compliance-alert compliance-alert--kyc" role="status">
+        <div className="compliance-alert__icon">⏳</div>
+        <div className="compliance-alert__content">
+          <h4>Verification under review</h4>
+          <p>
+            Your submission is with the compliance team{submitted ? ` (received ${submitted})` : ''}. Nothing further is
+            needed from you — you&apos;ll be notified as soon as a decision is recorded.
+          </p>
+        </div>
+        <button
+          className="btn btn--sm btn--secondary"
+          onClick={() => { window.location.hash = '/kyc'; }}
+        >
+          View status
+        </button>
+      </div>
+    );
+  }
+
+  if (state === 'rejected') {
+    return (
+      <div className="compliance-alert compliance-alert--kyc" role="alert">
+        <div className="compliance-alert__icon">⚠️</div>
+        <div className="compliance-alert__content">
+          <h4>Verification was not approved</h4>
+          <p>
+            {detail.notes
+              ? `The reviewer recorded: “${detail.notes}”`
+              : 'The reviewer recorded no reason, so the decision has to be looked at directly.'}
+          </p>
+        </div>
+        <button
+          className="btn btn--sm btn--secondary"
+          onClick={() => { window.location.hash = '/kyc'; }}
+        >
+          Review and resubmit
+        </button>
+      </div>
+    );
   }
 
   return (

@@ -12,6 +12,7 @@ import { useWizard } from '../../hooks/useWizard';
 import { useWalletData } from '../../hooks/useWalletData';
 import { useLivePrice } from '../../hooks/useLivePrice';
 import { useCurrencyConverter } from '../../services/currency';
+import { AddressIdentity } from '../../components/WalletIdentity';
 import { loadAddressBook } from '../../services/addressBookStore';
 import {
   ArrowUpRight, Send, CheckCircle2, AlertTriangle, Shield,
@@ -662,7 +663,9 @@ export default function WalletSend() {
                   <User size={13} /> To
                 </span>
                 <span className="wo-summary-value mono" style={{ fontSize: 12 }}>
-                  {addr.slice(0, 10)}…{addr.slice(-6)}
+                  {/* Who is about to be paid, when their account is public —
+                      the last chance to notice it is the wrong person. */}
+                  <AddressIdentity address={addr} label="To" size={18} />
                 </span>
               </div>
               <div className="wo-summary-row">

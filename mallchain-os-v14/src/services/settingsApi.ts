@@ -56,7 +56,20 @@ class SettingsApi {
     return unwrap(api.get('/api/settings'));
   }
 
-  async update(patch: Partial<UserSettingsData>): Promise<ApiResult<UserSettingsData>> {
+  /**
+   * `PUT /api/settings` merges per section — routes/settings.js Object.assigns
+   * each of prefs / notifications / security / privacy / display onto the stored
+   * document — and answers with the whole saved document. So a caller may send
+   * one key inside one section instead of re-sending a section it never touched,
+   * and a patch that omits a section leaves that section alone.
+   */
+  async update(patch: {
+    prefs?: Partial<UserSettingsData['prefs']>;
+    notifications?: Partial<UserSettingsData['notifications']>;
+    security?: Partial<UserSettingsData['security']>;
+    privacy?: Partial<UserSettingsData['privacy']>;
+    display?: Partial<UserSettingsData['display']>;
+  }): Promise<ApiResult<UserSettingsData>> {
     return unwrap(api.put('/api/settings', patch));
   }
 

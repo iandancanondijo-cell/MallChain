@@ -33,8 +33,13 @@ exports.listValidators = async (_req, res) => {
       // operator_address — see consensusAddressFromPubkey's doc comment.
       const consAddress = consensusAddressFromPubkey(v.consensus_pubkey?.key);
       const signingInfo = consAddress ? signingInfos[consAddress] : null;
-      const missedBlocks = Number(signingInfo?.missed_blocks_counter || 0);
-      const uptime = Math.max(0, Math.min(100, 100 - Math.min(100, missedBlocks / 10)));
+      // No signing record is not "zero blocks missed" — an unknown uptime is
+      // reported as null so the staking UI can say so instead of showing the
+      // most flattering possible number.
+      const missedBlocks = signingInfo ? Number(signingInfo.missed_blocks_counter || 0) : null;
+      const uptime = missedBlocks === null
+        ? null
+        : Math.max(0, Math.min(100, 100 - Math.min(100, missedBlocks / 10)));
       return {
         id: v.operator_address,
         operatorAddress: v.operator_address,

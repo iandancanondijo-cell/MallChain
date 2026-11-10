@@ -1024,6 +1024,12 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   animation: slideUp 0.28s var(--ease);
 }
 .modal.wide { max-width: 760px; }
+/* The sidebar is a fixed layer above the backdrop, so a viewport-centred modal
+   wider than the content column gets its left edge hidden behind it. Centring
+   the backdrop inside `.main` puts every modal where the page actually is. */
+@media (min-width: 768px) {
+  .modal-backdrop { left: var(--sidebar-w); }
+}
 .modal-head {
   display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;
   position: sticky; top: -22px; margin-top: -22px; padding-top: 22px;
@@ -1271,6 +1277,19 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .chart-hit:first-child .tip { left: 0; transform: none; }
 .chart-hit:last-child .tip { left: auto; right: 0; transform: none; }
 
+/* Multi-series charts: a legend, then one plot area holding several series on
+   the same scale. .chart-body is the positioned parent the vertex overlay
+   measures against — without it, adding a legend would shift every marker
+   down by the legend's height. */
+.chart-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; font-size: 11px; font-weight: 600; color: var(--txt-2); }
+.chart-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; vertical-align: 1px; }
+.chart-body { position: relative; }
+.chart-groups { display: flex; align-items: flex-end; gap: 8px; padding-top: 8px; }
+.chart-group { flex: 1; display: flex; align-items: flex-end; gap: 3px; height: 100%; min-width: 0; }
+/* A zero day stays visible and hoverable instead of vanishing: the absence is
+   the finding, and it has to be readable. */
+.chart-group .chart-bar { min-height: 3px; }
+
 .score-ring { position: relative; width: 72px; height: 72px; flex: none; }
 .score-ring svg { transform: rotate(-90deg); }
 .score-ring .ring-txt { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: var(--accent); }
@@ -1324,6 +1343,21 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .mc-stats-grid .lbl { font-size: 11px; color: var(--txt-2); font-weight: 600; }
 .mc-stats-grid .num { font-size: 20px; font-weight: 800; margin-top: 3px; }
 .mc-stats-grid .num small { font-size: 10.5px; color: var(--green-2); font-weight: 700; }
+
+/* Earnings stat cards. One grid, one card anatomy: every card carries its
+   title, figure, the definition of what it counts and where that number
+   comes from, and the footnote sits bottom-aligned so a short card and a long
+   one still read as the same object. auto-fit (not auto-fill) keeps the row
+   from collapsing into a strip of narrow columns when there are few cards. */
+.earn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(228px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.earn-card { display: flex; flex-direction: column; gap: 6px; padding: 14px; margin: 0; text-align: left; }
+.earn-card .lbl { font-size: 11px; color: var(--txt-2); font-weight: 700; letter-spacing: .2px; }
+.earn-card .num { font-size: 22px; font-weight: 800; line-height: 1.1; }
+.earn-card .num small { font-size: 10.5px; font-weight: 700; color: var(--green-2); margin-left: 3px; }
+.earn-card .def { font-size: 11.5px; color: var(--txt-2); }
+.earn-card .src { font-size: 10.5px; color: var(--txt-3); margin-top: auto; padding-top: 6px; border-top: 1px solid var(--line-1); }
+.earn-card[data-degraded='yes'] { opacity: .72; }
+.earn-card[data-degraded='yes'] .num { color: var(--txt-3); }
 .mc-subnav { display: flex; gap: 6px; flex-wrap: wrap; }
 .mc-subnav button {
   padding: 7px 13px; border-radius: 9px;
@@ -1428,6 +1462,113 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   background: var(--red-dark); border: 1px solid var(--red);
   border-radius: 10px; padding: 8px 11px; margin-bottom: 12px;
 }
+
+/* ── mines: how a task pays ──
+   The one rule worth explaining on the list (the link opens once and only an
+   approved proof pays), stated where a participant chooses a task rather than
+   after they have already spent an attempt. */
+.mc-howto {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: 12px; padding: 9px 13px; margin-bottom: 14px;
+  font-size: 11.5px; color: var(--txt-2);
+  animation: fade-up 0.35s var(--ease) 0.04s both;
+}
+.mc-howto b { font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: rgb(var(--section-accent-rgb)); margin-right: 2px; }
+.mc-howto i { color: var(--txt-3); font-style: normal; }
+
+/* The enforced terms, on the card. Deliberately flat and small: this is a
+   disclosure, not a selling point. */
+.mc-card-terms { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.mc-card-terms span {
+  font-size: 10.5px; color: var(--txt-3);
+  background: var(--bg-3); border: 1px solid var(--line-1);
+  border-radius: 999px; padding: 2px 8px;
+}
+
+/* ── mines: the task detail ──
+   Everything a participant needs before the open costs them an attempt. The
+   four stages are the whole product rule, so they lead; the facts are the
+   server's numbers, not the campaign's marketing copy. */
+.mc-task-loading { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--txt-2); padding: 18px 0; }
+
+.mc-task-steps { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(4, 1fr); }
+.mc-task-steps li {
+  display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
+  padding: 9px 10px; border-radius: 11px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  transition: border-color var(--duration-fast) var(--ease), background var(--duration-fast) var(--ease);
+}
+.mc-task-steps .dot {
+  width: 19px; height: 19px; border-radius: 50%; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 800; background: var(--bg-3); color: var(--txt-3);
+}
+.mc-task-steps .lbl { font-size: 11.5px; font-weight: 700; }
+.mc-task-steps .hint { font-size: 10px; color: var(--txt-3); line-height: 1.35; }
+.mc-task-steps li.done { border-color: rgba(34, 197, 94, 0.32); }
+.mc-task-steps li.done .dot { background: var(--green); color: #04150a; }
+.mc-task-steps li.done .lbl { color: var(--green-2); }
+/* The step the participant is actually on, so the modal has one focal point
+   instead of four equal boxes. */
+.mc-task-steps li.now { border-color: rgba(34, 211, 238, 0.45); background: rgba(34, 211, 238, 0.07); }
+.mc-task-steps li.now .dot { background: var(--cyan); color: #04222b; }
+@media (max-width: 620px) { .mc-task-steps { grid-template-columns: repeat(2, 1fr); } }
+
+.mc-task-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.mc-task-facts .f {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 9px 11px; border-radius: 11px;
+  background: var(--bg-3); border: 1px solid var(--line-1);
+}
+.mc-task-facts .f b { font-size: 14px; font-weight: 800; display: flex; align-items: center; }
+.mc-task-facts .f.rate b { font-size: 17px; }
+.mc-task-facts .f span { font-size: 10.5px; color: var(--txt-3); line-height: 1.4; }
+
+.mc-task-brief { margin-bottom: 14px; }
+.mc-task-brief .desc { font-size: 12.5px; color: var(--txt-2); margin: 0 0 8px; line-height: 1.55; white-space: pre-wrap; }
+.mc-task-brief .directive {
+  border-left: 2px solid rgb(var(--section-accent-rgb));
+  padding: 2px 0 2px 11px;
+}
+.mc-task-brief .directive b { font-size: 10.5px; letter-spacing: 0.5px; text-transform: uppercase; color: rgb(var(--section-accent-rgb)); }
+.mc-task-brief .directive p { margin: 3px 0 0; font-size: 12.5px; color: var(--txt-1); line-height: 1.55; white-space: pre-wrap; }
+.mc-task-brief .directive--thin { font-size: 12px; color: var(--txt-3); font-style: italic; }
+.mc-task-brief .plat { display: flex; align-items: center; gap: 7px; margin-top: 9px; font-size: 12px; }
+
+/* The open itself. `spent` is a distinct visual state on purpose: an open the
+   participant has already burned must not look like one still available. */
+.mc-task-open {
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: 13px; padding: 12px 14px; margin-bottom: 14px;
+}
+.mc-task-open.spent { border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.05); }
+.mc-task-open .hd { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.mc-task-open .hd b { font-size: 12px; letter-spacing: 0.3px; }
+.mc-task-view { width: 100%; justify-content: center; text-align: center; }
+.mc-task-open .warn {
+  font-size: 11.5px; color: var(--txt-2); line-height: 1.55;
+  margin-top: 9px; padding: 8px 11px; border-radius: 10px;
+  background: rgba(245, 158, 11, 0.09); border: 1px solid rgba(245, 158, 11, 0.28);
+}
+.mc-task-open .note { font-size: 11.5px; color: var(--txt-2); line-height: 1.55; margin-top: 8px; }
+.mc-task-open .note--warn { color: var(--red-2); }
+.mc-task-open .spent-line { font-size: 12px; color: var(--txt-1); margin-bottom: 7px; }
+.mc-task-open .mc-link-open { margin-top: 2px; }
+.mc-task-open .mc-proof-error { margin: 10px 0 0; }
+
+.mc-task-proof { border-top: 1px solid var(--line-1); padding-top: 12px; margin-bottom: 12px; }
+.mc-task-proof.locked { opacity: 0.72; }
+.mc-task-proof .hd, .mc-task-attempts .hd { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 9px; }
+.mc-task-proof .hd b, .mc-task-attempts .hd b { font-size: 12px; letter-spacing: 0.3px; }
+.mc-task-proof .note { font-size: 12px; color: var(--txt-2); line-height: 1.55; }
+
+.mc-task-attempts { border-top: 1px solid var(--line-1); padding-top: 12px; }
+.mc-task-attempts .att { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11.5px; padding: 4px 0; }
+.mc-task-attempts .att .when { color: var(--txt-3); }
+.mc-task-attempts .att .amt { font-weight: 700; }
+.mc-task-attempts .att .att-proof { color: var(--cyan); text-decoration: none; }
+.mc-task-attempts .att .why { color: var(--txt-3); font-style: italic; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── mines: the six-step flow, on the command centre ── */
 .mc-flow { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }

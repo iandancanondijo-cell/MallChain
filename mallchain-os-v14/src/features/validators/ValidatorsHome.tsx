@@ -36,7 +36,9 @@ export default function ValidatorsHome({ navigate }: { navigate: (p: string) => 
         <p>
           Validators run the Cosmos consensus that produces Mallchain's blocks — they bond stake and are
           slashed for downtime or double-signing. This is separate from Mines Proof Reviewers, who vote on
-          social-content submissions (see the Mines section for that).
+          social-content submissions (see the Mines section for that). Becoming either takes two things, and
+          one without the other gets you nothing: an admin approving your application, and a stake — your own
+          signed self-bond for the chain, an active MLPTS bond for the review pool.
         </p>
         <div className="mc-hero-btns">
           <button className="btn btn-primary" onClick={() => navigate('/validators/apply')}><Shield size={14} /> Apply to Validate</button>

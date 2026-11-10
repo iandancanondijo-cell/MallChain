@@ -3,6 +3,7 @@ import { toast } from '../../../components/ui';
 import './NotificationsPanel.css';
 import {
   notificationPreferencesApi,
+  COLUMN_LABEL,
   type EffectiveNotifications,
   type NotificationFrequencyValue,
   type NotificationMatrixColumn,
@@ -29,17 +30,6 @@ import {
  */
 
 const COLUMNS: NotificationMatrixColumn[] = ['email', 'push', 'sms', 'whatsapp'];
-
-const COLUMN_LABEL: Record<NotificationMatrixColumn, string> = {
-  email: 'Email',
-  // The in-app column. `push` is the key the per-category document uses; the
-  // per-channel document's own `push` field is read by nothing and is not
-  // offered here — that is the switch that used to sit under "Notification
-  // Channels" and change no behaviour.
-  push: 'In-app',
-  sms: 'SMS',
-  whatsapp: 'WhatsApp',
-};
 
 const CATEGORY_LABEL: Record<string, string> = {
   transactions: 'Transactions',

@@ -6,6 +6,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { toast } from '../components/ui';
+import { AddressIdentity } from '../components/WalletIdentity';
 import { getLatestBlock, getBlockchainStats, getRecentTransactions, getRecentBlocks, getBlock, getTransaction } from '../services/explorerApi';
 import type { BlockData, BlockStats, TransactionData } from '../services/explorerApi';
 import { socketManager, type BlockData as SocketBlockData } from '../services/socket';
@@ -242,7 +243,7 @@ export default function BlockchainExplorer() {
 
           <div className="stat-card">
             <div className="stat-label">Avg Block Time</div>
-            <div className="stat-value">{stats.averageBlockTime === null ? '—' : `${stats.averageBlockTime.toFixed(2)}s`}</div>
+            <div className="stat-value">{typeof stats.averageBlockTime === 'number' ? `${stats.averageBlockTime.toFixed(2)}s` : '—'}</div>
             <div className="stat-detail">Block production rate</div>
           </div>
 
@@ -451,13 +452,13 @@ export default function BlockchainExplorer() {
                 {selectedTx.from && (
                   <div className="info-row">
                     <span className="label">From:</span>
-                    <span className="value mono">{selectedTx.from}</span>
+                    <span className="value mono"><AddressIdentity address={selectedTx.from} label="From" size={16} showAddress={false} />{selectedTx.from}</span>
                   </div>
                 )}
                 {selectedTx.to && (
                   <div className="info-row">
                     <span className="label">To:</span>
-                    <span className="value mono">{selectedTx.to}</span>
+                    <span className="value mono"><AddressIdentity address={selectedTx.to} label="To" size={16} showAddress={false} />{selectedTx.to}</span>
                   </div>
                 )}
                 {selectedTx.amount && (
@@ -500,8 +501,10 @@ export default function BlockchainExplorer() {
                           Block {tx.height} · {tx.timestamp ? new Date(tx.timestamp * 1000).toLocaleString() : '—'}
                         </div>
                         {tx.from && tx.to && (
-                          <div style={{ fontSize: '11px', color: 'var(--txt-3)' }}>
-                            {fmtHash(tx.from)} → {fmtHash(tx.to)}
+                          <div style={{ fontSize: '11px', color: 'var(--txt-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <AddressIdentity address={tx.from} label="From" size={16} />
+                            <span aria-hidden="true">→</span>
+                            <AddressIdentity address={tx.to} label="To" size={16} />
                           </div>
                         )}
                       </div>

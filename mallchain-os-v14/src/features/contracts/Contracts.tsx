@@ -3,16 +3,42 @@ import { store } from '../../store/store';
 import { useStoreVersion, toast, Modal } from '../../components/ui';
 import { requestMnemonic } from '../../services/mnemonicAccess';
 import { deployContract, executeContract, WasmTxError } from '../../services/wasmTx';
-import { contractsApi, type ContractRecord } from '../../services/contractsApi';
+import { contractsApi, type ContractOfferStatus, type ContractRecord } from '../../services/contractsApi';
+
+const fmtDate = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString() : null);
+
+/**
+ * One sentence per offer state. A contract that was never shared returns null
+ * rather than a sentence about an offer that never happened.
+ */
+function offerSentence(c: ContractRecord): { label: string; detail: string } | null {
+  const status: ContractOfferStatus = c.offerStatus ?? '';
+  const to = c.counterpartyAddress || 'the account you named';
+  const on = fmtDate(c.respondedAt || c.offeredAt);
+  switch (status) {
+    case 'offered':
+      return { label: `Offered to ${to}`, detail: `waiting on their answer${on ? `, sent ${on}` : ''}. Nothing about the contract changes until they accept.` };
+    case 'accepted':
+      return { label: `Accepted by ${to}`, detail: `${on ? `on ${on}. ` : ''}Mallchain records that they took it on; accepting signed no transaction.` };
+    case 'declined':
+      return { label: `Declined by ${to}`, detail: `${on ? `on ${on}. ` : ''}You can offer this contract to another account.` };
+    case 'revoked':
+      return { label: 'Offer withdrawn', detail: `${on ? `on ${on} ` : ''}before they answered.` };
+    default:
+      return null;
+  }
+}
 
 export default function Contracts() {
   useStoreVersion();
   const st = store.state;
   const address = st.wallet.address as string;
   const [contracts, setContracts] = useState<ContractRecord[] | null>(null);
+  const [offers, setOffers] = useState<ContractRecord[] | null>(null);
+  const [offersError, setOffersError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<null | 'deploy' | 'execute'>(null);
+  const [open, setOpen] = useState<null | 'deploy' | 'execute' | 'share'>(null);
   const [active, setActive] = useState<ContractRecord | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -23,14 +49,25 @@ export default function Contracts() {
   const [wasmBytes, setWasmBytes] = useState<Uint8Array | null>(null);
   const [method, setMethod] = useState('');
   const [args, setArgs] = useState('{}');
+  const [shareTo, setShareTo] = useState('');
+  const [shareNote, setShareNote] = useState('');
+  const [shareError, setShareError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const res = await contractsApi.list();
-    if (res.ok && res.data) setContracts(res.data);
-    else setError(res.error || 'Failed to load contracts');
+    setOffersError(null);
+    const [mine, incoming] = await Promise.all([contractsApi.list(), contractsApi.offers()]);
+    if (mine.ok && mine.data) setContracts(mine.data);
+    else setError(mine.error || 'Failed to load contracts');
+    // An offer read that failed is not "nothing is waiting", so it keeps its
+    // own error slot instead of an empty list.
+    if (incoming.ok) setOffers(incoming.data || []);
+    else {
+      setOffers(null);
+      setOffersError(incoming.error || 'Failed to load contract offers');
+    }
     setLoading(false);
   }, []);
 
@@ -134,6 +171,44 @@ export default function Contracts() {
     }
   };
 
+  const share = async () => {
+    if (!active) return;
+    if (!shareTo.trim()) return toast('Enter the wallet address to share with', false);
+    setBusy(true);
+    setShareError(null);
+    const res = await contractsApi.share(active._id, shareTo.trim(), shareNote.trim() || undefined);
+    setBusy(false);
+    if (res.ok) {
+      toast(`Offered to ${shareTo.trim()} — they have to accept it themselves`);
+      setOpen(null);
+      setShareTo('');
+      setShareNote('');
+      load();
+    } else {
+      // The server owns the reason (no account has that address linked, own
+      // account, already accepted), so it is shown as it answered.
+      setShareError(res.error || 'Could not share this contract');
+    }
+  };
+
+  const respond = async (c: ContractRecord, action: 'accept' | 'decline') => {
+    setBusy(true);
+    const res = action === 'accept' ? await contractsApi.accept(c._id) : await contractsApi.decline(c._id);
+    setBusy(false);
+    if (res.ok) toast(action === 'accept' ? `Accepted ${c.name}` : `Declined ${c.name}`);
+    else toast(res.error || 'Could not record your answer', false);
+    load();
+  };
+
+  const revoke = async (c: ContractRecord) => {
+    setBusy(true);
+    const res = await contractsApi.revoke(c._id);
+    setBusy(false);
+    if (res.ok) toast('Offer withdrawn');
+    else toast(res.error || 'Could not withdraw the offer', false);
+    load();
+  };
+
   const resetDeployForm = () => {
     setName('');
     setLabel('');
@@ -158,11 +233,16 @@ export default function Contracts() {
     );
   }
 
+  const own = contracts || [];
+  const incoming = offers || [];
+  const waiting = incoming.filter((c) => c.offerStatus === 'offered');
+  const acceptedIncoming = incoming.filter((c) => c.offerStatus === 'accepted');
+
   return (
     <div>
       <div className="view-head">
         <h1 className="text-gradient">Smart Contracts</h1>
-        <span className="sub">Deploy and execute CosmWasm contracts on-chain</span>
+        <span className="sub">Deploy and execute CosmWasm contracts on-chain, and offer one to another account</span>
         <div className="row" style={{ marginLeft: 'auto' }}>
           <button className="btn btn-ghost btn-sm" onClick={() => setOpen('deploy')}>Deploy contract</button>
         </div>
@@ -174,6 +254,108 @@ export default function Contracts() {
         </div>
       )}
 
+      <div className="earn-grid" style={{ marginBottom: 14 }}>
+        <div className="card earn-card">
+          <div className="lbl">Deployed by you</div>
+          <div className="num">{contracts ? contracts.length : '—'}</div>
+          <div className="def">
+            {contracts
+              ? 'Each is a wasm instance your own key deployed, plus the record Mallchain keeps beside it.'
+              : 'This list could not be read, so the count is unknown — not zero.'}
+          </div>
+          <div className="src">contracts · userId = you</div>
+        </div>
+        <div className="card earn-card">
+          <div className="lbl">Waiting on your answer</div>
+          <div className="num">{offers ? waiting.length : '—'}</div>
+          <div className="def">
+            {offersError
+              ? 'The offers could not be read, so nothing is being claimed about them.'
+              : 'An offer grants nothing until you accept it. Accepting is recorded by Mallchain and signs no transaction.'}
+          </div>
+          <div className="src">contracts · counterpartyUserId = you · offerStatus</div>
+        </div>
+        <div className="card earn-card">
+          <div className="lbl">You accepted</div>
+          <div className="num">{offers ? acceptedIncoming.length : '—'}</div>
+          <div className="def">
+            {acceptedIncoming.length
+              ? 'These you may execute from your own key, the way the owner can.'
+              : 'Accepting is what lets you use someone else’s contract. Nothing is handed to you without your answer.'}
+          </div>
+          <div className="src">contracts · offerStatus = accepted</div>
+        </div>
+      </div>
+
+      <div className="sec-title mt"><h2>Shared with you</h2></div>
+
+      {offersError && (
+        <div className="card mb" style={{ borderColor: 'var(--red)', padding: 16 }}>
+          <div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {offersError}</div>
+          <div className="tiny mt">This is a read that failed, not an empty inbox — an offer may still be waiting.</div>
+          <div className="row mt"><button className="btn btn-ghost btn-sm" onClick={load}>Re-check offers</button></div>
+        </div>
+      )}
+
+      {!offersError && offers?.length === 0 && (
+        <div className="card mb card-glow bg-gradient-card">
+          <div className="empty-state">
+            <div className="es-ico">📥</div>
+            <div className="es-t">No contracts shared with you</div>
+            <div className="es-m">An account that deployed a contract can offer it to the wallet address you have linked. Nothing appears here by itself.</div>
+          </div>
+        </div>
+      )}
+
+      {waiting.map((c) => (
+        <div key={`wait-${c._id}`} className="card mb card-glow bg-gradient-card card-hover" style={{ borderColor: 'var(--gold)' }}>
+          <div className="row">
+            <div className="grow">
+              <b>{c.name}</b>
+              <span className="chip mono" style={{ fontSize: 11, marginLeft: 8 }}>{c.address}</span>
+            </div>
+            <span className="chip">offered</span>
+          </div>
+          <div className="tiny mt" style={{ opacity: 0.75 }}>
+            From {c.ownerAddress || 'an account with no linked wallet'} · offered to {address}
+            {c.offeredAt ? ` · ${new Date(c.offeredAt).toLocaleString()}` : ''}
+          </div>
+          {c.offerNote && <div className="tiny mt">“{c.offerNote}”</div>}
+          {c.description && <div className="tiny mt" style={{ opacity: 0.7 }}>{c.description}</div>}
+          <div className="def mt">
+            Accepting records that this contract is yours to use and lets you execute it with your own key. It does not change the contract on
+            chain and moves no funds — the wasm still only obeys signed transactions.
+          </div>
+          <div className="row mt">
+            <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => respond(c, 'accept')}>Accept contract</button>
+            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => respond(c, 'decline')}>Decline</button>
+          </div>
+          <div className="src">contracts · offerStatus = offered · counterpartyAddress</div>
+        </div>
+      ))}
+
+      {acceptedIncoming.map((c) => (
+        <div key={`acc-${c._id}`} className="card mb card-glow bg-gradient-card">
+          <div className="row">
+            <div className="grow">
+              <b>{c.name}</b>
+              <span className="chip mono" style={{ fontSize: 11, marginLeft: 8 }}>{c.address}</span>
+            </div>
+            <span className="chip green">accepted</span>
+            <span className="chip">{c.txs} txs</span>
+          </div>
+          <div className="tiny mt" style={{ opacity: 0.75 }}>
+            Offered by {c.ownerAddress || 'an account with no linked wallet'}
+            {c.respondedAt ? ` · you accepted ${new Date(c.respondedAt).toLocaleDateString()}` : ''}
+          </div>
+          <div className="row mt">
+            <button className="btn btn-ghost btn-sm" onClick={() => { setActive(c); setOpen('execute'); setMethod(''); setArgs('{}'); }}>Execute</button>
+          </div>
+        </div>
+      ))}
+
+      <div className="sec-title mt"><h2>Your contracts</h2></div>
+
       {!loading && contracts?.length === 0 && (
         <div className="empty-state">
           <div className="es-ico">📜</div>
@@ -183,23 +365,45 @@ export default function Contracts() {
         </div>
       )}
 
-      {(contracts || []).map((c) => (
-        <div key={c._id} className="card mb card-glow bg-gradient-card card-hover">
-          <div className="row">
-            <div className="grow">
-              <b>{c.name}</b>
-              <span className="chip mono" style={{ fontSize: 11, marginLeft: 8 }}>{c.address}</span>
+      {own.map((c) => {
+        const offer = offerSentence(c);
+        return (
+          <div key={c._id} className="card mb card-glow bg-gradient-card card-hover">
+            <div className="row">
+              <div className="grow">
+                <b>{c.name}</b>
+                <span className="chip mono" style={{ fontSize: 11, marginLeft: 8 }}>{c.address}</span>
+              </div>
+              <span className="chip">{c.type}</span>
+              <span className="chip">{c.txs} txs</span>
             </div>
-            <span className="chip">{c.type}</span>
-            <span className="chip">{c.txs} txs</span>
+            {c.description && <div className="tiny mt" style={{ opacity: 0.7 }}>{c.description}</div>}
+            {c.txHash && <div className="tiny mt mono" style={{ opacity: 0.5 }}>tx: {c.txHash.slice(0, 18)}...</div>}
+            {offer && (
+              <div className="tiny mt">
+                <b>{offer.label}</b> — {offer.detail}
+              </div>
+            )}
+            <div className="row mt">
+              <button className="btn btn-ghost btn-sm" onClick={() => { setActive(c); setOpen('execute'); setMethod(''); setArgs('{}'); }}>Execute</button>
+              {c.offerStatus === 'offered' ? (
+                <>
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setActive(c); setShareError(null); setOpen('share'); }}>Change offer</button>
+                  <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => revoke(c)}>Withdraw offer</button>
+                </>
+              ) : c.offerStatus === 'accepted' ? null : (
+                <button className="btn btn-ghost btn-sm" onClick={() => { setActive(c); setShareError(null); setShareTo(''); setShareNote(''); setOpen('share'); }}>Share</button>
+              )}
+            </div>
+            {c.offerStatus === 'accepted' && (
+              <div className="tiny mt" style={{ opacity: 0.6 }}>
+                One contract record holds one counterparty, and their answer is a settled fact — it cannot be re-pointed or withdrawn from here.
+                Deploying a new instance is how the same code is handed to someone else.
+              </div>
+            )}
           </div>
-          {c.description && <div className="tiny mt" style={{ opacity: 0.7 }}>{c.description}</div>}
-          {c.txHash && <div className="tiny mt mono" style={{ opacity: 0.5 }}>tx: {c.txHash.slice(0, 18)}...</div>}
-          <div className="row mt">
-            <button className="btn btn-ghost btn-sm" onClick={() => { setActive(c); setOpen('execute'); }}>Execute</button>
-          </div>
-        </div>
-      ))}
+        );
+      })}
 
       {open === 'deploy' && (
         <Modal title="Deploy contract" onClose={() => { setOpen(null); resetDeployForm(); }}>
@@ -244,11 +448,46 @@ export default function Contracts() {
           </div>
           <div className="tiny mt" style={{ marginBottom: 12, opacity: 0.6 }}>
             Sends a MsgExecuteContract to {active.address} — signed with your wallet key.
+            {acceptedIncoming.some((c) => c._id === active._id)
+              ? ' You are calling as the account it was offered to, so the contract’s own permissions decide whether the call goes through.'
+              : ''}
           </div>
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setOpen(null)}>Cancel</button>
             <button className="btn btn-primary" disabled={busy} onClick={execute}>
               {busy && <span className="spin" />} Sign &amp; execute
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {open === 'share' && active && (
+        <Modal title={`Share — ${active.name}`} onClose={() => setOpen(null)}>
+          <div className="field">
+            <label>Wallet address to offer it to</label>
+            <input className="input mono" value={shareTo} onChange={(e) => setShareTo(e.target.value)} placeholder="mall1…" />
+            <div className="hint">
+              The account that has this address linked is the one asked to accept. A shared contract is not public — only that account and you can
+              read it.
+            </div>
+          </div>
+          <div className="field">
+            <label>Note for them (optional)</label>
+            <textarea className="input" rows={2} value={shareNote} onChange={(e) => setShareNote(e.target.value)} placeholder="What this contract is for" />
+          </div>
+          {shareError && (
+            <div className="card mb" style={{ backgroundColor: 'var(--red-dark)', borderColor: 'var(--red)', padding: 12 }}>
+              <div style={{ color: 'var(--red)', fontSize: 13 }}>⚠ {shareError}</div>
+            </div>
+          )}
+          <div className="tiny mt" style={{ marginBottom: 12, opacity: 0.6 }}>
+            Nothing about the contract changes when you offer it. Their acceptance is stored by Mallchain against their own account, and it is not
+            a signature.
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={() => setOpen(null)}>Cancel</button>
+            <button className="btn btn-primary" disabled={busy} onClick={share}>
+              {busy && <span className="spin" />} Send offer
             </button>
           </div>
         </Modal>

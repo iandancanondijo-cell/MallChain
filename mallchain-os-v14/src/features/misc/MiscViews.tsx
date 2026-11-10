@@ -13,34 +13,11 @@ import {
   type FeedEntry,
 } from '../../services/notificationFeed';
 
-/** Small utility views — Careers, Learning, Social Tasks, Notifications,
- *  Analytics, Help — mirroring v14's ecosystem group. */
-export const Careers = () => {
-  useStoreVersion();
-  const st = store.state;
-  return (
-    <div>
-      <div className="view-head"><h1 className="text-gradient">Careers</h1><span className="sub">join the Mallchain team</span></div>
-      <div className="stat-grid">
-        <div className="card card-glow bg-gradient-card"><div className="card-label">Open roles</div><div className="card-value">{st.careers.list.length}</div><div className="card-sub">remote-first</div></div>
-      </div>
-      <div className="card card-glow bg-gradient-card mb">
-        <div className="tiny">Applications aren't wired up yet — there's no backend to send them to. Reach out directly for now.</div>
-      </div>
-      <div className="stagger">
-      {st.careers.list.map((c) => (
-        <div key={c.title} className="card card-glow bg-gradient-card card-hover mb">
-          <div className="row">
-            <div className="grow"><b>{c.title}</b><div className="tiny">{c.dept} · {c.loc}</div></div>
-            <button className="btn btn-ghost btn-sm" disabled title="Applications aren't available yet">Apply</button>
-          </div>
-        </div>
-      ))}
-      </div>
-    </div>
-  );
-};
-
+/** Small utility views — Learning and the Notifications centre.
+ *  Careers lives in features/careers now that it reads and writes real
+ *  openings; the old Social Tasks and Network Analytics pages were removed
+ *  rather than shipped, because their only content was a list of rewards no
+ *  backend pays out and a stats panel no endpoint serves. */
 const LESSONS = [
   {
     t: 'What is Mallcoin (MALL)?',
@@ -116,35 +93,8 @@ export const Learning = () => {
         </div>
       ))}
       </div>
-      <div className="tiny">Progress {lessons.filter((l) => l.done).length}/{lessons.length} lessons.</div>
-    </div>
-  );
-};
-
-export const SocialTasks = () => {
-  useStoreVersion();
-  const tasks = [
-    { t: 'Follow @mallchain on X', r: 25 },
-    { t: 'Join the Telegram community', r: 40 },
-    { t: 'Share your referral link', r: 30 },
-    { t: 'Verify your email + phone', r: 50 },
-  ];
-  return (
-    <div>
-      <div className="view-head"><h1 className="text-gradient">Social Tasks</h1><span className="sub">not available yet</span></div>
-      <div className="card card-glow bg-gradient-card mb">
-        <div className="tiny">Social task rewards aren't wired up yet — there's no real backend crediting MLPTS for these yet, so completing them here wouldn't actually pay out.</div>
-      </div>
-      <div className="stagger">
-      {tasks.map((t) => (
-        <div key={t.t} className="card card-glow bg-gradient-card card-hover mb">
-          <div className="row">
-            <div className="grow"><b>{t.t}</b></div>
-            <span className="chip gold">+{t.r} MLPTS</span>
-            <button className="btn btn-ghost btn-sm" disabled title="Not available yet">Complete</button>
-          </div>
-        </div>
-      ))}
+      <div className="tiny">
+        Progress {lessons.filter((l) => l.done).length}/{lessons.length} lessons — marked on this device, not synced to your account.
       </div>
     </div>
   );
@@ -406,22 +356,6 @@ export const NotificationsView = () => {
 
       <div className="tiny nc-note">
         Dismissing archives a notification on your account — it disappears from every device and stops counting towards your unread total. Filters and search apply to the notifications loaded here; older ones arrive as you load them.
-      </div>
-    </div>
-  );
-};
-
-export const AnalyticsView = () => {
-  useStoreVersion();
-  return (
-    <div>
-      <div className="view-head"><h1 className="text-gradient">Network Analytics</h1><span className="sub">not available yet</span></div>
-      <div className="card card-glow bg-gradient-card">
-        <div style={{ textAlign: 'center', padding: 32 }}>
-          <div style={{ fontSize: 40 }}>📊</div>
-          <h2 style={{ margin: '8px 0' }}>Network analytics isn't available yet</h2>
-          <p className="muted">There's no backend endpoint serving real network-wide stats yet — check the Explorer for live chain data in the meantime.</p>
-        </div>
       </div>
     </div>
   );
