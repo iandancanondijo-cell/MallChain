@@ -115,6 +115,8 @@ See `docs/2026_blockchain_enhancements.md` for the full feature roadmap and impl
 
 ## Guides
 
+- [Frontend v14 integration handoff (contracts, build, export, removed mock data)](frontend-v14-integration-handoff-2026-11-10.md) ·
+  [what the UI still needs from the backend](backend-handoff-2026-11-09.md)
 - [Run a node / become a validator (worldwide setup guide)](validator-setup/README.md)
 - [Node operator reference](user-guides/10-run-a-blockchain-node.md) ·
   [Become a validator](user-guides/09-become-a-validator.md) ·

@@ -11,6 +11,10 @@ This is a request list, not a critique of the client: the frontend workarounds
 mentioned here are deliberately conservative and each should be deleted once the
 endpoint exists.
 
+For what the shipped client already depends on — contracts, build and
+environment requirements, surfaces removed on purpose, and the export recipe —
+see [frontend-v14-integration-handoff-2026-11-10.md](./frontend-v14-integration-handoff-2026-11-10.md).
+
 ## 1. `/api/market/price` cannot produce a 7-day series
 
 `history` is capped with `history.slice(-500)` (15s sampling ≈ 2 hours), while

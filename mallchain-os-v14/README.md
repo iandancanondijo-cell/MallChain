@@ -1,131 +1,211 @@
 # Mallchain OS v14 — Mission Control Frontend
 
-The decentralized operating system for commerce, creators, and communities. A production-ready Vite + React + TypeScript single-page app with hash routing, a reactive store with a single `applyTx` mutation path, demo-mode seeding, and a fetch-based API service layer.
+The decentralized operating system for commerce, creators, and communities: a
+Vite + React + TypeScript single-page app with hash routing, a reactive store
+with one mutation path (`applyTx`), and a fetch-based API service layer.
 
-## Overview
-
-Mallchain Mission Control is the Web3 OS frontend for the Mallchain network: wallets, marketplace with escrow, staking, governance, mines (campaign participation), a full 13-step validator lifecycle including a Rewards Calculator (projection + break-even + export/share) and Rewards Leaderboard, chain explorer, messaging, referrals, admin controls, and settings.
-
-**Design system:** deep navy base (`#050810` / `#0d111b`), gold primary (`#f3ba2f`), emerald success, crimson errors. Fixed 252px sidebar with 9 collapsible groups.
+There is no demo mode. Every screen shows what the backend answered — or says
+that nothing answered. The demo seeding (`src/demo/seeds.ts`), the `sim` timer
+controller and the `VITE_DEMO_MODE` flag are gone, and the pages that existed
+only to display invented content were deleted rather than stubbed (see
+[docs/frontend-v14-integration-handoff-2026-11-10.md](../docs/frontend-v14-integration-handoff-2026-11-10.md) §7).
 
 ## Setup
 
 ```bash
-npm install        # install dependencies (react 18, vite 5, typescript 5)
-npm run dev        # start dev server → http://localhost:5173
-npm run build      # typecheck (tsc --noEmit) + production build → dist/
-npm run preview    # preview the production build
-npm run typecheck  # tsc --noEmit only
+npm ci               # dependencies per package.json (react 19, vite 8, vitest 5)
+npm run dev          # http://localhost:5173 — /api proxied to http://localhost:4000
+npm run build        # tsc --noEmit && vite build → dist/
+npm run preview      # serve dist/ on :4173 (also proxies /api)
+npm run typecheck    # tsc --noEmit
+npm run test         # vitest (watch)
+npm run test:run     # full suite
 ```
 
-Requires Node 18+ (Node 20 recommended).
+Node 20+ (verified on Node 24). No backend reachable? `stub-api.mjs`, next to
+this repository, serves these routes on `:4000` for local UI work.
 
-## Environment configuration
+## Configuration
 
-Copy `.env.example` to `.env`:
+Copy `.env.example` to `.env.local` (or set the variables in CI). They are
+inlined at build time, so a bundle is rebuilt — not reconfigured — to point
+somewhere else.
 
-| Variable | Default | Description |
+| Variable | Required | Meaning |
 |---|---|---|
-| `VITE_API_BASE_URL` | `''` | Backend base URL. Empty → local simulated store (demo). Set → real `fetch()` calls |
-| `VITE_DEMO_MODE` | `'true'` | Seed the store with demo data on boot |
-| `VITE_NETWORK` | `'mainnet'` | `mainnet` or `testnet` |
+| `VITE_API_BASE_URL` | yes, in a production build | Absolute API origin, no trailing slash. Empty in dev/test so requests stay same-origin and hit the Vite proxy. |
+| `VITE_ALLOW_LOCAL_API` | no | `1` permits a build aimed at `localhost`/`127.x`/`::1`. For local preview smoke tests only — never for an uploaded artifact. |
+| `VITE_NETWORK` | no | `mainnet` \| `testnet` (default `testnet`). Labelled in the UI; selects the chain parameters used for signing. |
+| `VITE_SESSION_TTL` | no | Idle minutes before logout (default 120). The server mints its own JWT TTL; the shorter wins. |
+| `VITE_CHAIN_ID` / `VITE_CHAIN_PREFIX` / `VITE_GAS_PRICE` | no | `mallchain-1` / `mall` / `0.01stake` — must match `backend/src/config/index.js`. |
 
-## Demo mode vs production mode
+Two guards, deliberately: `vite.config.ts`'s `guardProductionApiUrl()` fails
+`vite build` when the API origin is missing, unparseable or loopback, and
+`src/services/config.ts` still refuses to start such a bundle at page load. A
+wrongly-targeted artifact should never reach a user.
 
-- **Demo mode (`VITE_DEMO_MODE=true`, no API URL):** the store is seeded from `src/demo/seeds.ts` (balances, transactions, validators, campaigns, marketplace items, blocks, messages, referrals). Simulated timers (explorer block stream, pending-payment polls, consensus vote tick-in) run through the central `sim` controller in `src/services/config.ts`.
-- **Production mode (`VITE_API_BASE_URL` set, `VITE_DEMO_MODE=false`):** the store initializes **empty** and every module shows its proper empty state with a primary CTA ("No transactions yet — send or receive MALL to get started", "Connect a wallet to participate", "You are not a validator yet — Become a Validator", etc.). All reads/writes go through the API service layer.
-
-## API service contract
+## How data reaches the screen
 
 `src/services/api.ts` exposes:
 
 ```ts
-api.get(path, params)   // GET → Promise<JSON>
-api.post(path, body)    // POST → Promise<JSON>
-api.mutate(tx)          // apply a transaction → Promise<tx>
+api.get(path, params)   // → Promise<ApiResult<T>>
+api.post(path, body)    // → Promise<ApiResult<T>>
+api.mutate(tx)          // → Promise<ApiResult<T>>
+// ApiResult = { ok: boolean; status?: number; data?: T; error?: string; details?: unknown }
 ```
 
-When `config.apiBaseUrl` is set these perform real `fetch()` calls (JSON in/out). When empty they resolve from the local store (the current simulated engine). The backend is expected to expose the same paths the frontend calls (e.g. `/wallet/balance`, `/validators/me`, `/marketplace/products`, `/campaigns`).
+`data` is the **whole parsed response body**. The backend wraps successes in
+`ok(x)` → `{ ok: true, data: x }`, so a value arrives at `res.data.data.x`. A
+few legacy routes return flat bodies and read as `res.data.x`. The endpoint
+table and the per-route envelope rules are in §2-§3 of the handoff document
+linked above.
 
-## Store API
+`src/store/store.ts` is the single client-side source of truth:
 
-`src/store/store.ts` is the single source of truth:
-
-- `store.state` — reactive state (subscribe via `useStoreVersion()` in components or `store.subscribe(fn)`)
-- `store.commit()` — persist to localStorage (key `mallchain_os_v1_v14`) + notify subscribers
-- `store.applyTx(tx)` — the single mutation path: validate → mutate → create transaction record → emit notification → append activity. All module mutations go through it
+- `store.state` — reactive state (`useStoreSlice` / `useStoreVersion`, or `store.subscribe(fn)`)
+- `store.commit()` — persist to localStorage (`mallchain_os_v1_v14`; the encrypted vault is a separate key) + notify subscribers
+- `store.applyTx(tx)` — the one mutation path: validate → mutate balances → append tx record → emit notification → append activity
 - `store.reset()` — clear localStorage and re-initialize
 - Pub/sub: `store.subscribe(fn)` / `store.unsubscribe(fn)`
 
-## Route map (hash routing — all deep-linkable)
+### Signing and identity invariants
+
+- The mnemonic is never read directly. `requestMnemonic()`
+  (`src/services/mnemonicAccess.ts`) unlocks it with the PIN, passes it to the
+  signing call and drops the plaintext. Only the PIN-encrypted form is ever
+  persisted, and a credential that cannot unlock the wallet cannot be saved.
+- Wallet creation and wallet linking require a server-verified KYC status; a
+  referral code is assigned only after a wallet actually connects.
+- Server-supplied paths go through a sanitizer before they reach the DOM, never
+  raw: `src/services/assets.ts` resolves `avatarUrl` and other upload paths for
+  `img src`, and `src/services/proofLink.ts` (`resolveProofLink`,
+  `resolveContentLink`, `isStorableProof`) turns a user-authored `proof_url`
+  into either a safe http(s) anchor or a visible "blocked" state.
+- Counterparty names and pictures come from `POST /api/identity/resolve` via
+  `src/components/WalletIdentity.tsx` and honour that account's
+  `profileVisibility`. Unknown and private look identical.
+- Naming: the product says **MALL** to people; **MLCNS** is the on-chain ticker
+  and API field, used only in technical/builder text.
+
+## Routes (hash routing — all deep-linkable)
 
 ```
-#/                    → Dashboard (Mission Control)
-#/auth                → Sign in / Sign up / verify / wallet setup
-#/wallet              → Wallet Hub          #/wallet/send      → Send MALL
-#/wallet/receive      → Receive             #/wallet/swap      → Swap
-#/wallet/history      → Tx history (CSV export)
-#/marketplace         → Marketplace + escrow checkout
-#/staking             → Staking (7-day unstake cooldown)
-#/governance          → Proposals (create, vote, comment)
-#/mines               → Mines command center
-#/mines/discover      → Campaign discovery + Campaign Intelligence
-#/mines/my-campaigns  → Creator analytics   #/mines/participation
-#/mines/earnings      → Earnings            #/mines/leaderboard
-#/mines/analytics     → 6 charts            #/mines/history
-#/mines/validator-queue → Submissions awaiting validation
-#/validators          → Validator home      #/validators/apply
-#/validators/stake    → 500 MALL stake      #/validators/training
-#/validators/approval → Approval countdown  #/validators/dashboard
-#/validators/calculator → Rewards Calculator (projection + break-even + export/share)
-#/validators/rewards-leaderboard → Rewards leaderboard
-#/validators/leaderboard → Reputation leaderboard
-#/validators/profile  → Validator profile
-#/explorer            → Block/tx explorer (streaming)
-#/messaging           → Messages            #/referrals  → Referrals
-#/admin               → Admin control center (feature flags, freeze, announcements)
-#/settings            → Settings (accent, currency, language)
-#/profile             → Profile edit        #/contracts → Smart contracts
-#/devhub              → Developer hub       #/notifications, #/analytics, #/help…
+#/                      Dashboard          #/auth, #/login        Sign in / up
+#/signup-v2             Register (v2)      #/kyc                  Identity verification
+#/wallet                Wallet hub         #/wallet/send          Send MALL
+#/wallet/receive        Receive            #/wallet/swap          Swap
+#/wallet/history        Chain history      #/wallet/points        Mallpoints
+#/wallet/performance    Performance        #/wallet/buy|withdraw  On/off ramps
+#/wallet/connect        Create / link      #/wallet/settings      Wallet settings
+#/wallet/address-book   Saved addresses    #/transactions         Transaction history
+#/security              Security settings  #/marketplace          Marketplace + escrow
+#/staking               Stake MALL         #/governance           Proposals + voting
+#/mines                 Command center     #/mines/discover       Campaigns to do
+#/mines/participation   Your opens         #/mines/my-campaigns   Creator space
+#/mines/earnings        Earnings           #/mines/leaderboard    Leaderboard
+#/mines/analytics       Analytics          #/mines/history        History
+#/mines/validator-queue Proof review       #/mines/reviewer/stake Reviewer stake
+#/mallpoints-purchase   Spend MLPTS (STK)  #/validators           Validator home
+#/validators/apply      Application        #/validators/leaderboard  Active set
+#/validators/profile    Your application   #/explorer             Blocks & txs
+#/economy               Network economy    #/edu                  EDU
+#/messaging             Messages           #/referrals            Referrals
+#/contracts             Smart contracts    #/devhub               Developer hub
+#/run-node              Run a node         #/careers              Jobs
+#/learning              Lessons            #/notifications        Notification centre
+#/settings              Profile & Settings #/search               Search results
+#/admin                 Admin (role-gated) #/help  #/dmca  #/landing
 ```
+
+Unmatched paths fall through to Dashboard (`matchRoute`), and `/admin` sends an
+authenticated non-admin to Dashboard rather than rendering it. `/social-tasks`
+and `/analytics` no longer exist — they were the mock-data pages, so a stale
+bookmark or old share link now lands somewhere honest.
 
 ## Feature list
 
-- **Auth:** sign up/login (email/phone), 2FA, recovery, wallet create/import, PIN
-- **Wallet:** hub, send (fee slider, single-word phrase signing), receive (QR, address rotation, payment polling), swap, history + CSV export
-- **Marketplace:** browse/filter, wishlist, cart, escrow checkout, order tracking, disputes, seller dashboard
-- **Staking:** delegate MALL, 7-day cooldown unstake + claim
-- **Governance:** create proposals, MALL-weighted voting, discussion threads
-- **Mines:** Campaign Participants model — discover campaigns with Campaign Intelligence (Validator Confidence, Completion Rate, Creator Trust Score), 5-step participation flow, creator analytics, leaderboard, validator queue + appeal
-- **Validators (13-step lifecycle):** eligibility checks → apply → 500 MALL stake → 90% training quiz → approval → dashboard (Today's Work) → blind review with auto-flag → consensus (15 validators, 80%) → matched rewards (+0.8 MALL) / wrong-vote penalties (−0.2 rep) → reputation → 5-tier strike ladder → profile/leaderboard
-- **Rewards Calculator:** projection mode (0.8 MALL per consensus-matched review, 0.5× strike multiplier from tier 2, 25% stake slash at tier 4), break-even mode (days to recover 500 MALL stake), Copy Summary / CSV export / share links, presets, live recompute
-- **Rewards Leaderboard:** seeded validators ranked by projected net MALL, current user highlighted, "Calculate mine" pre-fill
-- **Explorer:** streaming blocks/txs · **Messaging:** typing indicator, unread badges · **Referrals:** claim commission · **Admin:** feature flags (maintenance mode, trading freeze, hide marketplace), user freeze, announcements broadcast
-- **Settings:** theme accent (gold/cyan/purple/emerald), currency (USD/KES/EUR/GBP), language (EN/FR/ES/SW) — applied app-wide
+- **Auth:** register/sign in (email, phone, Google OAuth), 18+ age gate, terms
+  acceptance, 2FA, recovery, KYC session, PIN-protected wallet create/import
+- **Wallet:** hub with sessions, send (fee + fiat quote, real `MsgSend`),
+  receive (QR, payment polling), swap, history with CSV export, Mallpoints,
+  performance, buy/withdraw, address book
+- **Marketplace:** browse/filter, wishlist, cart, escrow checkout, order
+  tracking, disputes, seller dashboard. Nothing is listed until a catalog
+  endpoint exists — the page says so instead of inventing sellers.
+- **Staking / Governance:** real `MsgStake`/`MsgUnstake` and validator voting,
+  proposals and weights from the chain
+- **Mines / Creator Space:** campaigns available to you, link opens recorded
+  server-side, screenshot proof (upload or URL, scheme-checked), reviewer queue
+  with staking and votes, earnings, leaderboard, analytics, creator campaigns
+  funded with Mallpoints
+- **Validators:** real Cosmos `x/staking` validators — apply gated on
+  eligibility that is actually enforced, active-set leaderboard, your application
+- **Explorer / Economy / Network status:** blocks, transactions, chain metrics
+  and the emission schedule read live; a row whose source is unreachable says so
+- **Ecosystem:** messaging, referrals, smart contracts (deploy/inspect/share/
+  accept), DevHub (natural-language command composer, WASM workspace, API keys),
+  careers (real openings; Apply messages the author), EDU, learning, run-a-node,
+  notifications centre, help, search
+- **Profile & Settings:** avatar upload, profile edit, social accounts that
+  persist, privacy (including `profileVisibility`), notification channels and
+  categories, security (password, 2FA, sessions, API keys), display/theme
 
 ## Build & deploy
 
 ```bash
-npm run build        # → dist/ (static assets only)
-npm run preview      # verify locally
+npm run build      # → dist/ (static assets only, .htaccess included)
+npm run preview    # local check of the real artifact:
+                   # VITE_API_BASE_URL=http://localhost:4173 VITE_ALLOW_LOCAL_API=1 npm run build
 ```
 
-Deploy `dist/` to any static host (Netlify, Vercel, GitHub Pages, S3). Hash routing means no server rewrites needed — every route is `#/...` and works from `index.html` alone.
+`base: './'` plus hash routing means `dist/` works on any static host, in any
+directory, with no server rewrites. `public/.htaccess` is the single tracked
+copy and Vite copies it into `dist/`; for Namecheap/Apache it adds HTTPS and
+`www.`→apex redirects, the SPA fallback, MIME types, security headers with
+HSTS, 1-year asset caching and 5-minute `index.html` caching. The full export
+checklist (backend env, uploads persistence, WSS for Socket.IO) is §10 of the
+handoff document.
 
 ## Project structure
 
 ```
 src/
-  main.tsx            entry
-  App.tsx             layout shell (Sidebar + TopBar + route outlet)
-  router.tsx          hash router + route table
-  store/store.ts      reactive store + applyTx + pub/sub + persistence
-  services/api.ts     fetch service layer (local fallback)
-  services/config.ts  env config + sim controller (demoMode flag)
-  demo/seeds.ts       demo seed data (loaded only when demoMode)
-  styles/global.css   design-system tokens + all component styles
-  components/         Sidebar, TopBar, CommandPalette, ui (Modal/Toast/Chart/ScoreRing/Stepper/StatusChip/EmptyState)
-  features/           one folder per module (auth, wallet, marketplace, staking,
-                      governance, mines×9, validators×9, explorer, messaging,
-                      referrals, admin, settings, profile, contracts, devhub, misc)
+  main.tsx             entry
+  App.tsx              shell: sidebar + top bar + route outlet + cross-tab sync
+  router.tsx           hash router, lazy route chunks, role gating
+  store/store.ts       reactive store, applyTx, persistence, pub/sub
+  services/api.ts      fetch layer → ApiResult
+  services/config.ts   env parsing + validation (fail fast)
+  services/assets.ts   stored asset path → safe URL
+  services/mnemonicAccess.ts   PIN-gated key unlock
+  services/identityApi.ts      batched address → identity resolution
+  hooks/               useLivePrice, useStoreSlice, …
+  components/          Sidebar, TopBar, WalletIdentity, ComplianceGates,
+                       CommandPalette, ui (Modal/Toast/Chart/ScoreRing/Stepper/…)
+  features/            one folder per module: admin, auth, careers, contracts,
+                       dashboard, devhub, economy, edu, governance, help, kyc,
+                       marketplace, messaging, mines, misc, node, profile,
+                       referrals, search, settings, staking, validators, wallet
+  pages/               Landing, BlockchainExplorer, TransactionHistory,
+                       MallpointsPurchase, SecuritySettings, WalletSettings,
+                       AddressBook, Dmca, KycWizard, …
+  styles/              global.css (design tokens) + section stylesheets
+  test-setup.ts        vitest environment setup
 ```
+
+## Tests
+
+`npm run test:run` — 85 files, ~1670 tests (vitest + happy-dom, configured in
+`vite.config.ts`). Component tests drive real interactions and assert the
+arguments handed to the signing and API services (`Staking.test.tsx`,
+`WalletSend.test.tsx`, `MallpointsPurchase.test.tsx`,
+`WalletIdentity.test.tsx`, `Settings.test.tsx`, `Careers.test.tsx`, …), so a
+regression that only shows up inside a payload is caught too.
+
+## Design system
+
+Deep navy base (`#050810` / `#0d111b`), gold primary (`#f3ba2f`), emerald
+success, crimson error. 252px sidebar with collapsible groups, per-route
+`document.title` from `router.tsx`, and toasts, modals, empty states and status
+chips from `components/ui.tsx`.
