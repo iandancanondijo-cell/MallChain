@@ -9,7 +9,6 @@
  * - Backpressure handling
  */
 
-const redis = require('ioredis');
 const redisFactory = require('../mallwallet/queue/redis');
 const logger = require('../utils/logger');
 const promClient = require('prom-client');
@@ -45,7 +44,11 @@ const eventReplayCounter = new promClient.Counter({
 
 class EventPersistence {
   constructor(redisClient = null) {
-    this.redis = redisClient || new redis(process.env.REDIS_URL || {});
+    // Same factory the consumer below uses: it carries REDIS_HOST/PORT, the
+    // REDIS_PASSWORD requirement and the TLS options. A bare `new Redis()`
+    // here defaulted to 127.0.0.1:6379 with no credentials, which NOAUTHs
+    // against the --requirepass nodes compose starts.
+    this.redis = redisClient || redisFactory();
     this.subscribers = new Map(); // Map of eventType -> [callback, ...]
     this.isProcessing = false;
     this.lastProcessedId = '0'; // Track position in stream

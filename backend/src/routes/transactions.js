@@ -1,10 +1,50 @@
 const router = require('express').Router()
-const Transaction = require('../models/transaction')
-const { getTransactionQueue } = require('../mallwallet/queue/transactionQueue')
+const Joi = require('joi')
 const crypto = require('crypto')
 const { bech32 } = require('bech32')
+const Transaction = require('../models/transaction')
+const { getTransactionQueue } = require('../mallwallet/queue/transactionQueue')
 const { asyncHandler } = require('../utils/errorHandler')
 const requireAuth = require('../middleware/requireAuth')
+const { validateRequest, addressSchema, amountSchema } = require('../utils/validationSchemas')
+const { createUserLimiter } = require('../middleware/rateLimiter')
+const { decryptField } = require('../utils/fieldEncryption')
+
+const auth = requireAuth()
+
+const financialLimiter = createUserLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'rate_limit_exceeded', message: 'Too many financial operations. Please try again later.' }
+})
+
+// signedTx is mandatory. This route used to accept an unsigned {from,to,amount}
+// and fall back to signing MsgSend with the operator key, which let anyone who
+// could name the (public, on-chain-observable) operator address get the server
+// to move system funds. Server-side signing of user transfers is removed;
+// see sendController.sendMallcoins, which enforces the same txBytes rule.
+const sendSchema = Joi.object({
+  from: addressSchema,
+  to: addressSchema,
+  amount: amountSchema,
+  denom: Joi.string().valid('mlcoin', 'umal').default('mlcoin'),
+  signedTx: Joi.string()
+    .base64()
+    .max(64 * 1024)
+    .required()
+    .messages({
+      'any.required': 'signedTx is required — transactions must be signed in the wallet client',
+      'string.base64': 'signedTx must be base64-encoded transaction bytes',
+      'string.max': 'signedTx exceeds the maximum length',
+    }),
+  // Optional, and only used to prove the queued record describes the account
+  // the signed bytes actually came from. Joi rejects unknown keys by default,
+  // so they have to be declared for the check below to have anything to read.
+  signerPubKey: Joi.string().base64().max(128),
+  signerAddress: addressSchema,
+})
+
+const OBJECT_ID_RE = /^[a-fA-F0-9]{24}$/
 
 function pubkeyToAddress(pubkeyBase64, prefix = process.env.CHAIN_PREFIX || process.env.COSMOS_PREFIX || 'mall') {
   // pubkeyBase64 expected to be base64-encoded raw secp256k1 compressed pubkey (33 bytes)
@@ -15,75 +55,50 @@ function pubkeyToAddress(pubkeyBase64, prefix = process.env.CHAIN_PREFIX || proc
   return bech32.encode(prefix, words)
 }
 
+router.post('/send',
+  auth,
+  financialLimiter,
+  validateRequest(sendSchema),
+  asyncHandler(async (req, res) => {
+    const { from, to, amount, denom, signedTx, signerPubKey, signerAddress } = req.validatedBody
 
-router.post('/send', requireAuth(), asyncHandler(async (req, res) => {
-    const {
-      from,
-      to,
-      amount,
-      denom
-    } = req.body
-
-    // Validate required fields
-    if (!from || !to || !amount || !denom) {
-      return res.status(400).json({ error: 'Missing required fields: from, to, amount, denom' })
-    }
-
-    // Validate amount is positive
-    if (Number(amount) <= 0) {
-      return res.status(400).json({ error: 'Amount must be positive' })
-    }
-
-    // Validate denom
-    const validDenoms = ['mlcoin', 'umal']
-    if (!validDenoms.includes(denom)) {
-      return res.status(400).json({ error: `Invalid denom. Must be one of: ${validDenoms.join(', ')}` })
-    }
-
-    // If frontend provided a signed tx, do basic signature verification: require signerPubKey or signerAddress
-    if (req.body.signedTx) {
-      const signerPubKey = req.body.signerPubKey // base64
-      const signerAddress = req.body.signerAddress
-      if (!signerPubKey && !signerAddress) {
-        return res.status(400).json({ error: 'signedTx requires signerPubKey or signerAddress for verification' })
-      }
-      if (signerPubKey) {
-        try {
-          const derived = pubkeyToAddress(signerPubKey)
-          if (derived !== from && derived !== signerAddress) {
-            return res.status(400).json({ error: 'signature verification failed: pubkey does not match from address' })
-          }
-        } catch (e) {
-          return res.status(400).json({ error: 'invalid signerPubKey', detail: e.message })
+    // The chain is the final authority on whose signature a tx carries, but
+    // this row is what the ledger, the notifications and GET /:id read back.
+    // Without the derivation check a caller could queue a record that names
+    // somebody else as the sender.
+    if (signerPubKey) {
+      try {
+        const derived = pubkeyToAddress(signerPubKey)
+        if (derived !== from && derived !== signerAddress) {
+          return res.status(400).json({ error: 'signature verification failed: pubkey does not match from address' })
         }
+      } catch (e) {
+        return res.status(400).json({ error: 'invalid signerPubKey', detail: e.message })
       }
     }
 
     const transaction = await Transaction.create({
-      from,
-      to,
-      amount,
-      denom,
       // The worker's notifications resolve the sender from tx.userId;
       // omitting it here made every emit on this path a silent no-op.
-      userId: req.user?._id || req.user?.id,
-      status: 'queued'
-    })
-
-    const jobData = {
-      transactionId: transaction._id,
+      userId: req.user._id || req.user.id,
       from,
       to,
-      amount,
-      denom
-    }
-    if (req.body.signedTx) jobData.signedTx = req.body.signedTx
-    if (req.body.serverSign) jobData.serverSign = Boolean(req.body.serverSign)
+      amount: String(amount),
+      denom,
+      status: 'queued'
+    })
 
     await getTransactionQueue().add(
       'broadcast',
       {
-        ...jobData
+        transactionId: transaction._id,
+        from,
+        to,
+        amount,
+        denom,
+        // Always present — sendSchema made it required, and the worker has no
+        // server-signing branch to fall back to.
+        signedTx
       },
       {
         jobId: transaction._id.toString(),
@@ -98,10 +113,15 @@ router.post('/send', requireAuth(), asyncHandler(async (req, res) => {
       transactionId: transaction._id,
       status: transaction.status
     })
-}))
+  }))
 
+router.get('/:id',
+  auth,
+  asyncHandler(async (req, res) => {
+    if (!OBJECT_ID_RE.test(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid transaction id' })
+    }
 
-router.get('/:id', asyncHandler(async (req, res) => {
     const tx = await Transaction.findById(req.params.id)
 
     if (!tx) {
@@ -110,7 +130,29 @@ router.get('/:id', asyncHandler(async (req, res) => {
       })
     }
 
+    const isPrivileged = req.user.role === 'admin' || req.user.role === 'superadmin'
+    // Either side of the transfer counts as owning it, not just the sender:
+    // GET /api/transactions/:id is how the wallet opens an incoming-transfer
+    // row, and the receiver is the only person who should be able to read it.
+    //
+    // walletAddress is stored encrypted (models/user.js ENCRYPTED_FIELDS) and
+    // req.user is that raw document or its auth-cache copy, so it has to be
+    // decrypted before it can meet a plain bech32 address. decryptField
+    // returns un-prefixed values unchanged, so pre-encryption rows still work.
+    const myAddress = req.user.walletAddress ? decryptField(req.user.walletAddress) : null
+    const isOwner =
+      (tx.userId && tx.userId.toString() === req.user._id.toString()) ||
+      (!!myAddress && (tx.from === myAddress || tx.to === myAddress))
+
+    // 404 rather than 403: a 403 confirms the id exists, which is the
+    // enumeration this route previously allowed outright.
+    if (!isPrivileged && !isOwner) {
+      return res.status(404).json({
+        error: 'Transaction not found'
+      })
+    }
+
     res.json(tx)
-}))
+  }))
 
 module.exports = router

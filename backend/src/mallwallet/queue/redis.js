@@ -1,5 +1,5 @@
 const Redis = require('ioredis')
-const { redisTlsOptions } = require('../../utils/redisTlsOptions')
+const { redisTlsOptions, redisAuthOptions } = require('../../utils/redisTlsOptions')
 
 let bullmqConnection = null
 
@@ -7,7 +7,7 @@ function getConnection() {
   return new Redis({
     host: process.env.REDIS_HOST || '127.0.0.1',
     port: Number(process.env.REDIS_PORT || 6379),
-    password: process.env.REDIS_PASSWORD || undefined,
+    ...redisAuthOptions(),
     maxRetriesPerRequest: null,
     enableOfflineQueue: true,
     retryStrategy: (times) => Math.min(times * 50, 2000),
@@ -24,7 +24,7 @@ function getBullMQConnection() {
     bullmqConnection = new Redis({
       host: process.env.REDIS_HOST || '127.0.0.1',
       port: Number(process.env.REDIS_PORT || 6379),
-      password: process.env.REDIS_PASSWORD || undefined,
+      ...redisAuthOptions(),
       maxRetriesPerRequest: null,
       connectTimeout: Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 2000),
       ...redisTlsOptions(),

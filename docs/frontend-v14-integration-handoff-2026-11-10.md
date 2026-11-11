@@ -261,10 +261,15 @@ If the other team adds a progress endpoint, delete that sentence with it.
 ## 9. Known gaps the other team owns
 
 1. **`GET /api/transactions/:id` returns the raw Mongo document**
-   (`backend/src/routes/transactions.js:103-116` — `res.json(tx)`), so the key
+   (`backend/src/routes/transactions.js` — `res.json(tx)`), so the key
    serialises as `_id` and clients reading `transaction.id` get an empty
    identifier. Either wrap in `ok({ ... })` with an `id` field or keep the flat
    body and document it (see §2).
+   It is also **no longer public**: as of the 2026-11-05 audit closure it
+   requires a session and answers 404 unless the caller is the record's user,
+   one of its two addresses, or an admin. A signed-out explorer-style deep link
+   to a transaction id now gets 401 — do not build a public transaction page on
+   this route.
 2. **No marketplace catalog endpoint.** `GET /api/marketplace/products` (with
    seller address, price, category, images from `/uploads/products`) is the only
    thing standing between the current "Coming Soon" empty state and a working

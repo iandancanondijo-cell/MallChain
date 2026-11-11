@@ -89,6 +89,14 @@ services:
     <<: *restart-always
     container_name: mallchain-redis-node-1
     hostname: redis-node-1
+    environment:
+      # Consumed by redis-cli (the healthcheck below), not by the server. Using
+      # the env var rather than `-a` keeps the secret out of the healthcheck's
+      # argv, where `docker inspect` and `ps` would expose it.
+      # The `:?` form is deliberate: an unset variable would otherwise
+      # interpolate to empty and start the node with `--requirepass ""` — i.e.
+      # silently wide open. This makes the deploy fail instead.
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     command: >
       redis-server
       --appendonly yes
@@ -97,6 +105,8 @@ services:
       --cluster-config-file nodes.conf
       --cluster-node-timeout 5000
       --port 6379
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      --masterauth ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       --maxmemory 512mb
       --maxmemory-policy allkeys-lru
       --save 900 1 --save 300 10 --save 60 10000
@@ -117,6 +127,8 @@ services:
     <<: *restart-always
     container_name: mallchain-redis-node-2
     hostname: redis-node-2
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     command: >
       redis-server
       --appendonly yes
@@ -125,6 +137,8 @@ services:
       --cluster-config-file nodes.conf
       --cluster-node-timeout 5000
       --port 6380
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      --masterauth ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       --maxmemory 512mb
       --maxmemory-policy allkeys-lru
       --save 900 1 --save 300 10 --save 60 10000
@@ -145,6 +159,8 @@ services:
     <<: *restart-always
     container_name: mallchain-redis-node-3
     hostname: redis-node-3
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     command: >
       redis-server
       --appendonly yes
@@ -153,6 +169,8 @@ services:
       --cluster-config-file nodes.conf
       --cluster-node-timeout 5000
       --port 6381
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      --masterauth ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       --maxmemory 512mb
       --maxmemory-policy allkeys-lru
       --save 900 1 --save 300 10 --save 60 10000
@@ -177,9 +195,16 @@ services:
       - redis-node-1
       - redis-node-2
       - redis-node-3
+    # auth-pass gives the sentinel the master's password. The sentinels
+    # themselves are left without requirepass: Redis 7 needs a matching
+    # `sentinel sentinel-pass` on every peer plus sentinelPassword on each
+    # client, and a mismatch there silently breaks quorum/failover. They are
+    # unreachable from outside this bridge network (no published ports), so
+    # this is a deliberate, scoped trade-off.
     command: >
       redis-sentinel /usr/local/etc/redis/sentinel.conf
       --sentinel monitor mymaster redis-node-1 6379 2
+      --sentinel auth-pass mymaster ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       --sentinel down-after-milliseconds mymaster 5000
       --sentinel parallel-syncs mymaster 1
       --sentinel failover-timeout mymaster 10000
@@ -210,6 +235,7 @@ services:
     command: >
       redis-sentinel /usr/local/etc/redis/sentinel.conf
       --sentinel monitor mymaster redis-node-1 6379 2
+      --sentinel auth-pass mymaster ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       --sentinel down-after-milliseconds mymaster 5000
       --sentinel parallel-syncs mymaster 1
       --sentinel failover-timeout mymaster 10000
@@ -240,6 +266,7 @@ services:
     command: >
       redis-sentinel /usr/local/etc/redis/sentinel.conf
       --sentinel monitor mymaster redis-node-1 6379 2
+      --sentinel auth-pass mymaster ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       --sentinel down-after-milliseconds mymaster 5000
       --sentinel parallel-syncs mymaster 1
       --sentinel failover-timeout mymaster 10000
@@ -522,6 +549,7 @@ services:
       MONGO_URI: mongodb://mallchain:${MONGO_APP_PASSWORD}@mongo-rs-1:27017,mongo-rs-2:27018,mongo-rs-3:27019/marketplace?authSource=admin&replicaSet=mallchain-rs&readPreference=primaryPreferred
       REDIS_HOST: redis-node-1
       REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       REDIS_SENTINEL_HOSTS: redis-sentinel-1:26379,redis-sentinel-2:26380,redis-sentinel-3:26381
       REDIS_SENTINEL_MASTER: mymaster
       PG_HOST: postgres
@@ -531,6 +559,12 @@ services:
       CHAIN_RPC: http://chain-sentry:26657
       CHAIN_REST: http://chain-sentry:1317
       VAULT_ADDR: http://vault:8200
+      # Deliberately NOT `${BOOTSTRAP_SECRET:?...}`: an unset value means
+      # POST /api/admin/bootstrap answers 404 and the stack still deploys.
+      # Only a deployment that wants to mint its first superadmin over the API
+      # needs to set it. Prefer BOOTSTRAP_SECRET_FILE with a compose secret if
+      # you would rather the value not appear in `docker inspect`.
+      BOOTSTRAP_SECRET: ${BOOTSTRAP_SECRET:-}
       TRUST_PROXY: 10.30.0.0/16
     secrets:
       - postgres_password
@@ -673,6 +707,9 @@ services:
     <<: *restart-always
     container_name: mallchain-redis-exporter
     hostname: redis-exporter
+    environment:
+      # redis_exporter reads REDIS_PASSWORD when --redis-password is not given.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     command:
       - --redis.addr=redis://redis-node-1:6379
       - --redis.addr=redis://redis-node-2:6380

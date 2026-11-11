@@ -64,7 +64,8 @@ export interface SellResult {
 
 export interface SellStatus {
   saleId: string;
-  sellerAddress: string;
+  // null unless the caller's session owns the sale — see PaymentStatus above.
+  sellerAddress: string | null;
   amountMlcns: number;
   phone: string | null;
   status: string;
@@ -95,6 +96,16 @@ export interface BuyQuote {
   txHash: string | null;
   providerMode: string;
 }
+
+/**
+ * GET /status/{paymentId} is an address-keyed relay route: it answers without a
+ * session, and only returns walletAddress/phone to a caller whose linked wallet
+ * or phone matches the record. Everything else comes back null.
+ */
+export type PaymentStatus = Omit<BuyQuote, 'walletAddress' | 'phone'> & {
+  walletAddress: string | null;
+  phone: string | null;
+};
 
 export interface ReserveResult {
   ok: boolean;
@@ -154,8 +165,8 @@ class BuyApi {
     return api.post<MpesaInitiateResult>('/api/buy/mpesa', params, { 'Idempotency-Key': crypto.randomUUID() });
   }
 
-  async getStatus(paymentId: string): Promise<ApiResult<BuyQuote>> {
-    return api.get<BuyQuote>(`/api/buy/status/${paymentId}`);
+  async getStatus(paymentId: string): Promise<ApiResult<PaymentStatus>> {
+    return api.get<PaymentStatus>(`/api/buy/status/${paymentId}`);
   }
 
   /** Credit MLCNS on-chain once the reserved quote's payment is confirmed. */

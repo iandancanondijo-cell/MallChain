@@ -60,8 +60,8 @@ async function handleRelay(job) {
   return { txHash }
 }
 
-// 'broadcast' jobs: SDK-level broadcast (client signedTxBase64 or server-side
-// operator signing) with REST inclusion polling and 'tx:update' socket events
+// 'broadcast' jobs: SDK-level broadcast of client-signed transaction bytes,
+// with REST inclusion polling and 'tx:update' socket events
 async function handleBroadcast(job) {
   const { from, to, amount, denom } = job.data
   const txRef = job.data.txId || job.data.transactionId
@@ -75,8 +75,9 @@ async function handleBroadcast(job) {
     await tx.save()
     txJobCounter.inc({ status: 'processing' })
 
-    // Prefer server-side signing if operator mnemonic exists
-    const serverSign = Boolean(process.env.OPERATOR_MNEMONIC)
+    // No server-side fallback: broadcastTransaction only accepts pre-signed
+    // bytes and throws without them, so OPERATOR_MNEMONIC no longer decides
+    // anything on this path.
     const signedTx = job.data.signedTx || null
 
     const result = await broadcastTransaction({
@@ -84,8 +85,7 @@ async function handleBroadcast(job) {
       to,
       amount,
       denom,
-      signedTxBase64: signedTx,
-      serverSign
+      signedTxBase64: signedTx
     })
 
     // Normalize tx hash and height

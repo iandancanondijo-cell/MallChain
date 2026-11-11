@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const logger = require('../utils/logger')
 const mongoose = require('mongoose');
 const User = require('../models/user');
@@ -51,25 +52,58 @@ const MINING_TERMINAL_STATUSES = ['auto_approved', 'approved', 'rejected'];
 const MAINTENANCE_SCOPES = ['send', 'withdraw', 'buy', 'payment', 'marketplace', 'staking', 'vault', 'key-vault', 'badge', 'dex'];
 
 // ============ BOOTSTRAP: Create first admin (only works when no admins exist) ============
-// Gated behind a one-time bootstrap token (BOOTSTRAP_TOKEN env var) so that
-// after a full admin wipe, a random scanner can't claim superadmin before the
-// real operator does. In production the env var is required; in dev/test a
-// missing token is tolerated but logged as a warning. [B7 remediation]
+//
+// This route deliberately sits above `router.use(requireAdmin)` further down —
+// it is what creates the first admin. Its only guard used to be "no admin
+// exists yet", so anyone who reached the API on a fresh deploy (or one where
+// every admin had been removed) could claim superadmin for themselves.
+//
+// Now fail-closed: an out-of-band secret must be configured server-side and
+// supplied in the request before the precondition is even evaluated.
+const BOOTSTRAP_SECRET_HEADER = 'x-bootstrap-key';
+const MIN_BOOTSTRAP_PASSWORD_LENGTH = 12;
+
+/**
+ * Resolved per request rather than at module load: operators commonly start a
+ * first boot without this variable and add it before running bootstrap.
+ */
+function configuredBootstrapSecret() {
+  if (process.env.BOOTSTRAP_SECRET_FILE) {
+    try {
+      return fs.readFileSync(process.env.BOOTSTRAP_SECRET_FILE, 'utf8').trim() || null;
+    } catch (e) {
+      // A configured-but-unreadable file is a misconfiguration, not an
+      // invitation to fall back to the env value.
+      logger.error('adminPanel', 'BOOTSTRAP_SECRET_FILE unreadable', e);
+      return null;
+    }
+  }
+  return process.env.BOOTSTRAP_SECRET || null;
+}
+
+// Both sides hashed to 32 bytes first: timingSafeEqual throws when lengths
+// differ, and throw-vs-no-match would leak the configured secret's length.
+function bootstrapSecretMatches(supplied) {
+  const expected = configuredBootstrapSecret();
+  if (!expected) return { configured: false, matches: false };
+  if (!supplied) return { configured: true, matches: false };
+
+  const a = crypto.createHash('sha256').update(String(supplied)).digest();
+  const b = crypto.createHash('sha256').update(expected).digest();
+  return { configured: true, matches: crypto.timingSafeEqual(a, b) };
+}
+
 router.post('/bootstrap', limiters.strict, async (req, res) => {
   try {
-    const bootstrapToken = process.env.BOOTSTRAP_TOKEN;
-    const suppliedToken = req.headers['x-bootstrap-token'];
-
-    if (process.env.NODE_ENV === 'production') {
-      if (!bootstrapToken) {
-        return res.status(503).json({ ok: false, error: 'Bootstrap not configured. Set BOOTSTRAP_TOKEN env var.' });
-      }
-      if (!suppliedToken || suppliedToken !== bootstrapToken) {
-        return res.status(403).json({ ok: false, error: 'Invalid or missing bootstrap token.' });
-      }
-    } else if (bootstrapToken && suppliedToken !== bootstrapToken) {
-      // Non-production: if a token IS configured, enforce it. If not configured, allow (dev convenience).
-      return res.status(403).json({ ok: false, error: 'Invalid bootstrap token.' });
+    const { configured, matches } = bootstrapSecretMatches(req.get(BOOTSTRAP_SECRET_HEADER));
+    if (!configured) {
+      // 404 rather than 403: a deployment that never enabled bootstrap should
+      // not advertise that a privileged route is here waiting for a key.
+      return res.status(404).json({ ok: false, error: 'not found' });
+    }
+    if (!matches) {
+      await AuditLog.create({ action: 'admin_bootstrap_denied', actor: req.body?.email || 'unknown', details: 'bootstrap key missing or invalid', outcome: 'failure' }).catch(() => null);
+      return res.status(403).json({ ok: false, error: 'invalid bootstrap key' });
     }
 
     const adminExists = await User.findOne({ role: { $in: ['admin', 'superadmin'] } });
@@ -77,17 +111,24 @@ router.post('/bootstrap', limiters.strict, async (req, res) => {
       return res.status(403).json({ ok: false, error: 'Admin already exists. Use normal admin auth to manage users.' });
     }
 
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
     if (!email || !password) {
       return res.status(400).json({ ok: false, error: 'email and password are required' });
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email))) {
+      return res.status(400).json({ ok: false, error: 'email is not valid' });
+    }
+    if (String(password).length < MIN_BOOTSTRAP_PASSWORD_LENGTH) {
+      return res.status(400).json({ ok: false, error: `password must be at least ${MIN_BOOTSTRAP_PASSWORD_LENGTH} characters` });
+    }
 
-    // findOneAndUpdate(..., {upsert: true}) here would silently overwrite
-    // the password and promote an EXISTING regular user's account the
-    // moment this endpoint's only guard (zero admins in the DB) is ever
-    // true — a fresh deploy, or every admin having been deleted — with no
-    // verification the caller controls that email. Create-only: never touch
-    // an existing user document.
+    // Create-only: never touch an existing user document. An
+    // updateOne(..., {upsert: true}) keyed on email would promote whoever
+    // registered that address the first time this endpoint's precondition
+    // (zero admins in the DB) happens to hold, with no verification that the
+    // caller controls the address. The unique index on email_blind still
+    // covers the race — the duplicate key is reported as 409 in the catch
+    // below. email is encrypted at rest, so the lookup uses the blind index.
     const existingUser = await User.findOne({ email_blind: blindIndex(email.toLowerCase().trim()) });
     if (existingUser) {
       return res.status(409).json({ ok: false, error: 'An account with this email already exists. Bootstrap only creates a brand-new superadmin account.' });
@@ -99,6 +140,14 @@ router.post('/bootstrap', limiters.strict, async (req, res) => {
     // Admin/superadmin accounts are pre-verified (kycLevel: 2) — they
     // manage KYC for other users, so showing them an "Under Review" banner
     // would be confusing and incorrect.
+    //
+    // User.create rather than the updateOne({...}, {$setOnInsert}, {upsert})
+    // the audit patch proposed: this schema encrypts email at rest in a
+    // pre('save') hook and derives email_blind there too, so a raw driver
+    // write would store plaintext with no blind index and break every
+    // email-based lookup. The remaining check-then-create window is between
+    // two callers that already hold the bootstrap secret, and a same-email
+    // collision in that window is caught as E11000 below.
     const user = await User.create({ email, password: hashedPassword, role: 'superadmin', kycLevel: 2 });
     const publicUser = user.toObject();
     delete publicUser.password;
@@ -111,6 +160,11 @@ router.post('/bootstrap', limiters.strict, async (req, res) => {
 
     return res.json({ ok: true, user: publicUser, message: 'Superadmin created successfully' });
   } catch (err) {
+    // Two bootstraps racing on the same email hit the unique index on
+    // email_blind — report the conflict, not a 500.
+    if (err && err.code === 11000) {
+      return res.status(409).json({ ok: false, error: 'An account with this email already exists.' });
+    }
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }

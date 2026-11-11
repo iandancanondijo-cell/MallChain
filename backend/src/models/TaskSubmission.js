@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
+const { isSafeExternalUrl, looksLikeLocalProofRef } = require('../utils/linkPolicy');
 
 const TaskSubmissionSchema = new Schema({
   // Core fields
@@ -8,7 +9,19 @@ const TaskSubmissionSchema = new Schema({
   title: { type: String, default: '' },
   task_type: { type: String, default: '' },
   description: { type: String, default: '' },
-  proof_url: { type: String, default: '' },
+  // Either an uploaded screenshot ref or an http(s) URL — the same two shapes
+  // utils/linkPolicy.js defines, because reviewers render this as an <a href>
+  // and a `javascript:` / `data:` URI there executes in the reviewer's
+  // session. A plain http(s)-only rule here would reject every screenshot
+  // proof, which POST /api/mines/upload exists to produce.
+  proof_url: {
+    type: String,
+    default: '',
+    validate: {
+      validator: (v) => !v || looksLikeLocalProofRef(v) || isSafeExternalUrl(v),
+      message: 'proof_url must be an uploaded screenshot ref or an http(s) URL',
+    },
+  },
 
   // Status: pending_assignment | assigned | voting | approved | rejected
   status: { type: String, default: 'manual_review', index: true },

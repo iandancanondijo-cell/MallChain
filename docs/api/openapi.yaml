@@ -226,6 +226,8 @@ paths:
     get:
       summary: Check a buy payment's status
       tags: [Buy]
+      description: Accepts an optional JWT. Without one — or with one whose wallet/phone does not match the record — `walletAddress` and `phone` are returned as null; the status fields are always present.
+      security: [{ bearerAuth: [] }, {}]
       parameters:
         - { name: paymentId, in: path, required: true, schema: { type: string } }
       responses:
@@ -268,6 +270,8 @@ paths:
     get:
       summary: Check a withdrawal's status
       tags: [Withdraw]
+      description: Accepts an optional JWT. Without a matching owner, `walletAddress` and `phone` are returned as null; the status fields are always present.
+      security: [{ bearerAuth: [] }, {}]
       parameters:
         - { name: withdrawalId, in: path, required: true, schema: { type: string } }
       responses:

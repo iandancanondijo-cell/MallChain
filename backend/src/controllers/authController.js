@@ -649,9 +649,12 @@ exports.googleCallback = async (req, res) => {
     // New Google signup — the cooldown policy never applies to fresh
     // accounts (same as register/registerUsername).
     user = await User.create({ email, googleId: profile.id });
-    // GET /google (routes/auth.js) echoes the referral code through as the
-    // OAuth `state` param — Google returns it verbatim on the callback.
-    const referralCode = typeof req.query.state === 'string' ? req.query.state : undefined;
+    // Recovered from the signed oauth-state cookie by requireOAuthState in
+    // routes/auth.js, which proved it belongs to this same browser attempt.
+    // Never req.query.state: that value is attacker-supplied until the nonce
+    // check passes, and trusting it turned Google login into a login-CSF
+    // vector that could pin someone else's referral code onto a new account.
+    const referralCode = typeof req.oauthReferralCode === 'string' ? req.oauthReferralCode : undefined;
     await recordReferralAttribution(user, referralCode);
   } else {
     // Returning Google login — same cooldown gate as login()/loginUsername().

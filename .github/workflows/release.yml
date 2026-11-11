@@ -14,6 +14,16 @@
 # default branch.
 on: push
 
+# id-token: write exists for the keyless Sigstore signing below: cosign
+# exchanges this workflow's GitHub OIDC token for a Fulcio certificate that
+# binds every signature to this repo, this workflow file and this tag. Without
+# signatures, a release is only protected by whatever hash is published next to
+# it — anyone who can replace the artifact can replace its advertised digest
+# too, in the same response, so the check proves nothing.
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
   might_release:
     runs-on: ubuntu-latest
@@ -61,6 +71,78 @@ jobs:
         env:
           DO_NOT_TRACK: 1
           GOFLAGS: "-buildvcs=false"
+
+      - name: Publish checksums and keyless artifact signatures
+        # Runs before "Publish the Release", so the .sig/.crt files land in
+        # release/ alongside the tarballs and ride along with `files: release/*`
+        # with no change to that step.
+        #
+        # No `continue-on-error`: a release this pipeline cannot sign should
+        # stop the job, not ship quietly. The alternative is a published
+        # artifact whose only integrity claim is a digest hosted next to it.
+        if: ${{ steps.vars.outputs.should_release == 'true' }}
+        shell: bash
+        env:
+          DO_NOT_TRACK: 1
+        run: |
+          set -euo pipefail
+          cd release
+
+          if ! command -v cosign >/dev/null 2>&1; then
+            echo "::error::cosign is missing from this runner image. Refusing to publish unsigned binaries — add a pinned cosign install step rather than relaxing this check."
+            exit 1
+          fi
+          echo "Signing with cosign $(cosign version 2>/dev/null | awk '/^GitVersion/{print $2}')"
+
+          # Sign what the build actually produced, not a guessed filename
+          # pattern, and never re-sign a signature from a previous run.
+          find . -maxdepth 1 -type f \
+            ! -name 'checksums.txt' ! -name '*.sig' ! -name '*.crt' ! -name '*.pem' \
+            -printf '%f\n' | LC_ALL=C sort > /tmp/artifacts.txt
+          if [ ! -s /tmp/artifacts.txt ]; then
+            echo "::error::release/ contains no artifacts to sign; the build step produced nothing."
+            exit 1
+          fi
+
+          xargs -a /tmp/artifacts.txt -d '\n' sha256sum > checksums.txt
+          echo checksums.txt >> /tmp/artifacts.txt
+
+          while IFS= read -r artifact; do
+            # </dev/null: cosign must not consume the loop's stdin, or the
+            # remaining artifacts silently go unsigned.
+            cosign sign-blob --yes \
+              --output-signature "${artifact}.sig" \
+              --output-certificate "${artifact}.crt" \
+              "${artifact}" >/dev/null </dev/null
+          done < /tmp/artifacts.txt
+
+          SIGNED=$(find . -maxdepth 1 -name '*.sig' | wc -l)
+          TOTAL=$(( $(wc -l < /tmp/artifacts.txt) ))
+          if [ "$SIGNED" -ne "$TOTAL" ]; then
+            echo "::error::signed $SIGNED of $TOTAL artifacts"
+            exit 1
+          fi
+          echo "Signed $SIGNED artifacts."
+
+          IDENTITY="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}"
+          {
+            echo "### Signed artifacts"
+            echo
+            echo '```sh'
+            sed 's/^/  /' checksums.txt
+            echo '```'
+            echo
+            echo 'Verify (needs [cosign](https://github.com/sigstore/cosign)):'
+            echo
+            echo '```sh'
+            echo "cosign verify-blob checksums.txt \\"
+            echo "  --signature checksums.txt.sig \\"
+            echo "  --certificate checksums.txt.crt \\"
+            echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
+            echo "  --certificate-identity '${IDENTITY}'"
+            echo "sha256sum --ignore-missing --check checksums.txt"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Delete the "latest" Release
         uses: dev-drprasad/delete-tag-and-release@5eafd8668311bf3e4d6c1e9898f32a317103de68 # v0.2.1

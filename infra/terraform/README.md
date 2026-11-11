@@ -39,3 +39,10 @@ team can make.
   TLS — needs a real domain you control.
 - **`var.github_repo`** — set to the real `org/repo` before applying
   `github-oidc.tf`, or the trust policy authorizes the wrong repository.
+- **`var.admin_cidr_blocks`** — has no default, so `terraform plan` fails until
+  you set it in your `terraform.tfvars`. That is the point: the EKS API
+  endpoint used to come up with the module's `0.0.0.0/0` public access, which
+  put the control plane on the whole internet. Use your VPN/office range
+  (`["203.0.113.10/32"]`), or `[]` together with
+  `cluster_endpoint_public_access = false` in `eks.tf` for a cluster nobody
+  applies to from outside the VPC.

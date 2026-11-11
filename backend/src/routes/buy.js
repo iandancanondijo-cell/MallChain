@@ -33,6 +33,8 @@ const verifyWebhookToken = require('../middleware/verifyWebhookToken');
 const requireAuth = require('../middleware/requireAuth');
 const { limiters } = require('../middleware/rateLimiter');
 const idempotency = require('../middleware/idempotency');
+const optionalAuth = require('../middleware/optionalAuth');
+const { ownsRecord, redactIdentity } = require('../utils/recordOwnership');
 const {
   recordBuyLiquidityActivity,
   recordWithdrawLiquidityActivity,
@@ -610,7 +612,7 @@ router.post('/mpesa', limiters.financial, idempotency({ required: true }), requi
 });
 
 // Check payment status
-router.get('/status/:paymentId', async (req, res) => {
+router.get('/status/:paymentId', optionalAuth, async (req, res) => {
   try {
     const { error, value } = schemas.buyStatusParam.validate(req.params);
     if (error) {
@@ -624,7 +626,8 @@ router.get('/status/:paymentId', async (req, res) => {
       ]
     });
     if (!purchase) return res.json({ status: 'unknown', providerMode: getProviderMode() });
-    return res.json(paymentSummary(purchase));
+    const summary = paymentSummary(purchase);
+    return res.json(ownsRecord(req.user, purchase) ? summary : redactIdentity(summary));
   } catch (e) {
     logger.error('buy', { route: req.originalUrl, error: e.message || String(e) });
     res.json({ status: 'error', reason: 'internal error', providerMode: getProviderMode() });
@@ -928,7 +931,7 @@ router.post('/sell/:saleId/resign', limiters.financial, async (req, res) => {
   }
 });
 
-router.get('/sell/status/:saleId', async (req, res) => {
+router.get('/sell/status/:saleId', optionalAuth, async (req, res) => {
   try {
     const { error, value } = schemas.sellStatusParam.validate(req.params);
     if (error) {
@@ -939,7 +942,8 @@ router.get('/sell/status/:saleId', async (req, res) => {
     if (!sale) {
       return res.status(404).json({ error: 'sale not found' });
     }
-    return res.json(await saleSummary(sale));
+    const summary = await saleSummary(sale);
+    return res.json(ownsRecord(req.user, sale) ? summary : redactIdentity(summary));
   } catch (e) {
     logger.error('buy', { route: req.originalUrl, error: e.message || String(e) });
     return res.status(500).json({ error: 'internal error' });

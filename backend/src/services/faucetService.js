@@ -8,7 +8,7 @@ const {
 } = require('./mallcoinTxBuilder');
 const { DirectSecp256k1Wallet, DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
 const Redis = require('ioredis');
-const { redisTlsOptions } = require('../utils/redisTlsOptions');
+const { redisTlsOptions, redisAuthOptions } = require('../utils/redisTlsOptions');
 const logger = require('../utils/logger');
 const { recordFaucetActivity } = require('./liquidityActivityService');
 
@@ -25,6 +25,7 @@ if (!IS_TEST_ENV) {
     password: config.redis.password || undefined,
     lazyConnect: true,
     retryStrategy: () => null,
+    ...redisAuthOptions(),
     ...redisTlsOptions(),
   });
 

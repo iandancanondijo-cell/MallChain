@@ -58,6 +58,7 @@ This audit covers the full Mallchain stack: backend API, blockchain core (7 Cosm
 `routes/adminPanel.js:34-74` — After all admins are deleted, any caller can create a superadmin.
 *Fix:* Gate behind a one-time bootstrap token (env var).
 *Status:* Fixed 2026-10-02. POST /bootstrap now requires `BOOTSTRAP_TOKEN` env var + matching `x-bootstrap-token` header in production. Non-production environments enforce the token if configured, remain permissive if not.
+*Superseded 2026-11-05:* the token mechanism above — permissive when unconfigured, and compared with `!==` — was itself the finding. It is now `BOOTSTRAP_SECRET` / `BOOTSTRAP_SECRET_FILE` + `x-bootstrap-key`, compared with `crypto.timingSafeEqual`, and the route 404s when no secret is configured; see `configuredBootstrapSecret()` in `backend/src/routes/adminPanel.js`.
 
 **B8. Account lockout is fail-open** — ✅ REMEDIATED
 `controllers/authController.js` — If Redis is unavailable, lockout is skipped and login proceeds.

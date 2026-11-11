@@ -7,6 +7,12 @@
 # fail open/best-effort if Redis is unreachable, but losing this volume
 # still means every issued JWT becomes unrevokable until each one expires
 # on its own.
+#
+# Also unauthenticated, which is fine only because nothing in here is real:
+# docker-compose.prod.yml starts its nodes with --requirepass and every client
+# sends REDIS_PASSWORD (utils/redisTlsOptions.js:redisAuthOptions). If this
+# manifest ever sees production traffic, add `--requirepass`/`--masterauth` from
+# a Secret here and the app needs no change.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

@@ -23,6 +23,7 @@ const { validateInput, preventNoSQLInjection, sanitizeInputs, limitPayloadSize, 
 const { limiters } = require('../middleware/rateLimiter');
 const { asyncHandler } = require('../utils/errorHandler');
 const { requireVerifiedKyc } = require('../middleware/requireKyc');
+const oauthState = require('../utils/oauthState');
 
 /**
  * Task 4.1: POST /api/auth/register
@@ -252,13 +253,27 @@ function requireGoogleConfigured(req, res, next) {
   next();
 }
 router.get('/google', requireGoogleConfigured, (req, res, next) => {
-  // Carries the referral code through Google's redirect round-trip via the
-  // OAuth `state` param — the only field Google echoes back verbatim to the
-  // callback. Without this, a referral code in the URL when the user clicked
-  // "Continue with Google" was silently dropped (see googleCallback below).
-  const state = req.query.ref ? String(req.query.ref).trim().slice(0, 64) : undefined;
+  // `state` is a fresh random nonce (see utils/oauthState.js). The referral
+  // code rides along in the signed cookie the nonce is verified against, so
+  // it survives Google's round-trip without making state attacker-chosen.
+  const state = oauthState.issue(req, res, req.query.ref);
   passport.authenticate('google', { scope: ['profile', 'email'], state })(req, res, next);
 });
-router.get('/google/callback', requireGoogleConfigured, passport.authenticate('google', { session: false, failureRedirect: '/' }), asyncHandler(authCtrl.googleCallback));
+
+// Runs before passport.authenticate: an invalid state must reject the attempt
+// outright, not create or log in a user and then complain.
+function requireOAuthState(req, res, next) {
+  const { valid, ref } = oauthState.consume(req, res, req.query.state);
+  if (!valid) {
+    return res.status(400).json({
+      error: 'invalid_oauth_state',
+      message: 'Google sign-in could not be completed. Please start again.',
+    });
+  }
+  req.oauthReferralCode = ref;
+  next();
+}
+
+router.get('/google/callback', requireGoogleConfigured, requireOAuthState, passport.authenticate('google', { session: false, failureRedirect: '/' }), asyncHandler(authCtrl.googleCallback));
 
 module.exports = router;

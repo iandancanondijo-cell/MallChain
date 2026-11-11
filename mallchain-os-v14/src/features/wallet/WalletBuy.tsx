@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CreditCard, Phone, Coins, CheckCircle2, Loader2, Smartphone, AlertTriangle, Lock, ArrowRight, Banknote } from 'lucide-react';
 import { store } from '../../store/store';
 import { useStoreVersion, toast } from '../../components/ui';
-import { buyApi, type BuyConfig, type BuyQuote } from '../../services/buyApi';
+import { buyApi, type BuyConfig, type PaymentStatus } from '../../services/buyApi';
 import { useLivePrice } from '../../hooks/useLivePrice';
 
 type Step = 'form' | 'awaiting_payment' | 'stalled' | 'crediting' | 'done';
@@ -34,7 +34,7 @@ export default function WalletBuy({ navigate }: { navigate: (p: string) => void 
   const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<Step>('form');
-  const [quote, setQuote] = useState<BuyQuote | null>(null);
+  const [quote, setQuote] = useState<PaymentStatus | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(STALL_SECONDS);
   const [stallNote, setStallNote] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);

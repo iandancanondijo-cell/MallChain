@@ -8,13 +8,21 @@ module "eks" {
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
-  # Private endpoint for in-VPC node traffic; public endpoint for kubectl
-  # access. Default public CIDR is 0.0.0.0/0 for initial setup — override
-  # eks_endpoint_allowed_cidrs in terraform.tfvars to lock to office/VPN
-  # ranges before production use.
-  endpoint_private_access        = true
-  endpoint_public_access         = true
-  endpoint_public_access_cidrs   = var.eks_endpoint_allowed_cidrs
+  # Node traffic stays in the private subnets. Public reachability of the API
+  # server is now constrained to admin_cidr_blocks, which deliberately has no
+  # default — an unlisted operator network fails at plan instead of silently
+  # accepting the module's 0.0.0.0/0.
+  #
+  # If this cluster does not need interactive kubectl from outside the VPC, set
+  # cluster_endpoint_public_access = false and admin_cidr_blocks = [] in
+  # your terraform.tfvars; the endpoint then exists only on the private
+  # interface.
+  #
+  # cluster_* prefixes are the module v21 argument names; the bare
+  # endpoint_public_access / _cidrs form belongs to v17 and earlier.
+  cluster_endpoint_public_access       = true
+  cluster_endpoint_private_access      = true
+  cluster_endpoint_public_access_cidrs = var.admin_cidr_blocks
 
   eks_managed_node_groups = {
     default = {
