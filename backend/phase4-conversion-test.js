@@ -6,7 +6,9 @@ const { Secp256k1HdWallet } = require('@cosmjs/amino');
 const { makeSignDoc, serializeSignDoc } = require('@cosmjs/amino');
 const { Sha256 } = require('@cosmjs/crypto');
 const { toBase64, toUtf8 } = require('@cosmjs/encoding');
-const testWallets = require('../test/test-wallets.json');
+// Untracked local fixtures — see test/testWallets.js for why this is a loader
+// call rather than a require() of a committed spending key.
+const testWallets = require('../test/testWallets').loadTestWallets();
 
 const BACKEND_URL = 'http://localhost:4000';
 

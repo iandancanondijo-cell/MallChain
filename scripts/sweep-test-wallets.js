@@ -19,8 +19,6 @@
  *   node scripts/sweep-test-wallets.js --to=mall1...       # other destination
  *   node scripts/sweep-test-wallets.js --wallet=TEST_ADMIN # one wallet only
  */
-const fs = require('fs');
-const path = require('path');
 const { DirectSecp256k1HdWallet } = require('@cosmjs/proto-signing');
 const { SigningStargateClient, GasPrice } = require('@cosmjs/stargate');
 const { stringToPath } = require('@cosmjs/crypto');
@@ -29,7 +27,6 @@ const {
   createMlcoinRegistry,
 } = require('../backend/src/services/mlcoinProto');
 
-const REPO = path.resolve(__dirname, '..');
 const RPC = process.env.RPC || 'http://127.0.0.1:26657';
 const REST = process.env.REST || 'http://127.0.0.1:1317';
 // MsgTransferMallcoin charges fee = amount*97/10_000_000 (0.0097%) ON TOP of
@@ -73,6 +70,10 @@ if (!Object.values(KEEPERS).includes(DEST)) {
 
 const mlcnsBalance = async (address) => {
   const res = await fetch(`${REST}/tmp/marketplace/mlcoin/v1/wallet_balance/${address}`);
+  // A wallet with no mlcoin record is empty, not an error: the keeper only
+  // creates the record on first credit. Treating 404 as a hard failure made
+  // the whole sweep abort on the first already-drained fixture.
+  if (res.status === 404) return 0n;
   if (!res.ok) throw new Error(`wallet_balance HTTP ${res.status} for ${address}`);
   const body = await res.json();
   const w = body.wallet_balance || body.balance || body;
@@ -90,7 +91,8 @@ const stakingBalance = async (address) => {
 };
 
 (async () => {
-  const walletsFile = JSON.parse(fs.readFileSync(path.join(REPO, 'test', 'test-wallets.json'), 'utf8'));
+  // Untracked local fixtures; the loader explains how to create them if absent.
+  const walletsFile = require('../test/testWallets').loadTestWallets();
   const names = ONLY ? [ONLY] : Object.keys(walletsFile);
 
   console.log(`=== sweep test wallets → ${DEST} (${EXECUTE ? 'EXECUTE' : 'dry run'}) ===\n`);

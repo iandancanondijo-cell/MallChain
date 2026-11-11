@@ -68,6 +68,11 @@ blockchain_working/config/gentx/
 .marketplace_test/config/node_key.json
 .marketplace_test/data/priv_validator_state.json
 
+# Disposable test-fixture spending keys, written by test/generate-test-wallets.js.
+# Three funded 24-word mnemonics were committed here before; anyone who could
+# clone the repo could sign transfers out of them. Never track this file.
+test/test-wallets.json
+
 # Agent metadata - do not commit
 .kilocode/
 .kilo/

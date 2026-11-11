@@ -9,10 +9,11 @@ const { toBase64, toUtf8 } = require('@cosmjs/encoding');
 const fs = require('fs');
 const path = require('path');
 
-const TEST_WALLETS_PATH = path.join(__dirname, 'test-wallets.json');
+// test-wallets.json is untracked on purpose (spending keys); see test/testWallets.js.
+const { loadTestWallets } = require('./testWallets');
 
 async function loadTestWallet(name) {
-  const wallets = JSON.parse(fs.readFileSync(TEST_WALLETS_PATH, 'utf8'));
+  const wallets = loadTestWallets();
   const walletData = wallets[name];
   if (!walletData) throw new Error(`Wallet ${name} not found`);
 

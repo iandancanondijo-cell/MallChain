@@ -7,7 +7,9 @@ const { SigningStargateClient, GasPrice, calculateFee } = require('@cosmjs/starg
 const { Registry } = require('@cosmjs/proto-signing');
 const { defaultRegistryTypes } = require('@cosmjs/stargate');
 const { TxRaw } = require('cosmjs-types/cosmos/tx/v1beta1/tx');
-const testWallets = require('../test/test-wallets.json');
+// Untracked local fixtures — see test/testWallets.js for why this is a loader
+// call rather than a require() of a committed spending key.
+const testWallets = require('../test/testWallets').loadTestWallets();
 
 const CHAIN_RPC = 'http://localhost:26657';
 const CHAIN_REST = 'http://localhost:1317';

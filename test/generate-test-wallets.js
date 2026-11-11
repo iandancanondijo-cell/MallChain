@@ -60,8 +60,10 @@ async function main() {
     TEST_ADMIN: await generateTestWallet('TEST_ADMIN')
   };
   
-  // Save to test directory (not committed)
-  fs.writeFileSync(TEST_WALLETS_PATH, JSON.stringify(wallets, null, 2));
+  // Owner-read-only, and untracked by rule — .gitignore lists
+  // test/test-wallets.json, and test/testWallets.js errors out rather than
+  // falling back to fabricated wallets if this file is missing.
+  fs.writeFileSync(TEST_WALLETS_PATH, JSON.stringify(wallets, null, 2), { mode: 0o600 });
   
   console.log('\n=== WALLET SUMMARY ===');
   for (const [key, wallet] of Object.entries(wallets)) {
