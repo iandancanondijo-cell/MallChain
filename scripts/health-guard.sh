@@ -13,11 +13,52 @@
 #
 # CRITICAL MongoDB rule: mongod MUST use --dbpath /home/elle_bryson/mongodb-data
 # (persistent). NEVER /tmp — tmpfs wipes the whole database on power loss.
+#
+# SINGLE INSTANCE: this runs from three places now (@reboot, a */10 system cron,
+# and the Qoder watchdog automation). Two overlapping passes could each decide a
+# service is down and start it twice — worst case a second `marketplaced` node on
+# the same home dir, which wedges the chain. An exclusive lock makes any second
+# invocation exit immediately instead of racing the first.
 set -u
 
-REPO=/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain
+# Two roots, because the repo has two git worktrees checked out side by side.
+#
+# CHAIN_ROOT owns the compiled node binary and the on-disk chain state
+# (`build/marketplaced`, `blockchain_working/`). That is data, not code, and it
+# must stay exactly where the running validator already has it — starting a
+# second `marketplaced` against the same home wedges the chain.
+#
+# SERVICES_ROOT is which checkout the API (:4000) and the frontend dev server
+# (:5173) are started from. This MUST track the worktree the current work is
+# happening in. It used to be hardcoded to the same path as CHAIN_ROOT, and that
+# was the reason features kept coming back as "not working": every 10 minutes a
+# healthy-looking :4000 was (re)started from the older snapshot worktree, whose
+# branch does not contain the newer routes at all, so freshly built and tested
+# endpoints answered `Cannot GET /api/...` no matter how many times they were
+# verified. Override with an env var if the working checkout moves again.
+CHAIN_ROOT=${CHAIN_ROOT:-/home/elle_bryson/Documents/MarketplaceBlockchain-Mallchain}
+SERVICES_ROOT=${SERVICES_ROOT:-/home/elle_bryson/Documents/mallchain-main-56caea3e}
+# Kept as an alias for the chain-side callers below; never repoint this to
+# SERVICES_ROOT unless build/marketplaced + blockchain_working exist there too.
+REPO=$CHAIN_ROOT
+# The explorer has its own node_modules; it only runs where they are installed.
+EXPLORER_ROOT=${EXPLORER_ROOT:-$CHAIN_ROOT}
 MONGO_DBPATH=/home/elle_bryson/mongodb-data
 STATUS=0
+
+LOCK=/tmp/health-guard.lock
+exec 9>"$LOCK" || exit 0
+if ! flock -n 9; then
+  echo "OK guard (another health-guard pass holds $LOCK; skipping this run)"
+  exit 0
+fi
+
+# Cold-boot patience (2026-11-09): after a power loss the node has to replay
+# blocks before :26657 answers, and systemd takes a minute to bring the tunnel
+# up. The old fixed 40s chain wait / instant cloudflared check declared both
+# FAILED on the 06:34 boot while they were still legitimately starting — which
+# made a normal boot look like an outage. BOOT_WAIT multiplies those budgets.
+BOOT_WAIT=${BOOT_WAIT:-1}
 
 say() { echo "$@"; }
 
@@ -79,7 +120,7 @@ check_chain() {
         --home "$REPO/blockchain_working" --minimum-gas-prices "0.01stake" \
         > /tmp/chain.log 2>&1 &
     }
-    for i in $(seq 1 20); do h1=$(chain_height); [ -n "$h1" ] && break; sleep 2; done
+    for i in $(seq 1 $((20 * BOOT_WAIT))); do h1=$(chain_height); [ -n "$h1" ] && break; sleep 2; done
     if [ -z "$h1" ]; then
       say "FAILED chain — no RPC response on :26657; check /tmp/chain.log"
       STATUS=1
@@ -108,6 +149,19 @@ backend_health() {
 check_backend() {
   local code
   code=$(backend_health)
+  # A 200 from the WRONG checkout is the failure mode this guard used to hide:
+  # the legacy worktree answers /api/health perfectly while every newer route
+  # 404s. So the cwd of the process holding the port decides, not just the code.
+  local wrong
+  wrong=$(pgrep -f "node src/index.js" | while read -r p; do
+    [ "$(readlink /proc/$p/cwd 2>/dev/null)" = "$SERVICES_ROOT/backend" ] || echo "$p"
+  done)
+  if [ -n "$wrong" ]; then
+    say "REPAIRING backend (running from a stale checkout: $(readlink /proc/$(echo "$wrong" | head -1)/cwd 2>/dev/null); restarting from $SERVICES_ROOT/backend)"
+    pkill -f "node src/index.js" 2>/dev/null
+    sleep 3
+    code=000
+  fi
   if [ "$code" = "200" ]; then
     say "OK backend (:4000 health 200)"
     return
@@ -119,7 +173,7 @@ check_backend() {
     if [ "$code" = "200" ]; then say "OK backend (recovered without restart)"; return; fi
     pkill -f "node src/index.js" 2>/dev/null; sleep 3
   }
-  cd "$REPO/backend" && nohup node src/index.js > /tmp/backend.log 2>&1 &
+  cd "$SERVICES_ROOT/backend" && nohup node src/index.js > /tmp/backend.log 2>&1 &
   for i in $(seq 1 30); do
     code=$(backend_health); [ "$code" = "200" ] && break; sleep 4
   done
@@ -135,7 +189,7 @@ check_backend() {
     say "REPAIRED backend (health 200, background workers active)"
   else
     pkill -f "node src/index.js" 2>/dev/null; sleep 3
-    cd "$REPO/backend" && nohup node src/index.js > /tmp/backend.log 2>&1 &
+    cd "$SERVICES_ROOT/backend" && nohup node src/index.js > /tmp/backend.log 2>&1 &
     for i in $(seq 1 30); do
       code=$(backend_health); [ "$code" = "200" ] && break; sleep 4
     done
@@ -158,7 +212,7 @@ check_explorer() {
     return
   fi
   if ! pgrep -f "explorer.*server.js" >/dev/null && ! ss -tln 2>/dev/null | grep -q ':4100'; then
-    cd "$REPO/explorer/backend" && nohup node server.js >> /tmp/explorer.log 2>&1 &
+    cd "$EXPLORER_ROOT/explorer/backend" && nohup node server.js >> /tmp/explorer.log 2>&1 &
   fi
   for i in $(seq 1 10); do
     curl -s --max-time 5 http://127.0.0.1:4100/api/explorer/stats 2>/dev/null | grep -q '"success":true' && break
@@ -174,11 +228,23 @@ check_explorer() {
 
 # ------------------------------------------------------------- Dev server
 check_devserver() {
-  if curl -s --max-time 4 -o /dev/null http://localhost:5173/ 2>/dev/null; then
+  # Same stale-checkout trap as the backend: :5173 answers for any vite, and a
+  # vite started from the other worktree serves that branch's source.
+  local wrong
+  wrong=$(pgrep -f '\.bin/vite' | while read -r p; do
+    [ "$(readlink /proc/$p/cwd 2>/dev/null)" = "$SERVICES_ROOT/mallchain-os-v14" ] || echo "$p"
+  done)
+  if [ -n "$wrong" ]; then
+    say "REPAIRING devserver (vite serving a stale checkout: $(readlink /proc/$(echo "$wrong" | head -1)/cwd 2>/dev/null); restarting from $SERVICES_ROOT/mallchain-os-v14)"
+    kill $wrong 2>/dev/null
+    # vite's esbuild/npm parent has to go too or the port stays claimed
+    pkill -f 'npm run dev' 2>/dev/null
+    sleep 4
+  elif curl -s --max-time 4 -o /dev/null http://localhost:5173/ 2>/dev/null; then
     say "OK devserver (:5173)"
     return
   fi
-  cd "$REPO/mallchain-os-v14" && nohup npm run dev > /tmp/vite-dev.log 2>&1 &
+  cd "$SERVICES_ROOT/mallchain-os-v14" && nohup npm run dev > /tmp/vite-dev.log 2>&1 &
   for i in $(seq 1 15); do
     curl -s --max-time 3 -o /dev/null http://localhost:5173/ 2>/dev/null && break
     sleep 2
@@ -193,11 +259,20 @@ check_devserver() {
 
 # -------------------------------------------------- Tunnel connector (root)
 check_cloudflared() {
+  # systemd owns this process (unit is enabled, runs as root with
+  # /etc/cloudflared/token) and it can take the first minute of boot to
+  # register, so poll before declaring it missing. Still never started from
+  # here — it needs sudo, and the standing rule is to report rather than
+  # sudo-start the tunnel.
+  for i in $(seq 1 $((1 + 4 * BOOT_WAIT))); do
+    pgrep -f "cloudflared.*tunnel run" >/dev/null && break
+    sleep 15
+  done
   if pgrep -f "cloudflared.*tunnel run" >/dev/null; then
     say "OK cloudflared (api.mallchain.network tunnel process alive)"
   else
     # Runs as root with /etc/cloudflared/token — cannot auto-start unprivileged.
-    say "FAILED cloudflared — tunnel process not running; needs: sudo /home/elle_bryson/.local/bin/cloudflared --no-autoupdate tunnel run --token-file /etc/cloudflared/token & "
+    say "FAILED cloudflared — tunnel process not running; needs: sudo systemctl restart cloudflared (or: sudo /home/elle_bryson/.local/bin/cloudflared --no-autoupdate tunnel run --token-file /etc/cloudflared/token &)"
     STATUS=1
   fi
 }

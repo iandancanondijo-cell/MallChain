@@ -21,10 +21,15 @@ module "vpc" {
 
   # VPC Flow Logs → CloudWatch for network-level visibility (I2).
   # Destination and IAM role are defined in audit-s3.tf.
+  #
+  # Argument name verified against the pinned module (terraform-aws-modules/vpc
+  # v6.7.3): its root variables.tf declares flow_log_cloudwatch_iam_role_arn,
+  # while flow_log_iam_role_arn exists only as a local/submodule input inside
+  # vpc-flow-logs.tf, so passing it here is an "Unsupported argument" at plan.
   enable_flow_log                   = true
   flow_log_destination_type         = "cloud-watch-logs"
   flow_log_destination_arn          = aws_cloudwatch_log_group.vpc_flow_logs.arn
-  flow_log_iam_role_arn             = aws_iam_role.vpc_flow_logs.arn
+  flow_log_cloudwatch_iam_role_arn  = aws_iam_role.vpc_flow_logs.arn
   flow_log_max_aggregation_interval = 60
 
   # Required tags for the AWS Load Balancer Controller / EKS to auto-discover

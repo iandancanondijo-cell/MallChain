@@ -14,15 +14,25 @@ module "eks" {
   # accepting the module's 0.0.0.0/0.
   #
   # If this cluster does not need interactive kubectl from outside the VPC, set
-  # cluster_endpoint_public_access = false and admin_cidr_blocks = [] in
+  # endpoint_public_access = false and admin_cidr_blocks = [] in
   # your terraform.tfvars; the endpoint then exists only on the private
   # interface.
   #
-  # cluster_* prefixes are the module v21 argument names; the bare
-  # endpoint_public_access / _cidrs form belongs to v17 and earlier.
-  cluster_endpoint_public_access       = true
-  cluster_endpoint_private_access      = true
-  cluster_endpoint_public_access_cidrs = var.admin_cidr_blocks
+  # Argument names verified against the pinned module (terraform-aws-modules/eks
+  # v21.26.0, the newest release satisfying ~> 21.0): its own
+  # docs/UPGRADE-21.0.md lists the v21 rename as
+  # `cluster_endpoint_public_access` -> `endpoint_public_access`, and
+  # variables.tf declares endpoint_public_access, endpoint_private_access and
+  # endpoint_public_access_cidrs — no cluster_* form. The cluster_* names this
+  # block used before are v20 and earlier and fail with "Unsupported argument".
+  #
+  # `terraform validate` could not be run to demonstrate this (the module
+  # registry is unreachable from this network, so the modules cannot be
+  # installed here); the check was made against the module source cached at
+  # infra/terraform/.terraform/modules/eks.
+  endpoint_public_access       = true
+  endpoint_private_access      = true
+  endpoint_public_access_cidrs = var.admin_cidr_blocks
 
   eks_managed_node_groups = {
     default = {
