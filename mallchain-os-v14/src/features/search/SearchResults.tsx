@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PlatformIcon } from '../mines/platformIcons';
+import { fmtNum } from '../../components/ui';
 import { search, type SearchResults as SearchResultsData } from '../../services/searchApi';
 
 function getQuery(): string {
@@ -124,18 +125,30 @@ export default function SearchResults({ navigate }: { navigate: (p: string) => v
       {q && !loading && !error && data && data.campaigns.length > 0 && (
         <div className="card card-glow bg-gradient-card card-hover" style={{ padding: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 10 }}>Mines campaigns</div>
-          {data.campaigns.map((c) => (
+          {data.campaigns.map((c) => {
+            // The campaign record comes straight from Mongo, so a campaign
+            // created before rate_per_task/budget existed has neither. A bare
+            // `{c.rate_per_task} MLPTS` rendered as " MLPTS" — say what the
+            // number means instead of printing a unit with no amount.
+            const rate = Number(c.rate_per_task);
+            const budget = Number(c.budget_remaining);
+            return (
             <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--line-1)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {c.platform && <PlatformIcon platform={c.platform} />}
                 <div>
                   <div><b>{c.title}</b></div>
-                  <div style={{ fontSize: 12, color: 'var(--txt-2)' }}>{c.rate_per_task} MLPTS · budget {c.budget_remaining}</div>
+                  <div style={{ fontSize: 12, color: 'var(--txt-2)' }}>
+                    {Number.isFinite(rate) ? `${fmtNum(rate)} MLPTS` : 'reward not set by the creator'}
+                    {' · budget '}
+                    {Number.isFinite(budget) ? fmtNum(budget) : '—'}
+                  </div>
                 </div>
               </div>
               <button className="btn btn-ghost btn-sm" onClick={() => navigate('/mines/discover')}>View →</button>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

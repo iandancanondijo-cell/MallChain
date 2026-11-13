@@ -109,6 +109,100 @@ describe('401 Authentication Flow Integration Test', () => {
     });
   });
 
+  // Session policy (2026-11), end to end: requireAuth answers
+  // {error:'session_expired', cooldownMinutes} at the same moment it writes the
+  // account's 15-minute Redis lockout
+  // (backend/src/middleware/sessionCooldown.js). api.ts has to carry that body
+  // through to handle401Error, because it — not the local clock — is the only
+  // thing allowed to arm the client countdown.
+  it('mirrors the cooldown when the 401 body says session_expired', async () => {
+    localStorage.clear();
+    authService.setSession(Math.floor(Date.now() / 1000) + 3600);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: 'session_expired', cooldownMinutes: 15 }),
+    });
+
+    await api.get('/api/notifications');
+
+    const until = authService.getCooldownUntil();
+    expect(until).not.toBeNull();
+    expect(((until as number) - Date.now()) / 60_000).toBeGreaterThan(14);
+
+    // …and lands on the sign-in page, where CooldownCard counts it down.
+    // (window.location is a plain stub in this file, so it holds the assigned
+    // value verbatim — a real browser would render this as '#/auth'.)
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    expect(window.location.hash).toBe('/auth');
+  });
+
+  // The machine-readable half of the same contract: requireAuth now answers
+  // `{error:'session_expired', code:'session_expired'}` (and
+  // handleExpiredToken adds cooldownMinutes). A client that read only the
+  // message would stop mirroring the countdown the moment the prose moved; a
+  // client that reads only the code stops mirroring it the moment the backend
+  // it is talking to is an older build. Both fields describe one fact, so both
+  // are honoured — and neither is guessed.
+  it('mirrors the cooldown from the code even when the message is reworded', async () => {
+    localStorage.clear();
+    authService.setSession(Math.floor(Date.now() / 1000) + 3600);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        error: 'Your session ended after 30 minutes of inactivity',
+        code: 'session_expired',
+        cooldownMinutes: 15,
+      }),
+    });
+
+    await api.get('/api/notifications');
+
+    const until = authService.getCooldownUntil();
+    expect(until).not.toBeNull();
+    expect(((until as number) - Date.now()) / 60_000).toBeGreaterThan(14);
+    await new Promise(resolve => setTimeout(resolve, 1100));
+  });
+
+  it('arms no countdown for another 401 code, whatever its message says', async () => {
+    localStorage.clear();
+    authService.setSession(Math.floor(Date.now() / 1000) + 3600);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: 'session_expired', code: 'token_revoked' }),
+    });
+
+    await api.get('/api/notifications');
+
+    // The code wins here too: requireAuth revoked this token, and it started no
+    // cooldown. Mirroring one from the prose would replace the login form with
+    // a 15-minute countdown for a lockout the user is not under.
+    expect(authService.getCooldownUntil()).toBeNull();
+    await new Promise(resolve => setTimeout(resolve, 1100));
+  });
+
+  it('does not lock the sign-in form out after a 401 that is not session_expired', async () => {
+    localStorage.clear();
+    authService.setSession(Math.floor(Date.now() / 1000) + 3600);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: 'Account is banned' }),
+    });
+
+    await api.get('/api/notifications');
+
+    expect(authService.getCooldownUntil()).toBeNull();
+
+    await new Promise(resolve => setTimeout(resolve, 1100));
+  });
+
   it('should handle 401 in transaction flow', async () => {
     // SETUP: User has a session but it's rejected by the time the request lands
     authService.setSession(Math.floor(Date.now() / 1000) + 3600);

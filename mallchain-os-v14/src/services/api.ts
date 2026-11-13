@@ -232,9 +232,31 @@ class Api {
       // Task 2.3: Handle 401 — handle401Error() clears the token, fully resets
       // the store, and navigates via the app's hash router (see errorHandler.ts).
       if (res.status === 401) {
+        // The body separates the kinds of 401 by its `code` field — the
+        // machine-readable half of the contract added in
+        // backend/src/middleware/requireAuth.js (handoff §4):
+        // 'session_expired' means requireAuth just armed this account's
+        // 15-minute sign-in cooldown, every other code (invalid_token,
+        // token_revoked, unknown_user, missing_token) means no cooldown
+        // exists. handle401Error mirrors the countdown only for the former.
+        //
+        // The legacy `error === 'session_expired'` string is accepted as well,
+        // and the two are the same answer because requireAuth emits both
+        // fields in that one response. Code is what a client should read — a
+        // reworded message must not silently turn cooldown mirroring off — but
+        // matching on code alone would make this bundle depend on a backend
+        // redeploy: the live API can still be the build that answers with
+        // prose only, and a user past their 30-minute session would get a
+        // login form that a too-early attempt then 423s. Prefer the code, fall
+        // back to the message, never invent a countdown.
+        const body = json as unknown as { code?: string; error?: string; cooldownMinutes?: number } | null;
+        const expired = body?.code === 'session_expired'
+          || (body?.code === undefined && body?.error === 'session_expired');
         handle401Error({
           action: `accessing ${path}`,
           endpoint: path,
+          sessionExpired: expired,
+          cooldownMinutes: body?.cooldownMinutes,
         });
 
         return { ok: false, code: 401, error: 'Session expired. Please log in again.' };

@@ -3,7 +3,7 @@ import { CreditCard, Phone, Coins, CheckCircle2, Loader2, Smartphone, ShoppingBa
 import { api } from '../services/api';
 import { store } from '../store/store';
 import { authService } from '../services/auth';
-import { useLivePrice } from '../hooks/useLivePrice';
+import { useMallpointsPrice } from '../hooks/useMallpointsPrice';
 import { useStoreVersion, toast } from '../components/ui';
 import { useWalletGate, reportLinkFailure, linkAttemptGuard } from '../features/wallet/walletGate';
 import WalletGateNotice from '../features/wallet/WalletGateNotice';
@@ -11,9 +11,12 @@ import WalletGateNotice from '../features/wallet/WalletGateNotice';
 type Step = 'form' | 'awaiting_payment' | 'stalled' | 'crediting' | 'done';
 
 /**
- * The Mallpoints rate is whatever the server's economy constants say (`MALLPOINT_PRICE_KES`,
- * bundled into /api/economy/state) — the same number the reserve quote divides
- * by. Quoting a total from a client-side constant would show a buyer one figure
+ * The Mallpoints rate is whatever the server's economy constants say — read
+ * from its own endpoint (GET /api/mallpoints/price, backed by
+ * `MALLPOINT_PRICE_KES` in services/economyConstants.js) rather than borrowed
+ * from `/api/economy/state`, which answers with the whole tokenomics payload to
+ * state one number. It is the same number the reserve quote divides by.
+ * Quoting a total from a client-side constant would show a buyer one figure
  * and STK-push them another the moment a deployment moves off the default, so
  * there is deliberately no fallback rate here: with no rate loaded, nothing can
  * be paid.
@@ -43,9 +46,9 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
   // MLPTS credit to a wallet, a wallet links to an account, and the link needs
   // a verified identity — the gate is checked before any of those are offered.
   const { gate, refresh: refreshGate } = useWalletGate();
-  const livePrice = useLivePrice();
+  const peg = useMallpointsPrice();
   /** Null until the server states it — the rate is never assumed. */
-  const rateKes = livePrice.pointPriceKes;
+  const rateKes = peg.pointPriceKes;
   const minMlpts = rateKes ? Math.ceil(MIN_KES / rateKes) : null;
 
   const [amount, setAmount] = useState(50);
@@ -390,7 +393,7 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
                 <span className="wo-summary-value">
                   {rateKes
                     ? `${rateKes} KES / MLPTS`
-                    : livePrice.loading
+                    : peg.loading
                       ? 'loading the current rate…'
                       : 'rate unavailable'}
                 </span>
@@ -402,7 +405,7 @@ export default function MallpointsPurchase({ navigate }: { navigate: (p: string)
                 figure we made up next to real money is not. */}
             {!rateKes && (
               <div className="tiny" style={{ marginBottom: 10, color: 'var(--warning, var(--gold))' }}>
-                {livePrice.loading
+                {peg.loading
                   ? 'Waiting for the current Mallpoints rate from the network…'
                   : 'Could not load the current Mallpoints rate. Check your connection and reload — paying is disabled until the rate is known.'}
               </div>

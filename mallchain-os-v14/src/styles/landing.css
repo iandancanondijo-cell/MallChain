@@ -1563,6 +1563,15 @@
   background: rgba(243, 241, 234, 0.05);
 }
 
+/* A service that is genuinely not answering — distinct from "soon", which
+   means "not built yet", and from "measuring", which means "no data yet".
+   The status table must not blur these three. */
+.landing-page .pill.warn {
+  color: var(--l-red);
+  border-color: rgba(255, 74, 61, 0.4);
+  background: rgba(255, 74, 61, 0.08);
+}
+
 .landing-page .step h3 {
   display: flex;
   flex-wrap: wrap;

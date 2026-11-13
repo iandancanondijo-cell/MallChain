@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useStoreSlice } from '../../store/hooks';
 import { fmtNum, fmtMoney } from '../../components/ui';
 import { economyApi, type EconomyState, type EconomyUserHoldings, type TrackEconomics } from '../../services/economyApi';
+import { fetchMarketCap, type MarketCapResponse } from '../../services/marketPriceApi';
 import { TrendingUp, Coins, Flame, BarChart3, AlertTriangle, Wallet, ArrowDownRight, Eye, ChevronDown, ChevronUp, Droplets, Users } from 'lucide-react';
 
 /** Economy / Tokenomics — macro-financial glassmorphism layout with real emission/supply/treasury data. */
@@ -15,6 +16,11 @@ export default function Economy() {
   const [track, setTrack] = useState<TrackEconomics | null>(null);
   const [trackOpen, setTrackOpen] = useState(false);
   const [trackLoading, setTrackLoading] = useState(false);
+  // Circulating supply × the on-chain price, both read by the backend in one
+  // call (GET /api/market/cap). Null until it answers, and it stays absent
+  // rather than falling back to a supply constant: a cap the chain cannot
+  // support is a cap not shown.
+  const [cap, setCap] = useState<MarketCapResponse | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -24,6 +30,7 @@ export default function Economy() {
       else setError(res.error || 'Failed to load economic data');
       setLoading(false);
     });
+    void fetchMarketCap().then(setCap);
   };
 
   useEffect(() => { load(); }, []);
@@ -77,11 +84,21 @@ export default function Economy() {
               <div className="wallet-hero-label">Mallchain economy</div>
               <div className="wallet-hero-balance">
                 <div className="wallet-hero-num">{fmtMoney(data.mlcnsPriceKes, 'KES')}</div>
-                <div style={{ fontSize: 14, color: 'var(--txt-3)', marginTop: 2 }}>MLCNS market price</div>
+                <div style={{ fontSize: 14, color: 'var(--txt-3)', marginTop: 2 }}>MALL market price</div>
               </div>
               <div className="wallet-hero-meta">
                 <span className="chip"><TrendingUp size={12} style={{ marginRight: 4 }} />Buy {fmtMoney(data.market.buyPriceKes, 'KES')}</span>
                 <span className="chip"><ArrowDownRight size={12} style={{ marginRight: 4 }} />Sell {fmtMoney(data.market.sellPriceKes, 'KES')}</span>
+                {cap !== null && (
+                  <span
+                    className="chip"
+                    title={cap.method + (cap.supplyFallback === 'genesis'
+                      ? ' — supply read from the chain’s starting state because it could not be read live'
+                      : ` · as of height ${cap.asOfHeight ?? 'unknown'}`)}
+                  >
+                    <Coins size={12} style={{ marginRight: 4 }} />Cap {fmtMoney(cap.marketCapKes, 'KES')}
+                  </span>
+                )}
                 <span className="chip">Phase {data.emission.phase}</span>
               </div>
             </div>
@@ -104,7 +121,7 @@ export default function Economy() {
               </div>
               <div>
                 <div className="card-label">Total supply</div>
-                <div className="card-value">{fmtNum(data.emission.totalSupply)} <span className="unit">MLCNS</span></div>
+                <div className="card-value">{fmtNum(data.emission.totalSupply)} <span className="unit">MALL</span></div>
                 <div className="tiny mt">{fmtNum(data.emission.totalAvailable)} available</div>
               </div>
             </div>
@@ -114,7 +131,7 @@ export default function Economy() {
               </div>
               <div>
                 <div className="card-label">Emitted so far</div>
-                <div className="card-value">{fmtNum(Number(data.emission.emittedTotal))} <span className="unit">MLCNS</span></div>
+                <div className="card-value">{fmtNum(Number(data.emission.emittedTotal))} <span className="unit">MALL</span></div>
                 <div className="tiny mt">{fmtNum(data.emission.remainingInSchedule)} remaining</div>
               </div>
             </div>
@@ -124,7 +141,7 @@ export default function Economy() {
               </div>
               <div>
                 <div className="card-label">Burned so far</div>
-                <div className="card-value" style={{ color: 'var(--red-2)' }}>{fmtNum(Number(data.emission.burnedTotal))} <span className="unit">MLCNS</span></div>
+                <div className="card-value" style={{ color: 'var(--red-2)' }}>{fmtNum(Number(data.emission.burnedTotal))} <span className="unit">MALL</span></div>
                 <div className="tiny mt">{data.emission.burnRatePercent}% burn rate</div>
               </div>
             </div>
@@ -136,22 +153,22 @@ export default function Economy() {
               <table className="tbl">
                 <tbody>
                   <tr><td className="muted">Current month</td><td>{data.emission.currentMonth}</td></tr>
-                  <tr><td className="muted">Monthly cap</td><td>{fmtNum(data.emission.monthlyCap)} MLCNS</td></tr>
-                  <tr><td className="muted">Daily limit</td><td>{fmtNum(data.emission.dailyLimit)} MLCNS</td></tr>
+                  <tr><td className="muted">Monthly cap</td><td>{fmtNum(data.emission.monthlyCap)} MALL</td></tr>
+                  <tr><td className="muted">Daily limit</td><td>{fmtNum(data.emission.dailyLimit)} MALL</td></tr>
                   <tr><td className="muted">Months left in schedule</td><td>{data.emission.monthsRemaining}</td></tr>
                 </tbody>
               </table>
               <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>
-                {`Emission halves every ${data.schedule.phaseMonths} months across ${data.schedule.phases.length} phases, from ${data.schedule.phases[0]?.monthly ?? '—'} down to ${data.schedule.phases[data.schedule.phases.length - 1]?.monthly ?? '—'} MLCNS/month.`}
+                {`Emission halves every ${data.schedule.phaseMonths} months across ${data.schedule.phases.length} phases, from ${data.schedule.phases[0]?.monthly ?? '—'} down to ${data.schedule.phases[data.schedule.phases.length - 1]?.monthly ?? '—'} MALL/month.`}
               </div>
             </div>
 
             <div className="card card-glow bg-gradient-card">
-              <div className="sec-title"><h2>Mallpoints → MLCNS conversion</h2></div>
+              <div className="sec-title"><h2>Mallpoints → MALL conversion</h2></div>
               <table className="tbl">
                 <tbody>
                   <tr><td className="muted">Rate</td><td>{data.conversion.rate}</td></tr>
-                  <tr><td className="muted">Value ratio</td><td>1 MLPTS ≈ {data.conversion.valueRatio} MLCNS by market value</td></tr>
+                  <tr><td className="muted">Value ratio</td><td>1 MLPTS ≈ {data.conversion.valueRatio} MALL by market value</td></tr>
                   <tr><td className="muted">Badge holders</td><td>{data.conversion.badgeHolders}</td></tr>
                   <tr><td className="muted">Everyone else</td><td>{data.conversion.nonBadge}</td></tr>
                 </tbody>
@@ -171,8 +188,8 @@ export default function Economy() {
                   <tr key={p.phase} style={p.phase === data.emission.phase ? { background: 'rgba(var(--section-accent-rgb),0.06)' } : undefined}>
                     <td>{p.phase === data.emission.phase ? <b style={{ color: 'rgb(var(--section-accent-rgb))' }}>Phase {p.phase} (current)</b> : `Phase ${p.phase}`}</td>
                     <td>{p.months}</td>
-                    <td>{p.monthly} MLCNS</td>
-                    <td>{p.cumulative} MLCNS</td>
+                    <td>{p.monthly} MALL</td>
+                    <td>{p.cumulative} MALL</td>
                   </tr>
                 ))}
               </tbody>
@@ -206,7 +223,7 @@ export default function Economy() {
                           </span>
                         ) : <span className="muted">—</span>}
                       </td>
-                      <td>{w?.balance == null ? <span className="muted">unavailable</span> : `${fmtNum(w.balance)} MLCNS`}</td>
+                      <td>{w?.balance == null ? <span className="muted">unavailable</span> : `${fmtNum(w.balance)} MALL`}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -242,7 +259,7 @@ export default function Economy() {
                     <div style={{ marginBottom: 20 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--txt-3)', marginBottom: 6 }}>
                         <span>Supply distribution</span>
-                        <span>{fmtNum(track.totalSupply)} MLCNS total</span>
+                        <span>{fmtNum(track.totalSupply)} MALL total</span>
                       </div>
                       <div style={{
                         height: 28, borderRadius: 14, overflow: 'hidden',
@@ -292,7 +309,7 @@ export default function Economy() {
                         <Coins size={20} style={{ color: 'rgb(var(--section-accent-rgb))', marginBottom: 6 }} />
                         <div className="card-label">Total Mallcoins</div>
                         <div className="card-value" style={{ fontSize: '1.15em' }}>{fmtNum(track.totalSupply)}</div>
-                        <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>MLCNS</div>
+                        <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>MALL</div>
                       </div>
 
                       <div className="card card-glow bg-gradient-card" style={{
@@ -357,7 +374,7 @@ export default function Economy() {
                           {track.liquidityPoolKes > 0 ? fmtMoney(track.liquidityPoolKes, 'KES') : '—'}
                         </div>
                         <div className="tiny mt" style={{ color: 'var(--txt-3)' }}>
-                          {track.liquidityPool?.name || 'MLCNS/KES'} fiat value
+                          {track.liquidityPool?.name || 'MALL/KES'} fiat value
                         </div>
                       </div>
 
@@ -409,7 +426,7 @@ export default function Economy() {
             ) : holdings ? (
               <table className="tbl">
                 <tbody>
-                  <tr><td className="muted">MLCNS</td><td style={{ fontWeight: 600 }}>{fmtNum(holdings.mlcns)}</td></tr>
+                  <tr><td className="muted">MALL</td><td style={{ fontWeight: 600 }}>{fmtNum(holdings.mlcns)}</td></tr>
                   <tr><td className="muted">Mallpoints</td><td style={{ fontWeight: 600 }}>{fmtNum(holdings.mallpoints)}</td></tr>
                   <tr><td className="muted">Estimated value</td><td style={{ fontWeight: 700, color: 'rgb(var(--section-accent-rgb))' }}>{fmtMoney(holdings.estimatedKesValue, 'KES')}</td></tr>
                 </tbody>

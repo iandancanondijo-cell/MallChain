@@ -1,11 +1,12 @@
 /**
  * Mallpoints purchase is the one screen where the app asks for real money, so
  * every figure on it has to be the server's. These tests pin that: the rate
- * comes from the live economy state, the KSH total is derived from it, the
- * quote the phone receives is the one the server reserved, and nothing can be
- * paid while the rate is unknown. The page used to multiply by a hardcoded
- * `MALLPOINT_PRICE_KES = 2`, which quoted one total and charged another the
- * moment `MALLPOINT_PRICE_KES` moved in the deployment.
+ * comes from the server's dedicated Mallpoints price endpoint
+ * (GET /api/mallpoints/price, via hooks/useMallpointsPrice.ts), the KES total
+ * is derived from it, the quote the phone receives is the one the server
+ * reserved, and nothing can be paid while the rate is unknown. The page used to
+ * multiply by a hardcoded `MALLPOINT_PRICE_KES = 2`, which quoted one total and
+ * charged another the moment `MALLPOINT_PRICE_KES` moved in the deployment.
  */
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
@@ -20,7 +21,7 @@ const { getMock, postMock, priceRef } = vi.hoisted(() => ({
 }));
 
 vi.mock('../services/api', () => ({ api: { get: getMock, post: postMock } }));
-vi.mock('../hooks/useLivePrice', () => ({ useLivePrice: () => priceRef.current }));
+vi.mock('../hooks/useMallpointsPrice', () => ({ useMallpointsPrice: () => priceRef.current }));
 vi.mock('../services/auth', () => ({ authService: { linkWallet: vi.fn() } }));
 vi.mock('../features/wallet/walletGate', () => ({
   useWalletGate: () => ({ gate: { blocked: false, state: 'ready' }, refresh: vi.fn() }),

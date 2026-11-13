@@ -14,7 +14,14 @@ import NetworkDots from './NetworkDots';
 import WalletFlowChart from './WalletFlowChart';
 import { useWalletGate, reportLinkFailure, linkAttemptGuard } from '../wallet/walletGate';
 import WalletGateNotice from '../wallet/WalletGateNotice';
+import {
+  KYC_VERDICT,
+  resolveKycVerdict,
+  type KycServerVerdict,
+  type ResolvedKycVerdict,
+} from '../../services/kycVerdict';
 import { AddressIdentity } from '../../components/WalletIdentity';
+import { txTitle } from '../../utils/txPresentation';
 import { TrendingUp, Wallet, Zap, Shield, ArrowUpRight, ArrowDownLeft, Repeat, Sparkles, CheckCircle2, XCircle, Bell, RefreshCw } from 'lucide-react';
 import { Button, Card, Badge, Heading, Text } from '../../components/shared';
 import './Dashboard.css';
@@ -37,6 +44,8 @@ function dayLabel(day: string): string {
 interface KycStatusResponse {
   kycId?: string;
   status?: string;
+  /** The verdict this card branches on — see services/kycVerdict.ts. */
+  verdict?: KycServerVerdict;
   riskLevel?: string;
   submittedAt?: string | null;
   reviewedAt?: string | null;
@@ -46,15 +55,18 @@ interface KycStatusResponse {
 
 type KycVerdict = 'verified' | 'invalid' | 'review' | 'needed' | 'unknown';
 
-function verdictFor(status: string | undefined, fetchFailed: boolean): KycVerdict {
-  if (fetchFailed) return 'unknown';
-  switch (status) {
-    case 'approved': return 'verified';
-    case 'rejected': return 'invalid';
-    case 'pending':
-    case 'review': return 'review';
-    case 'draft':
-    case 'not_submitted': return 'needed';
+/**
+ * The published verdict → this card's five render states. Nothing is derived
+ * here: `resolveKycVerdict` reads the response, and the server's answer is the
+ * same one the wallet gate applies, which is what the "Details are invalid" /
+ * "Verified" banner used to contradict when the account held a wallet.
+ */
+function verdictFor(verdict: ResolvedKycVerdict): KycVerdict {
+  switch (verdict) {
+    case KYC_VERDICT.VERIFIED: return 'verified';
+    case KYC_VERDICT.REJECTED: return 'invalid';
+    case KYC_VERDICT.PENDING: return 'review';
+    case KYC_VERDICT.NOT_SUBMITTED: return 'needed';
     default: return 'unknown';
   }
 }
@@ -115,7 +127,7 @@ function KycStatusCard({ navigate }: { navigate: (p: string) => void }) {
     fetchStatus();
   }, [userId, seenKey, fetchStatus]);
 
-  const verdict = verdictFor(snap?.status, fetchFailed);
+  const verdict = verdictFor(resolveKycVerdict(snap));
 
   useEffect(() => {
     if (verdict !== 'verified' || dismissed || seenKey === null) return;
@@ -223,7 +235,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
 
   const isWalletConnected = st.wallet.address && st.wallet.address.length > 0;
   const net = useNetworkIdentity();
-  const { midKes, pointPriceKes, error: priceError, loading: priceLoading } = useLivePrice();
+  const { midKes, pointPriceKes, error: priceError, loading: priceLoading, estimating: priceEstimating } = useLivePrice();
   // Whether this account may attach a wallet at all. Verified identity comes
   // first (backend/src/middleware/requireKyc.js answers 403 on the link), so a
   // "Link wallet" button shown without it would only cost the user a cipher
@@ -378,8 +390,19 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
     return fmtMoney(mallDisp + usdDisp, cur);
   })();
 
+  // Three different reasons the rate can be missing, and the dashboard used to
+  // print the same two words for all of them. `estimating` means the economy
+  // feed answered but only with the deployment's configured defaults, i.e. no
+  // verified rate exists right now — which is not the same incident as the
+  // feed being unreachable, and neither is "still loading".
+  const priceUnavailableReason = priceError
+    ? 'price feed unreachable'
+    : priceEstimating
+      ? 'no verified rate — market feed on configured defaults'
+      : 'price unavailable';
+
   const mallValueDisplay = (() => {
-    if (midKes === null) return priceError ? 'price feed unreachable' : 'price unavailable';
+    if (midKes === null) return priceUnavailableReason;
     const t = toDisplay(mallKes, 'KES');
     return t === null ? '…' : `≈ ${fmtMoney(t, cur)}`;
   })();
@@ -398,18 +421,28 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
   // fmtMoney(…, cur) put a "$0.60" label on a Kenyan-shilling number — for a
   // USD user that read as roughly 1/130th of the real price.
   const mallRateDisplay = (() => {
-    if (midKes === null) return 'MALL price unavailable';
+    if (midKes === null) return priceUnavailableReason;
     const d = toDisplay(midKes, 'KES');
     return d === null ? 'MALL @ —' : `MALL @ ${fmtUnitPrice(d, cur)}`;
   })();
 
   const displayName = st.user.name?.trim() || st.user.email?.split('@')[0] || 'Guest';
 
-  const txIcon = (type: string) => {
-    switch (type) {
+  // The icon follows the published category (`txType`), not the direction
+  // (`type`): a stake and a transfer are both 'send' for the wallet that
+  // signed them, and drawing both as an up arrow is what made the card look
+  // like it only ever contained transfers.
+  const txIcon = (tx: Transaction) => {
+    switch (tx.txType) {
       case 'send': return <ArrowUpRight size={14} />;
       case 'receive': return <ArrowDownLeft size={14} />;
       case 'swap': return <Repeat size={14} />;
+      case 'purchase':
+      case 'sale':
+      case 'convert': return <Zap size={14} />;
+      case 'stake':
+      case 'unstake':
+      case 'redelegate': return <Shield size={14} />;
       default: return <Sparkles size={14} />;
     }
   };
@@ -441,7 +474,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
               <NetworkDots
                 signals={[
                   { tone: 'green', label: 'Chain node', ok: net.loading ? null : net.reachable },
-                  { tone: 'yellow', label: 'MLCNS price feed', ok: priceLoading ? null : midKes !== null },
+                  { tone: 'yellow', label: 'MALL price feed', ok: priceLoading ? null : midKes !== null },
                   { tone: 'orange', label: 'Account-to-wallet link', ok: linkCheck.error ? null : linkCheck.checked ? serverLinked : null },
                 ]}
               />
@@ -568,7 +601,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
           </div>
           <div className="dash-stat-body">
             <div className="card-label">Staking</div>
-            <div className="card-value">{fmtNum(staking?.totalStaked ?? 0)} <span className="unit">MLCNS</span></div>
+            <div className="card-value">{fmtNum(staking?.totalStaked ?? 0)} <span className="unit">MALL</span></div>
             <div className="card-sub">{staking?.active.length ?? 0} active stake{staking?.active.length === 1 ? '' : 's'}</div>
           </div>
         </div>
@@ -617,9 +650,9 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
           ) : (
             recentTxs.map((t) => (
               <div key={t.id} className="list-row dash-tx-row">
-                <div className="dash-tx-icon">{txIcon(t.type)}</div>
+                <div className="dash-tx-icon" title={t.txTypeLabel}>{txIcon(t)}</div>
                 <div className="grow">
-                  <div className="t">{t.type.charAt(0).toUpperCase() + t.type.slice(1)} {fmtNum(t.amount)} {t.asset}</div>
+                  <div className="t">{txTitle(t)} {fmtNum(t.amount)} {t.asset}</div>
                   <div className="m">{t.note || <AddressIdentity address={t.type === 'receive' ? t.from : (t.to || t.from)} label={t.type === 'receive' ? 'From' : 'To'} size={18} />}</div>
                 </div>
                 <StatusChip status={t.status} />
@@ -678,7 +711,7 @@ export default function Dashboard({ navigate }: { navigate: (p: string) => void 
             <button className="dash-snap-row" onClick={() => navigate('/staking')}>
               <div className="grow">
                 <div className="t">Staking</div>
-                <div className="m">{fmtNum(staking?.totalStaked ?? 0)} MLCNS staked · {staking?.active.length ?? 0} active</div>
+                <div className="m">{fmtNum(staking?.totalStaked ?? 0)} MALL staked · {staking?.active.length ?? 0} active</div>
               </div>
               <span style={{ color: 'var(--txt-3)', fontSize: 12 }}>View →</span>
             </button>

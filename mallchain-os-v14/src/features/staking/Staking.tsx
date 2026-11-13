@@ -41,7 +41,7 @@ export default function Staking() {
     setBusy(true);
     try {
       const result = await stakeMlcns({ mnemonic, fromAddress: address, amountMlcns: a });
-      toast(`Staked ${a} MLCNS — tx ${result.txHash.slice(0, 10)}…`);
+      toast(`Staked ${a} MALL — tx ${result.txHash.slice(0, 10)}…`);
       
       // Send notification through all channels.
       //
@@ -100,7 +100,7 @@ export default function Staking() {
           <div className="empty-state">
             <div className="es-ico"><Lock size={28} /></div>
             <div className="es-t">No wallet connected</div>
-            <div className="es-m">Connect a wallet to stake MLCNS and earn rewards.</div>
+            <div className="es-m">Connect a wallet to stake MALL and earn rewards.</div>
           </div>
         </div>
       </div>
@@ -115,7 +115,7 @@ export default function Staking() {
     <div>
       <div className="view-head">
         <h1 className="text-gradient">Staking</h1>
-        <span className="sub">Stake MLCNS on-chain — unstaking pays out principal + rewards in one transaction</span>
+        <span className="sub">Stake MALL on-chain — unstaking pays out principal + rewards in one transaction</span>
       </div>
 
       {error && (
@@ -134,7 +134,7 @@ export default function Staking() {
             <div className="wallet-hero-num">
               {loading ? '—' : fmtNum(totalStaked)}
             </div>
-            <div style={{ fontSize: 14, color: 'var(--txt-3)', marginTop: 2 }}>MLCNS locked</div>
+            <div style={{ fontSize: 14, color: 'var(--txt-3)', marginTop: 2 }}>MALL locked</div>
           </div>
           <div className="wallet-hero-meta">
             <span className="chip"><Zap size={12} style={{ marginRight: 4 }} />{activeCount} active stake{activeCount !== 1 ? 's' : ''}</span>
@@ -158,7 +158,7 @@ export default function Staking() {
           </div>
           <div>
             <div className="card-label">Actively staked</div>
-            <div className="card-value">{loading ? '—' : error ? 'N/A' : <>{fmtNum(totalStaked)} <span className="unit">MLCNS</span></>}</div>
+            <div className="card-value">{loading ? '—' : error ? 'N/A' : <>{fmtNum(totalStaked)} <span className="unit">MALL</span></>}</div>
           </div>
         </div>
         <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
@@ -167,7 +167,7 @@ export default function Staking() {
           </div>
           <div>
             <div className="card-label">Rewards claimed</div>
-            <div className="card-value up">{loading ? '—' : error ? 'N/A' : <>{fmtNum(totalRewards)} <span className="unit">MLCNS</span></>}</div>
+            <div className="card-value up">{loading ? '—' : error ? 'N/A' : <>{fmtNum(totalRewards)} <span className="unit">MALL</span></>}</div>
           </div>
         </div>
         <div className="card card-glow bg-gradient-card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16 }}>
@@ -184,10 +184,10 @@ export default function Staking() {
       {/* Stake form + Active stakes */}
       <div className="grid-2">
         <div className="card card-glow bg-gradient-card">
-          <div className="sec-title"><h2>Stake MLCNS</h2></div>
+          <div className="sec-title"><h2>Stake MALL</h2></div>
           <div className="field">
             <label>
-              Amount (MLCNS)
+              Amount (MALL)
               <span className="tiny muted" style={{ float: 'right', fontWeight: 400 }}>Balance: {fmtNum(mallBalance)}</span>
             </label>
             <div className="row">
@@ -225,7 +225,7 @@ export default function Staking() {
             <div key={s.stakeId} className="list-row" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'rgb(var(--section-accent-rgb))', flexShrink: 0, boxShadow: '0 0 6px rgba(var(--section-accent-rgb),0.5)' }} />
               <div className="grow">
-                <div className="t">{fmtNum(s.stakedAmount)} MLCNS</div>
+                <div className="t">{fmtNum(s.stakedAmount)} MALL</div>
                 <div className="m">staked {new Date(s.stakeDate * 1000).toLocaleDateString()}</div>
               </div>
               <button className="btn btn-ghost btn-sm" disabled={unstakingId === s.stakeId} onClick={() => doUnstake(s.stakeId)}>
@@ -255,10 +255,10 @@ export default function Staking() {
         {((!error && summary?.history) || []).map((s) => (
           <div key={s.stakeId} className="list-row">
             <div className="grow">
-              <div className="t">{fmtNum(s.stakedAmount)} MLCNS</div>
+              <div className="t">{fmtNum(s.stakedAmount)} MALL</div>
               <div className="m">staked {new Date(s.stakeDate * 1000).toLocaleDateString()}</div>
             </div>
-            <span className="green" style={{ fontWeight: 700, fontSize: 13 }}>+{fmtNum(s.rewardsEarned)} MLCNS</span>
+            <span className="green" style={{ fontWeight: 700, fontSize: 13 }}>+{fmtNum(s.rewardsEarned)} MALL</span>
           </div>
         ))}
       </div>

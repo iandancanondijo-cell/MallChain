@@ -10,6 +10,7 @@
 import { config } from './config';
 import { authService } from './auth';
 import type { ApiResult } from './api';
+import type { KycServerVerdict } from './kycVerdict';
 
 export interface UploadDocumentResponse {
   ok: boolean;
@@ -19,6 +20,14 @@ export interface UploadDocumentResponse {
 export interface KycStatusResponse {
   /** 'draft' = only wizard progress saved via PATCH /kyc/draft, nothing submitted yet */
   status: 'not_submitted' | 'draft' | 'pending' | 'approved' | 'rejected' | 'review';
+  /**
+   * The account's verification verdict, published by the server
+   * (backend/src/middleware/requireKyc.js) — see services/kycVerdict.ts. This
+   * is what decides whether a wallet may be linked, so nothing in the client
+   * should re-derive it from `status` + `kycLevel` + `reviewedAt`; `status`
+   * stays for the KYC wizard, which shows the document's own state.
+   */
+  verdict?: KycServerVerdict;
   kycId?: string;
   riskLevel?: 'low' | 'medium' | 'high';
   submittedAt?: string;

@@ -45,60 +45,150 @@ import { normalizeNotification, type AppNotification } from './notificationWire'
 
 /**
  * Wallet data structure received from socket events
- * 
- * Sent by backend when wallet balance changes:
+ *
+ * Sent by backend when a movement involving this wallet settles, and once as a
+ * primer when the socket joins the wallet's room
+ * (backend/src/services/walletSync.js):
  * - address: Wallet address that was updated
- * - balances: Current token balances (e.g., { mallcoin: 1000, gold: 50 })
- * - timestamp: When update occurred (for UI: "updated 2s ago")
+ * - balances: MLCN balances in display units — 6-decimal MALL, not base units.
+ *   `mlcns` is the full on-chain balance, `mlcnsLocked` the part not yet
+ *   spendable, `mlcnsAvailable` the difference.
+ * - timestamp: When the server read it, unix milliseconds. This is what a
+ *   "updated Ns ago" label compares against; a primer can be up to the
+ *   server's cache TTL old, which is why the age travels with the payload
+ *   instead of the client assuming the number is current.
  */
 export interface WalletData {
   address: string;
-  balances: Record<string, number>;
+  /**
+   * Named exactly as `toWalletData()` in backend/src/services/walletSync.js
+   * builds it — those three keys and nothing else. This used to be
+   * `Record<string, number>`, which let hooks/useWalletData.ts read
+   * `balances.MALL`/`MLPTS`/`USD_M` (keys no server has ever emitted), apply
+   * `|| 0` fallbacks and blank a live balance on every push while still
+   * typechecking. Consumers must still guard at runtime: TypeScript describes
+   * the contract, it cannot police bytes off a socket.
+   */
+  balances: {
+    mlcns: number;
+    mlcnsAvailable: number;
+    mlcnsLocked: number;
+  };
   timestamp: number;
+  denom?: string;
+  exists?: boolean;
 }
 
 /**
  * Block data structure received from socket events
- * 
- * Sent by backend for each new blockchain block:
+ *
+ * Sent by backend for each new blockchain block (services/blockBroadcaster.js,
+ * which subscribes to the node's `tm.event = 'NewBlock'` feed):
  * - height: Block number in chain
- * - hash: Block hash (unique identifier)
- * - timestamp: When block was mined
+ * - hash: Block hash, uppercase hex (the node sends base64; decoded server-side
+ *   so it matches what /api/explorer/blocks returns)
+ * - timestamp: Block time, ISO 8601 — note this is a *string*, while the
+ *   explorer's own BlockData.timestamp is unix seconds
  * - txCount: Number of transactions in block (for UI stats)
+ *
+ * The optional fields exist so a new block can be painted from the event
+ * alone. Before the broadcaster existed, clients received height/hash/time and
+ * had to spend a REST round-trip per block for the tx count and proposer —
+ * i.e. the "realtime" panel polled. They stay optional because a page can be
+ * connected to a backend that predates the broadcaster.
  */
 export interface BlockData {
   height: number;
   hash: string;
   timestamp: string;
   txCount: number;
+  numTxs?: number;
+  proposer?: string;
+  unixTime?: number;
+  chainId?: string;
+  /** 'ws' when the node pushed it, 'rest' when the server's safety-net poll found it. */
+  source?: 'ws' | 'rest';
 }
 
 /**
- * Market event structure
- * 
- * Represents marketplace activity (trades, listings, sales):
- * - type: 'trade' (user bought), 'listing' (item posted), 'sale' (completed sale)
- * - timestamp: When event occurred
- * - data: Event-specific data (varies by type)
+ * Market event — one row of marketplace/economy activity.
+ *
+ * The primer (`market:feed`, an array of these) and the live stream
+ * (`market:event`, a single one) carry the same shape. Emitted by
+ * backend/src/services/marketActivityFeed.js from the ledger row a settlement
+ * wrote and from the catalog document a seller created.
+ *
+ * A trade is a settled value movement; a listing is a product put up for sale.
+ * Deliberately absent: who did it. The room is joined by anonymous sockets, so
+ * a row carries amounts, a flow and a time — never a userId, wallet address or
+ * fiat amount. `txHash` is on a trade because that movement is already public
+ * in the explorer, which lets a viewer verify the row instead of trusting it.
+ * 'sale' is not emitted: escrow settlements live on-chain with no local ledger
+ * to read, and the feed publishes nothing it cannot substantiate.
+ *
+ * Note `timestamp` is an ISO string (server clock at record time), unlike
+ * WalletData.timestamp which is unix milliseconds — each matches what its
+ * emitter actually sends rather than the two being forced to agree on paper.
  */
-export interface MarketEvent {
-  type: 'trade' | 'listing' | 'sale';
-  timestamp: number;
-  data: unknown;
-}
+export type MarketEvent =
+  | {
+      id: string;
+      type: 'trade';
+      flow: 'buy' | 'withdraw' | 'mallpoints_purchase' | 'mallpoints_convert' | string;
+      amountMlcns: number;
+      currency: string;
+      timestamp: string;
+      txHash: string | null;
+    }
+  | {
+      id: string;
+      type: 'listing';
+      title: string;
+      category: string;
+      /** Price in MAL, the native denom x/marketplace escrow holds — not MALL, not fiat. */
+      price: number;
+      currency: 'MAL';
+      timestamp: string;
+    };
 
 /**
  * Price data structure
- * 
- * Sent by backend periodically with market prices:
- * - prices: Current token prices { mallcoin: 0.50, gold: 1.25 }
- * - volumes: 24h trading volume { mallcoin: 50000, gold: 10000 }
- * - changes: Percentage change in price { mallcoin: +5.2, gold: -1.3 }
+ *
+ * Sent when a subscriber joins `price:updates` and again whenever a price
+ * actually moves (backend/src/services/priceEngine.js). The numbers are the
+ * on-chain market params — the same buy/sell/mid the REST economy state
+ * returns, which is why the field names match `economyApi.getState()` instead
+ * of inventing a socket-only vocabulary.
+ *
+ * This replaces a stub that answered every subscription with
+ * `{ mallcoin: { usd: 0, kes: 0 }, mlpts: { usd: 0, kes: 2 } }`, i.e. a
+ * fabricated quote that had MALL at zero.
+ *
+ * Honest absence:
+ * - `usd` is null when the FX provider is unreachable, rather than a dollar
+ *   price derived from a stale constant.
+ * - `volume24h` is null when the ledger read failed — not zero, which would
+ *   claim nobody traded.
+ * - `change24h` is null until the server has two samples inside the window,
+ *   which for a freshly started backend means "unknown", not "flat".
+ * - `source` distinguishes a chain read from the configured fallback, so a
+ *   frozen-looking panel can be told apart from a quiet market.
  */
 export interface PriceData {
-  prices: Record<string, number>;
-  volumes: Record<string, number>;
-  changes: Record<string, number>;
+  buyPriceKes: number;
+  sellPriceKes: number;
+  midPriceKes: number;
+  mlptsPriceKes: number;
+  usd: {
+    rate: number;
+    fxAsOf: string | null;
+    midPriceUsd: number | null;
+    mlptsPriceUsd: number | null;
+  } | null;
+  volume24h: { mlcns: number; kes: number; trades: number } | null;
+  change24h: number | null;
+  source: 'chain' | 'configured-default';
+  asOf: string;
 }
 
 /**
@@ -119,6 +209,30 @@ export interface MessageData {
   senderId: string;
   text: string;
   ts: string;
+}
+
+/**
+ * Which origin the websocket handshake should be opened against.
+ *
+ * The failure this exists for is deployment-shaped and invisible in
+ * development: a bundle built with `VITE_API_BASE_URL=http://api.example.com`
+ * and served from `https://app.example.com` asks for `ws://api.example.com`,
+ * which every browser refuses from a secure page (mixed content) — so realtime
+ * silently never connects while REST works fine, because `fetch` upgrades
+ * `http:` to the page's scheme more forgivingly than Socket.IO does. Upgrading
+ * the scheme here is the client half of the fix; the other half is the proxy
+ * answering `wss://` on `/socket.io` (see docs/user-guides/10 and the
+ * deployment notes in docs/).
+ *
+ * Left alone when the page itself is insecure: `http://localhost` is the normal
+ * development case and must keep hitting the plain-HTTP backend.
+ */
+export function resolveSocketOrigin(url?: string): string {
+  const pageOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const chosen = url || config.apiBaseUrl || pageOrigin;
+  if (!chosen) return '';
+  if (typeof window === 'undefined' || window.location.protocol !== 'https:') return chosen;
+  return chosen.replace(/^http:\/\//i, 'https://');
 }
 
 /**
@@ -162,17 +276,26 @@ class SocketManager {
   private isConnecting = false;
 
   /**
-   * Task 5.2: Connect to backend Socket.IO server from config.apiBaseUrl
-   * Skip connection if no backend URL is configured at all.
+   * Task 5.2: Connect to backend Socket.IO server.
+   *
+   * Resolution order: explicit URL → configured API origin → the origin this
+   * page is served from. That last fallback is what makes realtime work
+   * locally: `VITE_API_BASE_URL` is deliberately unset during development (API
+   * calls ride Vite's same-origin `/api` proxy), and this call used to bail out
+   * instead — so the socket never connected at all and the header stayed
+   * "Disconnected" no matter what the backend was doing. Vite proxies
+   * `/socket.io` with `ws: true` for exactly this path.
+   *
+   * `options.forceNew` asks the client for a brand-new connection instead of
+   * one from its per-origin pool; see reauth() for why that matters.
    */
-  connect(url?: string): void {
-    // If no URL provided, use config.apiBaseUrl
-    if (!url && !config.apiBaseUrl) {
-      console.warn('[Socket] No API base URL configured — skipping Socket.IO connection');
+  connect(url?: string, options?: { forceNew?: boolean }): void {
+    const socketUrl = resolveSocketOrigin(url);
+
+    if (!socketUrl) {
+      console.warn('[Socket] No API origin available — skipping Socket.IO connection');
       return;
     }
-
-    const socketUrl = url || config.apiBaseUrl;
     
     if (this.socket?.connected) {
       return;
@@ -197,6 +320,7 @@ class SocketManager {
         // `fetch(..., {credentials:'include'})` does, and the backend's
         // io.use() middleware reads it straight off that cookie.
         withCredentials: true,
+        ...(options?.forceNew ? { forceNew: true } : {}),
       });
 
       // Task 5.1: Socket lifecycle management - connection
@@ -249,9 +373,17 @@ class SocketManager {
       this.emit('block:new', data);
     });
 
-    // Task 5.6: Market feed events
+    // Task 5.6: Market feed events — the backlog primer, sent on join.
     this.socket.on('market:feed', (events: MarketEvent[]) => {
       this.emit('market:feed', events);
+    });
+
+    // One row that just happened, published by the backend as the ledger write
+    // or the catalog create lands. Kept a separate event from `market:feed` so
+    // a listener can tell a backlog page from live activity instead of having
+    // to diff arrays.
+    this.socket.on('market:event', (event: MarketEvent) => {
+      this.emit('market:event', event);
     });
 
     // Task 5.6: Price update events
@@ -482,10 +614,15 @@ class SocketManager {
   }
 
   /**
-   * Task 5.6: Register market feed listener
+   * Task 5.6: Register market feed listener (the backlog primer).
    */
   onMarketFeed(callback: (events: MarketEvent[]) => void): () => void {
     return this.on('market:feed', callback);
+  }
+
+  /** Register a listener for one row of live market activity. */
+  onMarketEvent(callback: (event: MarketEvent) => void): () => void {
+    return this.on('market:event', callback);
   }
 
   /**
@@ -527,20 +664,36 @@ class SocketManager {
 
   /**
    * Forces a fresh connection so the backend's io.use() JWT middleware picks
-   * up a token that didn't exist yet at the original connect() call — the
-   * common case of logging in without a page reload, where the socket
-   * already connected anonymously first. Deliberately doesn't go through
-   * disconnect() (which clears `subscriptions`) — the 'connect' handler's
+   * up a session that didn't exist yet at the original connect() call — the
+   * common case of logging in without a page reload, where the socket already
+   * connected anonymously first. Deliberately doesn't go through disconnect()
+   * (which clears `subscriptions`) — the 'connect' handler's
    * resubscribeAll()/pendingUserId replay needs that bookkeeping intact to
    * restore whatever rooms were joined before.
+   *
+   * The old connection is destroyed rather than merely disconnected, and the
+   * new one is opened with `forceNew`, because the client pools one Manager
+   * per origin and hands back that Manager's cached namespace socket: a plain
+   * `disconnect()` + `connect()` pair could return the same Socket riding the
+   * same pre-login handshake. Confirmed live — after signing in,
+   * `subscribe:wallet` still travelled on the connection opened before login,
+   * the backend rejected it as unauthenticated, and the wallet showed no live
+   * balance until the page was reloaded. A new handshake is the only moment
+   * the server can read the auth cookie (or stop reading it, on logout), which
+   * is also what drops the previous account's rooms on a shared device.
    */
   reauth(): void {
-    if (this.socket) {
-      this.socket.disconnect();
-      this.socket = null;
-    }
+    const previous = this.socket;
+    this.socket = null;
     this.isConnecting = false;
-    this.connect();
+    if (previous) {
+      // Our own lifecycle handlers go first, so tearing this connection down
+      // doesn't surface as a spurious "Real-time updates unavailable".
+      previous.removeAllListeners?.();
+      previous.disconnect();
+      (previous as unknown as { client?: { destroy?: () => void } }).client?.destroy?.();
+    }
+    this.connect(undefined, { forceNew: true });
   }
 
   /**

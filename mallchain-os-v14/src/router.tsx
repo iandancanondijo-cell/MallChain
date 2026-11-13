@@ -148,20 +148,48 @@ export const ROUTES: RouteDef[] = [
 /** Routes only 'admin'/'superadmin' may reach — checked as an exact-or-prefix match, same as the public-route check below. */
 const ADMIN_ROUTES = ['/admin'];
 
+/**
+ * The anonymous surface of the product — everything else requires a session.
+ *
+ * Exported because the guard in App.tsx needs the identical list. It used to
+ * keep its own inline copy of four paths, so a route opened here (/dmca,
+ * /run-node, and now /explorer) still bounced to /landing: App's effect
+ * rewrites the hash before matchRoute is ever consulted, which made the router
+ * table look authoritative while a second, narrower list decided. One source of
+ * truth, and `src/router.test.ts` pins the contents.
+ */
+export const PUBLIC_ROUTE_PATHS = [
+  '/landing',
+  '/auth',
+  '/login',
+  '/dmca',
+  '/wallet',
+  '/wallet/connect',
+  '/run-node',
+  // Read-only chain data; every endpoint it calls answers anonymously. The
+  // landing page links here and tells visitors blocks stay verifiable
+  // on-chain, so an auth wall on this route broke that promise. /marketplace
+  // and /devhub are deliberately NOT opened — that's a product decision.
+  '/explorer',
+];
+
+/** Exact-or-prefix match, so /explorer/329000 and /auth?mode=login count. */
+export function isPublicRoute(path: string): boolean {
+  const clean = (path || '').split('?')[0];
+  return PUBLIC_ROUTE_PATHS.some((p) => clean === p || clean.startsWith(p + '/'));
+}
+
 export function matchRoute(path: string, isAuthenticated: boolean = true, role: string = 'user'): RouteDef {
   const clean = path.split('?')[0];
 
-  // Public routes that don't require authentication.
-  // /wallet is included so users can connect/create a wallet before logging in.
-  // /admin is NOT here — unauthenticated users hitting /admin get redirected to /auth
-  // so there is ONE login portal across the whole platform.
-  const publicRoutes = ['/landing', '/auth', '/login', '/dmca', '/wallet', '/wallet/connect', '/run-node'];
+  // Public routes that don't require authentication — see PUBLIC_ROUTE_PATHS.
   const isAdmin = role === 'admin' || role === 'superadmin';
 
   const denyIfAdminOnly = (routePath: string): RouteDef | null => {
     const isAdminRoute = ADMIN_ROUTES.some((r) => routePath === r || routePath.startsWith(r + '/'));
     // Block authenticated non-admin users from admin routes — they go to dashboard instead.
-    // Unauthenticated users are already redirected to /auth by the publicRoutes check above.
+    // Unauthenticated users are already redirected to /auth by the isPublicRoute
+    // check below.
     if (isAdminRoute && isAuthenticated && !isAdmin) {
       return { path: '/', title: 'Dashboard', render: (n) => <Dashboard navigate={n} /> };
     }
@@ -171,7 +199,7 @@ export function matchRoute(path: string, isAuthenticated: boolean = true, role: 
   const exact = ROUTES.find((r) => r.path === clean);
   if (exact) {
     // If route requires auth but user not authenticated, return login page
-    if (!isAuthenticated && !publicRoutes.includes(clean)) {
+    if (!isAuthenticated && !isPublicRoute(clean)) {
       return { path: '/auth', title: 'Sign in', render: (n) => <AuthPage /> };
     }
     return denyIfAdminOnly(clean) || exact;
@@ -181,7 +209,7 @@ export function matchRoute(path: string, isAuthenticated: boolean = true, role: 
   const byPrefix = [...ROUTES].sort((a, b) => b.path.length - a.path.length).find((r) => r.path !== '/' && clean.startsWith(r.path + '/'));
   if (byPrefix) {
     // Check auth for prefix routes too
-    if (!isAuthenticated && !publicRoutes.includes(byPrefix.path)) {
+    if (!isAuthenticated && !isPublicRoute(byPrefix.path)) {
       return { path: '/auth', title: 'Sign in', render: (n) => <AuthPage /> };
     }
     return denyIfAdminOnly(byPrefix.path) || byPrefix;

@@ -288,6 +288,71 @@ describe('StoreSync', () => {
     });
   });
 
+  // Session policy (2026-11): the 15-minute sign-in cooldown exists on the
+  // SERVER, and it is armed only when a request actually arrives on an expired
+  // token (backend/src/middleware/sessionCooldown.js). storeSync used to infer
+  // it from the local clock, which locked the user out of the login form for 15
+  // minutes after a tab had merely sat closed past its expiry — a cooldown
+  // nothing ever issued. It now records the lapse and stays out of the
+  // cooldown's way.
+  describe('cooldown mirroring is server-driven, not clock-driven', () => {
+    it('does not arm a cooldown when a lapsed marker is found on initialization', () => {
+      authService.setSession(Math.floor(Date.now() / 1000) - 10);
+      store.state.user.authed = true;
+
+      storeSync.initialize();
+
+      expect(store.state.user.authed).toBe(false);
+      expect(localStorage.getItem('login_cooldown_until')).toBeNull();
+    });
+
+    it('does not arm a cooldown when the periodic sync watches a marker lapse', () => {
+      vi.useFakeTimers();
+
+      authService.setSession(futureExpiry(2));
+      store.state.user.authed = true;
+      storeSync.initialize();
+
+      vi.advanceTimersByTime(3000);
+
+      expect(store.state.user.authed).toBe(false);
+      expect(localStorage.getItem('login_cooldown_until')).toBeNull();
+
+      vi.useRealTimers();
+    });
+
+    it('records the lapse so the app can return the user to sign-in', () => {
+      authService.setSession(Math.floor(Date.now() / 1000) - 10);
+      expect(authService.sessionWasLapsed()).toBe(false);
+
+      storeSync.initialize();
+
+      expect(authService.sessionWasLapsed()).toBe(true);
+    });
+
+    it('clears the recorded lapse when a new session is issued', () => {
+      authService.setSession(Math.floor(Date.now() / 1000) - 10);
+      storeSync.initialize();
+      expect(authService.sessionWasLapsed()).toBe(true);
+
+      authService.setSession(futureExpiry());
+
+      expect(authService.sessionWasLapsed()).toBe(false);
+    });
+
+    it('leaves a server-armed cooldown marker untouched', () => {
+      // The mirror written from a 401 `session_expired` / a 423 must survive
+      // the sync tick and the marker wipe — that is why it lives in its own key.
+      authService.setSession(Math.floor(Date.now() / 1000) - 10);
+      authService.setCooldownUntil(Date.now() + 5 * 60_000);
+
+      storeSync.initialize();
+
+      expect(store.state.user.authed).toBe(false);
+      expect(authService.getCooldownUntil()).not.toBeNull();
+    });
+  });
+
   describe('cleanup', () => {
     it('should clean up resources on cleanup', () => {
       const removeEventListenerSpy = vi.spyOn(window, 'removeEventListener');

@@ -39,6 +39,21 @@ export interface SellPreview {
     reviewStatus: 'none' | 'pending' | 'approved' | 'rejected';
   };
   liquidity: { ok: boolean; reserveKes: number | null; error: string | null; wouldQueue: boolean };
+  /**
+   * The 29-day wallet-age cash-out rule, decided server-side
+   * (backend/src/services/walletAgeService.js) from the moment this address
+   * was first linked to an account. Balance plays no part in it.
+   */
+  walletAge: {
+    ok: boolean;
+    code: 'wallet_age_not_met' | 'wallet_not_linked' | 'wallet_age_unverifiable' | null;
+    minimumDays: number;
+    ageDays: number | null;
+    reference: 'walletLinkedAt' | 'accountCreatedAt' | null;
+    referenceAt: string | null;
+    unlockAt: string | null;
+    walletLinked: boolean;
+  };
   /** @deprecated use liquidity.ok — kept for one release since this was read directly before the `liquidity` object existed. */
   liquidityOk: boolean;
   /** @deprecated use liquidity.error */

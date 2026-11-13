@@ -115,11 +115,22 @@ export const config: MallchainConfig = {
   apiBaseUrl: validatedApiUrl,
 
   // Network: mainnet (production) or testnet (development)
-  // Controls which blockchain parameters are used
+  //
+  // This describes how the bundle was compiled, not which chain is producing
+  // blocks. Anything that shows a network to a user reads the node's own
+  // chainId through services/networkIdentity.ts instead; this value is only
+  // the fallback label used when the node has never answered, and the default
+  // for anything that keys behaviour off a build target.
   network: ((import.meta.env.VITE_NETWORK as string) || 'testnet') === 'mainnet' ? 'mainnet' : 'testnet',
 
-  // Session timeout in minutes
-  // After this time without activity, user is logged out
+  // Session timeout in minutes.
+  //
+  // Not consulted at runtime: the backend signs the JWT with its own
+  // SESSION_TTL_MIN and returns that expiry (`expiresAt` on login/me/refresh),
+  // which authService.setSession records and the session countdown reads.
+  // Kept because it is part of the published MALLCHAIN_CONFIG contract and the
+  // tests assert its shape — changing it here changes nothing about when a
+  // session actually ends.
   sessionTtlMin: parseInt(import.meta.env.VITE_SESSION_TTL as string, 10) || 120,
 };
 

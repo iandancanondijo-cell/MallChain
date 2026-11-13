@@ -257,15 +257,11 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
     }
   };
 
-  const [amlRiskLevel, setAmlRiskLevel] = useState<'low' | 'medium' | 'high' | null>(null);
-  // Populated by the (removed) AML-check step; always unchecked today since
-  // submitKYC's response — not a separate AML call — is what sets amlRiskLevel.
-  const [amlChecks] = useState({
-    sanctions: false,
-    pep: false,
-    adverseMedia: false,
-    watchlist: false
-  });
+  // No AML state lives here on purpose. The screening result is input for the
+  // admin reviewer (see the KYC category in the admin panel, which shows what
+  // actually ran); echoing it back to the applicant would disclose the
+  // heuristic behind a manual review decision without changing anything the
+  // applicant can do. The response's `riskLevel` is therefore not read.
 
   // Generate the mnemonic entirely client-side — it never transits the
   // network this way, unlike the old POST /api/wallet/generate-mnemonic.
@@ -361,10 +357,9 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
       const res = await api.post<{ success: boolean; kycId: string; riskLevel: 'low' | 'medium' | 'high'; status: 'pending' }>('/api/kyc/submit', kycData);
 
       if (res.ok && res.data?.success) {
-        setAmlRiskLevel(res.data.riskLevel);
         // Every submission now requires a real admin decision — kycLevel
-        // stays at 1 (unverified) until an admin approves it, regardless of
-        // the automated risk signal.
+        // stays at 1 (unverified) until an admin approves it, whatever the
+        // server's risk signal says.
         toast('KYC submitted — a reviewer will decide. You can use the dashboard while it is in review; connecting a wallet waits for that approval.');
         // The wallet doors cache the verification verdict; this submission
         // changes what they may offer, so drop the cache rather than let them
@@ -433,7 +428,12 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
         role: u?.role || 'user',
       };
       store.commit();
-      socketManager.reauth();
+      // No `socketManager.reauth()` here any more: App.tsx re-establishes the
+      // realtime connection whenever the session identity changes, which
+      // covers sign-in, account switch, the OAuth callback and the 401
+      // expiry — and takes it back down to anonymous on logout.
+      // subscribeUser() is safe to call before that new handshake lands;
+      // the manager records the intent and replays it on connect.
       if (u?.id) socketManager.subscribeUser(u.id);
       toast('Welcome back to Mallchain!');
       setBusy(false);
@@ -492,7 +492,9 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                 role: u?.role || 'user',
               };
               store.commit();
-              socketManager.reauth();
+              // App.tsx re-establishes the realtime connection on this
+              // session change; the intent recorded below is replayed on the
+              // new handshake.
               if (u?.id) socketManager.subscribeUser(u.id);
               toast('Account created! Check your email for the verification code.');
               setBusy(false);
@@ -956,7 +958,8 @@ export default function AuthFlow({ navigate }: { navigate: (p: string) => void }
                         role: u?.role || 'user',
                       };
                       store.commit();
-                      socketManager.reauth();
+                      // App.tsx re-establishes the realtime connection on
+                      // this session change.
                       if (u?.id) socketManager.subscribeUser(u.id);
                       toast('Account created! Check your email for the verification code.');
                       setBusy(false);

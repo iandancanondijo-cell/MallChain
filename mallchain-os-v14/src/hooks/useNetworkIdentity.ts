@@ -1,83 +1,42 @@
-import { useCallback, useEffect, useState } from 'react';
-import { api } from '../services/api';
-import { chain, config } from '../services/config';
+import { useEffect, useState } from 'react';
+import {
+  getNetworkSnapshot,
+  nameForChainId,
+  networkLabel,
+  refreshNetworkIdentity,
+  subscribeNetworkIdentity,
+  type NetworkSnapshot,
+} from '../services/networkIdentity';
 
-const POLL_MS = 60 * 1000;
-
-interface HealthResponse {
-  status?: string;
-  chainId?: string;
-  moniker?: string;
-  latestHeight?: string | number;
-  latestBlockTime?: string | null;
-}
-
-export interface NetworkIdentity {
-  /** e.g. "Mallchain Mainnet" — derived from the chain the node actually reports. */
-  networkName: string;
-  /** The chain's own identifier, straight from node_info. */
-  chainId: string | null;
-  latestHeight: number | null;
-  latestBlockTime: string | null;
-  /** True only while /api/blockchain/health answers with a usable chainId. */
-  reachable: boolean;
-  /** False when the node is on a different chain than this build is pointed at. */
-  matchesConfig: boolean;
-  loading: boolean;
-  reload: () => Promise<void>;
-}
+export type { NetworkSnapshot };
+export { nameForChainId, networkLabel };
 
 /**
- * The chain's `node_info.network` (its chain ID) is the only name that cannot
- * drift from reality, so the dashboard reads it from the node instead of
- * printing a build flag — VITE_NETWORK defaults to 'testnet' when unset, and a
- * forgotten env var must not rename the network the node is actually producing
- * blocks on. Cosmos convention puts the revision number last and reserves `-1`
- * for mainnets; anything these rules don't recognise is displayed verbatim
- * rather than labelled "mainnet" on faith. A build pointed at a different chain
- * than the node reports is surfaced separately by `matchesConfig`.
+ * The shared network snapshot. services/networkIdentity.ts owns the polling,
+ * so a second surface that shows the network costs no extra request — that is
+ * the whole reason this exists rather than each component calling
+ * /api/blockchain/health on its own interval.
  */
-function nameForChainId(chainId: string): string {
-  if (/test|dev|local/i.test(chainId)) return 'Mallchain Testnet';
-  if (/^(.*-)?1$/.test(chainId)) return 'Mallchain Mainnet';
-  return chainId;
+export function useNetworkSnapshot(): NetworkSnapshot {
+  // Seeded from the shared module state, so the very first render already has
+  // a snapshot object (never `null`) and a caller can read fields unguarded.
+  const [snap, setSnap] = useState<NetworkSnapshot>(getNetworkSnapshot);
+  useEffect(() => subscribeNetworkIdentity(setSnap), []);
+  return snap;
 }
 
-export function useNetworkIdentity(): NetworkIdentity {
-  const [snap, setSnap] = useState<{ chainId: string | null; height: number | null; blockTime: string | null }>({
-    chainId: null,
-    height: null,
-    blockTime: null,
-  });
-  const [reachable, setReachable] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  const reload = useCallback(async () => {
-    const res = await api.get<HealthResponse>('/api/blockchain/health');
-    const chainId = res.ok && res.data?.chainId && res.data.chainId !== 'unknown' ? res.data.chainId : null;
-    setReachable(Boolean(chainId));
-    setSnap({
-      chainId,
-      height: chainId ? Number(res.data?.latestHeight ?? 0) || null : null,
-      blockTime: chainId ? res.data?.latestBlockTime ?? null : null,
-    });
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    reload();
-    const id = window.setInterval(reload, POLL_MS);
-    return () => window.clearInterval(id);
-  }, [reload]);
-
+/** Dashboard-facing view: the snapshot plus its long-form name and refresh. */
+export function useNetworkIdentity(): NetworkSnapshot & {
+  networkName: string;
+  reload: () => Promise<void>;
+} {
+  const snap = useNetworkSnapshot();
   return {
-    networkName: snap.chainId ? nameForChainId(snap.chainId) : loading ? 'Checking network…' : 'Network unreachable',
-    chainId: snap.chainId,
-    latestHeight: snap.height,
-    latestBlockTime: snap.blockTime,
-    reachable,
-    matchesConfig: snap.chainId === null || snap.chainId === chain.chainId,
-    loading,
-    reload,
+    ...snap,
+    // The server's name when /api/network has answered; the documented local
+    // fallback only while it has not. See services/networkIdentity.ts.
+    networkName: snap.networkName
+      ?? (snap.chainId ? nameForChainId(snap.chainId) : snap.loading ? 'Checking network…' : 'Network unreachable'),
+    reload: refreshNetworkIdentity,
   };
 }

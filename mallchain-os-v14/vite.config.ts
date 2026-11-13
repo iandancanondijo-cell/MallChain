@@ -44,18 +44,37 @@ function guardProductionApiUrl() {
 
 // Mallchain Mission Control v14 — Vite config.
 // Hash-based routing: the app runs from any static host (no server rewrites needed).
+
+/**
+ * `/api` plus the Socket.IO endpoint, proxied to the local backend.
+ *
+ * The socket entry matters: `src/services/socket.ts` connects to the same
+ * origin this app is served from whenever `VITE_API_BASE_URL` is unset (the
+ * local dev/preview default), and the handshake is an HTTP request followed by
+ * a WebSocket upgrade on `/socket.io`. Without the upgrade enabled here, the
+ * socket could never connect locally, so every realtime surface — the
+ * "Connected" badge, live blocks, live price, push notifications — was dead in
+ * development no matter what the backend was doing.
+ */
+const localProxy = {
+  '/api': {
+    target: 'http://localhost:4000',
+    changeOrigin: true,
+  },
+  '/socket.io': {
+    target: 'http://localhost:4000',
+    changeOrigin: true,
+    ws: true,
+  },
+};
+
 export default defineConfig({
   plugins: [react(), guardProductionApiUrl()],
   base: './',
   server: {
     port: 5173,
     host: true,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:4000',
-        changeOrigin: true,
-      },
-    },
+    proxy: localProxy,
   },
   // Same proxy for `vite preview`, which serves the built `dist/`. Without it
   // the only way to exercise a production build against a local API is to
@@ -65,12 +84,7 @@ export default defineConfig({
   // keep requests same-origin and let them land here.
   preview: {
     port: 4173,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:4000',
-        changeOrigin: true,
-      },
-    },
+    proxy: localProxy,
   },
   build: {
     outDir: 'dist',

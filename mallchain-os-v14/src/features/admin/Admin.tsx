@@ -203,7 +203,11 @@ export default function Admin() {
           <tbody>
             {users.map((u) => (
               <tr key={u._id}>
-                <td><b>{u.username || u.email}</b><div className="tiny">{u.email}</div></td>
+                {/* Accounts created before the username field was optional
+                    carry their email in both columns, which rendered the same
+                    string twice per row. Show the handle only when it is
+                    actually a handle; the email still appears in bold. */}
+                <td><b>{u.username && u.username !== u.email ? u.username : u.email}</b>{u.username && u.username !== u.email && <div className="tiny">{u.email}</div>}</td>
                 <td>{u.role}</td>
                 <td>{new Date(u.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</td>
                 <td>{u.banned ? <span className="chip red">Banned</span> : <span className="chip green">Active</span>}</td>

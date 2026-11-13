@@ -14,6 +14,7 @@ import { ADDRESS_BOOK_STORAGE_KEY } from '../services/addressBookStore';
 // Type-only: the runtime modules stay behind the dynamic import in
 // pushNotification, so this never joins the api → auth → store cycle.
 import type { NotifCategory, NotifKind } from '../services/notificationsApi';
+import type { LocalOrder } from '../services/marketplaceOrders';
 
 export const OS_KEY = 'mallchain_os_v1_v14';
 export const WALLET_VAULT_STORAGE_KEY = 'mallchain_vault';
@@ -170,20 +171,12 @@ export interface AppState {
   marketplace: {
     cart: Array<{ id: string; qty: number }>;
     wishlist: string[];
-    orders: Array<{
-      id: string;
-      items: string[];
-      total: number;
-      status: 'processing' | 'shipped' | 'transit' | 'delivered' | 'cancelled' | 'disputed';
-      ts: number;
-      // Shipping stage above is a local/off-chain UI concern; fund custody
-      // is the real x/marketplace escrow identified by escrowId — see
-      // services/marketplaceTx.ts.
-      escrowId?: string;
-      sellerAddress?: string;
-      createTxHash?: string;
-      releaseTxHash?: string;
-    }>;
+    // LocalOrder is the storefront's row: a purchase as this browser knows it,
+    // which may be the server's receipt (recorded: true, id MLC-YYMMDD-…) or a
+    // device-local one (id ord-…) when the account record could not be saved.
+    // Fund custody is never in here — it is the x/marketplace escrow named by
+    // escrowId (services/marketplaceTx.ts).
+    orders: LocalOrder[];
   };
   staking: {
     delegated: number;

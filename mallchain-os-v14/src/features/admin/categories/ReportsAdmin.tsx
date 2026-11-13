@@ -26,6 +26,7 @@ import { adminApi } from '../../../services/adminApi';
 import type { PresenceState, ReportRecord } from '../../../services/adminApi';
 import { Modal, toast } from '../../../components/ui';
 import { store } from '../../../store/store';
+import { useAdminPoller } from '../adminShared';
 
 type Color = 'grey' | 'orange' | 'blue' | 'green';
 
@@ -90,19 +91,21 @@ export default function ReportsAdmin() {
   //     marks them — without polling the sender's pills wouldn't update
   //     until they navigated away)
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       setLoading(true);
       await Promise.all([loadReports(), loadPresence()]);
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     })();
-
-    const presenceId = setInterval(() => void loadPresence(), PRESENCE_POLL_MS);
-    const reportsId = setInterval(() => void loadReports(), PRESENCE_POLL_MS + 5000);
-    return () => {
-      clearInterval(presenceId);
-      clearInterval(reportsId);
-    };
+    return () => { cancelled = true; };
   }, [loadReports, loadPresence]);
+
+  // Same two cadences as before, through the shared poller: skipped while the
+  // tab is hidden, never overlapping a request that has not returned, and
+  // refreshed the moment the admin comes back to the tab. skipInitial because
+  // the mount effect above already did the first read.
+  useAdminPoller(() => void loadPresence(), PRESENCE_POLL_MS, [loadPresence], { skipInitial: true });
+  useAdminPoller(() => void loadReports(), PRESENCE_POLL_MS + 5000, [loadReports], { skipInitial: true });
 
   const submit = async () => {
     if (!subject.trim() || !body.trim()) {

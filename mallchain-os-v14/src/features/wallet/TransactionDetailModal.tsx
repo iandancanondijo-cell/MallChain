@@ -14,9 +14,16 @@ interface TransactionDetailModalProps {
   transactionId: string;
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * The wallet this row was read from. A chain transfer is a send for its
+   * sender and a receive for its recipient, and only the address says which —
+   * without it the detail would default to the sender's point of view and
+   * show an incoming payment as though this account had paid it.
+   */
+  address?: string;
 }
 
-export function TransactionDetailModal({ transactionId, isOpen, onClose }: TransactionDetailModalProps) {
+export function TransactionDetailModal({ transactionId, isOpen, onClose, address }: TransactionDetailModalProps) {
   const [transaction, setTransaction] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +35,7 @@ export function TransactionDetailModal({ transactionId, isOpen, onClose }: Trans
       setLoading(true);
       setError(null);
 
-      const result = await walletApi.getTransactionDetail(transactionId);
+      const result = await walletApi.getTransactionDetail(transactionId, address);
       if (result.ok && result.data) {
         setTransaction(result.data);
       } else {
@@ -38,7 +45,7 @@ export function TransactionDetailModal({ transactionId, isOpen, onClose }: Trans
     };
 
     fetchDetail();
-  }, [transactionId, isOpen]);
+  }, [transactionId, isOpen, address]);
 
   if (!isOpen) return null;
 
@@ -79,7 +86,19 @@ export function TransactionDetailModal({ transactionId, isOpen, onClose }: Trans
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', paddingBottom: '16px', borderBottom: '1px solid var(--bg-2)' }}>
                 <div>
                   <div style={{ fontSize: '12px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Type</div>
-                  <div style={{ fontSize: '18px', fontWeight: 'bold', textTransform: 'capitalize', marginTop: '4px' }}>{transaction.type}</div>
+                  {/* The category the server published, with the direction under
+                      it: a stake the wallet signed reads "Staked / sent by this
+                      wallet", which is two different facts the old single word
+                      could not carry. */}
+                  <div style={{ fontSize: '18px', fontWeight: 'bold', marginTop: '4px' }}>{transaction.txTypeLabel}</div>
+                  <div style={{ fontSize: '12px', opacity: 0.7, marginTop: '2px' }}>
+                    {transaction.type === 'receive' ? 'received by this wallet' : 'sent by this wallet'}
+                  </div>
+                  {transaction.msgType && (
+                    <div style={{ fontFamily: 'monospace', fontSize: '11px', opacity: 0.55, marginTop: '4px' }} title="On-chain message type">
+                      {transaction.msgType}
+                    </div>
+                  )}
                 </div>
                 <StatusChip status={transaction.status} />
               </div>
@@ -109,10 +128,12 @@ export function TransactionDetailModal({ transactionId, isOpen, onClose }: Trans
                 </div>
               </div>
 
-              {/* Block Hash (if available) */}
-              {transaction.hash && (
+              {/* Transaction hash, only when it is a different string from the
+                  id above: for a chain row they are the same value, and
+                  printing it twice reads as two identifiers. */}
+              {transaction.hash && transaction.hash !== transaction.id && (
                 <div style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid var(--bg-2)' }}>
-                  <div style={{ fontSize: '12px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Block Hash</div>
+                  <div style={{ fontSize: '12px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Transaction Hash</div>
                   <div
                     style={{
                       fontFamily: 'monospace',
@@ -202,10 +223,24 @@ export function TransactionDetailModal({ transactionId, isOpen, onClose }: Trans
                 </div>
               )}
 
+              {/* Gas used (chain transactions only — a queued record has no
+                  gas figure until the chain answers for it) */}
+              {transaction.gasUsed !== undefined && (
+                <div style={{ marginBottom: '16px', paddingBottom: '16px', borderBottom: '1px solid var(--bg-2)' }}>
+                  <div style={{ fontSize: '12px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Gas Used</div>
+                  <div style={{ fontSize: '16px', fontWeight: 'bold', fontFamily: 'monospace' }}>{transaction.gasUsed.toLocaleString()}</div>
+                </div>
+              )}
+
               {/* Timestamp */}
               <div style={{ marginBottom: '24px', paddingBottom: '16px' }}>
                 <div style={{ fontSize: '12px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Timestamp</div>
-                <div style={{ fontSize: '14px' }}>{new Date(transaction.ts).toLocaleString()}</div>
+                {/* 0 is what the backend publishes for "the node gave no
+                    readable time". new Date(0) would render 1 January 1970 —
+                    a wrong answer that looks like a real one. */}
+                <div style={{ fontSize: '14px' }}>
+                  {transaction.ts > 0 ? new Date(transaction.ts).toLocaleString() : 'Not reported by the node'}
+                </div>
               </div>
 
               {/* Close Button */}

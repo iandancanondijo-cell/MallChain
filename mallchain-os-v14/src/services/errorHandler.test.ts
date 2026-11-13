@@ -239,6 +239,80 @@ describe('errorHandler', () => {
 
       vi.useRealTimers();
     });
+
+    // Session policy (2026-11): the client shows a 15-minute countdown ONLY
+    // when the server says it armed one. requireAuth's
+    // {error:'session_expired', cooldownMinutes} is produced by the same call
+    // that writes the Redis lockout
+    // (backend/src/middleware/sessionCooldown.js), so that body — not the
+    // local clock — is what the mirror is allowed to trust. A 401 for any
+    // other reason must leave the sign-in form usable.
+    it('does not arm a sign-in cooldown for a 401 that is not session_expired', () => {
+      localStorage.clear();
+      vi.useFakeTimers();
+
+      // A lapsed marker on its own used to be enough to guess a cooldown.
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ authedUntil: Math.floor(Date.now() / 1000) - 10 }));
+
+      handle401Error({ action: 'test' });
+
+      expect(localStorage.getItem('login_cooldown_until')).toBeNull();
+
+      vi.advanceTimersByTime(1000);
+      localStorage.clear();
+      vi.useRealTimers();
+    });
+
+    it('mirrors the cooldown the server just armed, at the length it reported', () => {
+      localStorage.clear();
+      vi.useFakeTimers();
+
+      const before = Date.now();
+      handle401Error({ action: 'test', sessionExpired: true, cooldownMinutes: 7 });
+      const written = Number(localStorage.getItem('login_cooldown_until'));
+
+      expect(written).toBeGreaterThanOrEqual(before + 7 * 60_000);
+      expect(toast).toHaveBeenCalledWith(
+        'Your session ended. Sign in again after the security cooldown.',
+        false
+      );
+
+      vi.advanceTimersByTime(1000);
+      localStorage.clear();
+      vi.useRealTimers();
+    });
+
+    it('falls back to the 15-minute default when session_expired omits cooldownMinutes', () => {
+      localStorage.clear();
+      vi.useFakeTimers();
+
+      handle401Error({ action: 'test', sessionExpired: true });
+      const written = Number(localStorage.getItem('login_cooldown_until'));
+      const remainingMinutes = (written - Date.now()) / 60_000;
+
+      expect(remainingMinutes).toBeGreaterThan(14);
+      expect(remainingMinutes).toBeLessThanOrEqual(15);
+
+      vi.advanceTimersByTime(1000);
+      localStorage.clear();
+      vi.useRealTimers();
+    });
+
+    it('ignores an out-of-range cooldownMinutes instead of arming a nonsense lockout', () => {
+      localStorage.clear();
+      vi.useFakeTimers();
+
+      handle401Error({ action: 'test', sessionExpired: true, cooldownMinutes: 9_999 });
+      const written = Number(localStorage.getItem('login_cooldown_until'));
+      const remainingMinutes = (written - Date.now()) / 60_000;
+
+      expect(remainingMinutes).toBeGreaterThan(14);
+      expect(remainingMinutes).toBeLessThanOrEqual(15);
+
+      vi.advanceTimersByTime(1000);
+      localStorage.clear();
+      vi.useRealTimers();
+    });
   });
 
   describe('withErrorHandling', () => {

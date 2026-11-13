@@ -1,6 +1,7 @@
 /**
  * Mallpoints API service — wraps the backend's x/mallpoints-backed endpoints.
- * Maps to: GET /api/mallpoints/{address}, POST /api/mallpoints/convert
+ * Maps to: GET /api/mallpoints/price, GET /api/mallpoints/{address},
+ * POST /api/mallpoints/convert
  */
 import { Secp256k1HdWallet, makeSignDoc } from '@cosmjs/amino';
 import { toBase64, toUtf8 } from '@cosmjs/encoding';
@@ -44,10 +45,53 @@ function convertMessage(address: string, timestamp: string): string {
   return `Convert Mallpoints to Mallcoin for ${address} at ${timestamp}`;
 }
 
+/**
+ * GET /api/mallpoints/price — the Mallpoints rate on its own.
+ *
+ * `pointPriceKes` is the KES peg the server prices points at, and
+ * `pegSource` says whether that number is what the deployment configured or
+ * the built-in default nobody overrode. `conversion` is the MLPTS→MLCNS ratio
+ * the convert flow actually settles with (already clamped to the on-chain
+ * bounds); it is null when the oracle could not answer, because the ratio
+ * depends on the live MLCNS market price while the peg does not.
+ */
+export interface MallpointsConversion {
+  valueRatio: number;
+  human: string;
+  proposedRate: number;
+  rateScale: number;
+  minRate: number;
+  maxRate: number;
+  clamped: boolean;
+  mlcnsMidPriceKes: number;
+  mlptsPriceKes: number;
+  source: string;
+}
+
+export interface MallpointsPrice {
+  success: boolean;
+  currency: 'KES';
+  pointPriceKes: number;
+  pegSource: 'environment' | 'default';
+  defaultPointPriceKes: number;
+  conversion: MallpointsConversion | null;
+  asOf: string;
+}
+
 class MallpointsApi {
   async getBalance(address: string): Promise<ApiResult<MallpointsBalance>> {
     if (!address) return { ok: false, error: 'Wallet address is required' };
     return api.get<MallpointsBalance>(`/api/mallpoints/${address}`);
+  }
+
+  /**
+   * Public — no wallet, no session. Surfaces that need only the rate use this
+   * instead of pulling one field out of `/api/economy/state`, which answers
+   * with the entire tokenomics payload (two chain reads, the supply schedule,
+   * the treasury balances) to say what one point costs.
+   */
+  async getPrice(): Promise<ApiResult<MallpointsPrice>> {
+    return api.get<MallpointsPrice>('/api/mallpoints/price');
   }
 
   /**

@@ -113,6 +113,31 @@ describe('CipherChallengeHost', () => {
     expect(JSON.parse(localStorage.getItem(OS_KEY)!).wallet.mnemonic).toBe('');
   }, 30000);
 
+  it('offers create-or-connect rather than an import for a device that holds no keys', async () => {
+    // The other half of the case above: an account that has passed KYC but has
+    // not created a wallet yet. There is no phrase on this device to migrate
+    // and none to unlock, so the only honest answer is the connect flow — which
+    // offers both creating a wallet and importing an existing phrase.
+    const w = store.state.wallet;
+    w.address = '';
+    w.mnemonic = '';
+    w.pinEncryptedMnemonic = '';
+    w.secretMode = '';
+    store.commit();
+
+    render(<CipherChallengeHost />);
+    const granted = requestMnemonic();
+
+    await screen.findByText(/No wallet keys on this device/i);
+    // Not the enrollment wall, and not a silent failure either.
+    expect(screen.queryByRole('button', { name: /Engrave cipher/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Create or connect wallet/i }));
+
+    await expect(granted).resolves.toBeNull();
+    expect(window.location.hash).toBe('#/wallet/connect');
+  });
+
   it('takes the wallet off the device on the third wrong cipher, as the real backend answers', async () => {
     // 401 + attemptsRemaining 2, then 1, then the third failure carries
     // `locked: true` AND `attemptsRemaining: 0`.
@@ -120,8 +145,8 @@ describe('CipherChallengeHost', () => {
     const { granted } = await driveWall(() => {
       seen += 1;
       return seen < 3
-        ? jsonResponse(401, { ok: false, error: 'Incorrect PIN', valid: false, locked: false, attemptsRemaining: 3 - seen })
-        : jsonResponse(401, { ok: false, error: 'Too many failed attempts. Account locked for 5 minutes.', valid: false, locked: true, remainingTime: 300, attemptsRemaining: 0 });
+        ? jsonResponse(401, { ok: false, error: 'Incorrect PIN', code: 'invalid_secret', valid: false, locked: false, attemptsRemaining: 3 - seen })
+        : jsonResponse(401, { ok: false, error: 'Too many failed attempts. Account locked for 5 minutes.', code: 'invalid_secret', valid: false, locked: true, remainingTime: 300, attemptsRemaining: 0 });
     }, (n) => screen.findByText(new RegExp(`${3 - n} attempt`)));
 
     await expectDisconnected(granted);
@@ -131,7 +156,7 @@ describe('CipherChallengeHost', () => {
     // An unhardened (or differently configured) /verify-pin that keeps saying
     // "plenty left" must not become permission to keep guessing here.
     const { granted } = await driveWall(
-      () => jsonResponse(401, { ok: false, valid: false, code: 'invalid_pin', attemptsRemaining: 99 }),
+      () => jsonResponse(401, { ok: false, valid: false, code: 'invalid_secret', attemptsRemaining: 99 }),
       (n) => screen.findByText(new RegExp(`${3 - n} attempt`)),
     );
 
@@ -142,10 +167,11 @@ describe('CipherChallengeHost', () => {
     let seen = 0;
     const { granted } = await driveWall(() => {
       seen += 1;
-      // middleware/requireAuth.js: bare 401, no `valid`, no attempt count.
+      // middleware/requireAuth.js answers an expired session with code
+      // 'session_expired' and no attempt count at all — see handoff §4.
       return seen === 2
-        ? jsonResponse(401, { error: 'invalid token' })
-        : jsonResponse(401, { ok: false, valid: false, attemptsRemaining: 99 });
+        ? jsonResponse(401, { error: 'session_expired', code: 'session_expired', cooldownMinutes: 15 })
+        : jsonResponse(401, { ok: false, valid: false, code: 'invalid_secret', attemptsRemaining: 99 });
     }, undefined, 2);
 
     expect(await screen.findByText(/session ran out/i)).toBeTruthy();

@@ -1,7 +1,12 @@
 /**
  * Contracts API — wraps backend/src/routes/contracts.js. Records persist
- * server-side per user. Deploy/interact accept optional real chain tx data
- * (txHash, on-chain address) so the record reflects actual wasm operations.
+ * server-side per user.
+ *
+ * Deploy and interact report the real chain values (the instantiate hash, the
+ * execute hash), and the backend verifies each one against the node before it
+ * stores anything. That means a record can legitimately carry `address: null`:
+ * the draft exists, the metadata is real, but nothing was ever put on-chain.
+ * Nothing here fabricates a receipt — a null has to be shown as a null.
  */
 import { api } from './api';
 import { type ApiResult } from './api';
@@ -18,8 +23,10 @@ export interface ContractRecord {
   type: string;
   code: string;
   description: string;
-  address: string;
-  txHash?: string;
+  /** null when the record has no contract on-chain behind it. */
+  address: string | null;
+  /** null for the same reason: nothing was broadcast, so there is no receipt. */
+  txHash: string | null;
   deployedAt: string;
   txs: number;
   status: 'active' | 'paused';
@@ -62,7 +69,11 @@ class ContractsApi {
     return unwrap(api.post('/api/contracts/deploy', payload));
   }
 
-  async interact(id: string, method: string, params?: unknown, txHash?: string): Promise<ApiResult<{ txHash: string; status: string; result: unknown }>> {
+  async interact(id: string, method: string, params?: unknown, txHash?: string): Promise<ApiResult<{
+    txHash: string | null;
+    status: 'recorded' | 'not_broadcast';
+    result: unknown;
+  }>> {
     return unwrap(api.post(`/api/contracts/${encodeURIComponent(id)}/interact`, { method, params, txHash }));
   }
 

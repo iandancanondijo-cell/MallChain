@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { LineChart, fmtMoney } from '../../components/ui';
 import { usePerformance } from '../../services/performanceApi';
-import { fetchMarketPrice, type MarketPriceResponse } from '../../services/marketPriceApi';
+import { fetchMarketPrice, type MarketPriceResponse, type PriceWindowName } from '../../services/marketPriceApi';
 import { useCurrencyConverter } from '../../services/currency';
 import type { Currency } from '../../services/currency';
 
+/** Days of wallet flow to chart. PRICE_WINDOW must name the same span. */
 const WINDOW_DAYS = 7;
+/** The backend window this chart draws: '7d' (see PRICE_WINDOWS_MS). */
+const PRICE_WINDOW: PriceWindowName = '7d';
+/** Downsample the week to at most this many points. */
+const WINDOW_POINTS = 90;
 /** Chain amounts in /api/history/performance are raw base units, 1e6 per coin. */
 const MLCNS_DECIMALS = 6;
 const PRICE_POLL_MS = 60 * 1000;
@@ -48,11 +53,13 @@ interface Props {
  * equals the balance shown next to it. Where a day has no recorded flow the
  * line is flat — that is the truth, not a gap.
  *
- * Two honest limits, surfaced in the caption rather than papered over:
- * /api/market/price returns at most its last 500 samples (~2h of a 15s poll), so
- * the earlier days of the window are valued at the current rate; and movement
- * older than the window is invisible to the walk, which can push an early point
- * below zero.
+ * The price half is read with `?window=7d`, which the backend answers from its
+ * durable one-sample-per-minute store (models/MarketPriceSample.js) downsampled
+ * to WINDOW_POINTS rows, so the line is priced per day rather than at today's
+ * rate. Two limits that remain true are surfaced in the caption rather than
+ * papered over: a backend whose store has not been running a week yet values
+ * the earliest days at the current rate, and movement older than the window is
+ * invisible to the holdings walk, which can push an early point below zero.
  */
 export default function WalletFlowChart({ address, balanceCoins, midKes, currency, height = 150 }: Props) {
   const { data: perf, error: perfError } = usePerformance(address, WINDOW_DAYS);
@@ -62,7 +69,10 @@ export default function WalletFlowChart({ address, balanceCoins, midKes, currenc
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const next = await fetchMarketPrice();
+      // Ask for the window the chart actually draws, so the backend answers
+      // with its durable one-minute-per-bucket history downsampled to fit
+      // rather than with however many 15s samples this process has collected.
+      const next = await fetchMarketPrice({ window: PRICE_WINDOW, points: WINDOW_POINTS });
       if (!cancelled) setMarket(next);
     };
     load();
@@ -117,29 +127,33 @@ export default function WalletFlowChart({ address, balanceCoins, midKes, currenc
     if (!priced || p.kes === null) return p.coins;
     return toDisplay(p.kes, 'KES') ?? p.kes;
   });
-  const formatPoint = priced ? (v: number) => fmtMoney(v, currency) : (v: number) => `${Math.round(v * 100) / 100} MLCNS`;
+  const formatPoint = priced ? (v: number) => fmtMoney(v, currency) : (v: number) => `${Math.round(v * 100) / 100} MALL`;
 
   const labels = model.points.map((p) => new Date(`${p.day}T12:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' }));
 
-  // The backend's aggregateChangeForRange (controllers/marketController.js) falls
-  // back to its OLDEST sample whenever nothing reaches into the requested window,
-  // so `aggregates['7d']` comes back non-null from a process that started seconds
-  // ago and reports minutes of drift as a weekly trend. The chip is therefore
-  // computed here from the same samples the line is drawn from, and labelled with
-  // the span they actually cover.
-  const first = samples[0];
-  const last = samples[samples.length - 1];
-  const spanMs = samples.length > 1 ? last.ts - first.ts : 0;
-  const trend = samples.length > 1 && first.mid > 0
-    ? { pct: ((last.mid - first.mid) / first.mid) * 100, label: humanSpan(spanMs) }
-    : null;
-  const trendText = trend === null
-    ? 'Price history unavailable'
-    : `${trend.pct >= 0 ? '+' : ''}${trend.pct.toFixed(2)}% MLCNS · ${trend.label}`;
+  // The trend chip is the backend's own aggregate for the window this chart
+  // draws. It used to be recomputed here from the raw samples, because
+  // aggregateChangeForRange fell back to the oldest sample it had: a backend
+  // that started ten seconds ago reported ten seconds of drift as a weekly
+  // trend, and the only way to avoid printing that was to ignore the field.
+  // The endpoint now answers `null` when a range is not covered, so `null`
+  // means "not recorded" and is said out loud instead of worked around.
+  const aggregate = market?.aggregates?.[PRICE_WINDOW] ?? null;
+  const win = market?.window ?? null;
+  const spanMs = win && win.firstTs != null && win.lastTs != null ? win.lastTs - win.firstTs : 0;
+  const coveredLabel = win?.covered
+    ? PRICE_WINDOW
+    : spanMs > 0 ? humanSpan(spanMs) : 'no samples yet';
+  const trendText = aggregate === null
+    ? `No ${PRICE_WINDOW} trend recorded`
+    : `${aggregate.pct >= 0 ? '+' : ''}${aggregate.pct.toFixed(2)}% MALL · ${coveredLabel}`;
 
   const notes: string[] = [];
-  if (!priced) notes.push('No MLCNS rate for every day in the window — the line shows your coin balance, not its value.');
-  else if (model.daysUsingHistory < WINDOW_DAYS) notes.push(`Rate samples reach back ${humanSpan(spanMs)} (the endpoint returns its last 500), so the other ${WINDOW_DAYS - model.daysUsingHistory} day(s) are valued at the current rate.`);
+  if (!priced) notes.push('No MALL rate for every day in the window — the line shows your coin balance, not its value.');
+  else if (aggregate === null) notes.push(samples.length === 0
+    ? 'The backend has no recorded MALL price samples yet, so no trend can be stated.'
+    : `Recorded MALL price history covers ${coveredLabel}, not the full ${WINDOW_DAYS} days, so no weekly trend is stated.`);
+  else if (model.daysUsingHistory < WINDOW_DAYS) notes.push(`Rate samples reach back ${humanSpan(spanMs)}, so the other ${WINDOW_DAYS - model.daysUsingHistory} day(s) are valued at the current rate.`);
   if (model.floored > 0) notes.push(`${model.floored} day(s) sat before this window's flow, so their balance is floored at zero.`);
   if (perfError) notes.push(`Wallet flow unavailable (${perfError}).`);
 
@@ -156,7 +170,7 @@ export default function WalletFlowChart({ address, balanceCoins, midKes, currenc
     <div className="dash-flow">
       <div className="dash-flow-head">
         <span className="dash-flow-title">7-day balance trend</span>
-        <span className={'dash-flow-trend' + (trend === null ? '' : trend.pct >= 0 ? ' up' : ' down')}>{trendText}</span>
+        <span className={'dash-flow-trend' + (aggregate === null ? '' : aggregate.pct >= 0 ? ' up' : ' down')}>{trendText}</span>
       </div>
       {plotValues.length > 0 ? (
         <LineChart data={plotValues} labels={labels} height={height} color={priced ? 'var(--cyan)' : 'var(--txt-3)'} formatValue={formatPoint} />

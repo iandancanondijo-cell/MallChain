@@ -26,9 +26,19 @@ export const SESSION_KEY = 'session';
 /**
  * Post-expiry sign-in cooldown (platform security policy: 30-minute session
  * → logout → 15 minutes before signing in again, showing the remaining
- * time). Client-side mirror only — the server's 423 login_cooldown response
- * is authoritative; this drives the AuthPage countdown so the user sees the
- * lockout the moment the session ends instead of after a rejected attempt.
+ * time). Client-side mirror only.
+ *
+ * It is written exclusively from a server answer, never from the local clock:
+ *  - a 401 `{error:'session_expired', cooldownMinutes}` — requireAuth armed
+ *    the Redis cooldown while producing it
+ *    (`backend/src/middleware/sessionCooldown.js`),
+ *  - the 423 `login_cooldown` on a too-early sign-in, which carries the exact
+ *    remaining seconds (authApi.ts).
+ * Inferring it from "the marker's authedUntil passed" was tried and removed:
+ * the server only arms the lockout when a request actually arrives on an
+ * expired token, so a tab that closed and sat past its expiry caused nothing,
+ * and mirroring a cooldown that was never issued would replace the login form
+ * with a 15-minute countdown for a lockout the user is not under.
  * Kept in its OWN localStorage key because clearSession()/logout() delete
  * SESSION_KEY wholesale (and the cooldown must survive exactly that).
  */
@@ -52,9 +62,12 @@ export type LinkWalletResult =
   | { ok: true; referralCode?: string | null; referralActivated?: boolean }
   | { ok: false; reason: string };
 
-/** Outcome of getServerWalletLink(): `address` is the account's server-side linked wallet, or null when none is linked. */
+/** Outcome of getServerWalletLink(): `address` is the account's server-side linked wallet, or null when none is linked.
+ *  `linkedAt`/`accountCreatedAt` are the server's wallet-age clock (see
+ *  backend/src/services/walletAgeService.js) — optional so existing callers
+ *  that only read `address` keep type-checking. */
 export type ServerWalletLinkResult =
-  | { ok: true; address: string | null }
+  | { ok: true; address: string | null; linkedAt?: string | null; accountCreatedAt?: string | null }
   | { ok: false; reason: string };
 
 /** Must match backend/src/mallwallet/security/verifyAdr036.js's linkWalletMessage() exactly. */
@@ -77,11 +90,22 @@ class AuthService {
   private csrfFetchPromise: Promise<string | null> | null = null;
 
   /**
+   * In-memory, per page load: set the first time this browser finds its own
+   * session marker sitting past `authedUntil` — i.e. it WAS signed in and the
+   * 30-minute policy ended it, which is a different fact from "this device has
+   * never signed in". App.tsx's auth guard uses it to return that person to the
+   * sign-in screen instead of the public landing page. Cleared by the next
+   * successful `setSession()`.
+   */
+  private sessionLapsed = false;
+
+  /**
    * Record that the backend just authenticated us and set the session
    * cookie. `expiresAt` is the unix-seconds value the backend returns
    * alongside every login/register/OAuth response.
    */
   setSession(expiresAt: number): void {
+    this.sessionLapsed = false;
     try {
       const meta: SessionMeta = { authedUntil: expiresAt };
       localStorage.setItem(SESSION_KEY, JSON.stringify(meta));
@@ -103,10 +127,10 @@ class AuthService {
 
   /**
    * The raw `authedUntil` (unix seconds) from the session marker, WITHOUT
-   * the expiry-driven clear that isAuthenticated() performs — callers
-   * (handle401Error, storeSync) need to distinguish "the session ended on
-   * schedule" from "the server rejected a still-unexpired token" before the
-   * marker is wiped.
+   * the expiry-driven clear that isAuthenticated() performs — callers that
+   * have to distinguish "the session ended on schedule" from "this device
+   * never signed in" need the value before the marker is wiped (App.tsx's
+   * boot check and its session-ends-in-1-minute warning).
    */
   getAuthedUntil(): number | null {
     return this.readSession()?.authedUntil ?? null;
@@ -169,10 +193,23 @@ class AuthService {
 
     const now = Math.floor(Date.now() / 1000);
     if (session.authedUntil <= now) {
+      this.sessionLapsed = true;
       this.clearSession();
       return false;
     }
     return true;
+  }
+
+  /**
+   * Whether this page load has observed the session marker past its expiry.
+   * See `sessionLapsed`. Deliberately does NOT imply any sign-in cooldown:
+   * the backend only arms the 15-minute lockout when a request actually
+   * arrives on an expired token (`backend/src/middleware/sessionCooldown.js`),
+   * so `getCooldownUntil()` stays driven by that server's answers
+   * (a 401 `session_expired`, or the 423 on an early sign-in attempt).
+   */
+  sessionWasLapsed(): boolean {
+    return this.sessionLapsed;
   }
 
   /** Seconds until the session marker says the cookie should expire, or null if not authenticated. */
@@ -396,9 +433,17 @@ class AuthService {
    */
   async getServerWalletLink(): Promise<ServerWalletLinkResult> {
     try {
-      const res = await api.get<{ user?: { walletAddress?: string | null } }>('/api/auth/me');
+      const res = await api.get<{ user?: { walletAddress?: string | null; walletLinkedAt?: string | null; created_at?: string | null } }>('/api/auth/me');
       if (!res.ok) return { ok: false, reason: res.error || 'Could not confirm the wallet link with the server' };
-      return { ok: true, address: res.data?.user?.walletAddress ?? null };
+      return {
+        ok: true,
+        address: res.data?.user?.walletAddress ?? null,
+        // The server's clock on this address. `walletLinkedAt` is stamped by
+        // POST /api/auth/link-wallet; older accounts predate it and fall back
+        // to when the account itself was created.
+        linkedAt: res.data?.user?.walletLinkedAt ?? null,
+        accountCreatedAt: res.data?.user?.created_at ?? null,
+      };
     } catch (error) {
       return { ok: false, reason: (error as Error).message };
     }

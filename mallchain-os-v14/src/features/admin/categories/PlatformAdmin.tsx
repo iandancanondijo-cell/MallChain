@@ -30,7 +30,7 @@ import type {
 } from '../../../services/adminApi';
 import { fmtNum, Modal, toast } from '../../../components/ui';
 import { store } from '../../../store/store';
-import { AdminErrorBanner, collectErrors, displayPii } from '../adminShared';
+import { AdminErrorBanner, collectErrors, displayPii, useAdminPoller } from '../adminShared';
 
 const MAINTENANCE_SCOPES = ['send', 'withdraw', 'buy', 'payment', 'marketplace', 'staking', 'vault', 'key-vault', 'badge', 'dex'];
 
@@ -87,11 +87,9 @@ function OverviewSection() {
     setErrors(collectErrors([['platform dashboard stats', r]]));
   };
 
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), 60000);
-    return () => clearInterval(id);
-  }, []);
+  // Shared poller: no tick while the tab is hidden, and no stacking a second
+  // stats read on one that has not returned.
+  useAdminPoller(() => void load(), 60000);
 
   return (
     <>
@@ -575,8 +573,11 @@ function RolesSection() {
           {users.map((u) => (
             <tr key={u._id}>
               <td>
-                <b>{u.username || u.email}</b>
-                <div className="tiny">{u.email}</div>
+                {/* Same de-dup as the other user tables: legacy accounts store
+                    their email in the username field too, which printed the
+                    address twice in one row. */}
+                <b>{u.username && u.username !== u.email ? u.username : u.email}</b>
+                {u.username && u.username !== u.email && <div className="tiny">{u.email}</div>}
               </td>
               <td>
                 <select

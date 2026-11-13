@@ -25,7 +25,7 @@ const LESSONS = [
     body: [
       'MALL has a fixed total supply of 670,000,000 — nothing beyond that ever gets minted. New coins enter circulation on a fixed emission schedule, not on demand.',
       'Emission runs in 36-month phases. Phase 1 releases 3,000,000 MALL per month; every phase after that halves the previous rate (phase 2 = 1,500,000/month, phase 3 = 750,000/month, and so on). Nobody can speed this up — it\'s a fixed schedule, not a market decision.',
-      'A separate token, MLCNS, is what you actually hold and spend day to day (buy/sell, send, stake) — it\'s the liquid, tradable form backed by the MALL emission above.',
+      'MALL is also what you actually hold and spend day to day (buy/sell, send, stake). On-chain and in the API the same coin is recorded under the MLCNS denomination, so an explorer row or a developer document may call it MLCNS — it is the same token, one balance in the wallet.',
       'Transfers carry a small fee (currently 1% at time of writing). Half goes to active stakers, split proportionally to how much they\'ve staked; half goes to the treasury. This is what "staking rewards" actually are on this chain — a share of real transaction activity, not tokens created from nothing.',
     ],
   },

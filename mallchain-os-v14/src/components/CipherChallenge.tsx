@@ -218,35 +218,45 @@ export function CipherChallengeHost() {
     }
 
     if (!verifyResponse.ok) {
-      // Only a body saying "this secret was compared and rejected" may burn a
-      // strike. `valid: false` / `attemptsRemaining` are what routes/
-      // walletPin.js returns after bcrypt.compare; a bare `{ error: 'invalid
-      // token' }` from middleware/requireAuth.js is this session running out,
-      // and a 500-class body is the service's own problem. Counting either as a
-      // wrong cipher is how a correctly saved secret got blamed for a failure
-      // that was never the user's.
-      const wasCompared = verifyData.valid === false
-        || typeof verifyData.attemptsRemaining === 'number'
-        || verifyData.code === 'no_pin_set';
-      if (!wasCompared) {
+      // Branch on the server's `code`, which is the contract: routes/walletPin.js
+      // advertises invalid_secret / no_pin_set / secret_locked / invalid_secret_format
+      // and middleware/requireAuth.js answers an expired session with
+      // session_expired. This used to be inferred from which fields happened
+      // to be present (`valid === false || typeof attemptsRemaining === 'number'`),
+      // and inference is why a session that ran out mid-unlock could be
+      // charged as a wrong cipher: the two 401s were only distinguishable by
+      // what was *not* in the body. Only 'invalid_secret' — "this secret was
+      // compared and rejected" — may burn a strike.
+      const code = verifyData.code;
+
+      if (code === 'session_expired') {
         setBusy(false);
-        setError(verifyResponse.status === 401
-          ? 'Your session ran out before the wallet could be checked — sign in again, then unlock. This was not counted against your cipher.'
-          : `The wallet service could not check your cipher (${verifyData.error || `HTTP ${verifyResponse.status}`}) — this was not counted against it.`);
+        setError('Your session ran out before the wallet could be checked — sign in again, then unlock. This was not counted against your cipher.');
         return false;
       }
 
-      // A 401 means this exact secret was checked and rejected, so it counts as
-      // a strike even when it also tripped the account lockout: backend/src/
-      // routes/walletPin.js answers the third failure with BOTH `locked: true`
-      // and `attemptsRemaining: 0`, and letting the lock flag win is what made
-      // a 5-minute timer stand in for dropping the keys off this device. A 429
-      // is different — nothing was evaluated there, that is a previous streak's
-      // cool-down, so it waits instead of striking.
-      if (verifyData.locked && verifyResponse.status !== 401) {
+      // The cool-down is checked before anything else, because in it nothing
+      // was compared: 429 + `secret_locked` is a previous streak's timer, so
+      // it neither burns a strike nor belongs in the generic "the service did
+      // not check your cipher" reply — that one drops the countdown, which is
+      // the only thing telling the person how long to wait. A `locked` flag
+      // arriving with 429 means the same thing on a server that predates the
+      // code.
+      //
+      // The opposite case — 401 carrying BOTH `locked: true` and
+      // `code: 'invalid_secret'` (the backend's third failure) — is a strike,
+      // because that secret *was* evaluated; it reaches the tail of this block.
+      if (code === 'secret_locked' || (verifyData.locked && verifyResponse.status === 429)) {
         setLockedUntil(Date.now() + (verifyData.remainingTime || 300) * 1000);
         setError(`Account locked for ${verifyData.remainingTime || 300} seconds. Too many failed attempts.`);
         setBusy(false);
+        return false;
+      }
+
+      const wasCompared = code === 'invalid_secret' || code === 'no_pin_set';
+      if (!wasCompared) {
+        setBusy(false);
+        setError(`The wallet service did not check your cipher (${verifyData.error || verifyData.code || `HTTP ${verifyResponse.status}`}) — this was not counted against it.`);
         return false;
       }
 
@@ -382,8 +392,15 @@ export function CipherChallengeHost() {
               (a logout, or a fresh device, clears them by design).
             </p>
           </div>
+          {/* Was a single "Import your 24-word recovery phrase" line, which
+              assumed this account has a phrase to import. An account that has
+              not created a wallet yet — possible on any device, since KYC
+              gates creation — has nothing to import, and the screen this
+              button leads to offers both paths. */}
           <p style={{ margin: 0, fontSize: 13, color: 'var(--txt-3)' }}>
-            Import your 24-word recovery phrase here — no network call, no risk of losing funds — and sending unlocks immediately.
+            If this wallet already exists, import its 24-word recovery phrase here — no network call, no risk of
+            losing funds — and sending unlocks immediately. If you have not created a wallet yet, you can create
+            one on the next screen.
           </p>
           {error && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--red)', fontSize: 13 }}>
@@ -392,7 +409,7 @@ export function CipherChallengeHost() {
           )}
           <div style={{ display: 'flex', gap: 10 }}>
             <button className="btn btn-ghost" style={{ flex: 1 }} onClick={cancel}>Cancel</button>
-            <button className="btn btn-primary" style={{ flex: 1 }} onClick={gotoConnect}>Connect wallet</button>
+            <button className="btn btn-primary" style={{ flex: 1 }} onClick={gotoConnect}>Create or connect wallet</button>
           </div>
         </div>
       </Modal>

@@ -2,21 +2,26 @@ import { useState, useCallback, useEffect } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, StatusChip, toast } from '../../components/ui';
 import { useTransactionData } from '../../hooks/useTransactionData';
+import { useTxTypes } from '../../hooks/useTxTypes';
 import { TransactionDetailModal } from './TransactionDetailModal';
 import { AddressIdentity } from '../../components/WalletIdentity';
+import { txIcon, txTimeText, txTitle } from '../../utils/txPresentation';
 import { LoadingState } from '../../components/LoadingState';
 
 /**
  * Task 13.5-13.12: Real transaction history with pagination, filtering, and real-time updates
  * - Fetches real transactions from API
  * - Implements pagination (20 per page)
- * - Supports type filtering (send, receive, swap, stake, etc.)
+ * - Supports type filtering by direction (send/receive) and by category, the
+ *   options for which are read from GET /api/tx/types rather than hardcoded
+ *   here (see hooks/useTxTypes)
  * - Supports status filtering (pending, confirmed, failed)
  * - Real-time auto-updates via Socket.IO
  */
 export default function WalletHistory() {
   useStoreVersion();
   const st = store.state;
+  const txTypes = useTxTypes();
   const [type, setType] = useState('');
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
@@ -52,22 +57,34 @@ export default function WalletHistory() {
 
   /**
    * Export transactions as CSV
+   *
+   * `type` is the direction and `tx_type` the published category, because a
+   * stake and a transfer both read as 'send' on the first axis alone. An
+   * unknown timestamp exports as blank rather than 1970-01-01, which a
+   * spreadsheet would otherwise silently accept as a date.
    */
   const exportCsv = useCallback(() => {
-    const rows = [['id', 'type', 'amount', 'asset', 'status', 'to', 'fee', 'note', 'ts'].join(',')];
+    const cell = (value: string | number | undefined | null) => {
+      const text = String(value ?? '').replace(/,/g, ' ');
+      return /["]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const rows = [['id', 'type', 'tx_type', 'amount', 'asset', 'status', 'from', 'to', 'fee', 'note', 'timestamp', 'block'].join(',')];
     transactions.forEach((t) =>
       rows.push(
         [
           t.id,
           t.type,
+          t.txType,
           t.amount,
           t.asset,
           t.status,
+          t.from || '',
           t.to || '',
           t.fee || '',
-          (t.note || '').replace(/,/g, ' '),
-          new Date(t.ts).toISOString(),
-        ].join(',')
+          t.note || '',
+          t.ts > 0 ? new Date(t.ts).toISOString() : '',
+          t.blockNumber ?? '',
+        ].map(cell).join(',')
       )
     );
     const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
@@ -96,15 +113,32 @@ export default function WalletHistory() {
         </div>
       )}
 
-      {/* Task 13.8-13.9: Filters. Type is limited to send/receive — this
-          history endpoint reads generic bank-transfer events only, so it
-          can never actually classify a tx as swap/stake/reward/etc; Swap
-          and Staking each have their own dedicated history views. */}
+      {/* Task 13.8-13.9: Filters. The category options come from
+          GET /api/tx/types — the same table /api/tx/history classifies rows
+          with — so the filter cannot offer a category the server would answer
+          an empty page for, and a new module's transactions become filterable
+          as soon as the backend classifies them. */}
       <div className="filter-row" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <select className="input" value={type} onChange={(e) => { setType(e.target.value); setPage(1); }}>
+        <select className="input" value={type} onChange={(e) => { setType(e.target.value); setPage(1); }} aria-label="Filter by transaction type">
           <option value="">All types</option>
-          <option value="send">Send</option>
-          <option value="receive">Receive</option>
+          <optgroup label="Direction">
+            {txTypes.directions.map((direction) => (
+              <option key={direction} value={direction}>
+                {direction === 'send' ? 'Sent by this wallet' : 'Received by this wallet'}
+              </option>
+            ))}
+          </optgroup>
+          {txTypes.types.length > 0 && (
+            <optgroup label="Category">
+              {txTypes.types
+                .filter((entry) => !txTypes.directions.includes(entry.value))
+                .map((entry) => (
+                  <option key={entry.value} value={entry.value} title={entry.description}>
+                    {entry.label}
+                  </option>
+                ))}
+            </optgroup>
+          )}
         </select>
         <select className="input" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
           <option value="">All statuses</option>
@@ -176,12 +210,10 @@ export default function WalletHistory() {
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-2)')}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >
-                <span style={{ fontSize: 15 }}>
-                  {t.type === 'send' ? '➤' : t.type === 'receive' ? '⬇' : t.type === 'swap' ? '⇄' : t.type === 'stake' ? '📌' : '✦'}
-                </span>
+                <span style={{ fontSize: 15 }} title={t.txTypeLabel}>{txIcon(t)}</span>
                 <div className="grow">
                   <div className="t">
-                    {t.type} · {fmtNum(t.amount)} {t.asset}
+                    {txTitle(t)} · {fmtNum(t.amount)} {t.asset}
                   </div>
                   <div className="m mono">
                     {t.note
@@ -191,7 +223,7 @@ export default function WalletHistory() {
                         // No counterparty on this record at all — the hash is
                         // the only thing left that identifies it.
                         : (t.hash?.slice(0, 8) || '')}
-                    {' · '}{new Date(t.ts).toLocaleString()}
+                    {' · '}{txTimeText(t.ts)}
                   </div>
                 </div>
                 <StatusChip status={t.status} />
@@ -230,6 +262,7 @@ export default function WalletHistory() {
         transactionId={selectedTxId || ''}
         isOpen={selectedTxId !== null}
         onClose={() => setSelectedTxId(null)}
+        address={st.wallet.address}
       />
     </div>
   );

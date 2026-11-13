@@ -25,12 +25,29 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { kycApi, type KycStatusResponse } from '../../services/kycApi';
+import { KYC_VERDICT, resolveKycVerdict, type ResolvedKycVerdict } from '../../services/kycVerdict';
 import { authService } from '../../services/auth';
 import { toast, toastAction } from '../../components/ui';
 import { store } from '../../store/store';
 
 /** Every verdict the KYC endpoint can return, plus 'unknown' for a failed lookup. */
 export type KycVerdict = KycStatusResponse['status'] | 'unknown';
+
+/**
+ * The server's published verdict → the vocabulary the decision matrix below is
+ * written in. One direction, one place: {@link resolveKycVerdict} is the only
+ * thing in this file that reads a KYC response, and it is the same derivation
+ * the gate on the server applies.
+ *
+ * 'draft' and 'review' can no longer arrive this way — the server folds them
+ * into 'not_submitted' and 'pending' — so the matrix's cases for them only ever
+ * run for a caller that hands it a raw record status.
+ */
+function toGateVerdict(verdict: ResolvedKycVerdict): KycVerdict {
+  if (verdict === KYC_VERDICT.VERIFIED) return 'approved';
+  if (verdict === 'unknown') return 'unknown';
+  return verdict;
+}
 
 export type WalletGateState =
   | 'checking'
@@ -215,7 +232,11 @@ async function fetchReading(userId: string, force = false): Promise<GateReading>
     const [status, link] = await Promise.all([kycApi.getStatus(), authService.getServerWalletLink()]);
     const reading: GateReading = {
       // A 200 with an unusable body is a failed lookup, not an approval.
-      verdict: status.ok && status.data?.status ? status.data.status : 'unknown',
+      // `verdict` is the field the server publishes for this question, derived
+      // by the same function that answers the link route; resolveKycVerdict is
+      // the only reader of the response here, so the door and the server cannot
+      // fall out of step about the same account.
+      verdict: status.ok ? toGateVerdict(resolveKycVerdict(status.data)) : 'unknown',
       // "Could not read" is not "the account holds no wallet" — but the only
       // safe reading of an unknown link is the strict rule: no restore, verify
       // first. The link route still checks server-side.

@@ -61,7 +61,7 @@ const CATEGORIES: HelpCategory[] = [
         tags: ['wallet', 'mnemonic', 'keys', 'pin', 'earning'],
         updated: UPDATED,
         body: [
-          { kind: 'p', text: 'A wallet is a keypair that lives on the Mallchain — it is where your MLCNS sits and what signs your transactions. It is also a hard requirement for earning: campaign tasks and other rewards pay into a wallet, so the platform will not let you earn until one exists. This is deliberate — it stops points from being credited to accounts that have nowhere to receive them.' },
+          { kind: 'p', text: 'A wallet is a keypair that lives on the Mallchain — it is where your MALL sits and what signs your transactions. It is also a hard requirement for earning: campaign tasks and other rewards pay into a wallet, so the platform will not let you earn until one exists. This is deliberate — it stops points from being credited to accounts that have nowhere to receive them.' },
           { kind: 'h', text: 'What happens at creation' },
           { kind: 'list', items: [
             'The app generates a 24-word recovery phrase and shows it once. Write it down on paper — this is the only time it is displayed.',
@@ -98,34 +98,33 @@ const CATEGORIES: HelpCategory[] = [
     id: 'tokens',
     icon: '💰',
     name: 'Wallet & tokens',
-    blurb: 'MLPTS, MLCNS, MALL — what each one is and how they move.',
+    blurb: 'MLPTS and MALL — what each one is and how they move.',
     articles: [
       {
         id: 'tokens-explained',
-        title: 'MLPTS vs MLCNS vs MALL — three different things',
+        title: 'MLPTS vs MALL — what you actually hold',
         tags: ['mlpts', 'mlcns', 'mall', 'tokenomics', 'supply', 'emission'],
         updated: UPDATED,
         body: [
-          { kind: 'p', text: 'These three names get mixed up constantly, so start here.' },
-          { kind: 'h', text: 'MALL — the chain\'s base token' },
+          { kind: 'p', text: 'These names get mixed up constantly, so start here. There are two things in your account, not three: Mallpoints, which you earn, and MALL, which you hold and move. On-chain and in the API the same token is recorded under the MLCNS denomination, so explorer rows and developer docs may use that name — they are the same coin, and the wallet only ever shows it as MALL.' },
+          { kind: 'h', text: 'MALL — the chain\'s token' },
           { kind: 'p', text: 'MALL has a fixed total supply of 670,000,000. Nothing beyond that ever gets minted. New coins enter circulation on a fixed emission schedule: 36-month phases, starting at 3,000,000 MALL per month and halving each phase (phase 2 is 1,500,000/month, phase 3 is 750,000, and so on). Nobody can speed this up — it is a fixed schedule, not a market or governance decision.' },
-          { kind: 'h', text: 'MLPTS — points you earn' },
-          { kind: 'p', text: 'Mallpoints are earned, not minted: campaign tasks, education rewards, and similar activities credit MLPTS to your account. They are the entry layer of the economy. You cannot send MLPTS to another user — the path to a transferable token is converting them (which burns them).' },
-          { kind: 'h', text: 'MLCNS — the liquid token you hold and spend' },
-          { kind: 'p', text: 'MLCNS is the tradable form: buying, selling, sending, and staking all happen in MLCNS. It is backed by the conversion flow — MLPTS are burned and MLCNS is minted at a fiat-pegged rate. Transfers of MLCNS carry a small fee (1% at time of writing): half goes to active stakers, split proportionally to their stake, and half to the treasury. That is what "staking rewards" actually are here — a share of real transaction activity, not tokens created from nothing.' },
+          { kind: 'p', text: 'This is the tradable form: buying, selling, sending and staking all happen in MALL. Transfers carry a small fee (1% at time of writing): half goes to active stakers, split proportionally to their stake, and half to the treasury. That is what "staking rewards" actually are here — a share of real transaction activity, not tokens created from nothing.' },
+          { kind: 'h', text: 'MLPTS — Mallpoints you earn' },
+          { kind: 'p', text: 'Mallpoints are earned or bought, never minted: campaign tasks, education rewards and similar activities credit MLPTS to your account, and M-Pesa purchases add more. They are the entry layer of the economy. You cannot send MLPTS to another user — the path to a transferable token is converting them (which burns them) into MALL.' },
           { kind: 'links', items: [
             { label: 'Buying Mallpoints with M-Pesa', href: '#/mallpoints-purchase' },
-            { label: 'Converting MLPTS to MLCNS', href: '#/wallet' },
+            { label: 'Converting MLPTS to MALL', href: '#/wallet' },
           ] },
         ],
       },
       {
         id: 'send-receive',
-        title: 'Sending and receiving MLCNS',
+        title: 'Sending and receiving MALL',
         tags: ['send', 'receive', 'transfer', 'fee', 'address'],
         updated: UPDATED,
         body: [
-          { kind: 'p', text: 'Transfers move MLCNS from one on-chain address to another. Your address is in the Receive tab of the wallet — anyone can send to it, and it is safe to share.' },
+          { kind: 'p', text: 'Transfers move MALL from one on-chain address to another. Your address is in the Receive tab of the wallet — anyone can send to it, and it is safe to share.' },
           { kind: 'h', text: 'Before you send' },
           { kind: 'list', items: [
             'Double-check the address. Transfers are validated on-chain, but a valid-looking address that belongs to nobody accepts your funds all the same.',
@@ -142,18 +141,18 @@ const CATEGORIES: HelpCategory[] = [
       },
       {
         id: 'staking-rewards',
-        title: 'Staking MLCNS and how rewards actually work',
+        title: 'Staking MALL and how rewards actually work',
         tags: ['staking', 'rewards', 'fees', 'validators', 'delegation'],
         updated: UPDATED,
         body: [
-          { kind: 'p', text: 'Staking locks MLCNS you control and, in return, routes you a share of the network\'s real transfer fees. There is no inflation reward — the yield comes from the 1% fee on every MLCNS transfer, split half to stakers and half to treasury.' },
+          { kind: 'p', text: 'Staking locks MALL you control and, in return, routes you a share of the network\'s real transfer fees. There is no inflation reward — the yield comes from the 1% fee on every MALL transfer, split half to stakers and half to treasury.' },
           { kind: 'h', text: 'Two ways to stake' },
           { kind: 'list', items: [
-            'Direct stake — bond your own MLCNS and receive a proportional cut of the staker share of fees.',
+            'Direct stake — bond your own MALL and receive a proportional cut of the staker share of fees.',
             'Delegation — add your stake behind a validator. You share in that validator\'s rewards minus its commission; the validator earns for running infrastructure, you earn without running anything.',
           ] },
           { kind: 'note', tone: 'info', text: 'Rewards scale with network activity. A quiet hour pays less than a busy one — that is expected, not a bug.' },
-          { kind: 'p', text: 'Unstaking releases your tokens after the unbonding period shown in the staking screen. Plan cash-outs around it: MLCNS still unbonding cannot be sent or converted.' },
+          { kind: 'p', text: 'Unstaking releases your tokens after the unbonding period shown in the staking screen. Plan cash-outs around it: MALL still unbonding cannot be sent or converted.' },
           { kind: 'links', items: [{ label: 'Open staking', href: '#/staking' }] },
         ],
       },
@@ -184,17 +183,17 @@ const CATEGORIES: HelpCategory[] = [
       },
       {
         id: 'convert-mlpts',
-        title: 'Converting MLPTS to MLCNS',
+        title: 'Converting MLPTS to MALL',
         tags: ['convert', 'conversion', 'rate', 'oracle', 'burn', 'mint'],
         updated: UPDATED,
         body: [
-          { kind: 'p', text: 'Conversion is the bridge from earned points to a transferable token: your MLPTS are burned (destroyed, permanently) and MLCNS is minted in their place at the current rate.' },
+          { kind: 'p', text: 'Conversion is the bridge from earned points to a transferable token: your MLPTS are burned (destroyed, permanently) and MALL is minted in their place at the current rate.' },
           { kind: 'h', text: 'How the rate is set' },
           { kind: 'p', text: 'The rate is dynamic, not hardcoded. A fiat-pegged oracle publishes it from KES reference prices, with hard bounds enforced on-chain so the rate cannot drift outside a sane corridor even if a price feed misbehaves. The exact rate is shown on the conversion screen before you confirm — read it, because the number you confirm is the number you get.' },
           { kind: 'h', text: 'What to expect' },
           { kind: 'list', items: [
             'The conversion is a signed on-chain transaction — it appears in your transaction history like any other transfer.',
-            'Converted MLCNS lands in your wallet balance; the burned MLPTS are gone and cannot be restored.',
+            'Converted MALL lands in your wallet balance; the burned MLPTS are gone and cannot be restored.',
             'If a conversion is rejected, check that your wallet is set up and your MLPTS balance covers the amount — points already converted cannot be converted twice.',
           ] },
           { kind: 'links', items: [{ label: 'Convert in the wallet', href: '#/wallet' }] },
@@ -202,11 +201,19 @@ const CATEGORIES: HelpCategory[] = [
       },
       {
         id: 'cash-out',
-        title: 'Cashing out MLCNS to KES',
-        tags: ['withdraw', 'cash out', 'mpesa', 'payout', 'review'],
+        title: 'Cashing out MALL to KES',
+        tags: ['withdraw', 'cash out', 'mpesa', 'payout', 'review', '29 days', 'waiting period'],
         updated: UPDATED,
         body: [
-          { kind: 'p', text: 'Cashing out runs the buy flow in reverse: your MLCNS is burned on-chain first, then a KES payout is sent to your registered M-Pesa number.' },
+          { kind: 'p', text: 'Cashing out runs the buy flow in reverse: your MALL is burned on-chain first, then a KES payout is sent to your registered M-Pesa number.' },
+          { kind: 'h', text: 'The 29-day waiting period' },
+          { kind: 'p', text: 'A wallet can cash out 29 days after it joins the platform — that is, after it is linked to your verified account. The rule is about how long the wallet has been here, not how much it holds: a large balance in a fresh wallet does not shorten it, and a small one does not excuse it.' },
+          { kind: 'list', items: [
+            'Everything else works during the wait: sending, receiving, staking, Mines tasks, buying and converting are all unaffected, and your MALL stays in your wallet.',
+            'The withdraw screen tells you the exact date cash-outs open for your wallet, so you do not have to count days.',
+            'A wallet that was linked before this rule existed is dated from the oldest record your account has, so pre-existing wallets are not frozen.',
+            'If the screen says the wallet\'s age cannot be confirmed, the address is not linked to a verified account yet (or cannot be resolved to one) — link it in Settings → Security and try again.',
+          ] },
           { kind: 'h', text: 'How it works' },
           { kind: 'list', items: [
             'Request the payout from the withdraw screen and confirm the burn with your PIN.',
@@ -216,7 +223,7 @@ const CATEGORIES: HelpCategory[] = [
           { kind: 'note', tone: 'warn', text: 'Large amounts may be held for a manual compliance review before the payout is sent. This is normal for financial platforms — the hold is on the payout, and the notification center tells you when it clears.' },
           { kind: 'links', items: [
             { label: 'Withdraw screen', href: '#/wallet' },
-            { label: 'Identity verification (required for larger cash-outs)', href: '#/kyc' },
+            { label: 'Identity verification (required before a wallet can link)', href: '#/kyc' },
           ] },
         ],
       },
@@ -474,7 +481,7 @@ const CATEGORIES: HelpCategory[] = [
           { kind: 'h', text: 'Export' },
           { kind: 'p', text: 'Download a full export of everything linked to your account: profile, settings, transaction references, task history. The export is machine-readable so you can take it to another service or keep it for your own records.' },
           { kind: 'h', text: 'Erasure' },
-          { kind: 'p', text: 'Requesting permanent erasure anonymizes your account and personal details immediately. Two honest caveats: some financial records are retained in redacted form as required for fraud and compliance record-keeping — the law does not allow a full wipe of transaction history — and erasure does not put MLCNS back if you still hold any, so move funds out first.' },
+          { kind: 'p', text: 'Requesting permanent erasure anonymizes your account and personal details immediately. Two honest caveats: some financial records are retained in redacted form as required for fraud and compliance record-keeping — the law does not allow a full wipe of transaction history — and erasure does not put your MALL back if you still hold any, so move funds out first.' },
           { kind: 'note', tone: 'warn', text: 'Erasure is immediate and not reversible. Export first, always.' },
           { kind: 'links', items: [{ label: 'Security settings', href: '#/security' }] },
         ],

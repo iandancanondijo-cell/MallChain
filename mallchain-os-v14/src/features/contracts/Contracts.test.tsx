@@ -62,6 +62,9 @@ const record = (over: Partial<ContractRecord> = {}): ContractRecord => ({
   code: 'escrow.v2.wasm',
   description: 'codeId: 41',
   address: 'mall1b453f626eb6a3bd6ab61ba04',
+  // The backend stores null when nothing was broadcast, so a fixture that
+  // claims an address has to carry the hash that put it there.
+  txHash: 'A'.repeat(64),
   deployedAt: '2026-11-04T00:00:00.000Z',
   txs: 3,
   status: 'active',
@@ -301,6 +304,42 @@ describe('an offer you sent', () => {
     expect(inCard(card, 'Change offer')).toBeNull();
     expect(card.textContent).toContain('their answer is a settled fact');
     expect(card.textContent).toContain('Deploying a new instance is how the same code is handed to someone else');
+  });
+});
+
+describe('a record with nothing on-chain behind it', () => {
+  // The backend refuses to invent an address it cannot verify, so a record can
+  // come back with address/txHash null. The page has to show that as a state
+  // rather than as a blank field or a plausible-looking string.
+  test('says it was never deployed instead of guessing an address', async () => {
+    await mount({
+      own: [record({ _id: 'own-draft', name: 'Settlement draft', address: null, txHash: null, txs: 0 }), ...OWN()],
+    });
+    const card = await cardFor('Settlement draft');
+    expect(card.textContent).toContain('not deployed on-chain');
+    expect(card.textContent).toContain('No instantiation transaction behind this record');
+    expect(card.textContent).not.toMatch(/0x[0-9a-f]/i);
+    expect(inCard(card, 'Execute')).toBeNull();
+    // Offering it is a Mallchain-side record, so that stays available.
+    expect(inCard(card, 'Share')).toBeTruthy();
+  });
+
+  test('an accepted offer with no instance says what cannot be done instead of showing a dead button', async () => {
+    await mount({
+      incoming: [record({
+        _id: 'in-draft',
+        name: 'Paperwork only',
+        address: null,
+        txHash: null,
+        txs: 0,
+        offerStatus: 'accepted',
+        counterpartyAddress: ADDRESS,
+        ownerAddress: OWNER_ADDRESS,
+      })],
+    });
+    const card = await cardFor('Paperwork only');
+    expect(inCard(card, 'Execute')).toBeNull();
+    expect(card.textContent).toContain('nothing here to execute until its owner deploys one');
   });
 });
 

@@ -198,7 +198,7 @@ export default function WalletPoints({ navigate }: { navigate: (p: string) => vo
           </div>
           <div>
             <div style={{ fontSize: 15, fontWeight: 700 }}>Convert to Mallcoin</div>
-            <div style={{ fontSize: 11.5, color: 'var(--txt-3)' }}>Exchange your Mallpoints for MLCNS</div>
+            <div style={{ fontSize: 11.5, color: 'var(--txt-3)' }}>Exchange your Mallpoints for MALL</div>
           </div>
         </div>
 
@@ -228,9 +228,9 @@ export default function WalletPoints({ navigate }: { navigate: (p: string) => vo
         )}
 
         <p style={{ fontSize: 12.5, color: 'var(--txt-3)', lineHeight: 1.6, marginBottom: 16 }}>
-          Converting exchanges your full Mallpoints balance for Mallcoin at the live MLCNS/KES rate
+          Converting exchanges your full Mallpoints balance for Mallcoin at the live MALL/KES rate
           {data && mlcnsPriceKes ? (
-            <> — ≈ <b style={{ color: 'var(--gold)' }}>{fmtNum((data.convertiblePoints * data.pointPrice) / mlcnsPriceKes)} MLCNS</b> at
+            <> — ≈ <b style={{ color: 'var(--gold)' }}>{fmtNum((data.convertiblePoints * data.pointPrice) / mlcnsPriceKes)} MALL</b> at
             current rates</>
           ) : null}. This can only be done once per eligibility window (monthly for badge holders, yearly otherwise).
         </p>
@@ -259,7 +259,7 @@ export default function WalletPoints({ navigate }: { navigate: (p: string) => vo
             <CheckCircle2 size={16} style={{ color: 'var(--green)', flexShrink: 0, marginTop: 2 }} />
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--green)' }}>
-                {fmtNum(success.mallcoins)} MLCNS received
+                {fmtNum(success.mallcoins)} MALL received
               </div>
               <div style={{ fontSize: 12, color: 'var(--txt-2)', marginTop: 3 }}>
                 {fmtNum(success.points)} Mallpoints converted at the live rate and credited to{' '}

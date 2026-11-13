@@ -57,11 +57,14 @@ vi.mock('socket.io-client', () => {
     }
 
     private simulateWalletUpdate(address: string) {
-      // Simulate receiving cached wallet data
+      // Simulate receiving cached wallet data. The key names are the ones the
+      // backend's walletSync publishes (`mlcns`/`mlcnsAvailable`/
+      // `mlcnsLocked`); the old `{ mallcoin, gold }` fixture described tokens
+      // this platform does not have.
       setTimeout(() => {
         super.emit('wallet:update', {
           address,
-          balances: { mallcoin: 1000, gold: 50 },
+          balances: { mlcns: 1000, mlcnsAvailable: 950, mlcnsLocked: 50 },
           timestamp: Date.now()
         });
       }, 10);
@@ -166,7 +169,10 @@ describe('Task 14.2: Frontend Socket.IO Integration Tests', () => {
     // Should receive at least the initial cached update
     expect(updates.length).toBeGreaterThanOrEqual(1);
     expect(updates[0].address).toBe(WALLET_ADDRESS);
-    expect(updates[0].balances.mallcoin).toBe(1000);
+    // `mlcns`, not `mallcoin`: services/walletSync.js builds balances straight
+    // from mallcoinService.getWalletBalance(), whose fields are mlcns /
+    // mlcnsAvailable / mlcnsLocked — confirmed against the live socket.
+    expect(updates[0].balances.mlcns).toBe(1000);
 
     unsubscribe();
   });
@@ -296,16 +302,27 @@ describe('Task 14.2: Frontend Socket.IO Integration Tests', () => {
     // Manually emit price event
     if (socketManager.socket) {
       socketManager.socket.emit('price:current', {
-        prices: { mallcoin: 0.50, gold: 1.25 },
-        volumes: { mallcoin: 50000, gold: 10000 },
-        changes: { mallcoin: 5.2, gold: -1.3 }
+        buyPriceKes: 0.62,
+        sellPriceKes: 0.58,
+        midPriceKes: 0.6,
+        mlptsPriceKes: 2,
+        usd: { rate: 0.0077, fxAsOf: null, midPriceUsd: 0.00462, mlptsPriceUsd: 0.0154 },
+        volume24h: { mlcns: 50000, kes: 30000, trades: 12 },
+        change24h: 5.2,
+        source: 'chain',
+        asOf: new Date().toISOString(),
       });
     }
 
     await new Promise(resolve => setTimeout(resolve, 50));
 
     expect(prices.length).toBeGreaterThanOrEqual(1);
-    expect(prices[0].prices.mallcoin).toBe(0.50);
+    // The buy side of the on-chain spread, in KES — the field the backend's
+    // priceEngine actually sends. Asserting a value here rather than only a
+    // length is what makes this a contract check: the previous version of this
+    // case read `prices[0].prices.mallcoin`, a path the server never emitted on
+    // any path, stub or otherwise.
+    expect(prices[0].buyPriceKes).toBe(0.62);
 
     unsubscribe();
   });
@@ -331,11 +348,19 @@ describe('Task 14.2: Frontend Socket.IO Integration Tests', () => {
 
     // Manually emit market event
     if (socketManager.socket) {
+      // A settled buy, in the shape services/marketActivityFeed.js publishes.
+      // No buyer, no seller: the room is joinable anonymously, and the old
+      // fixture's `{ seller: 'addr1', buyer: 'addr2' }` described a payload the
+      // backend must never send.
       socketManager.socket.emit('market:feed', [
         {
+          id: 'evt-1',
           type: 'trade' as const,
-          timestamp: Date.now(),
-          data: { seller: 'addr1', buyer: 'addr2' }
+          flow: 'buy',
+          amountMlcns: 250,
+          currency: 'KES',
+          timestamp: new Date().toISOString(),
+          txHash: 'ABCD1234',
         }
       ]);
     }
@@ -458,7 +483,7 @@ describe('Task 14.2: Real-World Usage Scenarios', () => {
 
     const walletBalances: any[] = [];
     const unsubscribe = socketManager.onWalletUpdate((data) => {
-      walletBalances.push(data.balances.mallcoin);
+      walletBalances.push(data.balances.mlcns);
     });
 
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -476,7 +501,7 @@ describe('Task 14.2: Real-World Usage Scenarios', () => {
     if (socketManager.socket) {
       socketManager.socket.emit('wallet:update', {
         address: WALLET_ADDRESS,
-        balances: { mallcoin: initialBalance + 500, gold: 50 },
+        balances: { mlcns: initialBalance + 500, mlcnsAvailable: initialBalance + 500, mlcnsLocked: 0 },
         timestamp: Date.now()
       });
     }
@@ -525,7 +550,7 @@ describe('Task 14.2: Real-World Usage Scenarios', () => {
     if (socketManager.socket) {
       socketManager.socket.emit('wallet:update', {
         address: WALLET_ADDRESS,
-        balances: { mallcoin: 2000, gold: 100 },
+        balances: { mlcns: 2000, mlcnsAvailable: 1900, mlcnsLocked: 100 },
         timestamp: Date.now()
       });
 
@@ -537,9 +562,15 @@ describe('Task 14.2: Real-World Usage Scenarios', () => {
       });
 
       socketManager.socket.emit('price:current', {
-        prices: { mallcoin: 0.75 },
-        volumes: { mallcoin: 75000 },
-        changes: { mallcoin: 2.5 }
+        buyPriceKes: 0.62,
+        sellPriceKes: 0.58,
+        midPriceKes: 0.6,
+        mlptsPriceKes: 2,
+        usd: null,
+        volume24h: null,
+        change24h: null,
+        source: 'configured-default',
+        asOf: new Date().toISOString(),
       });
     }
 

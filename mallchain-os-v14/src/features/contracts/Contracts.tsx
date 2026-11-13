@@ -29,6 +29,37 @@ function offerSentence(c: ContractRecord): { label: string; detail: string } | n
   }
 }
 
+const EMPTY_ADDRESS_TEXT = 'not deployed on-chain';
+
+/**
+ * A contract record can legitimately carry `address: null`: the metadata is real
+ * but nothing was ever broadcast, and the backend now refuses to invent an
+ * address it cannot verify. This renders that state as what it is instead of
+ * leaving a blank where an address usually sits, which reads like a glitch.
+ */
+function AddressChip({ contract }: { contract: ContractRecord }) {
+  if (!contract.address) {
+    return (
+      <span
+        className="chip"
+        style={{ fontSize: 11, marginLeft: 8, opacity: 0.75 }}
+        title="No MsgInstantiateContract behind this record yet — it is metadata until it is deployed."
+      >
+        {EMPTY_ADDRESS_TEXT}
+      </span>
+    );
+  }
+  return <span className="chip mono" style={{ fontSize: 11, marginLeft: 8 }}>{contract.address}</span>;
+}
+
+/**
+ * How a record is named in prose a person reads, so a null never interpolates as
+ * the string "null".
+ */
+function describeTarget(contract: ContractRecord): string {
+  return contract.address || `${contract.name}, which has no on-chain instance yet`;
+}
+
 export default function Contracts() {
   useStoreVersion();
   const st = store.state;
@@ -121,7 +152,11 @@ export default function Contracts() {
         resetDeployForm();
         load();
       } else {
-        toast(res.error || 'Record saved but deploy metadata failed', false);
+        // Both halves are true at once: the chain did create the instance — the
+        // address and hash in `result` came from the broadcast — and Mallchain
+        // has no record of it. The server's reason leads, because the wasm is
+        // live either way and the address is the thing you need.
+        toast(`${res.error || 'The deploy record was not saved'} — on-chain instance is ${result.address}`, false);
         load();
       }
     } catch (e) {
@@ -135,6 +170,9 @@ export default function Contracts() {
   const execute = async () => {
     if (!active || !method.trim()) return toast('Function is required', false);
     if (!address) return toast('Connect a wallet first', false);
+    // There is no instance to sign a call against, and asking for the mnemonic
+    // to find that out would be a promise the chain cannot keep.
+    if (!active.address) return toast('This record has no contract on-chain behind it, so there is nothing to execute — deploy it first', false);
 
     const mnemonic = await requestMnemonic();
     if (!mnemonic) return;
@@ -160,7 +198,10 @@ export default function Contracts() {
         setArgs('{}');
         load();
       } else {
-        toast(`Executed on-chain (tx ${result.txHash.slice(0, 10)}...) but record update failed`, false);
+        // The chain has the transaction — its hash came back from the broadcast
+        // — but the Mallchain record did not take it. The server says why (it
+        // could not reach the node, or the tx failed), so its reason leads.
+        toast(`${res.error || 'Executed on-chain, but the record could not be updated'} (tx ${result.txHash.slice(0, 10)}…)`, false);
         load();
       }
     } catch (e) {
@@ -312,7 +353,7 @@ export default function Contracts() {
           <div className="row">
             <div className="grow">
               <b>{c.name}</b>
-              <span className="chip mono" style={{ fontSize: 11, marginLeft: 8 }}>{c.address}</span>
+              <AddressChip contract={c} />
             </div>
             <span className="chip">offered</span>
           </div>
@@ -339,7 +380,7 @@ export default function Contracts() {
           <div className="row">
             <div className="grow">
               <b>{c.name}</b>
-              <span className="chip mono" style={{ fontSize: 11, marginLeft: 8 }}>{c.address}</span>
+              <AddressChip contract={c} />
             </div>
             <span className="chip green">accepted</span>
             <span className="chip">{c.txs} txs</span>
@@ -349,7 +390,13 @@ export default function Contracts() {
             {c.respondedAt ? ` · you accepted ${new Date(c.respondedAt).toLocaleDateString()}` : ''}
           </div>
           <div className="row mt">
-            <button className="btn btn-ghost btn-sm" onClick={() => { setActive(c); setOpen('execute'); setMethod(''); setArgs('{}'); }}>Execute</button>
+            {c.address ? (
+              <button className="btn btn-ghost btn-sm" onClick={() => { setActive(c); setOpen('execute'); setMethod(''); setArgs('{}'); }}>Execute</button>
+            ) : (
+              <span className="tiny" style={{ opacity: 0.6 }}>
+                This offer has no on-chain instance behind it, so there is nothing here to execute until its owner deploys one.
+              </span>
+            )}
           </div>
         </div>
       ))}
@@ -372,20 +419,28 @@ export default function Contracts() {
             <div className="row">
               <div className="grow">
                 <b>{c.name}</b>
-                <span className="chip mono" style={{ fontSize: 11, marginLeft: 8 }}>{c.address}</span>
+                <AddressChip contract={c} />
               </div>
               <span className="chip">{c.type}</span>
               <span className="chip">{c.txs} txs</span>
             </div>
             {c.description && <div className="tiny mt" style={{ opacity: 0.7 }}>{c.description}</div>}
-            {c.txHash && <div className="tiny mt mono" style={{ opacity: 0.5 }}>tx: {c.txHash.slice(0, 18)}...</div>}
+            {c.txHash ? (
+              <div className="tiny mt mono" style={{ opacity: 0.5 }}>instantiate tx: {c.txHash.slice(0, 18)}...</div>
+            ) : (
+              <div className="tiny mt" style={{ opacity: 0.5 }}>
+                No instantiation transaction behind this record, so it is metadata only — there is no on-chain instance to execute yet.
+              </div>
+            )}
             {offer && (
               <div className="tiny mt">
                 <b>{offer.label}</b> — {offer.detail}
               </div>
             )}
             <div className="row mt">
-              <button className="btn btn-ghost btn-sm" onClick={() => { setActive(c); setOpen('execute'); setMethod(''); setArgs('{}'); }}>Execute</button>
+              {c.address && (
+                <button className="btn btn-ghost btn-sm" onClick={() => { setActive(c); setOpen('execute'); setMethod(''); setArgs('{}'); }}>Execute</button>
+              )}
               {c.offerStatus === 'offered' ? (
                 <>
                   <button className="btn btn-ghost btn-sm" onClick={() => { setActive(c); setShareError(null); setOpen('share'); }}>Change offer</button>
@@ -447,7 +502,7 @@ export default function Contracts() {
             <textarea className="input" rows={2} value={args} onChange={(e) => setArgs(e.target.value)} placeholder="{}" />
           </div>
           <div className="tiny mt" style={{ marginBottom: 12, opacity: 0.6 }}>
-            Sends a MsgExecuteContract to {active.address} — signed with your wallet key.
+            Sends a MsgExecuteContract to {describeTarget(active)} — signed with your wallet key.
             {acceptedIncoming.some((c) => c._id === active._id)
               ? ' You are calling as the account it was offered to, so the contract’s own permissions decide whether the call goes through.'
               : ''}

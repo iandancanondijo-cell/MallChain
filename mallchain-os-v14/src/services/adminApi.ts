@@ -65,6 +65,22 @@ export interface AdminKycSubmission {
   riskLevel: 'low' | 'medium' | 'high';
   status: 'pending' | 'approved' | 'rejected' | 'review';
   submittedAt: string;
+  /**
+   * What services/amlProvider.js actually did for this submission.
+   * `screened: false` means no sanctions/PEP/adverse-media/watchlist list was
+   * ever consulted, so riskLevel then means "unvetted — review carefully",
+   * not "the lists found nothing". Records saved before the field existed
+   * report it as unscreened, which is the honest reading of unknown
+   * provenance.
+   */
+  amlChecks?: {
+    screened?: boolean;
+    sanctions?: boolean;
+    pep?: boolean;
+    adverseMedia?: boolean;
+    watchlist?: boolean;
+    provider?: string;
+  } | null;
 }
 
 /** A decided KYC record from GET /api/admin/kyc/reviewed. */
@@ -126,8 +142,12 @@ export interface AdminCampaign {
   title: string;
   description?: string;
   content_link?: string;
-  rate_per_task: number;
-  budget_remaining: number;
+  // Required by the Campaign schema, but this endpoint returns raw `.lean()`
+  // documents, so a campaign written before the field existed has no rate. The
+  // admin surfaces render that case explicitly (campaignRateLabel) instead of
+  // showing a blank cell next to a payout that silently pays nothing.
+  rate_per_task?: number;
+  budget_remaining?: number;
   status: 'active' | 'paused' | 'completed';
   completions_count: number;
 }

@@ -8,11 +8,11 @@ import AnimatedBackground from './components/AnimatedBackground';
 const Admin = lazy(() => import('./features/admin/Admin'));
 import TopBar from './components/TopBar';
 import CommandPalette from './components/CommandPalette';
-import { ToastHost, toast, toastKind } from './components/ui';
+import { ToastHost, toastKind } from './components/ui';
 import { CipherChallengeHost } from './components/CipherChallenge';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { matchRoute, useHashRoute } from './router';
+import { matchRoute, useHashRoute, isPublicRoute } from './router';
 import { store } from './store/store';
 import { useStoreVersion } from './components/ui';
 import { storeSync } from './services/storeSync';
@@ -79,6 +79,10 @@ export default function App() {
   // wallet the server hasn't been told about yet.
   const linkedAddressRef = useRef<string | null>(null);
   const migrationNudgeShownRef = useRef(false);
+  // Once-latch for the "your session ended after its 30 minutes" explanation
+  // (see the effect below). Re-armed whenever a session comes back, so a second
+  // lapse in the same page load can explain itself too.
+  const sessionEndNoticeShown = useRef(false);
   
   // Compliance state
   const complianceStatus = useComplianceStatus();
@@ -106,6 +110,24 @@ export default function App() {
         if (cameFromOAuthRedirect) {
           window.history.replaceState({}, '', window.location.pathname + window.location.hash);
         }
+
+        // A session marker whose authedUntil has passed is a different fact
+        // from "this browser never signed in": the session ended on the
+        // 30-minute policy. Nothing here inspects the marker for it — the
+        // first isAuthenticated() call (from any component's render, or from
+        // storeSync.initialize() below) records it on authService.sessionWasLapsed()
+        // as it wipes the marker, and the notice/routing effects below read
+        // that. Probing the marker here instead was tried and lost the race:
+        // a child's render runs before this effect, so by the time boot got a
+        // look the marker was already gone and the explanation never showed.
+        //
+        // Deliberately NOT arming the client-side cooldown here: the backend
+        // only arms the 15-minute lockout when a request actually arrives on
+        // an expired token (backend/src/middleware/sessionCooldown.js), so a
+        // tab that simply sat closed never caused one. Mirroring a cooldown the
+        // server never issued would replace the login form with a countdown for
+        // a lockout that does not exist — the real 401 `session_expired` and the
+        // 423 on an early sign-in are what arm it, authoritatively.
 
         // Cross-tab store synchronization (session marker + whole app state)
         storeSync.initialize();
@@ -207,6 +229,14 @@ export default function App() {
     if (st.prefs.lang) document.documentElement.lang = st.prefs.lang.toLowerCase();
 
     // Task 5.12: Initialize Socket.IO connection for real-time updates
+    //
+    // In a dev build React StrictMode runs this effect mount → cleanup → mount,
+    // so the very first handshake is torn down mid-flight and the browser logs
+    // one "WebSocket is closed before the connection is established" warning
+    // before the second connect() succeeds. It is a dev-only artifact of the
+    // double-invoke (verified: block/price/notification events stream normally
+    // afterwards, and a production build logs nothing), not a failed
+    // connection — don't chase it by weakening disconnect() on unmount.
     socketManager.connect();
 
     // Cleanup on unmount
@@ -216,6 +246,31 @@ export default function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Explain a session that ended on the 30-minute policy. Covers both the cold
+  // boot (the marker was already past its expiry when the page loaded) and the
+  // live lapse (storeSync's 3-second tick flips `authed` off when the marker
+  // passes while the tab is open) — hence authed, not just authInitialized, in
+  // the deps. One toast per lapse: sessionEndNoticeShown latches until a
+  // session comes back. handle401Error toasts for the case where a request
+  // discovered the expiry first, and that path also mirrors the server's real
+  // cooldown, so the countdown card and this message never describe the same
+  // event twice on top of each other.
+  useEffect(() => {
+    if (!authInitialized) return;
+    if (st.user.authed) {
+      sessionEndNoticeShown.current = false;
+      return;
+    }
+    if (sessionEndNoticeShown.current || !authService.sessionWasLapsed()) return;
+    sessionEndNoticeShown.current = true;
+    // 10s rather than the 4.2s default: this one arrives in the same instant
+    // the screen changes out from under the user, and it is the only thing that
+    // says why their dashboard turned into a sign-in form. Verified live on both
+    // triggers — cold boot (emitted ~650ms in, visible until the 10s dismiss)
+    // and a lapse while the tab is open (visible within 2s of the marker passing).
+    toastKind('Your session ended after its 30 minutes. Sign in again to continue.', 'warning', 10_000);
+  }, [authInitialized, st.user.authed]);
 
   // A client-side login (Auth page) flips st.user.authed without a page
   // reload, so the boot-time /me seeding above never runs for that session —
@@ -243,6 +298,33 @@ export default function App() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authInitialized, st.user.authed]);
+
+  // Realtime identity follows the session.
+  //
+  // The backend decides which account a socket belongs to during the
+  // handshake, from the httpOnly auth cookie (backend/src/index.js io.use),
+  // because JS can no longer read that token to hand it over. So a connection
+  // opened before a login stays anonymous for its whole life, and one opened
+  // for the previous account keeps that account's rooms — the live balance
+  // never arrives for the first, and the bell keeps ringing for the second on
+  // a shared device.
+  //
+  // This used to be the sign-in screens' job (four separate
+  // `socketManager.reauth()` calls), which left the OAuth callback, the 401
+  // session-expiry bounce and any future login path free to forget it. Keyed
+  // on the id as well as the flag, so switching accounts in one commit — the
+  // store resets and re-authenticates together — counts as a transition.
+  const socketIdentityRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!authInitialized) return;
+    const identity = st.user.authed ? st.user.id : '';
+    if (socketIdentityRef.current === identity) return;
+    // The boot connect() already handshook under whatever cookie the browser
+    // held, so the first read of the session needs no new one.
+    const bootObservation = socketIdentityRef.current === null;
+    socketIdentityRef.current = identity;
+    if (!bootObservation) socketManager.reauth();
+  }, [authInitialized, st.user.authed, st.user.id]);
 
   // Session policy (2026-11): warn once, 60 seconds before the 30-minute
   // session ends. Polls the local session marker every 10s and fires exactly
@@ -364,14 +446,21 @@ export default function App() {
     // discarding the query string in the process.
     const cleanPath = path.split('?')[0];
 
-    // Routes that don't require authentication.
-    // /wallet is included so users can connect/create a wallet before logging in.
-    // /admin is NOT here — unified auth means all users (including admins) log in
-    // through the main /auth portal first, then get routed by role.
-    const isPublicRoute = cleanPath === '/landing' || cleanPath === '/auth' || cleanPath === '/wallet' || cleanPath === '/wallet/connect';
+    // Routes that don't require authentication — the same list matchRoute()
+    // uses, imported rather than repeated. This effect rewrites the hash before
+    // the router renders anything, so a route added to one list and not the
+    // other was silently unreachable: /explorer, /dmca and /run-node were all
+    // "public" in router.tsx and bounced to /landing from here.
+    const isPublic = isPublicRoute(path);
 
-    if (!isAuthenticated && !isPublicRoute) {
-      navigate('/landing');
+    if (!isAuthenticated && !isPublic) {
+      // A lapsed session goes to the sign-in screen, which explains the
+      // timeout and shows a countdown only when the server actually issued one;
+      // someone who never signed in stays on the landing page they came for.
+      // Read live rather than from boot-time state: storeSync's 3-second tick
+      // flips `authed` to false when a session lapses with the tab open, and
+      // this effect re-runs on that change.
+      navigate(authService.sessionWasLapsed() ? '/auth?mode=login' : '/landing');
     } else if (isAuthenticated && cleanPath === '/landing') {
       // Authenticated user on landing → redirect to dashboard
       navigate('/');

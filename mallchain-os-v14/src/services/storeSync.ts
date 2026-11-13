@@ -37,7 +37,7 @@
  */
 
 import { store, OS_KEY, type AppState } from '../store/store';
-import { authService, SESSION_KEY, DEFAULT_COOLDOWN_MINUTES } from './auth';
+import { authService, SESSION_KEY } from './auth';
 
 const SYNC_INTERVAL_MS = 3000; // Check session validity every 3 seconds
 
@@ -92,15 +92,20 @@ export class StoreSync {
       // from here whenever <10 minutes remained) defeated that policy by
       // sliding the session forever, so it is REMOVED — the manual
       // authService.refreshSession() remains available for explicit use.
-      // When the local marker simply reaches its expiry while this tab still
-      // believes it is authed, that is the scheduled end of the session:
-      // mirror the server's cooldown client-side (the 423 the server returns
-      // if the user tries to sign in early is the authoritative correction).
-      const rawAuthedUntil = authService.getAuthedUntil();
-      if (rawAuthedUntil !== null && rawAuthedUntil * 1000 <= Date.now() && store.state.user.authed) {
-        authService.setCooldownUntil(Date.now() + DEFAULT_COOLDOWN_MINUTES * 60_000);
-      }
-
+      //
+      // This tick does NOT arm the client-side cooldown any more. It used to
+      // write a 15-minute `login_cooldown_until` the moment the marker passed
+      // its expiry while the store still believed it was authed, but the
+      // backend only puts an account in cooldown when a request actually
+      // arrives on the expired token (see
+      // backend/src/middleware/sessionCooldown.js). A tab that was closed over
+      // the expiry, or a background tab whose polling is paused, reaches this
+      // line with no server-side lockout at all — and AuthPage replaces the
+      // sign-in form with a countdown whenever that marker exists, so the
+      // guess turned into a 15-minute lockout the user was not under, with no
+      // way to sign in. The mirror is now written only from the server's own
+      // answers: the 401 `session_expired` (errorHandler.ts) and the 423 on an
+      // early sign-in (authApi.ts).
       const isAuth = authService.isAuthenticated();
 
       if (isAuth) {

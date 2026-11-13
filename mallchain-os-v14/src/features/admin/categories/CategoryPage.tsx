@@ -17,7 +17,7 @@
  *   short-circuits with 403, so we hide them from the UI too as defense
  *   in depth.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { adminApi } from '../../../services/adminApi';
 import type {
   AdminAmlReview,
@@ -46,9 +46,10 @@ import type {
 } from '../../../services/adminApi';
 import { fmtNum, Modal, toast } from '../../../components/ui';
 import { resolveContentLink, resolveProofLink } from '../../../services/proofLink';
+import { marketplaceCatalog, type ListingStatus, type ManagedListing } from '../../../services/marketplaceCatalog';
 import { store } from '../../../store/store';
 import { config } from '../../../services/config';
-import { AdminErrorBanner, collectErrors, amlAmountLabel, displayPii } from '../adminShared';
+import { AdminErrorBanner, collectErrors, amlAmountLabel, amlProvenance, displayPii, campaignBudgetLabel, campaignRateIsSet, campaignRateLabel, useAdminPoller } from '../adminShared';
 import ReportsAdmin from './ReportsAdmin';
 
 export type Category =
@@ -274,8 +275,13 @@ function UsersAdmin() {
             {users.map((u) => (
               <tr key={u._id}>
                 <td>
-                  <b>{u.username || u.email}</b>
-                  <div className="tiny">{u.email}</div>
+                  {/* Accounts created before the username field was optional
+                      carry their email in both columns, which rendered the
+                      same string twice per row. Show the handle only when it
+                      is actually a handle — otherwise the row is one name and
+                      one email, which is what an admin is scanning for. */}
+                  <b>{u.username && u.username !== u.email ? u.username : u.email}</b>
+                  {u.username && u.username !== u.email && <div className="tiny">{u.email}</div>}
                 </td>
                 <td>{u.role}</td>
                 <td>{new Date(u.createdAt).toLocaleDateString()}</td>
@@ -471,8 +477,12 @@ function BlockchainAdmin() {
   const [errors, setErrors] = useState<ReturnType<typeof collectErrors>>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (refresh = false) => {
+    // A refresh must not blank what the admin is reading: the spinner is for
+    // the first paint only, and every branch below keeps the previous values
+    // when a poll fails, so a one-off unreachable node shows stale-but-labelled
+    // data instead of an empty "no blocks" panel.
+    if (!refresh) setLoading(true);
     const [s, b, v, g] = await Promise.all([
       adminApi.getChainStatus(),
       adminApi.getChainBlocks(8),
@@ -495,11 +505,7 @@ function BlockchainAdmin() {
     setLoading(false);
   };
 
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), 15000);
-    return () => clearInterval(id);
-  }, []);
+  useAdminPoller((refresh) => void load(refresh), 15000);
 
   return (
     <>
@@ -757,16 +763,40 @@ function KycAdmin() {
   // upload on click, then send the returned documentRef with the decision.
   const [screenshots, setScreenshots] = useState<Record<string, File | undefined>>({});
 
-  const load = async (page = 0) => {
-    const [k, a, rk, ra, f] = await Promise.all([
+  // The two pending queues are what change underneath an admin; the reviewed
+  // history only changes when this admin records a decision. They are read
+  // apart from each other so the background refresh can re-check the queues
+  // without resetting the reviewed list back to page 1 — the old combined
+  // `load(0)` on a timer discarded rows the "Load more" button had just
+  // appended, and it fired five endpoint fan-outs per tick where two do the
+  // job. `setErrors` merges by endpoint so a queue failure cannot erase a
+  // banner about the reviewed panels, or the other way round.
+  const REVIEWED_ENDPOINTS = ['reviewed KYC decisions', 'reviewed AML decisions'];
+
+  const loadQueues = async () => {
+    const [k, a, f] = await Promise.all([
       adminApi.listPendingKyc(),
       adminApi.listPendingAmlReviews(),
-      adminApi.listReviewedKyc({ page, limit: 25 }),
-      adminApi.listReviewedAml({ page, limit: 25 }),
       adminApi.listStructuringFlags(false),
     ]);
     if (k.ok && k.data) setKyc(k.data.submissions);
     if (a.ok && a.data) setAml(a.data.reviews);
+    if (f.ok && f.data) setFlags(f.data.flags);
+    setErrors((prev) => [
+      ...prev.filter((e) => REVIEWED_ENDPOINTS.includes(e.endpoint)),
+      ...collectErrors([
+        ['pending KYC submissions', k],
+        ['pending AML reviews', a],
+        ['structuring flags', f],
+      ]),
+    ]);
+  };
+
+  const loadReviewed = async (page: number) => {
+    const [rk, ra] = await Promise.all([
+      adminApi.listReviewedKyc({ page, limit: 25 }),
+      adminApi.listReviewedAml({ page, limit: 25 }),
+    ]);
     if (rk.ok && rk.data) {
       setReviewedKyc((prev) => (page === 0 ? rk.data!.submissions : [...prev, ...rk.data!.submissions]));
       setReviewedTotal((t) => ({ ...t, kyc: rk.data!.total }));
@@ -775,22 +805,26 @@ function KycAdmin() {
       setReviewedAml((prev) => (page === 0 ? ra.data!.reviews : [...prev, ...ra.data!.reviews]));
       setReviewedTotal((t) => ({ ...t, aml: ra.data!.total }));
     }
-    if (f.ok && f.data) setFlags(f.data.flags);
     setReviewedPage(page);
-    setErrors(collectErrors([
-      ['pending KYC submissions', k],
-      ['pending AML reviews', a],
-      ['reviewed KYC decisions', rk],
-      ['reviewed AML decisions', ra],
-      ['structuring flags', f],
-    ]));
+    setErrors((prev) => [
+      ...prev.filter((e) => !REVIEWED_ENDPOINTS.includes(e.endpoint)),
+      ...collectErrors([
+        ['reviewed KYC decisions', rk],
+        ['reviewed AML decisions', ra],
+      ]),
+    ]);
+  };
+
+  const load = async (page = 0) => {
+    await Promise.all([loadQueues(), loadReviewed(page)]);
   };
 
   useEffect(() => {
     void load(0);
-    const id = setInterval(() => void load(0), 30000);
-    return () => clearInterval(id);
   }, []);
+
+  // Queues only: the reviewed history keeps whatever page the admin paged to.
+  useAdminPoller(() => void loadQueues(), 30000);
 
   const toggleUserDetail = async (userId: string) => {
     if (expandedUser === userId) {
@@ -899,6 +933,7 @@ function KycAdmin() {
           {!kyc.length && <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>No pending submissions.</div>}
           {kyc.map((k) => {
             const who = identityOf(k.userId);
+            const aml = amlProvenance(k);
             return (
             <div key={k._id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -921,9 +956,18 @@ function KycAdmin() {
                     {k.idType} · {k.idNumber}
                   </div>
                 </div>
-                <span className={`chip ${k.riskLevel === 'high' ? 'red' : k.riskLevel === 'medium' ? 'gold' : 'green'}`}>
-                  risk: {k.riskLevel}
-                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                  <span className={`chip ${k.riskLevel === 'high' ? 'red' : k.riskLevel === 'medium' ? 'gold' : 'green'}`}>
+                    risk: {k.riskLevel}
+                  </span>
+                  <span
+                    className="tiny mono"
+                    title={aml.title}
+                    style={{ color: aml.unscreened ? 'var(--txt-3)' : 'var(--txt-2)', maxWidth: 260, textAlign: 'right' }}
+                  >
+                    {aml.text}
+                  </span>
+                </div>
               </div>
 
               {who.id && expandedUser === who.id && (
@@ -1137,7 +1181,7 @@ function KycAdmin() {
           </div>
 
           {(reviewedKyc.length < reviewedTotal.kyc || reviewedAml.length < reviewedTotal.aml) && (
-            <button className="btn btn-ghost btn-sm mt" onClick={() => void load(reviewedPage + 1)}>
+            <button className="btn btn-ghost btn-sm mt" onClick={() => void loadReviewed(reviewedPage + 1)}>
               Load more decisions
             </button>
           )}
@@ -1349,8 +1393,13 @@ function MiningAdmin() {
                 <div className="m tiny">{s.description}</div>
                 {campaign ? (
                   <div className="tiny" style={{ marginTop: 4 }}>
-                    Campaign: <b>{campaign.title}</b> · pays <b>{fmtNum(campaign.rate_per_task)} MLPTS</b>
+                    Campaign: <b>{campaign.title}</b> · pays <b>{campaignRateLabel(campaign.rate_per_task)}</b>
                     {campaign.status !== 'active' && <span className="chip" style={{ marginLeft: 6 }}>campaign {campaign.status}</span>}
+                    {!campaignRateIsSet(campaign.rate_per_task) && (
+                      <span className="chip red" style={{ marginLeft: 6 }} title="This campaign document has no rate_per_task, so the approve route refuses to settle its submissions. Give the campaign a rate before reviewing.">
+                        rate missing — approve will be refused
+                      </span>
+                    )}
                   </div>
                 ) : s.campaign_id ? (
                   <div className="tiny mt" style={{ color: 'var(--red-2)' }}>⚠ Its campaign is not in the active list — approving may be refused.</div>
@@ -1395,7 +1444,11 @@ function MiningAdmin() {
             </label>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn btn-primary btn-sm" onClick={() => void approveSub(s._id)} disabled={busySub === s._id}>
-                {campaign ? `Approve · pay ${fmtNum(campaign.rate_per_task)} MLPTS` : 'Approve'}
+                {campaign
+                  ? campaignRateIsSet(campaign.rate_per_task)
+                    ? `Approve · pay ${campaignRateLabel(campaign.rate_per_task)}`
+                    : 'Approve · campaign has no rate'
+                  : 'Approve'}
               </button>
               <button className="btn btn-danger btn-sm" onClick={() => void rejectSub(s._id)} disabled={busySub === s._id}>
                 Reject
@@ -1464,8 +1517,12 @@ function MiningAdmin() {
             {campaigns.map((c) => (
               <tr key={c._id}>
                 <td><b>{c.title}</b></td>
-                <td className="num">{c.rate_per_task}</td>
-                <td className="num">{c.budget_remaining}</td>
+                <td className="num" style={campaignRateIsSet(c.rate_per_task) ? undefined : { color: 'var(--red-2)' }}>
+                  {campaignRateLabel(c.rate_per_task)}
+                </td>
+                <td className="num" style={campaignRateIsSet(c.rate_per_task) ? undefined : { color: 'var(--txt-3)' }}>
+                  {campaignBudgetLabel(c.budget_remaining)}
+                </td>
                 <td className="num">{c.completions_count}</td>
               </tr>
             ))}
@@ -1513,9 +1570,12 @@ function TreasuryAdmin() {
 
   useEffect(() => {
     void load();
-    const id = setInterval(() => void load(), 20000);
-    return () => clearInterval(id);
   }, []);
+
+  // Same five reads on a timer, but through the shared poller: it skips a tick
+  // while the tab is hidden and never stacks a second fan-out on a request
+  // that has not come back yet.
+  useAdminPoller(() => void load(), 20000);
 
   const retry = async (id: string) => {
     const r = await adminApi.retryWithdrawal(id);
@@ -1709,11 +1769,14 @@ function TreasuryAdmin() {
 
 // ============================================================================
 // MARKETPLACE — escrow state read live from the chain relay
-// (/api/marketplace/escrow → x/marketplace on :1317) plus the treasury burn
-// ledger. There is no separate admin-gated marketplace endpoint on the
-// backend; the on-chain escrow query is the real record of deals in flight.
-// Dispute/listing queues are not implemented in x/marketplace yet, so the
-// panel says so honestly instead of showing blanks.
+// (/api/marketplace/escrow → x/marketplace on :1317), the treasury burn
+// ledger, and the seller listings table from /api/marketplace/catalog/manage.
+// There is no separate admin-gated marketplace endpoint for listings: the
+// catalog is Mongo discovery data, and its moderation routes (PATCH/DELETE
+// /:id) accept a marketplace category admin or a superadmin in place of the
+// seller, which is what the Listings window below drives.
+// On-chain dispute queues remain a real gap — x/marketplace records escrow
+// states, not a dispute backlog — so nothing is rendered for one.
 // ============================================================================
 
 interface ChainEscrow {
@@ -1735,12 +1798,27 @@ function MarketplaceAdmin() {
   const [escrowError, setEscrowError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
-    setLoading(true);
+  const [listings, setListings] = useState<ManagedListing[]>([]);
+  const [listingError, setListingError] = useState<string | null>(null);
+  const [listingTotal, setListingTotal] = useState(0);
+  const [listingCounts, setListingCounts] = useState<{ active: number; paused: number; removed: number } | null>(null);
+  // 'all' rather than 'active' by default: the rows a moderator needs to see
+  // are exactly the ones the storefront has hidden — a paused listing they
+  // should restart, or a removal they should be able to spot and undo.
+  const [statusFilter, setStatusFilter] = useState<ListingStatus | 'all'>('all');
+  // The poller's callback closes over the first render's state, so the filter
+  // it queries with lives in a ref the dropdown writes through.
+  const statusFilterRef = useRef<ListingStatus | 'all'>('all');
+  const [busyListing, setBusyListing] = useState<string | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<ManagedListing | null>(null);
+
+  const load = async (refresh = false) => {
+    if (!refresh) setLoading(true);
     setError(null);
-    const [r, e] = await Promise.all([
+    const [r, e, l] = await Promise.all([
       adminApi.getTreasuryLedger({ activity: 'burn', limit: 30 }),
       adminApi.listMarketplaceEscrows(),
+      marketplaceCatalog.manage({ status: statusFilterRef.current, limit: 50 }),
     ]);
     if (r.ok && r.data) {
       setLedger(r.data.entries);
@@ -1751,17 +1829,61 @@ function MarketplaceAdmin() {
       setEscrows((e.data.escrows || []) as ChainEscrow[]);
       setEscrowError(null);
     } else {
-      setEscrows([]);
+      // A failed refresh used to clear the escrow table, so one unreachable
+      // chain REST moment turned a populated panel into "no deals". Keep the
+      // last real rows and let the error line say the query failed; the next
+      // tick replaces them as soon as the node answers.
+      if (!refresh) setEscrows([]);
       setEscrowError(e.error || 'Escrow query unavailable (chain REST offline?)');
+    }
+    if (l.ok && l.data) {
+      setListings(l.data.listings);
+      setListingTotal(l.data.pagination.total);
+      setListingCounts(l.data.counts);
+      setListingError(null);
+    } else {
+      if (!refresh) setListings([]);
+      setListingError(l.error || 'Listing query unavailable');
     }
     setLoading(false);
   };
 
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), 30000);
-    return () => clearInterval(id);
-  }, []);
+  const filterListings = (next: ListingStatus | 'all') => {
+    statusFilterRef.current = next;
+    setStatusFilter(next);
+    void load(true);
+  };
+
+  // Pausing and removing go through the seller's own routes with moderator
+  // authority (see canModerate in routes/marketplaceCatalog.js), so there is
+  // no separate moderation API surface to keep in sync with the storefront.
+  const pauseListing = async (listing: ManagedListing) => {
+    setBusyListing(listing.id);
+    const to = listing.status === 'paused' ? 'active' : 'paused';
+    const r = await marketplaceCatalog.update(listing.id, { status: to });
+    setBusyListing(null);
+    if (r.ok) {
+      toast(`${listing.name} ${to === 'paused' ? 'paused — hidden from the storefront' : 'live again'}`);
+      void load(true);
+    } else {
+      toast(r.error || 'Failed to change the listing status', false);
+    }
+  };
+
+  const removeListing = async (listing: ManagedListing) => {
+    setBusyListing(listing.id);
+    const r = await marketplaceCatalog.remove(listing.id);
+    setBusyListing(null);
+    setRemoveTarget(null);
+    if (r.ok) {
+      toast(`${listing.name} removed. The seller can list it again; orders already escrowed against it are untouched.`);
+      void load(true);
+    } else {
+      toast(r.error || 'Failed to remove the listing', false);
+    }
+  };
+
+  useAdminPoller((refresh) => void load(refresh), 30000);
 
   const escrowCount = (s?: string) => (s || '').toLowerCase();
 
@@ -1770,14 +1892,16 @@ function MarketplaceAdmin() {
       <div className="card">
         <div className="sec-title">
           <h2>Marketplace category</h2>
-          <span className="sub">escrow deals on-chain + burn events from marketplace purchases</span>
+          <span className="sub">seller listings to moderate + escrow deals and burns from purchases</span>
         </div>
         <p className="tiny" style={{ color: 'var(--txt-3)' }}>
-          Deals settle through on-chain escrow (x/marketplace), surfaced live below. Listing creation
-          and dispute transactions run on <code>/api/marketplace</code> user-side; this window is the
-          admin read surface. Dispute/listing <em>queues</em> aren't implemented on-chain yet — no
-          marketplace transaction data exists for them, so there is nothing to show there beyond an
-          honest "coming soon".
+          Deals settle through on-chain escrow (x/marketplace), surfaced live below. Listings themselves
+          are off-chain discovery data in Mongo, read here through
+          <code>/api/marketplace/catalog/manage</code> and moderated from the Listings window with the
+          same routes a seller uses: pausing hides a listing from the storefront without deleting it, and
+          removing it is soft — orders and escrows that already reference the document keep resolving, and
+          the seller can restart their own copy afterwards. On-chain dispute queues are a separate gap:
+          the module records escrow states, not a dispute backlog, so there is nothing honest to list there yet.
         </p>
       </div>
 
@@ -1796,6 +1920,15 @@ function MarketplaceAdmin() {
           <div className="card-label">Marketplace burns</div>
           <div className="card-value">{ledger.length}</div>
           <div className="card-sub">treasury ledger entries (latest 30)</div>
+        </div>
+        <div className="card">
+          <div className="card-label">Listings in the catalog</div>
+          <div className="card-value">{listingCounts ? listingCounts.active : '—'}</div>
+          <div className="card-sub">
+            {listingCounts
+              ? `${listingCounts.paused} paused · ${listingCounts.removed} removed`
+              : listingError ? 'query failed' : 'loading…'}
+          </div>
         </div>
       </div>
 
@@ -1846,6 +1979,132 @@ function MarketplaceAdmin() {
           </table>
         )}
       </div>
+
+      <div className="card mt">
+        <div className="sec-title">
+          <h2>Listings</h2>
+          <span className="sub">
+            {loading && !listings.length
+              ? 'loading…'
+              : listingError
+                ? 'unavailable'
+                : `${listings.length} shown · ${listingTotal} with this filter`}
+          </span>
+          <select
+            className="input"
+            style={{ width: 'auto', marginLeft: 'auto' }}
+            value={statusFilter}
+            onChange={(e) => filterListings(e.target.value as ListingStatus | 'all')}
+            aria-label="Filter listings by status"
+          >
+            <option value="all">All statuses</option>
+            <option value="active">Active only</option>
+            <option value="paused">Paused only</option>
+            <option value="removed">Removed only</option>
+          </select>
+          <button className="btn btn-ghost btn-sm" onClick={() => void load(true)}>Refresh</button>
+        </div>
+        {listingError && (
+          <div style={{ color: 'var(--danger, #FF7A70)', padding: '8px 0' }}>{listingError}</div>
+        )}
+        {!listingError && !listings.length && !loading && (
+          <div className="empty" style={{ color: 'var(--txt-3)', padding: 20 }}>
+            No listings match this filter. Sellers post them from #/marketplace — a product only appears
+            once its account has a linked wallet, because escrow pays out to that address.
+          </div>
+        )}
+        {listings.length > 0 && (
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Seller</th>
+                <th>Category</th>
+                <th>Price</th>
+                <th>Qty</th>
+                <th>Status</th>
+                <th>Posted</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {listings.map((l) => (
+                <tr key={l.id}>
+                  <td>
+                    {/* The glyph and the name are separate elements: the card is
+                        a product label a moderator reads and a test locates, and
+                        fusing them into one text node makes the name unmatchable. */}
+                    <div>{l.img} <span>{l.name}</span></div>
+                    {l.description && (
+                      <div className="tiny" style={{ color: 'var(--txt-3)' }}>{l.description.slice(0, 70)}</div>
+                    )}
+                  </td>
+                  <td className="tiny">
+                    {l.seller || <span style={{ color: 'var(--txt-3)' }}>no display name</span>}
+                    <div className="mono" style={{ color: 'var(--txt-3)' }}>
+                      {l.sellerAddress ? `${l.sellerAddress.slice(0, 10)}…${l.sellerAddress.slice(-6)}` : '—'}
+                    </div>
+                  </td>
+                  <td className="tiny">{l.cat}</td>
+                  {/* Token price, the same unit the storefront and escrow use —
+                      never a currency symbol on an amount that settles in MALL. */}
+                  <td className="num tiny">{l.price.toFixed(2)} MALL</td>
+                  <td className="num tiny">{l.quantity}</td>
+                  <td>
+                    <span className={`chip ${l.status === 'active' ? 'green' : l.status === 'paused' ? 'gold' : 'red'}`}>
+                      {l.status}
+                    </span>
+                  </td>
+                  <td className="tiny">{l.createdAt ? timeAgo(l.createdAt) : '—'}</td>
+                  <td>
+                    {/* A removed listing is already out of the storefront; the
+                        only moderation left to do is put it back, which the
+                        seller themselves must do through PATCH. */}
+                    {l.status !== 'removed' && (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          disabled={busyListing === l.id}
+                          onClick={() => void pauseListing(l)}
+                        >
+                          {l.status === 'paused' ? 'Restart' : 'Pause'}
+                        </button>
+                        <button
+                          className="btn btn-danger btn-sm"
+                          disabled={busyListing === l.id}
+                          onClick={() => setRemoveTarget(l)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {removeTarget && (
+        <Modal title="Remove listing" onClose={() => setRemoveTarget(null)}>
+          <p style={{ fontSize: 13.5, color: 'var(--txt-2)' }}>
+            Remove <b>{removeTarget.name}</b> from {removeTarget.seller || removeTarget.sellerAddress}?
+            It leaves the storefront immediately. This is a soft removal: purchases and escrows that
+            already reference it stay resolvable, and the seller can post it again.
+          </p>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={() => setRemoveTarget(null)}>Cancel</button>
+            <button
+              className="btn btn-danger"
+              disabled={busyListing === removeTarget.id}
+              onClick={() => void removeListing(removeTarget)}
+            >
+              {busyListing === removeTarget.id ? 'Removing…' : 'Confirm removal'}
+            </button>
+          </div>
+        </Modal>
+      )}
 
       <div className="card mt">
         <div className="sec-title">
@@ -1950,12 +2209,9 @@ function MlptsAdmin() {
     ]));
   };
 
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), 30000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flowFilter]);
+  // Changing the flow filter is a new question, so that run is a load; the
+  // timer afterwards is a refresh of the same question.
+  useAdminPoller(() => void load(), 30000, [flowFilter]);
 
   // Filter options = the known enum ∪ flows actually observed in the data —
   // so new backend flow types are filterable as soon as they appear.

@@ -16,6 +16,8 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { store } from '../store/store';
 import { useStoreVersion, fmtNum, StatusChip, toast } from '../components/ui';
 import { useTransactionData } from '../hooks/useTransactionData';
+import { useTxTypes } from '../hooks/useTxTypes';
+import { txIcon, txTimeText, txTitle } from '../utils/txPresentation';
 import { LoadingState } from '../components/LoadingState';
 import { TransactionDetailModal } from '../features/wallet/TransactionDetailModal';
 import { AddressIdentity } from '../components/WalletIdentity';
@@ -39,6 +41,7 @@ interface FilterState {
 export default function TransactionHistory() {
   useStoreVersion();
   const st = store.state;
+  const txTypes = useTxTypes();
 
   // Task 14.2: Sortable columns state
   const [sortColumn, setSortColumn] = useState<SortColumn>(null);
@@ -187,23 +190,34 @@ export default function TransactionHistory() {
 
   /**
    * Task 14.6: Export transactions as CSV
+   *
+   * `type` is the direction and `tx_type` the published category — a stake and
+   * a transfer are both 'send' on the first axis alone. An unknown timestamp
+   * exports as blank rather than 1970-01-01, which a spreadsheet would accept
+   * as a real date.
    */
   const exportCsv = useCallback(() => {
-    const rows = [['id', 'type', 'amount', 'asset', 'status', 'from', 'to', 'fee', 'note', 'timestamp'].join(',')];
+    const cell = (value: string | number | undefined | null) => {
+      const text = String(value ?? '').replace(/,/g, ' ');
+      return /"/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const rows = [['id', 'type', 'tx_type', 'amount', 'asset', 'status', 'from', 'to', 'fee', 'note', 'timestamp', 'block'].join(',')];
     sortedTransactions.forEach((t) =>
       rows.push(
         [
           t.id,
           t.type,
+          t.txType,
           t.amount,
           t.asset,
           t.status,
           t.from || '',
           t.to || '',
           t.fee || '',
-          (t.note || '').replace(/,/g, ' '),
-          new Date(t.ts).toISOString(),
-        ].join(',')
+          t.note || '',
+          t.ts > 0 ? new Date(t.ts).toISOString() : '',
+          t.blockNumber ?? '',
+        ].map(cell).join(',')
       )
     );
     const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
@@ -279,6 +293,11 @@ export default function TransactionHistory() {
       {/* Task 14.3: Advanced filtering */}
       <div className="filter-section">
         <div className="filter-row">
+          {/* The options are the server's own category table (GET
+              /api/tx/types), not a list kept here: this select used to offer
+              'claim' and 'escrow' that /api/tx/history could never return, and
+              now that the endpoint validates `type`, an invented value would be
+              a 400 rather than an empty page. */}
           <select
             className="input"
             value={filters.type}
@@ -286,18 +305,27 @@ export default function TransactionHistory() {
               setFilters({ ...filters, type: e.target.value });
               setPage(1);
             }}
-            title="Filter by transaction type"
+            title={txTypes.error || 'Filter by transaction type'}
           >
             <option value="">All types</option>
-            <option value="send">Send</option>
-            <option value="receive">Receive</option>
-            <option value="swap">Swap</option>
-            <option value="stake">Stake</option>
-            <option value="unstake">Unstake</option>
-            <option value="reward">Reward</option>
-            <option value="penalty">Penalty</option>
-            <option value="claim">Claim</option>
-            <option value="escrow">Escrow</option>
+            <optgroup label="Direction">
+              {txTypes.directions.map((direction) => (
+                <option key={direction} value={direction}>
+                  {direction === 'send' ? 'Sent by this wallet' : 'Received by this wallet'}
+                </option>
+              ))}
+            </optgroup>
+            {txTypes.types.length > 0 && (
+              <optgroup label="Category">
+                {txTypes.types
+                  .filter((entry) => !txTypes.directions.includes(entry.value))
+                  .map((entry) => (
+                    <option key={entry.value} value={entry.value} title={entry.description}>
+                      {entry.label}
+                    </option>
+                  ))}
+              </optgroup>
+            )}
           </select>
 
           <select
@@ -354,7 +382,7 @@ export default function TransactionHistory() {
           <div className="filter-indicator">
             <span className="badge">Filters active: {
               [
-                filters.type && `type=${filters.type}`,
+                filters.type && `type=${txTypes.types.find((entry) => entry.value === filters.type)?.label ?? filters.type}`,
                 filters.status && `status=${filters.status}`,
                 filters.dateFrom && `from=${filters.dateFrom}`,
                 filters.dateTo && `to=${filters.dateTo}`,
@@ -416,15 +444,14 @@ export default function TransactionHistory() {
                   onClick={() => setSelectedTxId(t.id)}
                   style={{ cursor: 'pointer' }}
                 >
-                  {/* Transaction type icon */}
-                  <span className="tx-icon" title={t.type}>
-                    {t.type === 'send' ? '➤' : t.type === 'receive' ? '⬇' : t.type === 'swap' ? '⇄' : t.type === 'stake' || t.type === 'unstake' ? '📌' : t.type === 'reward' ? '✦' : t.type === 'penalty' ? '⚠' : '📋'}
-                  </span>
+                  {/* Transaction type icon — the category the server
+                      published, not a fragment match done here. */}
+                  <span className="tx-icon" title={t.txTypeLabel}>{txIcon(t)}</span>
 
                   {/* Transaction info */}
                   <div className="tx-info grow">
                     <div className="tx-title">
-                      {t.type.charAt(0).toUpperCase() + t.type.slice(1)} · {fmtNum(t.amount)} {t.asset}
+                      {txTitle(t)} · {fmtNum(t.amount)} {t.asset}
                     </div>
                     <div className="tx-detail mono">
                       {t.note
@@ -432,7 +459,7 @@ export default function TransactionHistory() {
                         : party
                           ? <AddressIdentity address={party} label={t.type === 'receive' ? 'From' : 'To'} size={18} />
                           : (shortHash || '')}
-                      {' · '}{new Date(t.ts).toLocaleString()}
+                      {' · '}{txTimeText(t.ts)}
                     </div>
                   </div>
 
@@ -441,9 +468,10 @@ export default function TransactionHistory() {
                     {fmtNum(t.amount)} {t.asset}
                   </div>
 
-                  {/* Date column */}
+                  {/* Date column — a blank rather than 01/01/1970 when the
+                      node gave no readable timestamp (ts === 0). */}
                   <div className="tx-date">
-                    {new Date(t.ts).toLocaleDateString()}
+                    {t.ts > 0 ? new Date(t.ts).toLocaleDateString() : '—'}
                   </div>
 
                   {/* Status chip */}
@@ -506,6 +534,7 @@ export default function TransactionHistory() {
         transactionId={selectedTxId || ''}
         isOpen={selectedTxId !== null}
         onClose={() => setSelectedTxId(null)}
+        address={st.wallet.address}
       />
     </div>
   );

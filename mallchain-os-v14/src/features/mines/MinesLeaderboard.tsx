@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStoreVersion, fmtNum, fmtMoney, ScoreRing } from '../../components/ui';
 import { useCurrencyConverter } from '../../services/currency';
-import { useLivePrice } from '../../hooks/useLivePrice';
+import { useMallpointsPrice } from '../../hooks/useMallpointsPrice';
 import { store } from '../../store/store';
 import { minesApi, type EarningsSummary, type ParticipantLeaderboardEntry, type MinesProfile } from '../../services/minesApi';
 
@@ -9,20 +9,21 @@ import { minesApi, type EarningsSummary, type ParticipantLeaderboardEntry, type 
  * Leaderboard — real top Campaign Participants (backend/src/routes/mines.js:
  * GET /leaderboard).
  *
- * Every figure here is Mallpoints, which has no price of its own: the chain
- * quotes it in KES through the same live rate the wallet and Send screens use
- * (hooks/useLivePrice.ts → GET /api/economy/state). The fiat line is therefore
- * derived in the browser from that rate rather than baked into the ranked rows,
- * so a rate change cannot leave stale money figures on a board that only
- * re-fetches when it reloads. When the rate is unavailable the row says so
- * instead of printing a number computed from a guess.
+ * Every figure here is Mallpoints, which has no price of its own: the server
+ * quotes it in KES from its own economy constants, over the dedicated rate
+ * endpoint (hooks/useMallpointsPrice.ts → GET /api/mallpoints/price) that the
+ * purchase screen reads too. The fiat line is therefore derived in the browser
+ * from that rate rather than baked into the ranked rows, so a rate change
+ * cannot leave stale money figures on a board that only re-fetches when it
+ * reloads. When the rate is unavailable the row says so instead of printing a
+ * number computed from a guess.
  */
 export default function MinesLeaderboard() {
   useStoreVersion();
   const st = store.state;
   const cur = st.prefs.currency;
   const toDisplay = useCurrencyConverter(cur);
-  const { pointPriceKes, error: priceError } = useLivePrice();
+  const { pointPriceKes, pegSource, error: priceError } = useMallpointsPrice();
 
   const [rows, setRows] = useState<ParticipantLeaderboardEntry[] | null>(null);
   const [profile, setProfile] = useState<MinesProfile | null>(null);
@@ -134,7 +135,7 @@ export default function MinesLeaderboard() {
                   ? 'No rate, so no money figure is printed.'
                   : `${fmtNum(mine?.approvedMlpts ?? 0)} MLPTS at the live Mallpoints rate of ${fmtMoney(ratePerPoint, cur)} each${cur === 'KES' ? '' : ' (converted from KES)'}.`}
               </div>
-              <div className="src">economy/state · pointPriceKes, {cur}</div>
+              <div className="src">mallpoints/price · pointPriceKes{pegSource === 'default' ? ' (deployment default)' : ''}, {cur}</div>
             </div>
           </div>
           {myRow ? (

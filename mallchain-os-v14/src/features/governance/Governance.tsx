@@ -259,7 +259,7 @@ export default function Governance() {
         <div className="card card-glow bg-gradient-card" style={{ padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
           <Users size={18} style={{ color: 'rgb(var(--section-accent-rgb))', flexShrink: 0 }} />
           <div className="grow" style={{ fontSize: 13 }}>
-            Real governance voting power comes from bonded stake (x/staking), not your MLCNS balance. Delegate some STAKE to gain real voting weight.
+            Real governance voting power comes from bonded stake (x/staking), not your MALL balance. Delegate some STAKE to gain real voting weight.
           </div>
           <button className="btn btn-primary" onClick={() => setDelegateOpen(true)}>Delegate stake</button>
         </div>

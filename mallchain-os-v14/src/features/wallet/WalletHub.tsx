@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { store } from '../../store/store';
 import { useStoreVersion, fmtNum, fmtMoney, toast } from '../../components/ui';
 import { useWalletData } from '../../hooks/useWalletData';
@@ -9,6 +9,7 @@ import { LoadingState } from '../../components/LoadingState';
 import { useWalletGate, reportLinkFailure, linkAttemptGuard } from './walletGate';
 import WalletGateNotice from './WalletGateNotice';
 import { AccountPicture, AddressIdentity } from '../../components/WalletIdentity';
+import { networkLabel, useNetworkSnapshot } from '../../hooks/useNetworkIdentity';
 import {
   ArrowUpRight, ArrowDownLeft, CreditCard, Building2, Sparkles,
   Repeat, Clock, BarChart3, Wallet, Copy, ExternalLink, Settings, Lock, Banknote
@@ -28,15 +29,49 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
   const walletCreatedAt = st.wallet.createdAt;
 
   const { balance, loading, error, retry } = useWalletData(walletAddress);
+  // Same shared snapshot the top bar reads, so the wallet's own "Network" row
+  // cannot disagree with the chip next to the user's name.
+  const netSnap = useNetworkSnapshot();
   // Verified identity comes before a wallet: this is the second door a signed-in
   // person can try to attach an address through, and it must not offer what the
   // server will refuse.
   const { gate, refresh: refreshGate } = useWalletGate();
 
+  // Wallet age is a server fact, not a browser fact. `st.wallet.createdAt`
+  // only exists for wallets created in this tab, which is why this row read
+  // "Unknown" for every linked wallet. The backend stamps
+  // `User.walletLinkedAt` when an address is linked
+  // (authController.linkWallet) and counts the cash-out waiting period from
+  // it, so the number shown here is the same one that decides withdrawals —
+  // not a local value a tab could move backwards.
+  const [serverWalletSince, setServerWalletSince] = useState<{ at: number; reference: 'walletLinkedAt' | 'accountCreatedAt' } | null>(null);
+
+  useEffect(() => {
+    if (!walletAddress) {
+      setServerWalletSince(null);
+      return;
+    }
+    let cancelled = false;
+    authService.getServerWalletLink().then((res) => {
+      // Only trust the clock when the server is talking about *this* address —
+      // a multi-wallet account must not borrow another wallet's age.
+      if (cancelled || !res.ok || !res.address || res.address !== walletAddress) return;
+      const fromLink = res.linkedAt ? Date.parse(res.linkedAt) : NaN;
+      if (!Number.isNaN(fromLink)) {
+        setServerWalletSince({ at: fromLink, reference: 'walletLinkedAt' });
+        return;
+      }
+      const fromAccount = res.accountCreatedAt ? Date.parse(res.accountCreatedAt) : NaN;
+      if (!Number.isNaN(fromAccount)) setServerWalletSince({ at: fromAccount, reference: 'accountCreatedAt' });
+    });
+    return () => { cancelled = true; };
+  }, [walletAddress]);
+
   const getWalletAge = () => {
-    if (!walletCreatedAt) return 'Unknown';
+    const since = serverWalletSince?.at ?? walletCreatedAt;
+    if (!since) return 'Unknown';
     const now = Date.now();
-    const diff = now - walletCreatedAt;
+    const diff = now - since;
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
     if (days === 0) return 'Today';
     if (days === 1) return '1 day';
@@ -349,7 +384,7 @@ export default function WalletHub({ navigate }: { navigate: (p: string) => void 
               </div>
               <div className="wallet-detail-row">
                 <span className="wallet-detail-label">Network</span>
-                <span>{st.settings.network}</span>
+                <span>{networkLabel(netSnap)}</span>
               </div>
               <div className="wallet-detail-row">
                 <span className="wallet-detail-label">Wallet age</span>

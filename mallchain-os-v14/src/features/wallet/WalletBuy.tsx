@@ -128,7 +128,7 @@ export default function WalletBuy({ navigate }: { navigate: (p: string) => void 
     }
     const mlcns = parseFloat(amount);
     if (!mlcns || mlcns <= 0) {
-      toast('Enter a valid MLCNS amount', false);
+      toast('Enter a valid MALL amount', false);
       return;
     }
     if (!/^254\d{9}$/.test(phone)) {
@@ -171,7 +171,7 @@ export default function WalletBuy({ navigate }: { navigate: (p: string) => void 
     }
 
     const quoteId = reserveRes.data.quoteId;
-    const mpesaRes = await buyApi.initiateMpesa({ quoteId, phone, amount: mlcns, description: `Buy ${mlcns} MLCNS` });
+    const mpesaRes = await buyApi.initiateMpesa({ quoteId, phone, amount: mlcns, description: `Buy ${mlcns} MALL` });
 
     if (!mpesaRes.ok || !mpesaRes.data) {
       toast(mpesaRes.error || 'Failed to start M-Pesa payment', false);
@@ -272,7 +272,7 @@ export default function WalletBuy({ navigate }: { navigate: (p: string) => void 
             </div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Direct purchases are closed</div>
             <div style={{ fontSize: 13, color: 'var(--txt-3)', lineHeight: 1.6, maxWidth: 360, margin: '0 auto' }}>
-              The MLCN/KES liquidity pool has reached its threshold. You can still get MLCNS by converting your Mallpoints or receiving a transfer from another wallet.
+              The MALL/KES liquidity pool has reached its threshold. You can still get MALL by converting your Mallpoints or receiving a transfer from another wallet.
             </div>
           </div>
         </div>
@@ -326,7 +326,7 @@ export default function WalletBuy({ navigate }: { navigate: (p: string) => void 
           <>
             <div className="field mb">
               <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Coins size={13} style={{ color: 'var(--gold)' }} /> Amount (MLCNS)
+                <Coins size={13} style={{ color: 'var(--gold)' }} /> Amount (MALL)
               </label>
               <input className="input" type="number" min="1" value={amount} onChange={(e) => onAmountChange(e.target.value)} disabled={busy} />
             </div>
@@ -337,7 +337,7 @@ export default function WalletBuy({ navigate }: { navigate: (p: string) => void 
               </label>
               <input className="input" type="number" min="1" value={fiat} onChange={(e) => setFiat(e.target.value)} disabled={busy} />
               <div className="hint" style={{ fontSize: 11.5, color: 'var(--txt-3)', marginTop: 4 }}>
-                Rate ≈ {buyRateKes.toFixed(2)} KES / MLCNS
+                Rate ≈ {buyRateKes.toFixed(2)} KES / MALL
               </div>
             </div>
 
@@ -359,7 +359,7 @@ export default function WalletBuy({ navigate }: { navigate: (p: string) => void 
             <div className="wo-summary" style={{ marginBottom: 16 }}>
               <div className="wo-summary-row">
                 <span className="wo-summary-label">You receive</span>
-                <span className="wo-summary-value" style={{ color: 'var(--gold)' }}>{amount || '0'} MLCNS</span>
+                <span className="wo-summary-value" style={{ color: 'var(--gold)' }}>{amount || '0'} MALL</span>
               </div>
               <div className="wo-summary-row">
                 <span className="wo-summary-label">You pay</span>
@@ -371,7 +371,7 @@ export default function WalletBuy({ navigate }: { navigate: (p: string) => void 
               </div>
               <div className="wo-summary-row total">
                 <span className="wo-summary-label">Rate</span>
-                <span className="wo-summary-value">{buyRateKes.toFixed(2)} KES / MLCNS</span>
+                <span className="wo-summary-value">{buyRateKes.toFixed(2)} KES / MALL</span>
               </div>
             </div>
 

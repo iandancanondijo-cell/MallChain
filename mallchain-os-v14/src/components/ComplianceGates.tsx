@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 import { store } from '../store/store';
 import { api } from '../services/api';
 import { kycApi } from '../services/kycApi';
+import { KYC_VERDICT, resolveKycVerdict, type KycServerVerdict } from '../services/kycVerdict';
 import './ComplianceGates.css';
 
 interface ComplianceStatus {
@@ -22,7 +23,18 @@ interface ComplianceStatus {
   tosAccepted: boolean;
   privacyAccepted: boolean;
   kycLevel: number;
-  kycStatus: 'pending' | 'approved' | 'rejected' | 'expired';
+  /**
+   * The record's own vocabulary, kept for existing consumers. 'unverified' is
+   * what the server answers when nothing has been submitted — the value this
+   * type used to lack, which is why an unread account was typed as 'pending'.
+   */
+  kycStatus: 'pending' | 'approved' | 'rejected' | 'expired' | 'unverified';
+  /**
+   * The machine-readable verdict GET /api/auth/compliance-status publishes
+   * (handoff §6), derived by the same server function that gates wallet
+   * linkage. New code should branch on this, not on the fields above.
+   */
+  verdict: KycServerVerdict | 'unknown';
   amlStatus: 'clear' | 'flagged' | 'under_review';
   geographicRestriction: boolean;
   restrictedReason?: string;
@@ -284,12 +296,15 @@ export function KYCStatusAlert() {
           setState('quiet');
           return;
         }
-        const s = res.data.status;
-        if (s === 'approved') setState('quiet');
-        else if (s === 'pending' || s === 'review') {
+        // The server's published verdict (handoff §6), not a reading of
+        // `status`/`kycLevel`/`reviewedAt` assembled here — which is how this
+        // banner and the wallet gate could disagree about one account.
+        const verdict = resolveKycVerdict(res.data);
+        if (verdict === KYC_VERDICT.VERIFIED) setState('quiet');
+        else if (verdict === KYC_VERDICT.PENDING) {
           setDetail({ submittedAt: res.data.submittedAt });
           setState('review');
-        } else if (s === 'rejected') {
+        } else if (verdict === KYC_VERDICT.REJECTED) {
           setDetail({ notes: res.data.notes, submittedAt: res.data.submittedAt });
           setState('rejected');
         } else setState('unverified');
@@ -383,7 +398,11 @@ export function useComplianceStatus(): ComplianceStatus {
     tosAccepted: false,
     privacyAccepted: false,
     kycLevel: 0,
-    kycStatus: 'pending',
+    // Nothing has been read yet, so nothing is claimed: 'pending' used to be
+    // the initial value, which told a brand-new account a reviewer was looking
+    // at it before any request had been made.
+    kycStatus: 'unverified',
+    verdict: 'unknown',
     amlStatus: 'clear',
     geographicRestriction: false,
     lastVerified: 0,
@@ -402,12 +421,22 @@ export function useComplianceStatus(): ComplianceStatus {
         const complianceRes = await api.get<ComplianceStatus>('/api/auth/compliance-status');
 
         if (isMounted) {
+          // The route answers with `verdict` (and `kycStatus` for current
+          // consumers) from the same server function that gates wallet
+          // linkage, so a compliance banner here and a wallet door elsewhere
+          // report one account's status the same way. resolveKycVerdict is the
+          // only reader of that pair, wherever it came from.
+          const verdict = resolveKycVerdict({
+            verdict: complianceRes.data?.verdict,
+            status: complianceRes.data?.kycStatus,
+          });
           setStatus({
             ageVerified: !!ageVerified,
             tosAccepted: !!tosAccepted,
             privacyAccepted: !!privacyAccepted,
             kycLevel: store.state.user.kycLevel || 0,
-            kycStatus: complianceRes.data?.kycStatus || 'pending',
+            kycStatus: complianceRes.data?.kycStatus || 'unverified',
+            verdict,
             amlStatus: complianceRes.data?.amlStatus || 'clear',
             geographicRestriction: complianceRes.data?.geographicRestriction || false,
             restrictedReason: complianceRes.data?.restrictedReason,

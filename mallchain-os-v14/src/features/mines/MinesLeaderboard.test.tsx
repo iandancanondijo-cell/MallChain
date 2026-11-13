@@ -5,8 +5,8 @@
  * (backend/src/routes/mines.js: GET /leaderboard), and every row now carries a
  * second, smaller figure: what that Mallpoints is worth. That conversion is the
  * security-critical part — Mallpoints has no price of its own, so the number
- * must come from the one live rate the wallet uses (hooks/useLivePrice.ts →
- * GET /api/economy/state) and must disappear, not fall back to a guess, when
+ * must come from the server's own rate (hooks/useMallpointsPrice.ts →
+ * GET /api/mallpoints/price) and must disappear, not fall back to a guess, when
  * that rate is missing. These also pin the second rule: the board is a top-50
  * list, so a miner's own lifetime total is read from their settled submissions
  * (GET /earnings/summary) rather than inferred from whether a row exists.
@@ -26,9 +26,9 @@ vi.mock('../../services/minesApi', () => ({
 }));
 
 /** Mutable so one test can hand the component a rate and the next can take it away. */
-const livePrice = { pointPriceKes: 2, loading: false, error: false };
-vi.mock('../../hooks/useLivePrice', () => ({
-  useLivePrice: () => ({ ...livePrice, midKes: 0.63, buyKes: null, sellKes: null, conversionRate: null }),
+const peg = { pointPriceKes: 2, pegSource: 'environment' as 'environment' | 'default' | null, loading: false, error: false };
+vi.mock('../../hooks/useMallpointsPrice', () => ({
+  useMallpointsPrice: () => ({ ...peg, defaultPointPriceKes: 2, conversion: null, conversionRate: null, asOf: null }),
 }));
 // KES in, KES out — the FX cross itself is tested in services/currency.
 vi.mock('../../services/currency', () => ({
@@ -59,8 +59,9 @@ async function mount(rows: unknown[], earnings: unknown = { ...summary }) {
 beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
-  livePrice.pointPriceKes = 2;
-  livePrice.error = false;
+  peg.pointPriceKes = 2;
+  peg.pegSource = 'environment';
+  peg.error = false;
   store.reset();
   // The rows assert "KES" digits; the default detection would follow the
   // test runner's locale and format them as dollars instead.
@@ -89,18 +90,29 @@ describe('the small money figure', () => {
     // 1200 MLPTS x 2 KES = KSh 2,400 — and the rate itself is named.
     expect(screen.getAllByText(/2,400/).length).toBeGreaterThan(0);
     expect(screen.getByText(/live Mallpoints rate of/)).toBeTruthy();
-    expect(screen.getByText(/economy\/state · pointPriceKes/)).toBeTruthy();
+    expect(screen.getByText(/mallpoints\/price · pointPriceKes/)).toBeTruthy();
+  });
+
+  test('says so when the rate is the deployment default rather than a configured one', async () => {
+    // Same digits, different fact: KSh 2 because someone set MALLPOINT_PRICE_KES
+    // and KSh 2 because nobody did. The source line is where that difference
+    // has to surface, because a reader cannot tell it from the number.
+    peg.pegSource = 'default';
+    await mount([ENTRY({ earned: 1200 })]);
+    expect(screen.getByText(/mallpoints\/price · pointPriceKes \(deployment default\)/)).toBeTruthy();
+    // The money figure itself is unchanged — provenance is a label, not a rate.
+    expect(screen.getAllByText(/2,400/).length).toBeGreaterThan(0);
   });
 
   test('says the rate moved the figure, and is not mistaken for a payout', async () => {
-    livePrice.pointPriceKes = 3;
+    peg.pointPriceKes = 3;
     await mount([ENTRY({ earned: 1200 })]);
     expect(screen.getAllByText(/3,600/).length).toBeGreaterThan(0);
     expect(screen.getByText(/not an amount anyone can withdraw/)).toBeTruthy();
   });
 
   test('prints no money digits when the rate has not loaded', async () => {
-    livePrice.pointPriceKes = null;
+    peg.pointPriceKes = null;
     await mount([ENTRY()]);
     expect(screen.getAllByText('rate unavailable').length).toBeGreaterThan(0);
     expect(screen.getByText('No rate, so no money figure is printed.')).toBeTruthy();
@@ -108,8 +120,8 @@ describe('the small money figure', () => {
   });
 
   test('distinguishes an unreachable rate feed from one still loading', async () => {
-    livePrice.pointPriceKes = null;
-    livePrice.error = true;
+    peg.pointPriceKes = null;
+    peg.error = true;
     await mount([ENTRY()]);
     expect(screen.getAllByText('rate feed unreachable').length).toBeGreaterThan(0);
   });

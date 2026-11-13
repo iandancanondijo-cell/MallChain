@@ -68,11 +68,19 @@ export default function BlockchainExplorer() {
     setLoading(false);
   }, []);
 
-  // Initial load + auto-refresh
+  // Initial load + periodic reconciliation.
+  //
+  // This interval used to be 10s, because that was the only thing making the
+  // block list move — the page subscribed to `blocks:live` and nothing on the
+  // server ever emitted to it. Blocks now arrive over the socket within a block
+  // of being produced, so what's left here is the two panels the block event
+  // can't feed (chain stats and the transaction list). Four requests every
+  // 10s was 24/min per open tab against a shared 300-requests-per-15-minutes
+  // anonymous budget, so reconciliation runs at 30s instead.
   useEffect(() => {
     loadData();
     if (!autoRefresh) return;
-    const interval = setInterval(loadData, 10000);
+    const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, [loadData, autoRefresh]);
 
@@ -91,8 +99,6 @@ export default function BlockchainExplorer() {
       // Update stats height only (socket data is limited)
       setStats(prev => prev ? { ...prev, height: data.height } : null);
 
-      // Apply to both cards — Recent Blocks used to refresh only via the
-      // 10s poll, so it stalled whenever a poll cycle failed.
       const applyBlock = (block: BlockData) => {
         setLatestBlock(block);
         setRecentBlocks(prev =>
@@ -101,6 +107,25 @@ export default function BlockchainExplorer() {
             : prev
         );
       };
+
+      // The block event carries every field these cards render, so a new block
+      // costs nothing beyond the socket frame. The fetch path stays for a
+      // backend whose broadcaster isn't running (or an older payload): one REST
+      // call per block, which is exactly what the polling used to be.
+      const hasFullBlock = typeof data.numTxs === 'number' && typeof data.unixTime === 'number';
+      if (hasFullBlock) {
+        applyBlock({
+          height: data.height,
+          hash: data.hash,
+          time: data.timestamp,
+          timestamp: data.unixTime ?? 0,
+          numTxs: data.numTxs ?? data.txCount,
+          proposer: data.proposer ?? '',
+          gasUsed: 0,
+          gasWanted: 0,
+        });
+        return;
+      }
 
       // Fetch full block data from API to get all fields
       getLatestBlock()

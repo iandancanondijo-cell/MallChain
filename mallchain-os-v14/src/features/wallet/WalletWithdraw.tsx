@@ -76,7 +76,7 @@ export default function WalletWithdraw() {
   const goToConfirm = async () => {
     setErr('');
     const mlcns = parseFloat(amount);
-    if (!mlcns || mlcns <= 0) { toast('Enter a valid MLCNS amount', false); return; }
+    if (!mlcns || mlcns <= 0) { toast('Enter a valid MALL amount', false); return; }
     if (mlcns > balance) { toast(`Insufficient balance — you have ${balance.toFixed(2)} MALL.`, false); return; }
     if (!/^254\d{9}$/.test(phone)) { toast('Enter phone as 254XXXXXXXXX', false); return; }
     if (!payoutConfigured) { toast('M-Pesa payouts are not configured in this environment — cash-out is unavailable.', false); return; }
@@ -89,6 +89,28 @@ export default function WalletWithdraw() {
     const p = res.data;
 
     if (!p.minimum.ok) { toast(`Minimum withdrawal is ${p.minimum.minimumKes} KES-equivalent — you're short by ${p.minimum.shortfallKes} KES.`, false); return; }
+    // The 29-day wallet-age cash-out rule is decided server-side
+    // (backend/src/services/walletAgeService.js) and re-checked on POST /sell,
+    // so this can't be talked around. It is shown with the exact date it
+    // lifts — "not yet" without a date is the kind of message people
+    // screenshot — and it says what still works, because everything except
+    // cashing out still does.
+    if (p.walletAge && !p.walletAge.ok) {
+      const when = p.walletAge.unlockAt
+        ? new Date(p.walletAge.unlockAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+        : null;
+      // One branch per server code — the three verdicts need three different
+      // asks, and quoting an age the server could not measure would be the
+      // same lie the old "Wallet age: Unknown" panel was.
+      const ageText = p.walletAge.code === 'wallet_not_linked'
+        ? 'Cash-out needs a wallet the platform can date. Link this wallet to your verified account first (Settings → Security), then try again.'
+        : p.walletAge.code === 'wallet_age_unverifiable'
+          ? 'Mallchain could not confirm how long this wallet has been on the platform, so cash-outs are closed for it until that can be verified. Everything else still works — contact support if this is unexpected.'
+          : `Cash-outs open ${p.walletAge.minimumDays} days after a wallet joins Mallchain. This wallet is ${p.walletAge.ageDays} day(s) old${when ? ` — available from ${when}` : ''}. Your MALL stays in your wallet, and sending, staking, Mines and buying all work as usual.`;
+      setErr(ageText);
+      return;
+    }
+    setErr('');
     if (!p.rateLimit.ok) {
       const when = p.rateLimit.nextAvailableAt ? new Date(p.rateLimit.nextAvailableAt).toLocaleString() : 'later this week';
       toast(`You've reached the limit of ${p.rateLimit.limit} withdrawals this week. Next one available ${when}.`, false);
@@ -235,7 +257,7 @@ export default function WalletWithdraw() {
           </div>
           <div className="wo-hero-body">
             <div className="wo-hero-title text-gradient">Withdraw</div>
-            <div className="wo-hero-sub">Sell MLCNS on-chain — paid out via M-Pesa</div>
+            <div className="wo-hero-sub">Sell MALL on-chain — paid out via M-Pesa</div>
           </div>
         </div>
         <div className="wo-card" style={{ maxWidth: 520 }}>
@@ -260,7 +282,7 @@ export default function WalletWithdraw() {
         </div>
         <div className="wo-hero-body">
           <div className="wo-hero-title text-gradient">Withdraw</div>
-          <div className="wo-hero-sub">Sell MLCNS on-chain — paid out via M-Pesa to your phone</div>
+          <div className="wo-hero-sub">Sell MALL on-chain — paid out via M-Pesa to your phone</div>
         </div>
       </div>
 
@@ -298,12 +320,12 @@ export default function WalletWithdraw() {
           <>
             <div className="field mb">
               <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Coins size={13} style={{ color: 'var(--gold)' }} /> Amount (MLCNS)
+                <Coins size={13} style={{ color: 'var(--gold)' }} /> Amount (MALL)
                 <span className="tiny muted" style={{ marginLeft: 'auto', fontWeight: 400 }}>Balance: {balance.toFixed(2)}</span>
               </label>
               <input className="input" inputMode="decimal" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} />
               <div className="hint" style={{ fontSize: 11.5, color: 'var(--txt-3)', marginTop: 4 }}>
-                Rate ≈ {sellRateKes.toFixed(2)} KES / MLCNS (estimate, confirmed on next step)
+                Rate ≈ {sellRateKes.toFixed(2)} KES / MALL (estimate, confirmed on next step)
               </div>
             </div>
 
@@ -420,7 +442,7 @@ export default function WalletWithdraw() {
             <div className="wo-amount-display" style={{ marginBottom: 16 }}>
               <div className="wo-amount-label">You send</div>
               <div className="wo-amount-num" style={{ color: 'var(--purple)' }}>{preview.amount}</div>
-              <div className="wo-amount-unit">MLCNS</div>
+              <div className="wo-amount-unit">MALL</div>
             </div>
 
             <div className="wo-summary" style={{ marginBottom: 16 }}>
@@ -434,7 +456,7 @@ export default function WalletWithdraw() {
               </div>
               <div className="wo-summary-row">
                 <span className="wo-summary-label">Rate</span>
-                <span className="wo-summary-value">{preview.sellPriceKes.toFixed(2)} KES / MLCNS</span>
+                <span className="wo-summary-value">{preview.sellPriceKes.toFixed(2)} KES / MALL</span>
               </div>
             </div>
 
@@ -442,7 +464,7 @@ export default function WalletWithdraw() {
             <div className="wo-card" style={{ padding: 12, marginBottom: 12, background: 'var(--bg-2)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                 <span style={{ fontSize: 11, color: 'var(--txt-3)' }}>Network detail</span>
-                <Tooltip text="Mallchain's tokenomics burn a share of every MLCNS sold for cash (deflationary) and route the rest to the protocol treasury. This is separate from — and doesn't reduce — the KES you receive." />
+                <Tooltip text="Mallchain's tokenomics burn a share of every MALL sold for cash (deflationary) and route the rest to the protocol treasury. This is separate from — and doesn't reduce — the KES you receive." />
                 <span style={{ fontSize: 11, color: 'var(--txt-3)' }}>— doesn't reduce your payout</span>
               </div>
               <div style={{ display: 'flex', gap: 16, fontSize: 12 }}>
@@ -462,7 +484,7 @@ export default function WalletWithdraw() {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                   <Clock size={14} style={{ color: 'var(--gold)', flexShrink: 0, marginTop: 1 }} />
                   <div style={{ fontSize: 12, color: 'var(--txt-2)', lineHeight: 1.5 }}>
-                    Pool liquidity is temporarily insufficient — this withdrawal will be queued and processed automatically once it recovers. Your MLCNS stays in your wallet until then.
+                    Pool liquidity is temporarily insufficient — this withdrawal will be queued and processed automatically once it recovers. Your MALL stays in your wallet until then.
                   </div>
                 </div>
               </div>

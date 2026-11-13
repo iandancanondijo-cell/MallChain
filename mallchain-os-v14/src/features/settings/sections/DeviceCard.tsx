@@ -1,4 +1,4 @@
-import { config } from '../../../services/config';
+import { networkLabel, useNetworkSnapshot } from '../../../hooks/useNetworkIdentity';
 import { Card, InfoRow } from './Shell';
 import type { SettingsData } from '../hooks/useSettingsData';
 
@@ -13,7 +13,22 @@ import type { SettingsData } from '../hooks/useSettingsData';
  */
 
 export function DeviceCard({ data, onOpenSecurityPage }: { data: SettingsData; onOpenSecurityPage: () => void }) {
-  const ttl = data.settings?.security.sessionTimeout;
+  const storedTtl = data.settings?.security.sessionTimeout;
+  // The lifetime the server signs tokens with, not the number sitting in the
+  // account document. utils/sessionPolicy.js caps the stored preference at the
+  // operator's SESSION_TTL_MIN and ignores anything below 1 minute, so the
+  // preference alone is not an answer — legacy documents carry a 120 that every
+  // account here gets shortened to 30.
+  const policy = data.sessionPolicy;
+  // The chain the node says it is, not the flag this bundle was compiled with —
+  // a settings page that reports the build flag invites people to believe the
+  // wrong thing about where their money is.
+  const net = useNetworkSnapshot();
+  const label = networkLabel(net);
+
+  const capped = Boolean(policy && Number.isFinite(Number(storedTtl)) && Number(storedTtl) > policy.ttlMinutes);
+  const endsAt = policy?.endsAt ? new Date(policy.endsAt) : null;
+  const endsIn = endsAt && !Number.isNaN(endsAt.getTime()) ? Math.round((endsAt.getTime() - Date.now()) / 60000) : null;
 
   return (
     <Card
@@ -22,19 +37,38 @@ export function DeviceCard({ data, onOpenSecurityPage }: { data: SettingsData; o
     >
       <InfoRow
         label="Network"
-        note={config.network === 'mainnet' ? 'the live Mallchain network' : 'test network — value here is not real'}
-        value={config.network}
-        tone={config.network === 'mainnet' ? 'default' : 'warn'}
+        note={
+          label === 'mainnet'
+            ? 'the live Mallchain network, as reported by the node'
+            : label === 'checking…'
+              ? 'reading the chain id from the node'
+              : 'not the live network — value here is not real'
+        }
+        value={label}
+        tone={label === 'mainnet' ? 'default' : 'warn'}
       />
       <InfoRow
         label="Session length"
-        note="counted from signing in, not from your last click"
-        value={
-          data.has('settings')
-            ? ttl === null || ttl === undefined ? 'Service default' : `${ttl} minutes`
-            : '—'
+        note={
+          policy
+            ? capped
+              ? `Your saved preference is ${storedTtl} minutes, but this service caps every session at ${policy.ttlMinutes}. It is counted from signing in, not from your last click.`
+              : 'counted from signing in, not from your last click' +
+                (endsIn !== null && endsIn > 0 ? ` · this sign-in ends in about ${endsIn} min` : '')
+            : data.has('settings')
+              ? 'read from your account, because the server policy could not be reached'
+              : 'not loaded'
         }
-        tone={data.has('settings') ? 'default' : 'muted'}
+        value={
+          policy
+            ? `${policy.ttlMinutes} minutes`
+            : !data.has('settings')
+              ? '—'
+              : storedTtl === null || storedTtl === undefined
+                ? 'Service default'
+                : `${storedTtl} minutes (unconfirmed)`
+        }
+        tone={!data.has('settings') && !policy ? 'muted' : capped || !policy ? 'warn' : 'default'}
       />
       <InfoRow
         label="Wallet cipher, key backup, export"

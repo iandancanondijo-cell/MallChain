@@ -496,8 +496,30 @@ describe('notificationFeed', () => {
         devices: [],
       });
 
-      const sections = groupByDay([...entry(at(0)), ...entry(at(1)), ...entry(at(3)), ...entry(at(40)), ...entry(at(400))], now.getTime());
-      expect(sections.map((s) => s.label)).toEqual(['Today', 'Yesterday', 'Friday', '30 September', '5 October 2025']);
+      // Only Today/Yesterday are literals. Beyond that the formatter deliberately
+      // passes `[]` as the locale (see groupByDay's comment: "matching how a
+      // person reads 'yesterday'"), so the *spelling* belongs to the reader's
+      // locale — this suite runs under whatever LANG the host has, which is
+      // en_US here and en_GB where the '30 September' expectation was written.
+      // What this test owns is the option set per bucket: a long weekday under a
+      // week, long month + day inside the current year, plus the year only once
+      // the row is in a different year.
+      const at3 = at(3);
+      const at40 = at(40);
+      const at400 = at(400);
+      const sections = groupByDay([...entry(at(0)), ...entry(at(1)), ...entry(at3), ...entry(at40), ...entry(at400)], now.getTime());
+      expect(sections.map((s) => s.label)).toEqual([
+        'Today',
+        'Yesterday',
+        new Date(at3).toLocaleDateString([], { weekday: 'long' }),
+        new Date(at40).toLocaleDateString([], { month: 'long', day: 'numeric' }),
+        new Date(at400).toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' }),
+      ]);
+      // The two ways this regressed: a 40-day row degrading to a relative "8d"
+      // style label, and a 400-day row losing the year that disambiguates it.
+      expect(sections[3]!.label).not.toMatch(/\d+d$/);
+      expect(sections[4]!.label).toContain('2025');
+      expect(new Set(sections.map((s) => s.label)).size).toBe(5);
     });
 
     it('is honest about a timestamp that is not one', () => {

@@ -33,7 +33,7 @@ export const CATEGORY_DESCRIPTIONS: Record<Exclude<AdminView, 'home'>, { title: 
   kyc: { title: 'KYC & AML Admin', sub: 'Identity submissions, AML reviews, decision history, structuring flags' },
   mining: { title: 'Mining Admin', sub: 'Campaigns, task submissions awaiting payout, badge issuance' },
   treasury: { title: 'Treasury Admin', sub: 'Withdrawal payouts, treasury ledger, burn policies, AML flags' },
-  marketplace: { title: 'Marketplace Admin', sub: 'On-chain escrow deals and marketplace burn events' },
+  marketplace: { title: 'Marketplace Admin', sub: 'Seller listings to moderate, on-chain escrow deals, burn events' },
   mlpts: { title: 'MLPTS & Liquidity Admin', sub: 'Mallpoints↔Mallcoin conversions and every liquidity pool flow' },
   reports: { title: 'Reports Admin', sub: 'Read and action escalation reports from category admins' },
   platform: { title: 'Platform Control', sub: 'Superadmin only: maintenance pause, broadcasts, audit log, reconciliation, roles, badge design' },

@@ -11,12 +11,12 @@ import { config } from '../services/config';
 import { savePreference } from '../services/preferences';
 import { AccountPicture } from './WalletIdentity';
 import { COMMON_CURRENCIES } from '../services/locale';
-import { useSupportedCurrencies } from '../services/currency';
 import SocketStatus from './SocketStatus';
 import { groupByDay, timeAgo, useNotificationFeed, type FeedEntry } from '../services/notificationFeed';
 import { t } from '../services/i18n';
 import { useMaintenanceStatus } from '../services/maintenanceApi';
 import { openCommandPalette } from './CommandPalette';
+import { networkLabel, useNetworkSnapshot } from '../hooks/useNetworkIdentity';
 const LANGS = ['EN', 'FR', 'ES', 'SW'];
 const ACCENTS = ['gold', 'cyan', 'purple', 'emerald'];
 
@@ -43,8 +43,11 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
   const panelRef = useRef<HTMLDivElement>(null);
   useStoreVersion();
   const st = store.state;
-  const allCurrencies = useSupportedCurrencies();
   const maintenance = useMaintenanceStatus();
+  // Which network this is comes from the node, not the build flag —
+  // the dashboard hero reads the same source, and the two used to
+  // disagree on screen at the same time.
+  const netSnap = useNetworkSnapshot();
   const maintenanceActive = maintenance.global || Object.values(maintenance.scopes).some(Boolean);
 
   // The bell is the app-wide owner of the feed: it is mounted for every
@@ -245,7 +248,7 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
               </div>
             </div>
             <div className="tb-settings-footer">
-              {t('Network')}: <span className="chip" style={{ marginLeft: 4 }}>{config.network}</span>
+              {t('Network')}: <span className="chip" style={{ marginLeft: 4 }}>{networkLabel(netSnap)}</span>
             </div>
           </div>
         )}
@@ -379,7 +382,7 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
           <UserAvatar />
           <div style={{ lineHeight: 1.2 }}>
             <div style={{ fontSize: 12.5, fontWeight: 800 }}>{st.user.name || st.user.email?.split('@')[0] || t('Guest')}{st.user.hasBadge && <BadgeCheckmark />}</div>
-            <div style={{ fontSize: 10.5, color: 'var(--txt-3)' }}>{st.user.frozen ? `❄ ${t('Frozen')}` : st.settings.network}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--txt-3)' }}>{st.user.frozen ? `❄ ${t('Frozen')}` : networkLabel(netSnap)}</div>
           </div>
         </div>
       ) : (
@@ -387,7 +390,7 @@ export default function TopBar({ navigate, isAdminRoute, onToggleMobileNav }: { 
           <UserAvatar />
           <div style={{ lineHeight: 1.2 }}>
             <div style={{ fontSize: 12.5, fontWeight: 800 }}>{st.user.name || st.user.email?.split('@')[0] || t('Guest')}{st.user.hasBadge && <BadgeCheckmark />}</div>
-            <div style={{ fontSize: 10.5, color: 'var(--txt-3)' }}>{st.user.frozen ? `❄ ${t('Frozen')}` : st.settings.network}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--txt-3)' }}>{st.user.frozen ? `❄ ${t('Frozen')}` : networkLabel(netSnap)}</div>
           </div>
         </a>
       )}

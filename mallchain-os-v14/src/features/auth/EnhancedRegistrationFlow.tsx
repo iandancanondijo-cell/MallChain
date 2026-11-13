@@ -264,7 +264,8 @@ export default function EnhancedRegistrationFlow({ navigate }: { navigate: (path
         role: u?.role || 'user',
       };
       store.commit();
-      socketManager.reauth();
+      // App.tsx re-establishes the realtime connection on this session
+      // change; the intent recorded below is replayed on the new handshake.
       if (u?.id) socketManager.subscribeUser(u.id);
       
       setLoading(false);

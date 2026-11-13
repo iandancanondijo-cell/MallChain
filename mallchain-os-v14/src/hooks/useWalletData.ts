@@ -145,38 +145,68 @@ export function useWalletData(address: string | null | undefined) {
 
   /**
    * Handle real-time balance updates from Socket.IO
+   *
+   * `wallet:update` is emitted by backend/src/services/walletSync.js when a
+   * movement involving this address settles, and once as a primer when the
+   * socket joins the wallet's room. Its payload is the on-chain MLCN balance
+   * in display units: `{ address, balances: { mlcns, mlcnsAvailable,
+   * mlcnsLocked }, timestamp }`.
+   *
+   * It has never contained `MALL`, `MLPTS`, `USD_M`, `KES`, `EUR` or `GBP`.
+   * The mapping here used to read precisely those keys and default each with
+   * `|| 0`, so the first live push after a purchase wrote a zeroed balance
+   * over the real one REST had just fetched — in this hook's state and in the
+   * global store, which is what TopBar, Send and Staking read. The wallet
+   * blanked itself at the moment the money moved, while claiming `isRealTime`.
+   * `balances: Record<string, number>` in services/socket.ts is why the typo
+   * still typechecked; that type now names the three keys the server sends.
+   *
+   * The rule this implements: a push overwrites only what it carries. MALL is
+   * the available figure — the same definition GET /api/wallet/:address uses
+   * (`MALL = availableDisplay`, `MALL_LOCKED = lockedDisplay`) — and every
+   * other column is preserved from the last fetch. Mallpoints in particular
+   * comes from a Mongo account plus a chain points call that no socket payload
+   * includes, so zeroing it was never a refresh, only a loss.
    */
   const handleWalletUpdate = useCallback((data: WalletData) => {
-    if (data.address === address) {
-      const updatedBalance: WalletBalance = {
-        address: data.address,
-        MALL: data.balances.MALL || 0,
-        MLPTS: data.balances.MLPTS || 0,
-        USD_M: data.balances.USD_M || 0,
-        KES: data.balances.KES,
-        EUR: data.balances.EUR,
-        GBP: data.balances.GBP,
-        lastUpdated: data.timestamp,
-      };
+    if (data.address !== address) return;
 
-      setState((prev) => ({
+    const available = data.balances?.mlcnsAvailable;
+    if (typeof available !== 'number' || !Number.isFinite(available)) {
+      // No readable balance in the payload, so nothing changes. Treating an
+      // unknown as 0 is the bug this guard exists to prevent; the figures the
+      // last fetch produced stay on screen until a push that carries a number.
+      return;
+    }
+    const locked = typeof data.balances.mlcnsLocked === 'number'
+      ? data.balances.mlcnsLocked
+      : undefined;
+
+    setState((prev) => {
+      const was = prev.balance;
+      return {
         ...prev,
-        balance: updatedBalance,
+        balance: {
+          address: data.address,
+          MALL: available,
+          MALL_LOCKED: locked ?? was?.MALL_LOCKED,
+          MALL_UNLOCK_TIME: was?.MALL_UNLOCK_TIME,
+          MLPTS: was?.MLPTS ?? 0,
+          USD_M: was?.USD_M ?? 0,
+          KES: was?.KES ?? 0,
+          EUR: was?.EUR ?? 0,
+          GBP: was?.GBP ?? 0,
+          lastUpdated: data.timestamp,
+        },
         lastUpdated: data.timestamp,
         isRealTime: true,
-      }));
-
-      // Update store with real balance
-      store.state.balances = {
-        MALL: data.balances.MALL || 0,
-        MLPTS: data.balances.MLPTS || 0,
-        USD_M: data.balances.USD_M || 0,
-        KES: data.balances.KES || 0,
-        EUR: data.balances.EUR || 0,
-        GBP: data.balances.GBP || 0,
       };
-      store.commit();
-    }
+    });
+
+    // Same rule for the global store: mutate only the number the push carries
+    // and leave the columns that only REST fills in.
+    store.state.balances.MALL = available;
+    store.commit();
   }, [address]);
 
   // Initial fetch and setup Socket.IO listeners

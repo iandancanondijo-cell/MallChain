@@ -35,11 +35,25 @@ export interface WalletBalance {
 }
 
 /**
- * Transaction response from /api/transactions
+ * Transaction response from /api/tx/history (see API_REFERENCE.md, "Backend
+ * REST: transaction history").
+ *
+ * `type` is the *direction* this transaction had for the wallet that asked —
+ * the same transfer message is a send for one address and a receive for the
+ * other. `txType` is the category, from the enum GET /api/tx/types publishes,
+ * and `txTypeLabel` is the server's own wording for it. The two are different
+ * axes on purpose: a stake the wallet signed is `type:'send'` / `txType:'stake'`,
+ * and rendering only the direction is what made every category other than a
+ * transfer look identical in history.
  */
 export interface Transaction {
   id: string;
-  type: 'send' | 'receive' | 'swap' | 'stake' | 'unstake' | 'reward' | 'penalty' | 'claim' | 'escrow';
+  type: 'send' | 'receive';
+  /** A `txType` from the published catalogue; 'other' with `msgType` when this build hasn't classified it. */
+  txType: string;
+  txTypeLabel: string;
+  /** Raw protobuf message URL, e.g. '/marketplace.mlcoin.v1.MsgStake' — always present, even for 'other'. */
+  msgType?: string;
   amount: number;
   asset: string;
   status: 'pending' | 'confirmed' | 'failed';
@@ -50,6 +64,7 @@ export interface Transaction {
   note?: string;
   hash?: string;
   blockNumber?: number;
+  gasUsed?: number;
 }
 
 /**
@@ -64,16 +79,70 @@ export interface TransactionsResponse {
 }
 
 /**
- * routes/tx.js returns the chain's own `timestamp`, which is an ISO-8601 string
- * (`Number()` of that is NaN) — but node-side code paths have also been seen to
- * hand back epoch seconds or milliseconds. Normalise all three to ms; 0 means
- * the value was unusable rather than "now".
+ * One row of /api/tx/history as the backend publishes it (backend/src/routes/tx.js,
+ * API_REFERENCE.md "Backend REST: transaction history"). `timestampMs` and
+ * `txType` are produced server-side; the ISO string is kept only so a row can
+ * still be shown verbatim.
  */
-function toEpochMs(timestamp: string | number): number {
-  const numeric = typeof timestamp === 'number' ? timestamp : Number(timestamp);
-  if (Number.isFinite(numeric) && numeric > 0) return numeric < 1e11 ? numeric * 1000 : numeric;
-  const parsed = Date.parse(String(timestamp ?? ''));
-  return Number.isNaN(parsed) ? 0 : parsed;
+interface ChainTxRow {
+  id: string;
+  hash: string;
+  from: string;
+  to: string;
+  amount: string | number;
+  type: string;
+  txType: string;
+  txTypeLabel: string;
+  msgType?: string;
+  status: string;
+  error?: string;
+  timestamp: string | number;
+  timestampMs: number;
+  block: number;
+  gasUsed?: number;
+}
+
+const MLCNS_DECIMALS = 6;
+
+/**
+ * A chain history row → the shape the rest of the app renders.
+ *
+ * The server does the arithmetic it owes: `timestampMs` is epoch milliseconds
+ * (`Number()` of the chain's ISO string is NaN, and an earlier version of this
+ * file guessed between seconds, milliseconds and ISO per node build — 0 now
+ * means the node gave no readable time, which is "unknown" rather than the
+ * misleading "just now"), and `txType`/`txTypeLabel` come from the published
+ * category table rather than a fragment match on the message URL.
+ */
+function toTransaction(t: ChainTxRow): Transaction {
+  const ts = Number.isFinite(t.timestampMs) ? t.timestampMs : 0;
+  return {
+    id: t.id || t.hash,
+    type: t.type === 'receive' ? 'receive' : 'send',
+    txType: t.txType || 'other',
+    txTypeLabel: t.txTypeLabel || 'Other on-chain activity',
+    msgType: t.msgType,
+    amount: Number(t.amount || 0) / 10 ** MLCNS_DECIMALS,
+    asset: 'MALL',
+    status: (t.status as Transaction['status']) || 'confirmed',
+    to: t.to,
+    from: t.from,
+    ts,
+    note: ts === 0
+      ? 'Chain returned no usable timestamp for this transaction'
+      : t.status === 'failed' && t.error ? t.error : undefined,
+    hash: t.hash,
+    blockNumber: Number(t.block) || 0,
+    gasUsed: t.gasUsed,
+  };
+}
+
+/** One entry of the category table GET /api/tx/types publishes. */
+export interface TxTypeEntry {
+  value: string;
+  label: string;
+  description: string;
+  msgTypes: string[];
 }
 
 /**
@@ -117,9 +186,14 @@ class WalletApi {  /**
    * type/search/startDate/endDate are all applied server-side (alongside
    * status) before pagination — filtering only the current page client-side
    * previously left `total`/page-count reflecting the *unfiltered* set, so
-   * "page 1 of N" and Next/Previous paged through the wrong data. This
-   * endpoint only ever derives 'send'/'receive' from a generic bank-transfer
-   * event, so 'swap'/'stake'/etc are not valid `type` values here.
+   * "page 1 of N" and Next/Previous paged through the wrong data.
+   *
+   * `type` is either a direction ('send' | 'receive', which is how the row's
+   * own `type` field is derived) or a category from the published taxonomy —
+   * 'stake', 'purchase', 'swap', … — which the row's `txType` is matched
+   * against. GET /api/tx/types returns that list, so a filter control can be
+   * built from it instead of a hardcoded copy; anything outside it is a 400
+   * from the server rather than an empty page.
    *
    * @param options - Query options
    * @returns Promise resolving to paginated transactions or error
@@ -128,7 +202,7 @@ class WalletApi {  /**
     walletAddress: string;
     page?: number;
     pageSize?: number;
-    type?: string; // 'send' | 'receive' — this endpoint has no other categories
+    type?: string; // 'send' | 'receive' (direction) or a GET /api/tx/types category
     status?: string; // Filter by status (pending, confirmed, failed)
     search?: string; // Substring match on hash/from/to
     startDate?: string; // ISO date, inclusive lower bound
@@ -154,7 +228,7 @@ class WalletApi {  /**
 
       const result = await api.get<{
         success: boolean;
-        transactions: Array<{ hash: string; from: string; to: string; amount: string | number; type: string; status: string; timestamp: string | number; block: number }>;
+        transactions: ChainTxRow[];
         total: number;
         page: number;
         limit: number;
@@ -162,26 +236,7 @@ class WalletApi {  /**
 
       if (!result.ok || !result.data) return { ok: false, error: result.error || 'Failed to fetch transactions' };
 
-      const MLCNS_DECIMALS = 6;
-      const transactions: Transaction[] = result.data.transactions.map((t) => {
-        const ts = toEpochMs(t.timestamp);
-        return {
-          id: t.hash,
-          type: (t.type as Transaction['type']) || 'send',
-          amount: Number(t.amount || 0) / 10 ** MLCNS_DECIMALS,
-          asset: 'MALL',
-          status: (t.status as Transaction['status']) || 'confirmed',
-          to: t.to,
-          from: t.from,
-          // 0 = genuinely unknown. The previous `|| Date.now()` stamped every
-          // transaction with no parseable time as "just now", which is wrong on
-          // screen and wrong in WalletHistory's CSV export.
-          ts,
-          note: ts === 0 ? 'Chain returned no usable timestamp for this transaction' : undefined,
-          hash: t.hash,
-          blockNumber: t.block,
-        };
-      });
+      const transactions: Transaction[] = result.data.transactions.map(toTransaction);
 
       return {
         ok: true,
@@ -206,19 +261,60 @@ class WalletApi {  /**
   }
 
   /**
-   * Fetch a single transaction detail
-   * Maps to: GET /api/transactions/{transactionId}
-   * 
-   * @param txId - Transaction ID
-   * @returns Promise resolving to transaction detail or error
+   * The published transaction categories, for a filter control or a label.
+   * Maps to: GET /api/tx/types
+   *
+   * Exists so this client stops carrying its own guess-list of categories:
+   * /api/tx/history's `txType` values are exactly the `value`s published here,
+   * and a message this build hasn't classified arrives as 'other' with its
+   * `msgType` URL attached rather than as a blank label.
    */
-  async getTransactionDetail(txId: string): Promise<ApiResult<Transaction>> {
+  async getTxTypes(): Promise<ApiResult<{ types: TxTypeEntry[]; directions: string[] }>> {
+    try {
+      const result = await api.get<{ success: boolean; types: TxTypeEntry[]; directions: string[] }>('/api/tx/types');
+      if (!result.ok || !result.data) return { ok: false, error: result.error || 'Failed to fetch transaction types' };
+      return { ok: true, data: { types: result.data.types, directions: result.data.directions } };
+    } catch (error) {
+      console.error('[WalletApi] Failed to fetch transaction types:', error);
+      return { ok: false, error: `Failed to fetch transaction types: ${(error as Error).message}` };
+    }
+  }
+
+  /**
+   * Fetch a single transaction detail.
+   *
+   * Maps to: GET /api/tx/{id}, which is the route that can answer for the ids
+   * this app actually holds. A history row's id is a 64-hex chain hash, and
+   * `GET /api/transactions/{id}` (which this used to call) validates its id as
+   * a Mongo ObjectId — so opening any chain transaction was a guaranteed 400,
+   * and `/api/tx/{hash}` did not exist at all. A queued-record id still goes
+   * to the Mongo route, because that is where a queued transfer's fee and memo
+   * live.
+   *
+   * @param txId - Chain transaction hash or queued-record id
+   * @param address - The wallet the row was read from, so a transfer keeps its
+   *                  send/receive direction; optional, defaults to the sender's view
+   * @returns Promise resolving to the transaction detail or error
+   */
+  async getTransactionDetail(txId: string, address?: string): Promise<ApiResult<Transaction>> {
     if (!txId) {
       return { ok: false, error: 'Transaction ID is required' };
     }
 
+    const isChainHash = /^[0-9A-Fa-f]{64}$/.test(txId);
+
     try {
-      const result = await api.get<Transaction>(`/api/transactions/${txId}`);
+      if (isChainHash) {
+        const result = await api.get<{ success: boolean; transaction: ChainTxRow }>(
+          `/api/tx/${encodeURIComponent(txId)}${address ? `?address=${encodeURIComponent(address)}` : ''}`
+        );
+        if (!result.ok || !result.data?.transaction) {
+          return { ok: false, error: result.error || 'Failed to fetch transaction' };
+        }
+        return { ok: true, data: toTransaction(result.data.transaction) };
+      }
+
+      const result = await api.get<Transaction>(`/api/transactions/${encodeURIComponent(txId)}`);
       return result;
     } catch (error) {
       console.error(`[WalletApi] Failed to fetch transaction ${txId}:`, error);

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStoreVersion } from '../components/ui';
 import { store } from '../store/store';
 import { useLivePrice } from '../hooks/useLivePrice';
+import { useNetworkStatus, type NetworkStatusState } from '../hooks/useNetworkStatus';
 import { config } from '../services/config';
 import '../styles/landing.css';
 
@@ -284,51 +285,198 @@ function Typewriter({ text }: { text: string }) {
 }
 
 // ── Live network status ──────────────────────────────────────────────────
-// Every row below the fixed product-status ones is fetched from public
-// backend endpoints on an interval (same cadence as useLivePrice). Nothing
-// here is a hardcoded number: when an endpoint is unreachable the row says
-// so, it never invents a value.
+// Every row below the fixed product-status ones comes from ONE public
+// endpoint, GET /api/blockchain/overview, polled on the shared interval in
+// services/networkStatus.ts. Nothing here is a hardcoded number.
+//
+// The wording is the contract: "rate-limited", "the API answered 5xx", "the
+// API is unreachable" and "the node is not producing blocks" are four
+// different facts, and an earlier version of this table collapsed the first
+// three into "UNREACHABLE" — which reported a healthy mainnet as an outage
+// simply because too many visitors were watching it. These helpers keep the
+// distinctions on purpose.
 
-const STATUS_POLL_MS = 30 * 1000;
+type PillTone = 'live' | 'soon' | 'dev' | 'warn';
 
-interface LiveNet {
-  chainId: string | null;
-  moniker: string | null;
-  height: number | null;
-  totalTxs: number | null;
-  avgBlockTime: number | null;
-  nodeVersion: string | null;
-  explorerLive: boolean;
-  chainReachable: boolean;
-  fetchedAt: number | null;
+interface StatusLine {
+  pill: string;
+  tone: PillTone;
+  detail: React.ReactNode;
 }
 
-const LIVE_IDLE: LiveNet = {
-  chainId: null,
-  moniker: null,
-  height: null,
-  totalTxs: null,
-  avgBlockTime: null,
-  nodeVersion: null,
-  explorerLive: false,
-  chainReachable: false,
-  fetchedAt: null,
-};
+const CHECKING: StatusLine = { pill: 'Checking', tone: 'soon', detail: 'First status check in progress…' };
 
-async function getJson<T>(path: string): Promise<T | null> {
-  try {
-    const res = await fetch(`${API_BASE}${path}`, { headers: { Accept: 'application/json' } });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    // Fail soft on the public landing page: an unreachable backend just means
-    // the status table reports "unreachable" — no toasts, no thrown errors.
-    return null;
+/**
+ * Why the status feed itself has no answer. Returned for every row when there
+ * is no overview to show, so one transport problem is described the same way
+ * across the whole table instead of each row guessing at a cause.
+ */
+export function feedProblem(status: NetworkStatusState): StatusLine | null {
+  const o = status.outcome;
+  if (!o) return status.loading ? CHECKING : null;
+  switch (o.kind) {
+    case 'rate_limited':
+      return {
+        pill: 'Rate-limited',
+        tone: 'warn',
+        detail: status.retryAfterSeconds
+          ? <>The public API is throttling this address — the feed retries automatically in <b>{status.retryAfterSeconds}s</b>. That is the request budget, not the network.</>
+          : 'The public API was throttling this address; retrying now.',
+      };
+    case 'unreachable':
+      return { pill: 'Unreachable', tone: 'warn', detail: 'Could not reach /api/blockchain/overview from this device.' };
+    case 'server_error':
+      return {
+        pill: 'API error',
+        tone: 'warn',
+        detail: `GET /api/blockchain/overview answered ${o.status}${o.code ? ` (${o.code})` : ''}.`,
+      };
+    default:
+      return null;
   }
 }
 
-function Pill({ tone, children }: { tone: 'live' | 'soon' | 'dev'; children: React.ReactNode }) {
+/**
+ * Appended to any row that is still displaying values from an earlier
+ * successful poll while the latest attempt failed. The values are real, so
+ * hiding them would be its own lie — but they must not look current, so the
+ * note names both the age and the reason the feed stopped.
+ */
+function freshnessNote(status: NetworkStatusState): React.ReactNode {
+  const o = status.outcome;
+  if (!o || o.kind === 'ok' || !status.overview) return null;
+  const reason = o.kind === 'rate_limited'
+    ? (status.retryAfterSeconds ? `status feed rate-limited, retrying in ${status.retryAfterSeconds}s` : 'status feed rate-limited')
+    : o.kind === 'unreachable'
+      ? 'status feed unreachable'
+      : `status feed erroring (${o.status})`;
+  return <> · {reason} · last good check {new Date(status.overview.generatedAt).toLocaleTimeString()}</>;
+}
+
+/** The chain row: reachable-but-stalled must not read as either Live or Down. */
+export function chainLine(status: NetworkStatusState): StatusLine {
+  const ov = status.overview;
+  if (!ov) return feedProblem(status) ?? CHECKING;
+  const staleNote = freshnessNote(status);
+  if (!ov.sources.chain.ok) {
+    return feedProblem(status) ?? {
+      pill: 'Down',
+      tone: 'warn',
+      detail: <>The node's REST endpoint is not answering{ov.chain.error ? ` (${ov.chain.error})` : ''}.</>,
+    };
+  }
+  if (!ov.chain.producing) {
+    return {
+      pill: 'Stalled',
+      tone: 'warn',
+      detail: <>Reachable, but the last block is {ov.chain.blockAgeMs != null ? `${Math.round(ov.chain.blockAgeMs / 1000)}s` : 'too old'} old (stale threshold {Math.round((ov.chain.staleThresholdMs ?? 60000) / 1000)}s).{staleNote}</>,
+    };
+  }
+  return {
+    pill: 'Live',
+    tone: 'live',
+    detail: ov.chain.height != null
+      ? <>Block height <b>#{ov.chain.height.toLocaleString()}</b>{ov.chain.nodeVersion ? ` · node ${ov.chain.nodeVersion}` : ''}{staleNote}</>
+      : <>Responding, height unavailable.{staleNote}</>,
+  };
+}
+
+export function blockTimeLine(status: NetworkStatusState): StatusLine {
+  const ov = status.overview;
+  if (!ov) return feedProblem(status) ?? CHECKING;
+  if (!ov.sources.chain.ok) return feedProblem(status) ?? { pill: 'Down', tone: 'warn', detail: 'Block time needs the node to answer.' };
+  return ov.chain.averageBlockTime != null
+    ? { pill: 'Live', tone: 'live', detail: <>≈ {ov.chain.averageBlockTime.toFixed(2)}s, measured on-chain{freshnessNote(status)}</> }
+    : { pill: 'Measuring', tone: 'soon', detail: <>Not enough blocks sampled yet{freshnessNote(status)}</> };
+}
+
+export function totalTxsLine(status: NetworkStatusState): StatusLine {
+  const ov = status.overview;
+  if (!ov) return feedProblem(status) ?? CHECKING;
+  if (!ov.sources.chain.ok) return feedProblem(status) ?? { pill: 'Down', tone: 'warn', detail: 'The transaction index needs the node to answer.' };
+  return ov.chain.totalTxs != null
+    // Named for what it actually is. This node's CometBFT index answers with
+    // `total_count` for its own query, which on a chain whose blocks are
+    // mostly empty is far below the number of transactions ever executed —
+    // calling it "total transactions" would understate the network in one
+    // direction and misrepresent the source in the other.
+    ? { pill: 'Live', tone: 'live', detail: <>{ov.chain.totalTxs.toLocaleString()} transactions in this node&apos;s tx index{freshnessNote(status)}</> }
+    : { pill: 'Unavailable', tone: 'soon', detail: <>The node exposes no transaction index, so no total is claimed.{freshnessNote(status)}</> };
+}
+
+export function explorerLine(status: NetworkStatusState): StatusLine {
+  const ov = status.overview;
+  if (!ov) return feedProblem(status) ?? CHECKING;
+  if (ov.explorer.ok) {
+    return { pill: 'Live', tone: 'live', detail: <>{ov.explorer.recentBlockCount} recent blocks read from the explorer feed{freshnessNote(status)}</> };
+  }
+  const problem = feedProblem(status);
+  if (problem) return problem;
+  return {
+    pill: 'Not responding',
+    tone: 'warn',
+    detail: <>The explorer feed returned no blocks{ov.explorer.error ? ` (${ov.explorer.error})` : ''} — blocks remain verifiable on-chain.</>,
+  };
+}
+
+/**
+ * The price row distinguishes three things the old table merged: a price read
+ * from the on-chain market, a configured fallback standing in for one, and no
+ * answer at all. A fallback is never labelled "Live" and its number is not
+ * shown, because displaying an unverified rate as the network price is the
+ * same mistake as a hardcoded figure.
+ */
+export function priceLine(status: NetworkStatusState): StatusLine {
+  const ov = status.overview;
+  if (!ov) return feedProblem(status) ?? CHECKING;
+  if (ov.price.ok && ov.price.midKes != null) {
+    return {
+      pill: 'Live',
+      tone: 'live',
+      detail: <><span className="rate">1 MLCNS ≈ KSh {ov.price.midKes.toFixed(2)}</span> — read from the on-chain market{freshnessNote(status)}</>,
+    };
+  }
+  const problem = feedProblem(status);
+  if (problem) return problem;
+  if (ov.price.source === 'fallback') {
+    return { pill: 'Unverified', tone: 'warn', detail: <>The on-chain market feed is not answering, so no price is displayed rather than a configured guess.{freshnessNote(status)}</> };
+  }
+  return { pill: 'Unavailable', tone: 'warn', detail: <>Market price feed is not responding.{freshnessNote(status)}</> };
+}
+
+/**
+ * The one line above the table. Says which of the four situations the feed is
+ * in, and when a previous good check exists it is shown as stale rather than
+ * thrown away — a visitor who arrives during a cool-down still sees the last
+ * real height, labelled with when it was read.
+ */
+export function statusHead(status: NetworkStatusState): React.ReactNode {
+  const o = status.outcome;
+  if (!o) return status.loading ? 'Checking the network…' : 'Preparing the status feed…';
+  if (o.kind === 'rate_limited') {
+    return status.retryAfterSeconds
+      ? <>Status feed rate-limited — retrying in {status.retryAfterSeconds}s. This is the request budget, not the network.</>
+      : 'Status feed rate-limited — retrying now.';
+  }
+  if (o.kind === 'unreachable') return 'API unreachable right now — retry below.';
+  if (o.kind === 'server_error') return `Status API returned ${o.status}${o.code ? ` (${o.code})` : ''} — retry below.`;
+  const chain = o.overview.chain;
+  if (!chain.reachable) return 'The API is answering, but the blockchain node is not.';
+  return <>Live from <b>{chain.chainId ?? 'mallchain'}</b>{chain.moniker && chain.moniker !== 'unknown' ? ` · node ${chain.moniker}` : ''}</>;
+}
+
+function Pill({ tone, children }: { tone: PillTone; children: React.ReactNode }) {
   return <span className={`pill ${tone}`}>{children}</span>;
+}
+
+function StatusRow({ label, line }: { label: string; line: StatusLine }) {
+  return (
+    <tr>
+      <td className="svc">{label}</td>
+      <td><Pill tone={line.tone}>{line.pill}</Pill></td>
+      <td className="det">{line.detail}</td>
+    </tr>
+  );
 }
 
 export default function Landing({ navigate }: LandingProps) {
@@ -336,12 +484,16 @@ export default function Landing({ navigate }: LandingProps) {
 
   const st = store.state;
   const price = useLivePrice();
+  const status = useNetworkStatus();
 
   const [doorOpen, setDoorOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const [live, setLive] = useState<LiveNet>(LIVE_IDLE);
-  const [liveLoading, setLiveLoading] = useState(true);
+  // The last good overview, whether or not the latest poll succeeded — rows
+  // that can be labelled "as of <time>" beat blanking the table during a
+  // cool-down, and the outcome field says which one it is.
+  const live = status.outcome?.kind === 'ok' ? status.outcome.overview : status.overview;
+  const chainLineView = chainLine(status);
 
   const ringRef = useRef<HTMLDivElement>(null);
   const pupilRef = useRef<SVGGElement>(null);
@@ -413,45 +565,8 @@ export default function Landing({ navigate }: LandingProps) {
     return () => observers.forEach((io) => io.disconnect());
   }, []);
 
-  // Live network status: fetch on mount, then poll on the same cadence as
-  // useLivePrice. The refresh button re-runs the same loader.
-  const loadLive = useCallback(async () => {
-    const [health, stats, blocks] = await Promise.all([
-      getJson<{ chainId?: string; moniker?: string; latestHeight?: string | number }>('/api/blockchain/health'),
-      getJson<{ height?: number; totalTxs?: number | null; averageBlockTime?: number | null; nodeVersion?: string }>('/api/blockchain/stats'),
-      getJson<{ blocks?: unknown[] }>('/api/explorer/blocks?limit=5'),
-    ]);
-    const height =
-      typeof stats?.height === 'number' ? stats.height
-      : typeof health?.latestHeight === 'number' ? health.latestHeight
-      : health?.latestHeight != null ? Number(health.latestHeight)
-      : null;
-    setLive({
-      chainId: health?.chainId ?? null,
-      moniker: health?.moniker ?? null,
-      height: Number.isFinite(height) ? height : null,
-      totalTxs: typeof stats?.totalTxs === 'number' ? stats.totalTxs : null,
-      avgBlockTime: typeof stats?.averageBlockTime === 'number' ? stats.averageBlockTime : null,
-      nodeVersion: stats?.nodeVersion ?? null,
-      explorerLive: Array.isArray(blocks?.blocks) && (blocks?.blocks?.length ?? 0) > 0,
-      chainReachable: !!health || !!stats,
-      fetchedAt: Date.now(),
-    });
-    setLiveLoading(false);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      if (!cancelled) await loadLive();
-    };
-    load();
-    const id = window.setInterval(load, STATUS_POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [loadLive]);
+  // Live network status is owned by services/networkStatus.ts (one shared
+  // 30s poll for the whole tab). The refresh button re-runs that same poll.
 
   // Ring parallax + pupil pointer tracking (disabled on mobile to prevent Android compositor flicker)
   useEffect(() => {
@@ -854,16 +969,14 @@ export default function Landing({ navigate }: LandingProps) {
             <p className="eyebrow rv">Transparency &amp; reliability</p>
             <h2 className="rv">Network &amp; ecosystem status.</h2>
             <p className="lead rv">
-              Chain metrics below are fetched live from Mallchain's public API every 30 seconds —
-              when an endpoint can't be reached, the row says so instead of showing a made-up number.
+              Chain metrics below are fetched live from Mallchain's public API every 30 seconds, from
+              one aggregated status endpoint. When a feed cannot answer, the row says which feed and
+              why — a throttled request, an API error, a lost connection, or a stalled node —
+              instead of showing a made-up number or treating a busy request budget as an outage.
             </p>
             <div className="status-wrap rv">
               <div className="status-head">
-                <span>
-                  {liveLoading ? 'Checking the network…' : live.chainReachable
-                    ? <>Live from <b>{live.chainId ?? 'mallchain'}</b>{live.moniker && live.moniker !== 'unknown' ? ` · node ${live.moniker}` : ''}</>
-                    : 'API unreachable right now — retry below.'}
-                </span>
+                <span>{statusHead(status)}</span>
               </div>
               <div className="status-scroll">
                 <table className="status">
@@ -875,30 +988,10 @@ export default function Landing({ navigate }: LandingProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr>
-                      <td className="svc">Mallchain Network</td>
-                      <td>{live.chainReachable ? <Pill tone="live">Live</Pill> : <Pill tone="soon">Unreachable</Pill>}</td>
-                      <td className="det">
-                        {live.height != null
-                          ? <>Block height <b>#{live.height.toLocaleString()}</b>{live.nodeVersion ? ` · node ${live.nodeVersion}` : ''}</>
-                          : live.chainReachable ? 'Height unavailable' : 'Could not reach /api/blockchain/health'}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="svc">Block time</td>
-                      <td>{live.avgBlockTime != null ? <Pill tone="live">Live</Pill> : <Pill tone="soon">Measuring</Pill>}</td>
-                      <td className="det">{live.avgBlockTime != null ? <>≈ {live.avgBlockTime.toFixed(2)}s, measured on-chain</> : 'Not enough blocks sampled yet'}</td>
-                    </tr>
-                    <tr>
-                      <td className="svc">Total transactions</td>
-                      <td>{live.totalTxs != null ? <Pill tone="live">Live</Pill> : <Pill tone="soon">Unavailable</Pill>}</td>
-                      <td className="det">{live.totalTxs != null ? <>{live.totalTxs.toLocaleString()} indexed on-chain</> : 'Tx index not reachable'}</td>
-                    </tr>
-                    <tr>
-                      <td className="svc">Blockchain Explorer</td>
-                      <td>{live.explorerLive ? <Pill tone="live">Live</Pill> : <Pill tone="soon">Coming soon</Pill>}</td>
-                      <td className="det">{live.explorerLive ? 'Recent blocks are streaming from the explorer API' : 'Explorer feed is not responding — blocks are still verifiable on-chain'}</td>
-                    </tr>
+                    <StatusRow label="Mallchain Network" line={chainLineView} />
+                    <StatusRow label="Block time" line={blockTimeLine(status)} />
+                    <StatusRow label="Transaction index" line={totalTxsLine(status)} />
+                    <StatusRow label="Blockchain Explorer" line={explorerLine(status)} />
                     <tr>
                       <td className="svc">Mallchain Wallet</td>
                       <td><Pill tone="live">Live</Pill></td>
@@ -907,13 +1000,9 @@ export default function Landing({ navigate }: LandingProps) {
                     <tr>
                       <td className="svc">The Market Place</td>
                       <td><Pill tone="live">Live</Pill></td>
-                      <td className="det">In-app commerce layer connecting buyers, sellers and creators</td>
+                      <td className="det">In-app commerce layer connecting buyers, sellers and creators — listings come from the live catalog</td>
                     </tr>
-                    <tr>
-                      <td className="svc">Mallcoin (MLCNS) price</td>
-                      <td>{price.midKes != null ? <Pill tone="live">Live</Pill> : <Pill tone="soon">Unavailable</Pill>}</td>
-                      <td className="det">{price.midKes != null ? <><span className="rate">1 MLCNS ≈ KSh {price.midKes.toFixed(2)}</span> — read from the on-chain market</> : 'Economy feed not responding'}</td>
-                    </tr>
+                    <StatusRow label="Mallcoin (MLCNS) price" line={priceLine(status)} />
                     <tr>
                       <td className="svc">Smart contracts / SDKs</td>
                       <td><Pill tone="dev">In development</Pill></td>
@@ -924,17 +1013,19 @@ export default function Landing({ navigate }: LandingProps) {
               </div>
               <div className="status-foot">
                 <span>
-                  {live.fetchedAt ? <>Last checked {new Date(live.fetchedAt).toLocaleTimeString()} · refreshes every 30s</> : 'First check in progress…'}
+                  {live
+                    ? <>Last checked {new Date(live.generatedAt).toLocaleTimeString()} · single status request every 30s{live.fromCache ? ' · served from the shared status cache' : ''}</>
+                    : 'First check in progress…'}
+                  {status.retryAfterSeconds
+                    ? <> · new status request automatically in {status.retryAfterSeconds}s</>
+                    : null}
                 </span>
                 <button
                   className="status-refresh"
-                  onClick={() => {
-                    setLiveLoading(true);
-                    void loadLive();
-                  }}
-                  disabled={liveLoading}
+                  onClick={() => { void status.reload(); }}
+                  disabled={status.loading && status.overview === null}
                 >
-                  Refresh now
+                  {status.retryAfterSeconds ? `Retry in ${status.retryAfterSeconds}s` : 'Refresh now'}
                 </button>
               </div>
             </div>

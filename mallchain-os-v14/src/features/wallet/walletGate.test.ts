@@ -153,6 +153,27 @@ describe('useWalletGate', () => {
     await waitFor(() => expect(result.current.gate.state).toBe('kyc_required'));
   });
 
+  it('takes the published verdict when it disagrees with the record status', async () => {
+    signInAs('gate-user-verified');
+    // The §6 case: the KYC document still says 'pending' while the account is
+    // verified on the admin's record. The gate obeys the verdict — the same
+    // answer POST /api/auth/link-wallet will give — so the door cannot offer a
+    // link the server refuses, or refuse one the server accepts.
+    getStatus.mockResolvedValue({ ok: true, data: { status: 'pending', verdict: 'verified' } } as never);
+
+    const { result } = renderHook(() => useWalletGate());
+    await waitFor(() => expect(result.current.gate.allowed).toBe(true));
+    expect(result.current.gate.restoreOnly).toBe(false);
+  });
+
+  it('folds a draft into "verify first", not "a reviewer has it"', async () => {
+    signInAs('gate-user-draft');
+    getStatus.mockResolvedValue({ ok: true, data: { status: 'draft', verdict: 'not_submitted' } } as never);
+
+    const { result } = renderHook(() => useWalletGate());
+    await waitFor(() => expect(result.current.gate.state).toBe('kyc_required'));
+  });
+
   it('treats a failed lookup as unknown, not as approved', async () => {
     signInAs('gate-user-c');
     getStatus.mockResolvedValue({ ok: false, error: 'offline' } as never);

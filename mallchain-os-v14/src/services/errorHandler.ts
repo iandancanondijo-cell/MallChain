@@ -19,6 +19,15 @@ export interface ErrorContext {
   action: string;  // e.g., "loading wallet data", "sending transaction"
   endpoint?: string;  // e.g., "/api/wallet/balances"
   originalError?: Error;  // Original error for logging
+  /**
+   * Set by the 401 call sites when the server's body said
+   * `{error:'session_expired'}` — i.e. requireAuth just armed this account's
+   * 15-minute sign-in cooldown in order to produce that response. Only then is
+   * the client allowed to mirror the lockout; see handle401Error.
+   */
+  sessionExpired?: boolean;
+  /** `cooldownMinutes` from the same response, so the countdown matches the server instead of a local default. */
+  cooldownMinutes?: number;
 }
 
 /**
@@ -162,19 +171,26 @@ export function handle401Error(context: ErrorContext, onRedirect?: () => void): 
     return;
   }
 
-  // Session policy (2026-11): backend respond 401 {error:'session_expired',
-  // cooldownMinutes} when the 30-minute session lapses, and arms a 15-minute
-  // sign-in cooldown. api.ts (frozen) discards the 401 body before calling
-  // this — so instead of reading cooldownMinutes we detect the same event
-  // locally: a marker whose authedUntil has already passed means the session
-  // ended on schedule, i.e. exactly the condition the server just locked us
-  // out for. We then mirror the cooldown client-side (default 15 min; the
-  // server's 423 on any early sign-in is authoritative and corrects it) and
-  // land the user on /auth where the countdown card renders.
-  const authedUntil = authService.getAuthedUntil();
-  const endedByPolicy = authedUntil !== null && authedUntil * 1000 <= Date.now();
+  // Session policy (2026-11): the backend answers 401 {error:'session_expired',
+  // cooldownMinutes} when the 30-minute session lapses, and arming this
+  // account's 15-minute sign-in cooldown is exactly what produces that response
+  // (backend/src/middleware/sessionCooldown.js's handleExpiredToken). api.ts
+  // reads the 401 body and passes it through on ErrorContext, so the client
+  // mirror is written on the server's word instead of a local guess about
+  // whether a lockout happened — and the user lands on /auth, where the
+  // countdown renders.
+  //
+  // Any other 401 (revoked or banned token, bad signature, an endpoint that
+  // simply refuses) deliberately does NOT arm a countdown: there is no cooldown
+  // to wait out in that case, and showing one would block a sign-in that the
+  // server would accept.
+  const endedByPolicy = context.sessionExpired === true;
   if (endedByPolicy) {
-    authService.setCooldownUntil(Date.now() + DEFAULT_COOLDOWN_MINUTES * 60_000);
+    const reported = context.cooldownMinutes;
+    const minutes = typeof reported === 'number' && reported >= 1 && reported <= 480
+      ? reported
+      : DEFAULT_COOLDOWN_MINUTES;
+    authService.setCooldownUntil(Date.now() + minutes * 60_000);
   }
 
   // Clear the local session marker immediately, synchronously — a 401 means

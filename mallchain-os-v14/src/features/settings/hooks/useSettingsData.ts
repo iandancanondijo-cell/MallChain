@@ -3,6 +3,7 @@ import { store } from '../../../store/store';
 import { applyPreference } from '../../../services/preferences';
 import { minesApi, type MinesProfile } from '../../../services/minesApi';
 import { settingsApi, type ContactInfo, type UserSettingsData } from '../../../services/settingsApi';
+import { sessionApi, type SessionPolicy } from '../../../services/sessionApi';
 import { kycApi, type KycStatusResponse } from '../../../services/kycApi';
 
 /**
@@ -92,6 +93,21 @@ export interface SettingsData {
   kyc: KycStatusResponse | null;
   contact: ContactInfo | null;
 
+  /**
+   * The session lifetime the server actually signs tokens with
+   * (`GET /api/sessions` → policy), as opposed to the stored preference in
+   * `settings.security.sessionTimeout`. They are different numbers: the
+   * preference may be unset, and it can only ever shorten the server policy,
+   * never extend it. Legacy documents carry a 120-minute preference written
+   * before the control was limited to 5/15/30, so displaying the stored value
+   * alone tells the account a session it will never get.
+   *
+   * Null when the read failed. It is not added to `gaps` because the card that
+   * uses it has a truthful fallback — it just has to say the number is the
+   * account's preference rather than the server's answer.
+   */
+  sessionPolicy: SessionPolicy | null;
+
   has: (id: DataGap['id']) => boolean;
   setContact: (next: ContactInfo | null) => void;
 
@@ -108,6 +124,7 @@ export function useSettingsData(): SettingsData {
   const [settings, setSettings] = useState<UserSettingsData | null>(null);
   const [kyc, setKyc] = useState<KycStatusResponse | null>(null);
   const [contact, setContact] = useState<ContactInfo | null>(null);
+  const [sessionPolicy, setSessionPolicy] = useState<SessionPolicy | null>(null);
   const [gaps, setGaps] = useState<DataGap[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
@@ -116,11 +133,12 @@ export function useSettingsData(): SettingsData {
     setLoading(true);
     // Each read fails on its own — a rejection becomes null so the four results
     // keep their types instead of collapsing into one union.
-    const [profileRes, settingsRes, kycRes, contactRes] = await Promise.all([
+    const [profileRes, settingsRes, kycRes, contactRes, sessionsRes] = await Promise.all([
       minesApi.getProfile().catch(() => null),
       settingsApi.get().catch(() => null),
       kycApi.getStatus().catch(() => null),
       settingsApi.getContact().catch(() => null),
+      sessionApi.listSessions().catch(() => null),
     ]);
 
     const missing: DataGap[] = [];
@@ -172,6 +190,10 @@ export function useSettingsData(): SettingsData {
       });
     }
 
+    // Not a gap: "This device" can still state the account's own preference if
+    // this fails, it just cannot claim the number is what the server grants.
+    setSessionPolicy(sessionsRes?.ok && sessionsRes.data ? sessionsRes.data.policy : null);
+
     setGaps(missing);
     setLoadedOnce(true);
     setLoading(false);
@@ -219,6 +241,7 @@ export function useSettingsData(): SettingsData {
     setSettings(null);
     setKyc(null);
     setContact(null);
+    setSessionPolicy(null);
     setGaps([]);
     setLoadedOnce(false);
     void reload();
@@ -226,8 +249,8 @@ export function useSettingsData(): SettingsData {
 
   return useMemo<SettingsData>(
     () => ({
-      loading, loadedOnce, gaps, reload, profile, settings, kyc, contact, has, setContact, save,
+      loading, loadedOnce, gaps, reload, profile, settings, kyc, contact, sessionPolicy, has, setContact, save,
     }),
-    [loading, loadedOnce, gaps, reload, profile, settings, kyc, contact, has, save],
+    [loading, loadedOnce, gaps, reload, profile, settings, kyc, contact, sessionPolicy, has, save],
   );
 }
