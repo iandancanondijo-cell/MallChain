@@ -3,6 +3,7 @@ package keeper_test
 import (
 	"testing"
 
+	"cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	addresscodec "github.com/cosmos/cosmos-sdk/codec/address"
@@ -25,30 +26,31 @@ import (
 	"marketplace/x/mlcoin/types"
 )
 
-// Regression coverage for two real, LIVE bugs found while investigating why
-// this chain's node crashed on restart at height 12000 (the first block
-// where EmissionTickBlocks/ConversionTickBlocks — both 12000 by default —
-// ever fired DistributeFees with a nonzero amount to send):
+// Coverage for the fee-distribution path, which has been the source of two
+// opposite live bugs and is therefore pinned from both sides here.
 //
 //  1. "mlcoin" had no entry in app_config.go's moduleAccPerms. Bank's
 //     SendCoinsFromModuleToAccount PANICS (not just errors — see its own
 //     doc comment) when the sender module isn't a registered account,
 //     which crashed the whole node, not just this one EndBlocker call.
-//  2. Even with that fixed, AccumulateFees only ever deducted the fee from
-//     senders' custom WalletBalance ledger entries — it never minted any
-//     real x/bank "mlcoin" coins to back it. DistributeFees then tried to
-//     SEND coins the module never actually had, so distribution silently
-//     failed (logged, swallowed) every single cycle since genesis — real
-//     money vanishing from user balances that stakers/treasury never
-//     received. query_treasury.go's GetTreasuryBalance already reads real
-//     bank balance for this exact module+denom, confirming the intended
-//     design was always "mint it for real", not "just track a number".
+//  2. The first fix for the "stakers/treasury were never actually paid"
+//     complaint was to MintCoins(totalFees) on every cycle. That was wrong
+//     and audit finding H1 reverted it: fees accrue against this module's
+//     custom WalletBalance ledger, which is not x/bank, and nothing ever
+//     moves real mlcoin coins into the module account. Minting therefore
+//     created uncapped net-new supply every cycle, and any user could
+//     trigger it because MsgTransferMallcoin's fee floors to 1 base unit.
+//
+// DistributeFees now pays out only what the module actually holds in bank
+// and leaves the undistributed remainder accrued, so the ledger stays
+// truthful and a future migration to real coin collection can settle it.
+// These tests hold both halves of that contract: no unbacked mint, and no
+// silent destruction of the accrual either.
 //
 // Only bank+auth are unfaked here — mlcoin's own types.BankKeeper/AuthKeeper
 // are concrete-type aliases (bankkeeper.BaseKeeper/authkeeper.AccountKeeper),
 // not interfaces, so a lightweight hand-rolled mock (the pattern every other
-// module in this repo uses) isn't possible — this is why the original test
-// (TestDistributeFeesNoActiveStakers) was skipped rather than written.
+// module in this repo uses) isn't possible.
 
 func newRealBankTestKeeper(t *testing.T) (keeper.Keeper, bankkeeper.BaseKeeper, sdk.Context) {
 	t.Helper()
@@ -109,52 +111,117 @@ func newRealBankTestKeeper(t *testing.T) (keeper.Keeper, bankkeeper.BaseKeeper, 
 	return k, bankKeeper, ctx
 }
 
-func TestDistributeFees_MintsRealCoinsAndPaysStakerAndTreasury(t *testing.T) {
-	k, bankKeeper, ctx := newRealBankTestKeeper(t)
-
-	staker := sdk.AccAddress([]byte("staker_address______")).String()
-	require.NoError(t, k.StakingRecords.Set(ctx, staker, types.StakingInfo{
-		Address:      staker,
+// activeStaker registers one staker holding the whole of the stake, so a
+// stakers' share of any size lands entirely on `addr`.
+func activeStaker(t *testing.T, k keeper.Keeper, ctx sdk.Context, addr string) {
+	t.Helper()
+	require.NoError(t, k.StakingRecords.Set(ctx, addr, types.StakingInfo{
+		Address:      addr,
 		StakedAmount: 1000,
 		IsActive:     true,
 	}))
+}
+
+// TestDistributeFees_DoesNotMintUnbackedSupply is the H1 regression test.
+// With fees accrued and an empty module account — the state every real block
+// has been in since genesis — distribution must pay nobody and mint nothing.
+// The pre-H1 behaviour was to mint the accrued number on the spot, which is
+// how uncapped supply entered a chain whose users' balances live in a
+// different ledger entirely.
+func TestDistributeFees_DoesNotMintUnbackedSupply(t *testing.T) {
+	k, bankKeeper, ctx := newRealBankTestKeeper(t)
+
+	staker := sdk.AccAddress([]byte("staker_address______")).String()
+	activeStaker(t, k, ctx, staker)
 
 	require.NoError(t, k.AccumulateFees(ctx, "transfer", 100_00)) // 1% -> 100 accumulated
+
+	require.NoError(t, k.DistributeFees(ctx))
+
+	// The decisive assertion: minting totalFees would have put 100 mlcoin
+	// into existence. Real supply must still be exactly zero.
+	supply := bankKeeper.GetSupply(ctx, "mlcoin")
+	require.True(t, supply.Amount.IsZero(), "fee distribution must not mint unbacked supply")
+
+	stakerAddr, err := sdk.AccAddressFromBech32(staker)
+	require.NoError(t, err)
+	require.True(t, bankKeeper.GetBalance(ctx, stakerAddr, "mlcoin").Amount.IsZero())
+	require.True(t, bankKeeper.GetBalance(ctx, authtypes.NewModuleAddress("treasury"), "mlcoin").Amount.IsZero())
+
+	// Nothing was paid, so nothing may be cleared: the accrual is the only
+	// record that this money is owed. Clearing it was the other half of the
+	// pre-H1 bug — fees deducted from users and never delivered.
+	fees, err := k.FeesAccumulated.Get(ctx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), fees.TransactionFees, "unpaid fees must stay accrued")
+}
+
+// TestDistributeFees_PaysFromRealCoinsAndClearsOnlyWhatItPaid is the mirror
+// case: once the module genuinely holds coins — the state after a future
+// migration that collects MsgSend fees into the module account — the same
+// call must move real money and reduce the accrual by exactly what left the
+// module.
+func TestDistributeFees_PaysFromRealCoinsAndClearsOnlyWhatItPaid(t *testing.T) {
+	k, bankKeeper, ctx := newRealBankTestKeeper(t)
+
+	staker := sdk.AccAddress([]byte("staker_address______")).String()
+	activeStaker(t, k, ctx, staker)
+
+	// Back the accrual with real coins, 10x the amount owed.
+	require.NoError(t, bankKeeper.MintCoins(ctx, types.ModuleName,
+		sdk.NewCoins(sdk.NewCoin("mlcoin", math.NewInt(1000)))))
+	require.NoError(t, k.AccumulateFees(ctx, "transfer", 100_00))
 
 	require.NoError(t, k.DistributeFees(ctx))
 
 	stakerAddr, err := sdk.AccAddressFromBech32(staker)
 	require.NoError(t, err)
 	stakerBalance := bankKeeper.GetBalance(ctx, stakerAddr, "mlcoin")
-	require.True(t, stakerBalance.Amount.IsPositive(), "staker should have actually received real mlcoin coins, not just a bookkeeping entry")
+	treasuryBalance := bankKeeper.GetBalance(ctx, authtypes.NewModuleAddress("treasury"), "mlcoin")
 
-	treasuryAddr := authtypes.NewModuleAddress("treasury")
-	treasuryBalance := bankKeeper.GetBalance(ctx, treasuryAddr, "mlcoin")
-	require.True(t, treasuryBalance.Amount.IsPositive(), "treasury should have actually received real mlcoin coins")
+	require.True(t, stakerBalance.Amount.IsPositive(), "staker must be paid in real coins")
+	require.True(t, treasuryBalance.Amount.IsPositive(), "treasury must be paid in real coins")
 
-	// The full accumulated total (minus integer-division dust) must have
-	// been minted and delivered — nothing silently destroyed.
-	delivered := stakerBalance.Amount.Uint64() + treasuryBalance.Amount.Uint64()
-	require.InDelta(t, uint64(100), delivered, 1)
+	// 50/50 split of the 100 owed. Supply stays at the 1000 that was minted
+	// into the module up front: moving coins between accounts creates
+	// nothing, which is the whole point of H1.
+	require.Equal(t, uint64(50), stakerBalance.Amount.Uint64())
+	require.Equal(t, uint64(50), treasuryBalance.Amount.Uint64())
+	require.Equal(t, uint64(1000), bankKeeper.GetSupply(ctx, "mlcoin").Amount.Uint64())
+	require.Equal(t, uint64(900),
+		bankKeeper.GetBalance(ctx, authtypes.NewModuleAddress(types.ModuleName), "mlcoin").Amount.Uint64())
 
 	fees, err := k.FeesAccumulated.Get(ctx)
 	require.NoError(t, err)
-	require.Zero(t, fees.TransactionFees, "accumulator must reset only after a successful mint+distribute")
+	require.Zero(t, fees.TransactionFees, "accumulator clears once the amount is actually delivered")
 }
 
-func TestDistributeFees_NoActiveStakers_TreasuryStillPaidForReal(t *testing.T) {
+// TestDistributeFees_PartialBackingLeavesRemainderAccrued covers the middle
+// ground, which is the case a migration will sit in for weeks: the module
+// holds less than the ledger says it owes. It may pay only what it holds and
+// must keep the shortfall accrued rather than either inflating or writing it
+// off. With no active stakers the stakers' half is undeliverable, so it too
+// stays accrued instead of vanishing.
+func TestDistributeFees_PartialBackingLeavesRemainderAccrued(t *testing.T) {
 	k, bankKeeper, ctx := newRealBankTestKeeper(t)
 
+	require.NoError(t, bankKeeper.MintCoins(ctx, types.ModuleName,
+		sdk.NewCoins(sdk.NewCoin("mlcoin", math.NewInt(30)))))
 	require.NoError(t, k.AccumulateFees(ctx, "transfer", 100_00))
+
 	require.NoError(t, k.DistributeFees(ctx))
 
-	treasuryAddr := authtypes.NewModuleAddress("treasury")
-	treasuryBalance := bankKeeper.GetBalance(ctx, treasuryAddr, "mlcoin")
-	require.True(t, treasuryBalance.Amount.IsPositive())
+	treasuryBalance := bankKeeper.GetBalance(ctx, authtypes.NewModuleAddress("treasury"), "mlcoin")
+	require.Equal(t, uint64(15), treasuryBalance.Amount.Uint64(), "treasury gets half of what the module could pay")
 
-	// With no active stakers, the module account itself should be left
-	// holding the un-delivered stakers' share rather than it vanishing —
-	// confirms the mint covered the FULL total, not just the treasury half.
+	// Only the 15 that actually left the module may be cleared, so the
+	// accrual drops 100 -> 85: 70 the module never held, plus the 15
+	// staker-side coins it holds but had nobody to pay.
+	fees, err := k.FeesAccumulated.Get(ctx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(85), fees.TransactionFees, "shortfall and undeliverable share both stay accrued")
+
 	moduleBalance := bankKeeper.GetBalance(ctx, authtypes.NewModuleAddress(types.ModuleName), "mlcoin")
-	require.True(t, moduleBalance.Amount.IsPositive())
+	require.Equal(t, uint64(15), moduleBalance.Amount.Uint64(),
+		"undeliverable staker share stays in the module rather than being destroyed")
 }

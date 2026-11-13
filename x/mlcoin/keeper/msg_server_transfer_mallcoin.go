@@ -49,14 +49,18 @@ func (k msgServer) TransferMallcoin(ctx context.Context, msg *types.MsgTransferM
 		return nil, errorsmod.Wrap(types.ErrLockedFunds, "cannot transfer from locked wallet")
 	}
 
-	// Calculate transfer fee: 0.0097% of amount (percentage-based)
-	// Fee is slashed from recipient's received amount
+	// Calculate transfer fee: 0.00097% of amount (percentage-based)
+	// The fee is charged ON TOP of the amount to the sender; the recipient is
+	// credited exactly `amount` (see the receiver credit below).
 	amount := math.NewIntFromUint64(msg.Amount)
 
-	// Fee rate: 0.0097% = 0.000097
-	// Fee = amount * 0.000097 (minimum 1 base unit to ensure fee always applies)
-	// Scaled to avoid floating point: fee = amount * 97 / 10000000 (0.0097%)
-	feeRate := math.NewInt(97)        // basis points: 97e-6 = 0.0097%
+	// Fee rate: 97 / 10,000,000 = 0.0000097 = 0.00097%
+	// (an earlier comment here called this "0.0097%", which is ten times the
+	// rate the arithmetic produces — the backend's withdrawal quote derives
+	// the label from these constants instead of restating it.)
+	// Fee = amount * 0.0000097 (minimum 1 base unit to ensure fee always applies)
+	// Scaled to avoid floating point: fee = amount * 97 / 10000000
+	feeRate := math.NewInt(97)        // 97e-6 of the amount
 	feeDenom := math.NewInt(10000000) // 10 million for scaling
 	fee := amount.Mul(feeRate).Quo(feeDenom)
 	if fee.IsZero() && !amount.IsZero() {

@@ -100,7 +100,20 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 	if err != nil {
 		return nil, err
 	}
-	if err := k.WalletBalance.Walk(ctx, nil, func(_ string, val types.WalletBalance) (stop bool, err error) {
+	if err := k.WalletBalance.Walk(ctx, nil, func(key string, val types.WalletBalance) (stop bool, err error) {
+		// InitGenesis re-inserts by elem.Index, so an export that leaves Index
+		// blank collapses every wallet onto the same key and destroys the state
+		// on restart. Records written through the keeper paths (mint/transfer/
+		// staking) never set Index, but their store key IS the bech32 address,
+		// so restore both identity fields from the key. Records that came from a
+		// genesis which set Index are exported exactly as imported, keeping the
+		// InitGenesis/ExportGenesis round-trip faithful.
+		if val.Index == "" {
+			val.Index = key
+			if val.Address == "" {
+				val.Address = key
+			}
+		}
 		genesis.WalletBalanceMap = append(genesis.WalletBalanceMap, val)
 		return false, nil
 	}); err != nil {

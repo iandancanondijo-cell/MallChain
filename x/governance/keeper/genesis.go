@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"context"
+	"errors"
 
 	"cosmossdk.io/collections"
 	"marketplace/x/governance/types"
@@ -58,9 +59,12 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 		return nil, err
 	}
 
-	// Get params
+	// Get params — a chain that predates this module has none stored, and
+	// export must still succeed rather than panic the whole `export` command.
 	params, err := k.GetParams(ctx)
-	if err != nil {
+	if errors.Is(err, collections.ErrNotFound) {
+		params = types.DefaultParams()
+	} else if err != nil {
 		return nil, err
 	}
 

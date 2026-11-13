@@ -624,7 +624,7 @@ func (k Keeper) DistributeFees(ctx context.Context) error {
 	// Clear only the amount actually paid out; anything undistributed stays
 	// accrued for a later cycle.
 	remaining := paidOut
-	for _, acc := []*uint64{&fees.TransactionFees, &fees.TradingFees, &fees.ConversionFees} {
+	for _, acc := range []*uint64{&fees.TransactionFees, &fees.TradingFees, &fees.ConversionFees} {
 		if remaining == 0 {
 			break
 		}
