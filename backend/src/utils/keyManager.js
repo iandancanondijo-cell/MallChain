@@ -108,8 +108,37 @@ async function _fromVaultOrThrow(secretKeyFallbackName, envFallbackName, vaultFi
   }
 }
 
+/**
+ * Resolve one system mnemonic: Vault first, then the documented local-test
+ * environment fallback.
+ *
+ * The distinction that matters is *why* Vault did not answer:
+ *  - Vault not configured at all  -> _fromVaultOrThrow returns null, and the
+ *    caller's TEST_MODE / ALLOW_OPERATOR_MNEMONIC check decides. Unchanged.
+ *  - Vault configured but failing -> _fromVaultOrThrow throws. Left alone, that
+ *    throw happens BEFORE the fallback below, so on a dev box whose Vault is
+ *    stopped (the state this machine has been in since the vault binary was
+ *    removed) TEST_MODE's env fallback is unreachable code and every treasury
+ *    call dies with "Failed to authenticate to Vault" — the opposite of what
+ *    backend/.env and faucetService's own try/catch both describe.
+ *
+ * So the failure is only downgraded to null when TEST_MODE is on. That is not a
+ * weakening: config/index.js rejects TEST_MODE together with NODE_ENV=production
+ * at startup, so a production process can never take this branch — a dead Vault
+ * in production still fails closed, exactly as before.
+ */
+async function _vaultMnemonic(vaultKey, envVarName, label) {
+  try {
+    return await _fromVaultOrThrow(vaultKey, envVarName, label)
+  } catch (e) {
+    if (process.env.TEST_MODE !== 'true') throw e
+    console.warn(`Vault unavailable for ${label} (${e.message}); using the ${envVarName} TEST_MODE fallback`)
+    return null
+  }
+}
+
 async function getTreasuryMnemonic(){
-  const fromVault = await _fromVaultOrThrow('treasuryMnemonic', 'TREASURY_MNEMONIC', 'treasury_mnemonic')
+  const fromVault = await _vaultMnemonic('treasuryMnemonic', 'TREASURY_MNEMONIC', 'treasury_mnemonic')
   if (fromVault) return fromVault
 
   // TEST_MODE: allow environment fallback for local test runs only
@@ -122,7 +151,7 @@ async function getTreasuryMnemonic(){
 }
 
 async function getOperatorMnemonic() {
-  const fromVault = await _fromVaultOrThrow('operatorMnemonic', 'OPERATOR_MNEMONIC', 'operator_mnemonic')
+  const fromVault = await _vaultMnemonic('operatorMnemonic', 'OPERATOR_MNEMONIC', 'operator_mnemonic')
   if (fromVault) return fromVault
 
   if (process.env.ALLOW_OPERATOR_MNEMONIC === 'true' || process.env.TEST_MODE === 'true') {
@@ -133,7 +162,7 @@ async function getOperatorMnemonic() {
 }
 
 async function getFaucetMnemonic() {
-  const fromVault = await _fromVaultOrThrow('faucetMnemonic', 'FAUCET_MNEMONIC', 'faucet_mnemonic')
+  const fromVault = await _vaultMnemonic('faucetMnemonic', 'FAUCET_MNEMONIC', 'faucet_mnemonic')
   if (fromVault) return fromVault
 
   // TEST_MODE + local dev: allow plaintext env var. Production MUST use Vault.

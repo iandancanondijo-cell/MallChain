@@ -27,6 +27,7 @@ const WithdrawalAmlReview = require('../models/WithdrawalAmlReview');
 const { checkMinimumWithdrawal } = require('../services/withdrawalMinimumService');
 const { checkWeeklyWithdrawalLimit, WEEKLY_WITHDRAWAL_LIMIT } = require('../services/withdrawalRateLimitService');
 const { requireApprovedAmlReview, checkAndFlagStructuring, AML_WITHDRAWAL_THRESHOLD_KES } = require('../services/withdrawalAmlGateService');
+const { checkWalletWithdrawalAge, describeWalletAgeBlock } = require('../services/walletAgeService');
 const { holdForLiquidity } = require('../services/withdrawalLiquidityQueueService');
 const { executeSellSettlement } = require('../services/sellExecutionService');
 const verifyWebhookToken = require('../middleware/verifyWebhookToken');
@@ -721,6 +722,9 @@ router.get('/sell/preview', async (req, res) => {
       ? await requireApprovedAmlReview(sellerAddress, estimatedKes)
       : { ok: true, required: false, thresholdKes: AML_WITHDRAWAL_THRESHOLD_KES, reviewId: null, reviewStatus: 'none' };
     const walletLinked = sellerAddress ? Boolean(await User.findOne({ walletAddress_blind: blindIndex(sellerAddress) }).select('_id').lean()) : false;
+    // Wallet-age rule (services/walletAgeService.js) — reported here so the
+    // withdrawal screen can name the unlock date instead of failing on submit.
+    const walletAgeCheck = await checkWalletWithdrawalAge(sellerAddress);
     const liquidityCheck = await checkSellLiquidity(estimatedKes);
 
     const burnPercentage = 30; // default applied burn rate — see burnCalculator.js, actual split confirmed at settlement time
@@ -744,6 +748,16 @@ router.get('/sell/preview', async (req, res) => {
         thresholdKes: amlCheck.thresholdKes,
         walletLinked,
         reviewStatus: amlCheck.reviewStatus,
+      },
+      walletAge: {
+        ok: walletAgeCheck.ok,
+        code: walletAgeCheck.code,
+        minimumDays: walletAgeCheck.minimumDays,
+        ageDays: walletAgeCheck.ageDays,
+        reference: walletAgeCheck.reference,
+        referenceAt: walletAgeCheck.referenceAt,
+        unlockAt: walletAgeCheck.unlockAt,
+        walletLinked: walletAgeCheck.walletLinked,
       },
       liquidity: {
         ok: liquidityCheck.ok,
@@ -794,6 +808,20 @@ router.post('/sell', limiters.financial, validate(schemas.sell), async (req, res
         error: `Minimum withdrawal is ${minimumCheck.minimumKes} KES-equivalent — this amount is short by ${minimumCheck.shortfallKes} KES.`,
         code: 'below_minimum_withdrawal',
         details: minimumCheck,
+      });
+    }
+
+    // Wallet-age withdrawal rule (product owner, 2026-11-11): a wallet cannot
+    // cash out until it has been attached to the platform for
+    // WITHDRAWAL_MIN_WALLET_AGE_DAYS (29 by default) — regardless of balance.
+    // Checked before the weekly counter and before anything is written, so a
+    // refused cash-out neither burns a slot nor leaves a phantom request.
+    const walletAgeCheck = await checkWalletWithdrawalAge(sellerAddress);
+    if (!walletAgeCheck.ok) {
+      return res.status(403).json({
+        error: describeWalletAgeBlock(walletAgeCheck),
+        code: walletAgeCheck.code,
+        details: walletAgeCheck,
       });
     }
 
@@ -905,6 +933,19 @@ router.post('/sell/:saleId/resign', limiters.financial, async (req, res) => {
     if (!sale || !withdrawal) return res.status(404).json({ error: 'withdrawal not found' });
     if (sale.status !== 'resign_required' || withdrawal.status !== 'resign_required') {
       return res.status(409).json({ error: `This withdrawal isn't awaiting a re-sign (current status: ${withdrawal.status})` });
+    }
+
+    // Same wallet-age rule as POST /sell — a held withdrawal must not be able
+    // to re-enter the queue by presenting a fresh signature, otherwise the
+    // 29-day clock would be a one-time submission check instead of a real
+    // block on the cash-out.
+    const resignAgeCheck = await checkWalletWithdrawalAge(withdrawal.walletAddress || sale.sellerAddress);
+    if (!resignAgeCheck.ok) {
+      return res.status(403).json({
+        error: `This wallet can't be re-queued for cash-out yet${resignAgeCheck.ageDays == null ? '' : ` (${resignAgeCheck.ageDays} of ${resignAgeCheck.minimumDays} days)`}.`,
+        code: resignAgeCheck.code,
+        details: resignAgeCheck,
+      });
     }
 
     sale.status = 'queued_liquidity';

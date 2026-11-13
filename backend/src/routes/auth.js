@@ -22,7 +22,7 @@ const passport = require('passport');
 const { validateInput, preventNoSQLInjection, sanitizeInputs, limitPayloadSize, schemas } = require('../middleware/inputValidation');
 const { limiters } = require('../middleware/rateLimiter');
 const { asyncHandler } = require('../utils/errorHandler');
-const { requireVerifiedKyc } = require('../middleware/requireKyc');
+const { requireVerifiedKyc, kycVerdict } = require('../middleware/requireKyc');
 const oauthState = require('../utils/oauthState');
 
 /**
@@ -136,28 +136,33 @@ router.get('/me', asyncHandler(authCtrl.me));
  * the client already consumes: kycStatus/amlStatus/geographicRestriction.
  *
  * Data sources (the real ones, not the legacy /api/compliance/status
- * mocks): latest KYC record from models/kyc.js drives kycStatus; any
- * pending WithdrawalAmlReview flips amlStatus to 'under_review' and a
- * rejected one to 'flagged'. Geographic restriction follows the same
- * Cloudflare header + RESTRICTED_COUNTRIES list as compliance.js.
+ * mocks): kycStatus/verdict come from middleware/requireKyc.js's kycVerdict,
+ * the same function the wallet gate answers with; any pending
+ * WithdrawalAmlReview flips amlStatus to 'under_review' and a rejected one to
+ * 'flagged'. Geographic restriction follows the same Cloudflare header +
+ * RESTRICTED_COUNTRIES list as compliance.js.
+ *
+ * Shape: { kycStatus, verdict, amlStatus, geographicRestriction, ... } where
+ * verdict is the machine-readable four-value answer — 'verified' |
+ * 'rejected' | 'pending' | 'not_submitted' — that a client is meant to branch
+ * on instead of reading kycLevel and kycStatus together and hoping they agree.
  */
 router.get('/compliance-status', auth, asyncHandler(async (req, res) => {
   const User = require('../models/user');
-  const KYC = require('../models/kyc');
   const WithdrawalAmlReview = require('../models/WithdrawalAmlReview');
 
   const userId = req.user?._id || req.user?.id;
   const user = await User.findById(userId).select('kycLevel tosAcceptedAt privacyAcceptedAt createdAt').lean();
   if (!user) return res.status(404).json({ error: 'User not found' });
 
-  const kyc = await KYC.findOne({ userId, status: { $ne: 'draft' } }).select('status riskLevel reviewedAt').sort({ submittedAt: -1 }).lean();
-  const kycStatus = kyc?.status === 'approved' || (user.kycLevel || 0) >= 2
-    ? 'approved'
-    : kyc?.status === 'rejected'
-      ? 'rejected'
-      : kyc
-        ? 'pending'
-        : 'unverified';
+  // The same derivation the wallet gate uses (middleware/requireKyc.js), which
+  // is what makes this endpoint and a blocked wallet action unable to disagree
+  // about where the account stands. It used to be re-implemented here as an
+  // inline ternary over the latest non-draft KYC record plus kycLevel — the
+  // handoff §6 complaint that a verdict was a *combination* of fields rather
+  // than a field. `verdict` is the four-value answer clients should branch on;
+  // `kycStatus` keeps its existing vocabulary for current consumers.
+  const { kycStatus, verdict } = await kycVerdict(user);
 
   const pendingAml = await WithdrawalAmlReview.countDocuments({ userId, status: 'pending' });
   const rejectedAml = await WithdrawalAmlReview.countDocuments({ userId, status: 'rejected' });
@@ -171,6 +176,7 @@ router.get('/compliance-status', auth, asyncHandler(async (req, res) => {
     ok: true,
     kycLevel: user.kycLevel || 0,
     kycStatus,
+    verdict,
     amlStatus,
     geographicRestriction,
     restrictedReason: geographicRestriction

@@ -16,6 +16,31 @@ const { config } = require('../config');
 
 const CHAIN_REST = config.chain.rest.replace(/\/$/, '');
 
+/**
+ * A `marketplaced` binary that predates a query answers the gateway with
+ * HTTP 200 and a grpc status body instead of throwing — e.g. the Escrows
+ * list on the node this repo currently runs comes back as
+ * `{"code":12,"message":"Not Implemented"}`. Reading that as data yields an
+ * empty list, which the storefront then shows as "you have no escrows":
+ * a silent wrong answer where an honest 503 is owed.
+ */
+function isGrpcStatusBody(payload) {
+  return Boolean(payload)
+    && typeof payload === 'object'
+    && payload.escrow == null
+    && payload.escrows == null
+    && Number.isFinite(payload.code)
+    && typeof payload.message === 'string';
+}
+
+function unavailable(res, message) {
+  return res.status(503).json({
+    success: false,
+    error: message || 'node did not answer the escrow query',
+    hint: 'The running marketplaced binary does not implement this x/marketplace query; rebuild and restart the node from the current tree.',
+  });
+}
+
 exports.broadcast = async (req, res) => {
   try {
     const { txBytes, mode } = req.body || {};
@@ -47,6 +72,7 @@ exports.getEscrow = async (req, res) => {
   try {
     const { id } = req.params;
     const { data } = await axios.get(`${CHAIN_REST}/marketplace/marketplace/v1/escrow/${encodeURIComponent(id)}`, { timeout: 8000 });
+    if (isGrpcStatusBody(data)) return unavailable(res, data.message);
     return res.json({ success: true, escrow: data.escrow || data });
   } catch (e) {
     const chainMessage = e.response?.data?.message || e.message;
@@ -64,6 +90,7 @@ exports.listEscrows = async (req, res) => {
   try {
     const { buyer, seller } = req.query;
     const { data } = await axios.get(`${CHAIN_REST}/marketplace/marketplace/v1/escrow`, { timeout: 8000 });
+    if (isGrpcStatusBody(data)) return unavailable(res, data.message);
     let escrows = data.escrows || [];
     if (buyer) escrows = escrows.filter((e) => e.buyer === buyer);
     if (seller) escrows = escrows.filter((e) => e.seller === seller);

@@ -24,6 +24,7 @@ const { appendAuditEvent } = require('../services/auditChainService');
 const linkPolicy = require('../utils/linkPolicy');
 const fs = require('fs');
 const path = require('path');
+const { respondFailure } = require('../utils/respondFailure');
 
 const SUBMISSION_CREATE_FIELDS = ['campaign_id', 'title', 'task_type', 'description', 'proof_url'];
 const SUBMISSION_UPDATE_FIELDS = ['title', 'task_type', 'description', 'proof_url'];
@@ -214,7 +215,7 @@ router.get('/campaigns/available', minesAuth, async (req, res) => {
       available_mlpts: Math.round(availableMlpts * 100) / 100,
     }));
     recordImpressions(userId, campaigns);
-  } catch (e) { res.status(500).json(fail(e)); }
+  } catch (e) { respondFailure(res, e, fail); }
 });
 
 /**
@@ -259,7 +260,7 @@ router.get('/opens/pending', minesAuth, async (req, res) => {
         campaign_status: c?.status || 'unknown',
       };
     })));
-  } catch (e) { res.status(500).json(fail(e)); }
+  } catch (e) { respondFailure(res, e, fail); }
 });
 
 /**
@@ -375,7 +376,7 @@ router.get('/campaigns/:id/task', minesAuth, async (req, res) => {
         })),
       },
     }));
-  } catch (e) { res.status(500).json(fail(e)); }
+  } catch (e) { respondFailure(res, e, fail); }
 });
 
 /**
@@ -465,7 +466,7 @@ router.get('/campaigns/creator/:creatorId', async (req, res) => {
     const { creatorId } = req.params;
     const rows = await Campaign.find({ creator_id: creatorId }).sort({ created_at: -1 }).limit(100).lean();
     res.json(ok(rows));
-  } catch (e) { res.status(500).json(fail(e)); }
+  } catch (e) { respondFailure(res, e, fail); }
 });
 
 // Public: top Campaign Participants by what Mines actually paid them.
@@ -637,7 +638,7 @@ router.post('/campaigns/create', minesAuth, async (req, res) => {
     if (e.message === 'insufficient Mallpoints balance to fund this campaign') {
       return badRequest(res, e.message);
     }
-    res.status(500).json(fail(e, { operation: 'campaign_create', userId: req.userId }));
+    respondFailure(res, e, fail, { operation: 'campaign_create', userId: req.userId });
   }
 });
 
@@ -680,7 +681,7 @@ router.get('/profile/me', minesAuth, async (req, res) => {
        created_at: (u.createdAt || u.created_at)?.toISOString() || new Date().toISOString(),
        updated_at: (u.updatedAt || u.updated_at)?.toISOString() || new Date().toISOString()
      }));
-   } catch (e) { res.status(500).json(fail(e)); }
+   } catch (e) { respondFailure(res, e, fail); }
  });
 
 router.put('/profile', minesAuth, async (req, res) => {
@@ -705,7 +706,7 @@ router.get('/transactions', minesAuth, async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit || '30', 10), 100);
     const rows = await WalletTransaction.find({ user_id: req.userId }).sort({ created_at: -1 }).limit(limit).lean();
     res.json(ok(rows));
-  } catch (e) { res.status(500).json(fail(e)); }
+  } catch (e) { respondFailure(res, e, fail); }
 });
 
 router.post('/transactions', minesAuth, async (req, res) => {
@@ -747,7 +748,7 @@ router.get('/submissions/me', minesAuth, async (req, res) => {
       out.push(doc.toObject ? doc.toObject() : doc);
     }
     res.json(ok(out));
-  } catch (e) { res.status(500).json(fail(e)); }
+  } catch (e) { respondFailure(res, e, fail); }
 });
 
 /**
@@ -894,7 +895,7 @@ router.get('/earnings/summary', minesAuth, async (req, res) => {
       // they never silently include referral or admin credits.
       source: 'task_submissions',
     }));
-  } catch (e) { res.status(500).json(fail(e)); }
+  } catch (e) { respondFailure(res, e, fail); }
 });
 
 // Anti-abuse for campaign submissions: caps how many times one user can be
@@ -1349,7 +1350,7 @@ router.post('/submissions/:id/approve', requireAdmin, idempotency({ required: tr
     }).catch(() => {});
     chainMinesAudit(req, 'mines_submission_approved', `submission:${req.params.id}`, { minerId: sub.miner_id.toString(), rewardAmount: finalReward });
     res.json(ok(updated));
-  } catch (e) { res.status(500).json(fail(e)); }
+  } catch (e) { respondFailure(res, e, fail); }
 });
 
 router.post('/submissions/:id/reject', requireAdmin, async (req, res) => {
@@ -1401,7 +1402,7 @@ router.post('/balance/credit', idempotency({ required: true }), requireAdmin, as
       chainMinesAudit(req, 'admin_mlpts_credit', `user:${userId}`, { amount, currency: 'MLPTS' });
     });
     res.json(ok({ success: true }));
-  } catch (e) { res.status(500).json(fail(e, { operation: 'balance_credit' })); }
+  } catch (e) { respondFailure(res, e, fail, { operation: 'balance_credit' }); }
   finally { session.endSession(); }
 });
 
@@ -1438,7 +1439,7 @@ router.post('/balance/deduct', idempotency({ required: true }), requireAdmin, as
       chainMinesAudit(req, 'admin_mlpts_deduct', `user:${userId}`, { amount, currency: 'MLPTS' });
     });
     res.json(ok({ success: true }));
-  } catch (e) { res.status(500).json(fail(e, { operation: 'balance_deduct' })); }
+  } catch (e) { respondFailure(res, e, fail, { operation: 'balance_deduct' }); }
   finally { session.endSession(); }
 });
 

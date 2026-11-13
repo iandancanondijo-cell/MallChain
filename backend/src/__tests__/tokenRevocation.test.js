@@ -29,6 +29,24 @@ jest.mock('../middleware/sessionCooldown', () => ({
   stampCurrentSession: jest.fn().mockResolvedValue(undefined),
   handleExpiredToken: jest.fn().mockResolvedValue(false),
 }));
+// services/sessionRegistry.js is the Session-row side of the same contract:
+// logout()/refresh() close the row for the revoked jti (and logoutEverywhere
+// closes all of them) through MongoDB. Without this mock those calls hit an
+// unconnected mongoose instance, whose buffered commands only time out after
+// 10s — which is what made the logout and refresh tests here exceed Jest's
+// 5s test timeout rather than fail on an assertion. The registry's own
+// behavior is covered by the sessions suites.
+jest.mock('../services/sessionRegistry', () => ({
+  recordIssuedSession: jest.fn().mockResolvedValue(undefined),
+  recordFailedLoginAttempt: jest.fn().mockResolvedValue(undefined),
+  endSessionByJti: jest.fn().mockResolvedValue(undefined),
+  endOtherSessions: jest.fn().mockResolvedValue(undefined),
+  endAllSessions: jest.fn().mockResolvedValue(undefined),
+  touch: jest.fn().mockResolvedValue(undefined),
+  assessLoginRisk: jest.fn().mockResolvedValue(undefined),
+  writeLoginActivity: jest.fn().mockResolvedValue(undefined),
+  hashToken: jest.fn(() => 'hashed'),
+}));
 
 const User = require('../models/user');
 const { isRevoked, revokeToken, revokeAllUserTokens } = require('../middleware/tokenDenylist');

@@ -91,10 +91,13 @@ router.post('/request-erasure', auth, async (req, res) => {
       kyc.idFrontUrl = null;
       kyc.idBackUrl = null;
       kyc.amlChecks = {
+        screened: false,
         sanctions: false,
         pep: false,
         adverseMedia: false,
         watchlist: false,
+        // Erased records must not read as "screened and clean": the screening
+        // evidence itself was removed, so what is left states that.
         provider: '[erased]',
         raw: null
       };

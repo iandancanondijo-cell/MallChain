@@ -44,6 +44,19 @@ jest.mock('../utils/activityTracker', () => ({
 jest.mock('../services/liquidityActivityService', () => ({
   recordTransferActivity: jest.fn(),
 }));
+// routes/send.js wraps the broadcast relays in middleware/receiveIntent.js,
+// which queries MongoDB for an active stated-amount intent on the recipient
+// address BEFORE the controller runs. Unmocked, that read buffers against an
+// unconnected mongoose instance and only rejects after its 10s
+// bufferCommands timeout — so every POST in this suite died on Jest's 5s test
+// timeout instead of reaching the relay. null means "no active intent", i.e.
+// the ordinary any-amount transfer path these tests describe.
+jest.mock('../models/receiveIntent', () => ({
+  MICRO: 1e6,
+  toMicro: jest.fn((mlcns) => Math.round(Number(mlcns) * 1e6)),
+  findActive: jest.fn().mockResolvedValue(null),
+  updateOne: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
+}));
 
 const axios = require('axios');
 const mallcoinService = require('../services/mallcoinService');
@@ -51,6 +64,7 @@ const { recordTransferActivity } = require('../services/liquidityActivityService
 const { errorHandler } = require('../utils/errorHandler');
 const sendRoutes = require('../routes/send');
 const User = require('../models/user');
+const ReceiveIntent = require('../models/receiveIntent');
 
 // Real, checksum-valid mall1... bech32 addresses — addressSchema
 // (utils/validationSchemas.js) now does a real bech32 decode, not a regex,
@@ -110,6 +124,11 @@ describe('sendController — real mall1... address flow (regression for a81288e)
   beforeEach(() => {
     jest.resetAllMocks();
     recordTransferActivity.mockResolvedValue({});
+    // resetAllMocks() strips the factory implementations too, so re-arm the
+    // receive-intent lookup for the no-intent path on every test.
+    ReceiveIntent.findActive.mockResolvedValue(null);
+    ReceiveIntent.updateOne.mockResolvedValue({ modifiedCount: 0 });
+    ReceiveIntent.toMicro.mockImplementation((mlcns) => Math.round(Number(mlcns) * 1e6));
     app = buildApp();
   });
 

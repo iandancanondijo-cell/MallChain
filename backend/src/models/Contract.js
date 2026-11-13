@@ -11,8 +11,23 @@ const ContractSchema = new Schema({
   type: { type: String, required: true },
   code: { type: String, required: true },
   description: { type: String, default: '' },
-  address: { type: String, required: true },
+  // Null means "this record has no contract on-chain behind it" — which is the
+  // honest state for a deployment whose MsgInstantiateContract was never
+  // broadcast (or never confirmed). The route used to substitute a random
+  // 0x-prefixed string here, which was indistinguishable from a real address in
+  // the list, could be pasted into a transfer, and read as proof of a deploy
+  // that had not happened. Absence is now stored as absence.
+  address: { type: String, default: null },
+  // The hash of the transaction that actually created (or last executed) this
+  // contract. This field was missing from the schema entirely, so mongoose
+  // strict mode silently dropped whatever /deploy was given — a real
+  // instantiate txHash was recorded nowhere, and the UI's "tx:" line could never
+  // render. Declared here so a genuine hash survives the round trip.
+  txHash: { type: String, default: null },
   deployedAt: { type: Date, default: Date.now },
+  // Number of executions the chain confirmed. Only /interact with a real
+  // txHash moves it — a call that broadcast nothing must not inflate a count
+  // that users read as on-chain activity.
   txs: { type: Number, default: 0 },
   status: { type: String, enum: ['active', 'paused'], default: 'active' },
 

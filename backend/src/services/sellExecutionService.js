@@ -15,6 +15,7 @@ const { initiateB2CPayout } = require('./b2cPayoutService');
 const B2CPayout = require('../models/B2CPayout');
 const { recordWithdrawLiquidityActivity } = require('./liquidityActivityService');
 const { emitWithdrawalCompleted, emitWithdrawalFailed, userIdForAddress } = require('./activityEvents');
+const { checkWalletWithdrawalAge, describeWalletAgeBlock } = require('./walletAgeService');
 
 /**
  * Email the holder of a wallet address about a withdrawal outcome
@@ -69,6 +70,25 @@ async function broadcastSignedTx(txBytes) {
  * queue-release path, which has no HTTP response to send).
  */
 async function executeSellSettlement({ sale, withdrawal, txBytes, amount, phone, sellerAddress, saleId, withdrawalId, estimatedKes, saleSummary }) {
+  // Wallet-age withdrawal rule, re-checked here rather than only at the
+  // submission endpoint: this function is what actually moves value, and it
+  // has callers beyond POST /api/buy/sell — the liquidity queue release
+  // (withdrawalLiquidityQueueService.js) settles withdrawals that were filed
+  // earlier, possibly before the rule existed. Refusing at the last step
+  // before broadcast is the difference between a policy and a suggestion.
+  // Nothing is written or broadcast when this fails.
+  const ageCheck = await checkWalletWithdrawalAge(sellerAddress);
+  if (!ageCheck.ok) {
+    return {
+      status: 403,
+      body: {
+        error: describeWalletAgeBlock(ageCheck),
+        code: ageCheck.code,
+        details: ageCheck,
+      },
+    };
+  }
+
   if (!txBytes || typeof txBytes !== 'string') {
     sale.status = 'failed';
     sale.reason = 'txBytes (base64) required';

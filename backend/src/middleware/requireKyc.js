@@ -28,26 +28,95 @@ const KYC = require('../models/kyc');
 const logger = require('../utils/logger');
 
 /**
+ * The four verdicts the account-facing surfaces publish — see
+ * docs/backend-handoff-2026-11-09.md §6. A client should branch on this and
+ * nothing else, because the fields it was assembled from disagree:
+ * `models/kyc.js` has five statuses (draft/pending/approved/rejected/review),
+ * `User.kycLevel` is a number whose default of 1 means "nothing verified",
+ * and the admin approval path can set kycLevel without touching the KYC
+ * document. Deriving those into one enum, in one place, is the point.
+ */
+const KYC_VERDICT = Object.freeze({
+  VERIFIED: 'verified',
+  REJECTED: 'rejected',
+  PENDING: 'pending',
+  NOT_SUBMITTED: 'not_submitted',
+});
+
+/**
+ * The one derivation of "where does this account stand with identity
+ * verification", given its User row and its most recent KYC document (or null
+ * when there is none).
+ *
+ * It exists because three surfaces publish that answer — the wallet gate,
+ * GET /api/kyc/status (the dashboard banner) and GET /api/auth/compliance-status
+ * — and each used to assemble it from a different combination of `status`,
+ * `kycLevel` and `reviewedAt` (handoff §6). Passing the record in, rather than
+ * looking it up here, is what lets all three share it without paying for the
+ * query twice; the surfaces that do not already hold a record call
+ * {@link kycVerdict}, which fetches one and lands here.
+ *
+ * `record` may be a draft — saved wizard progress is not a submission, which is
+ * why it reads as 'not_submitted' and never as 'pending'. `kycLevel >= 2`
+ * settles the question whatever the document says, because that is what the
+ * admin approve path writes and it can set it without touching the KYC row.
+ */
+function verdictForAccount(user, record) {
+  if (user && (user.kycLevel || 0) >= 2) return KYC_VERDICT.VERIFIED;
+  const status = record && record.status;
+  if (status === 'approved') return KYC_VERDICT.VERIFIED;
+  if (status === 'rejected') return KYC_VERDICT.REJECTED;
+  if (!status || status === 'draft') return KYC_VERDICT.NOT_SUBMITTED;
+  // 'pending', 'review', and anything a future schema adds that still means
+  // "submitted, awaiting a person".
+  return KYC_VERDICT.PENDING;
+}
+
+/**
+ * A KYC document's raw `status` on its own, with no account context. Kept for
+ * callers that only have a record (the reviewer queue); an account-facing
+ * surface wants {@link verdictForAccount}.
+ */
+function verdictFromRecordStatus(status) {
+  return verdictForAccount(null, status ? { status } : null);
+}
+
+/** The published verdict → this file's own `kycStatus` vocabulary. */
+function kycStatusFromVerdict(verdict) {
+  if (verdict === KYC_VERDICT.VERIFIED) return 'approved';
+  if (verdict === KYC_VERDICT.NOT_SUBMITTED) return 'unverified';
+  if (verdict === KYC_VERDICT.REJECTED) return 'rejected';
+  return 'pending';
+}
+
+/**
  * The kycStatus a reviewer would see for this user, plus whether it is
  * sufficient to let a wallet be linked. Reads one KYC record at most; callers
  * that already know `kycLevel >= 2` should not pay for that query.
+ *
+ * `verdict` comes from the same derivation the account's own KYC read publishes
+ * — so the banner and the gate cannot answer the same question twice in two
+ * different vocabularies.
  */
 async function kycVerdict(user) {
-  if (!user) return { verified: false, kycStatus: 'unverified' };
-  if ((user.kycLevel || 0) >= 2) return { verified: true, kycStatus: 'approved' };
+  const answered = (verdict) => ({
+    verified: verdict === KYC_VERDICT.VERIFIED,
+    kycStatus: kycStatusFromVerdict(verdict),
+    verdict,
+  });
+
+  if (!user) return answered(KYC_VERDICT.NOT_SUBMITTED);
+  if ((user.kycLevel || 0) >= 2) return answered(KYC_VERDICT.VERIFIED);
 
   const userId = user._id || user.id;
-  if (!userId) return { verified: false, kycStatus: 'unverified' };
+  if (!userId) return answered(KYC_VERDICT.NOT_SUBMITTED);
 
   const record = await KYC.findOne({ userId, status: { $ne: 'draft' } })
     .select('status')
     .sort({ submittedAt: -1 })
     .lean();
 
-  if (!record) return { verified: false, kycStatus: 'unverified' };
-  if (record.status === 'approved') return { verified: true, kycStatus: 'approved' };
-  if (record.status === 'rejected') return { verified: false, kycStatus: 'rejected' };
-  return { verified: false, kycStatus: 'pending' };
+  return answered(verdictForAccount(user, record));
 }
 
 /** Boolean form, for handlers that branch instead of answering. */
@@ -80,7 +149,7 @@ async function hasVerifiedKyc(user) {
 function requireVerifiedKyc(options = {}) {
   return async (req, res, next) => {
     try {
-      const { verified, kycStatus } = await kycVerdict(req.user);
+      const { verified, kycStatus, verdict } = await kycVerdict(req.user);
       if (verified) return next();
 
       if (options.allowSameAddress || options.allowExistingWallet) {
@@ -127,6 +196,10 @@ function requireVerifiedKyc(options = {}) {
         ok: false,
         error: 'kyc_verification_required',
         kycStatus,
+        // Same enum GET /api/kyc/status publishes, from the same function —
+        // a blocked wallet action and the dashboard banner cannot disagree
+        // about where the account stands (handoff §6).
+        verdict,
         message: copy,
         // Where the client sends the user next. Hash routing lives in the SPA,
         // so this is a hint, not a redirect the server performs.
@@ -149,4 +222,11 @@ function requireVerifiedKyc(options = {}) {
   };
 }
 
-module.exports = { requireVerifiedKyc, hasVerifiedKyc, kycVerdict };
+module.exports = {
+  requireVerifiedKyc,
+  hasVerifiedKyc,
+  kycVerdict,
+  KYC_VERDICT,
+  verdictForAccount,
+  verdictFromRecordStatus,
+};

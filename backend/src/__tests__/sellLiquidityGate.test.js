@@ -28,6 +28,20 @@ jest.mock('../services/sellExecutionService', () => ({
 jest.mock('../services/withdrawalLiquidityQueueService', () => ({
   holdForLiquidity: jest.fn().mockResolvedValue(undefined),
 }));
+// POST /sell enforces the 29-day wallet-age rule before anything else, and
+// that rule looks the wallet up through models/user + fieldEncryption —
+// neither of which exists in this suite (models/user is a bare jest.fn(), and
+// ../config is mocked without a secrets section, so blindIndex() would throw).
+// Stubbing the collaborator keeps the test about the liquidity gate; the rule
+// itself is covered by walletAgeService.test.js.
+jest.mock('../services/walletAgeService', () => ({
+  MIN_WALLET_AGE_DAYS: 29,
+  checkWalletWithdrawalAge: jest.fn().mockResolvedValue({
+    ok: true, code: null, minimumDays: 29, ageDays: 40,
+    reference: 'walletLinkedAt', referenceAt: null, unlockAt: null, walletLinked: true,
+  }),
+  describeWalletAgeBlock: jest.fn((check) => (check && check.ok ? null : `blocked by the wallet-age rule (${check && check.code})`)),
+}));
 jest.mock('../services/withdrawalAmlGateService', () => ({
   requireApprovedAmlReview: jest.fn().mockResolvedValue({ ok: true }),
   checkAndFlagStructuring: jest.fn().mockResolvedValue(undefined),
@@ -125,6 +139,27 @@ describe('POST /api/buy/sell liquidity gate', () => {
     const res = await request(app).post('/api/buy/sell').send(body);
 
     expect(res.status).toBe(503);
+    expect(checkSellLiquidity).not.toHaveBeenCalled();
+    expect(MallcoinSale.create).not.toHaveBeenCalled();
+  });
+
+  test('403s a cash-out from a wallet that has not met the age rule, before anything is written', async () => {
+    // The rule is balance-blind on purpose: 1 MALL or 1M, a 4-day-old wallet
+    // cannot cash out. Asserting it here (on the route) proves the guard is
+    // wired into POST /sell and not just into the service it delegates to.
+    const { checkWalletWithdrawalAge } = require('../services/walletAgeService');
+    checkWalletWithdrawalAge.mockResolvedValueOnce({
+      ok: false, code: 'wallet_age_not_met', minimumDays: 29, ageDays: 4,
+      reference: 'walletLinkedAt', referenceAt: '2026-11-07T00:00:00.000Z',
+      unlockAt: '2026-12-06T00:00:00.000Z', walletLinked: true,
+    });
+    getMarketPrice.mockResolvedValue({ sellPriceKes: 0.6 });
+
+    const res = await request(app).post('/api/buy/sell').send(body);
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('wallet_age_not_met');
+    expect(res.body.details.unlockAt).toBe('2026-12-06T00:00:00.000Z');
     expect(checkSellLiquidity).not.toHaveBeenCalled();
     expect(MallcoinSale.create).not.toHaveBeenCalled();
   });

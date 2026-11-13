@@ -213,7 +213,17 @@ async function eraseUserData(user) {
   if (sellerAddressPhoneFilter) {
     redactPhoneOps.push(MallcoinSale.updateMany(sellerAddressPhoneFilter, { $set: { phone: REDACTED } }));
   }
-  const b2cFilter = phoneOrWalletFilter('sellerAddress', 'sellerPhone');
+  // B2CPayout is the one financial model whose phone is NOT encrypted at
+  // rest: models/B2CPayout.js declares a plain `sellerPhone` string with no
+  // ENCRYPTED_FIELDS entry and no phone_blind column (its index is on
+  // sellerPhone itself). Routing it through phoneOrWalletFilter() compared a
+  // blind index against a plaintext column, so this branch matched nothing and
+  // a user's B2C payout phone numbers silently survived erasure. Match the
+  // decrypted phone directly instead.
+  const b2cOr = [];
+  if (walletAddress) b2cOr.push({ sellerAddress: walletAddress });
+  if (phone) b2cOr.push({ sellerPhone: phone });
+  const b2cFilter = b2cOr.length ? { $or: b2cOr } : null;
   if (b2cFilter) {
     redactPhoneOps.push(B2CPayout.updateMany(b2cFilter, { $set: { sellerPhone: REDACTED } }));
   }

@@ -14,6 +14,7 @@ const validatorEligibility = require('../services/validatorEligibility');
 const { notify } = require('../services/notify');
 const { syncMallPointAccount } = require('../services/mallpointsService');
 const logger = require('../utils/logger');
+const { respondFailure } = require('../utils/respondFailure');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -62,7 +63,7 @@ router.get('/tasks/pending-assignment', requireAdmin, async (_req, res) => {
       ]
     }).sort({ created_at: -1 }).limit(100).lean();
     return res.json(ok(tasks));
-  } catch (e) { return res.status(500).json(fail(e)); }
+  } catch (e) { return respondFailure(res, e, fail); }
 });
 
 // Get tasks currently in voting (assigned, waiting for validator votes)
@@ -73,7 +74,7 @@ router.get('/tasks/voting', requireAdmin, async (_req, res) => {
       status: 'manual_review',
     }).sort({ assigned_at: -1 }).limit(100).lean();
     return res.json(ok(tasks));
-  } catch (e) { return res.status(500).json(fail(e)); }
+  } catch (e) { return respondFailure(res, e, fail); }
 });
 
 // Get the accounts this window may hand a task to.
@@ -130,7 +131,7 @@ router.get('/validators/active', requireAdmin, async (_req, res) => {
     validators.sort((a, b) => Number(b.eligible) - Number(a.eligible) || b.mining_reputation - a.mining_reputation);
 
     return res.json(ok(validators));
-  } catch (e) { return res.status(500).json(fail(e)); }
+  } catch (e) { return respondFailure(res, e, fail); }
 });
 
 // ADMIN: Assign 6 validators to a task
@@ -200,7 +201,7 @@ router.post('/tasks/:id/assign', requireAdmin, async (req, res) => {
     });
 
     return res.json(ok(task));
-  } catch (e) { return res.status(500).json(fail(e)); }
+  } catch (e) { return respondFailure(res, e, fail); }
 });
 
 // ADMIN: View task with full voting details
@@ -228,7 +229,7 @@ router.get('/tasks/:id/details', requireAdmin, async (req, res) => {
     });
 
     return res.json(ok({ task, assignedValidators }));
-  } catch (e) { return res.status(500).json(fail(e)); }
+  } catch (e) { return respondFailure(res, e, fail); }
 });
 
 // ============ VALIDATOR: VIEW ASSIGNED TASKS & VOTE ============
@@ -285,7 +286,7 @@ router.get('/my-assigned', verifyToken, async (req, res) => {
     });
 
     return res.json(ok(hydrated));
-  } catch (e) { return res.status(500).json(fail(e)); }
+  } catch (e) { return respondFailure(res, e, fail); }
 });
 
 // Validator: Cast a vote on an assigned task
@@ -400,7 +401,7 @@ router.post('/tasks/:id/vote', verifyToken, async (req, res) => {
       weighted_votes: { yes: task.votes_yes_weight, no: task.votes_no_weight },
       status: resolved ? resolved.assignment_status : task.assignment_status,
     }));
-  } catch (e) { return res.status(500).json(fail(e)); }
+  } catch (e) { return respondFailure(res, e, fail); }
 });
 
 // ============ ADMIN: FINAL REJECTION (manual override) ============
@@ -442,7 +443,7 @@ router.post('/tasks/:id/final-reject', requireAdmin, async (req, res) => {
     });
 
     return res.json(ok(task));
-  } catch (e) { return res.status(500).json(fail(e)); }
+  } catch (e) { return respondFailure(res, e, fail); }
 });
 
 // ============ REVIEWER: STAKE / PROFILE / LEADERBOARD ============
@@ -601,7 +602,7 @@ router.get('/reviewer/queue-summary', verifyToken, async (req, res) => {
       currency: 'MLPTS',
       source: 'task_submissions',
     }));
-  } catch (e) { return res.status(500).json(fail(e)); }
+  } catch (e) { return respondFailure(res, e, fail); }
 });
 
 // Reviewer: my stake/reputation/earnings profile, plus both halves of the
@@ -636,7 +637,7 @@ router.get('/reviewer/profile', verifyToken, async (req, res) => {
       validator_allowed: allowed,
       review_eligible: allowed === null ? null : allowed && staked,
     }));
-  } catch (e) { return res.status(500).json(fail(e)); }
+  } catch (e) { return respondFailure(res, e, fail); }
 });
 
 // Public: top reviewers by reputation
@@ -647,7 +648,7 @@ router.get('/reviewer/leaderboard', async (_req, res) => {
       .limit(50)
       .lean();
     return res.json(ok(reviewers));
-  } catch (e) { return res.status(500).json(fail(e)); }
+  } catch (e) { return respondFailure(res, e, fail); }
 });
 
 module.exports = router;

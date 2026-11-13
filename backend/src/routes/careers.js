@@ -9,6 +9,7 @@ const JobOpening = require('../models/JobOpening');
 const JobApplication = require('../models/JobApplication');
 const User = require('../models/user');
 const { notify } = require('../services/notificationEngine');
+const { respondFailure } = require('../utils/respondFailure');
 
 function ok(data) { return { ok: true, data }; }
 function fail(err) {
@@ -251,7 +252,7 @@ router.get('/openings', auth, async (req, res) => {
       availableFields: fields.sort(),
     }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -263,7 +264,7 @@ router.get('/openings/mine', auth, async (req, res) => {
     const names = await namesFor([req.user._id]);
     res.json(ok(rows.map((r) => openingView(r, names.get(String(req.user._id)) || 'You', { mine: true }))));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -278,7 +279,7 @@ router.post('/openings', auth, postLimiter, limitPayloadSize(1), sanitizeInputs,
     const names = await namesFor([req.user._id]);
     res.status(201).json(ok(openingView(created, names.get(String(req.user._id)) || 'You', { mine: true })));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -295,7 +296,7 @@ router.get('/openings/:id', auth, async (req, res) => {
       myApplication: mine ? { id: String(mine._id), status: mine.status, message: mine.message, createdAt: mine.createdAt.toISOString() } : null,
     })));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -327,7 +328,7 @@ router.patch('/openings/:id', auth, limitPayloadSize(1), sanitizeInputs, prevent
     const names = await namesFor([req.user._id]);
     res.json(ok(openingView(opening, names.get(String(req.user._id)) || 'You', { mine: true })));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -348,7 +349,7 @@ router.delete('/openings/:id', auth, async (req, res) => {
     await JobOpening.deleteOne({ _id: opening._id });
     res.json(ok({ deleted: true }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -411,7 +412,7 @@ router.post('/openings/:id/apply', auth, applyLimiter, limitPayloadSize(1), sani
       authorName: names.get(String(opening.authorId)) || 'A Mallchain member',
     }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -437,7 +438,7 @@ router.get('/openings/:id/applications', auth, async (req, res) => {
       respondedAt: r.respondedAt ? r.respondedAt.toISOString() : null,
     }))));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -468,7 +469,7 @@ router.get('/applications/mine', auth, async (req, res) => {
       };
     })));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -506,7 +507,7 @@ router.patch('/applications/:id', auth, limitPayloadSize(1), sanitizeInputs, pre
 
     res.json(ok({ id: String(application._id), status: application.status, authorNote: application.authorNote }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -537,7 +538,7 @@ router.post('/applications/:id/withdraw', auth, async (req, res) => {
     });
     res.json(ok({ id: String(application._id), status: 'withdrawn' }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 

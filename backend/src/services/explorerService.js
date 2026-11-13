@@ -41,6 +41,23 @@ function decodeHash(b64OrHex) {
 }
 
 /**
+ * Normalize a validator address (20 bytes) to uppercase hex.
+ *
+ * The node is inconsistent about this field's encoding — REST/RPC block
+ * responses send base64, the `NewBlock` event websocket sends hex — so the
+ * explorer decodes explicitly instead of forwarding whichever form a given
+ * endpoint happened to use. Without this the same validator appeared as two
+ * different strings between a polled block row and a socket-pushed one.
+ */
+function decodeAddress(b64OrHex) {
+  if (!b64OrHex) return '';
+  if (/^[0-9a-fA-F]{40}$/.test(b64OrHex)) return b64OrHex.toUpperCase();
+  const bytes = Buffer.from(b64OrHex, 'base64');
+  if (bytes.length === 20) return bytes.toString('hex').toUpperCase();
+  return String(b64OrHex);
+}
+
+/**
  * Normalize Cosmos REST block into explorer-friendly shape.
  * Canonical block time is header.time (BFT time for this height).
  */
@@ -59,7 +76,7 @@ function normalizeRestBlock(data) {
     hash: decodeHash(blockId?.hash),
     chainId: header.chain_id,
     blockTime: time,
-    proposer: header.proposer_address,
+    proposer: decodeAddress(header.proposer_address),
     txCount: txs.length,
     transactions: txs.map((tx, i) => ({
       index: i,
@@ -129,7 +146,7 @@ async function fetchBlockFromRpc(height) {
     hash: result.block_id?.hash || null,
     chainId: header.chain_id,
     blockTime: time,
-    proposer: header.proposer_address,
+    proposer: decodeAddress(header.proposer_address),
     txCount: txs.length,
     transactions: txs.map((tx, i) => ({
       index: i,
@@ -252,7 +269,7 @@ async function getLatest() {
   // Return in format expected by frontend BlockData interface
   return {
     height: Number(sync.latest_block_height || 0),
-    hash: sync.latest_block_hash || '',
+    hash: decodeHash(sync.latest_block_hash) || '',
     time: time.iso || new Date().toISOString(),
     timestamp: time.unix || Math.floor(Date.now() / 1000),
     numTxs: block?.txCount || 0,

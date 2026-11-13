@@ -78,7 +78,7 @@ router.get('/', auth, async (req, res) => {
     const settings = await getOrCreateSettings(req.user._id);
     res.json(ok(settings));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -105,7 +105,7 @@ router.put('/', auth, async (req, res) => {
     await settings.save();
     res.json(ok(settings));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -123,7 +123,7 @@ router.put('/notifications', auth, async (req, res) => {
     await settings.save();
     res.json(ok(settings.notifications));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -133,7 +133,7 @@ router.get('/contact', auth, async (req, res) => {
     const settings = await getOrCreateSettings(req.user._id);
     res.json(ok(settings.contactInfo || {}));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -176,7 +176,7 @@ router.put('/contact', auth, async (req, res) => {
     await settings.save();
     res.json(ok(settings.contactInfo));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -212,6 +212,7 @@ router.post('/contact/phone/send-otp', auth, async (req, res) => {
     );
 
     const { sendSMS } = require('../services/brevoService');
+const { respondFailure } = require('../utils/respondFailure');
     const sent = await sendSMS(
       settings.contactInfo.phoneNumber,
       `Your Mallchain verification code is: ${otp}. Valid for 10 minutes.`
@@ -241,7 +242,7 @@ router.post('/contact/phone/send-otp', auth, async (req, res) => {
 
     res.json(ok({ sent: true, expiresAt: otpExpiry, message: 'OTP sent to your phone' }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -326,7 +327,7 @@ router.post('/contact/phone/verify', auth, async (req, res) => {
       phoneNumber: challenge.contactInfo?.phoneNumber ?? null,
     }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -345,7 +346,7 @@ router.post('/contact/whatsapp/opt-in', auth, async (req, res) => {
 
     res.json(ok({ whatsappOptIn: true }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -360,7 +361,7 @@ router.post('/contact/whatsapp/opt-out', auth, async (req, res) => {
 
     res.json(ok({ whatsappOptIn: false }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -387,7 +388,7 @@ router.get('/social', auth, async (req, res) => {
     const settings = await getOrCreateSettings(req.user._id);
     res.json(ok(settings.socialAccounts || []));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -416,7 +417,7 @@ router.post('/social/:platform', auth, async (req, res) => {
 
     res.json(ok({ platform, handle, connected: true }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -438,7 +439,7 @@ router.delete('/social/:platform', auth, async (req, res) => {
 
     res.json(ok({ removed: true }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -466,7 +467,7 @@ router.put('/security', auth, async (req, res) => {
     await settings.save();
     res.json(ok(settings.security));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -495,7 +496,7 @@ router.put('/privacy', auth, async (req, res) => {
     await settings.save();
     res.json(ok(settings.privacy));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -506,7 +507,7 @@ router.post('/reset', auth, async (req, res) => {
     const settings = await getOrCreateSettings(req.user._id);
     res.json(ok(settings));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -522,7 +523,7 @@ router.get('/export', auth, async (req, res) => {
     };
     res.json(ok(exportData));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -548,7 +549,7 @@ router.post('/import', auth, async (req, res) => {
 
     res.json(ok(settings));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -569,7 +570,7 @@ router.post('/security/2fa/setup', auth, async (req, res) => {
       otpauthUrl: totp.keyUri(secret, User.decryptUserPii(req.user).email || String(req.user._id)),
     }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -605,7 +606,7 @@ router.post('/security/2fa/enable', auth, limiters.strict, async (req, res) => {
     // Backup codes are only ever returned this once — only their hashes are stored.
     res.json(ok({ enabled: true, backupCodes }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -641,7 +642,7 @@ router.post('/security/2fa/disable', auth, limiters.strict, async (req, res) => 
 
     res.json(ok({ enabled: false }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -671,7 +672,7 @@ router.post('/security/change-password', auth, limiters.strict, async (req, res)
 
     res.json(ok({ changed: true }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 

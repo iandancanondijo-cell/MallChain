@@ -2,6 +2,12 @@
 /* global require, module */
 const LiquidityPoolActivity = require('../models/LiquidityPoolActivity');
 const { liquidityActivityTotal } = require('../utils/metrics');
+// Required lazily inside the publish step would avoid a load-time cycle, but
+// neither module reaches back here, so a plain require is safe and easier to
+// read. Both are observability paths: nothing in the ledger write depends on
+// them.
+const { publishMarketEvent, toTradeEvent, TRADE_FLOWS } = require('./marketActivityFeed');
+const { publish: publishWalletUpdate } = require('./walletSync');
 
 function compactObject(value) {
   return Object.fromEntries(
@@ -59,6 +65,31 @@ async function recordLiquidityActivity(entry) {
 
   const created = await LiquidityPoolActivity.create(payload);
   liquidityActivityTotal.inc({ flow: payload.flow, stage: payload.stage, status: payload.status });
+
+  // Realtime fan-out. Every value movement in the economy passes through this
+  // function, which makes it the only place that can promise a socket update is
+  // as true as the ledger row it describes: the market feed publishes the event
+  // (never the identity or the fiat amount — see services/marketActivityFeed.js)
+  // and the wallet room gets a freshly-read balance instead of a delta guess.
+  //
+  // Both are fire-and-forget and failure-isolated. A row this honest has
+  // already been written and the money has already moved; a dead websocket must
+  // never turn a settled purchase into a 500.
+  if (payload.status === 'success') {
+    setImmediate(() => {
+      try {
+        if (TRADE_FLOWS.includes(payload.flow)) {
+          publishMarketEvent(toTradeEvent(created.toObject ? created.toObject({ virtuals: false }) : created));
+        }
+        if (payload.walletAddress) {
+          Promise.resolve(publishWalletUpdate(payload.walletAddress)).catch(() => {});
+        }
+      } catch {
+        /* observability only */
+      }
+    });
+  }
+
   return created;
 }
 

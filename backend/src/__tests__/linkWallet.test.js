@@ -349,3 +349,68 @@ describe('GET /api/auth/me — badge enrichment', () => {
     expect(res.body.user.hasBadge).toBe(false);
   });
 });
+
+// The clock behind the 29-day cash-out rule is written here. A wallet's age
+// is only defensible if the stamp is created on the server at link time and
+// cannot be reset by clicking "connect wallet" again tomorrow — which is why
+// these three cases are about *when* the field moves.
+describe('POST /api/auth/link-wallet — wallet-age clock', () => {
+  let app;
+
+  beforeAll(() => {
+    app = express();
+    app.use(express.json());
+    app.post('/api/auth/link-wallet', auth, authController.linkWallet);
+  });
+
+  beforeEach(() => jest.clearAllMocks());
+
+  // A second real bech32 `mall1…` address (the sender/recipient pair used
+  // across sendController.test.js) — the handler validates the checksum, so a
+  // typed placeholder would 400 before the clock code ever ran.
+  const OTHER_ADDRESS = 'mall1dqd2t5avk0hfu5mmaq2dgmgydvlv8qhxffymaw';
+  const OLD_STAMP = new Date('2026-01-05T00:00:00.000Z');
+
+  function link(address, doc) {
+    User.findById.mockReturnValue({ select: jest.fn().mockResolvedValue(doc) });
+    verifyLinkWalletSignature.mockReturnValue(true);
+    return request(app).post('/api/auth/link-wallet')
+      .set(authHeader('user-1'))
+      .send({ address, timestamp: new Date().toISOString(), pubKey: 'fake-pubkey-b64', signature: 'fake-signature-b64' });
+  }
+
+  test('the first link starts the clock', async () => {
+    const doc = { _id: 'user-1', email: 'a@b.com', save: jest.fn().mockResolvedValue(undefined) };
+    const res = await link(VALID_ADDRESS, doc);
+    expect(res.status).toBe(200);
+    expect(doc.walletLinkedAt).toBeInstanceOf(Date);
+  });
+
+  test('re-connecting the same wallet does not restart the clock', async () => {
+    // The cipher wall can disconnect and reconnect the same address as often
+    // as the user likes; that must not turn a served 28-day wait into a new
+    // one (nor erase the evidence of how long the wallet has really been here).
+    const doc = {
+      _id: 'user-1', email: 'a@b.com', walletAddress: VALID_ADDRESS, walletLinkedAt: OLD_STAMP,
+      save: jest.fn().mockResolvedValue(undefined),
+    };
+    const res = await link(VALID_ADDRESS, doc);
+    expect(res.status).toBe(200);
+    expect(doc.walletLinkedAt).toBe(OLD_STAMP);
+  });
+
+  test('switching to a different wallet starts a fresh clock', async () => {
+    // Deliberately the opposite of the case above: a new address genuinely is
+    // a new wallet, and the rule exists for funds moved into a fresh address
+    // and cashed out the same week.
+    const doc = {
+      _id: 'user-1', email: 'a@b.com', walletAddress: VALID_ADDRESS, walletLinkedAt: OLD_STAMP,
+      save: jest.fn().mockResolvedValue(undefined),
+    };
+    const res = await link(OTHER_ADDRESS, doc);
+    expect(res.status).toBe(200);
+    expect(doc.walletAddress).toBe(OTHER_ADDRESS);
+    expect(doc.walletLinkedAt).toBeInstanceOf(Date);
+    expect(doc.walletLinkedAt.getTime()).not.toBe(OLD_STAMP.getTime());
+  });
+});

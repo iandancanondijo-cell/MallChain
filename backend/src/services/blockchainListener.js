@@ -128,17 +128,32 @@ function startBlockchainListener() {
     baseIntervalMs: BASE_POLL_INTERVAL_MS,
     maxIntervalMs: MAX_POLL_INTERVAL_MS,
   })
-  
+
+  let stopped = false
+  let timer = null
+
   // Use recursive setTimeout to support dynamic interval changes
   function scheduleNext() {
-    setTimeout(() => {
+    if (stopped) return
+    timer = setTimeout(() => {
       reconcilePendingTransactions().finally(() => {
         scheduleNext()
       })
     }, currentIntervalMs)
+    // Don't hold the event loop open in tests / during shutdown.
+    if (typeof timer.unref === 'function') timer.unref()
   }
-  
+
   scheduleNext()
+
+  // The caller wires this to SIGINT; returning nothing used to make
+  // `stopBlockListener()` in index.js a no-op guard that never fired, so the
+  // loop kept reconciling transactions against the chain after shutdown began.
+  return () => {
+    stopped = true
+    if (timer) clearTimeout(timer)
+    timer = null
+  }
 }
 
 module.exports = {

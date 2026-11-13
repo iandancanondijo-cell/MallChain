@@ -8,6 +8,7 @@ const { recordWithdrawLiquidityActivity } = require('./liquidityActivityService'
 const { notifyUser } = require('./notify');
 const logger = require('../utils/logger');
 const { blindIndex } = require('../utils/fieldEncryption');
+const { checkWalletWithdrawalAge } = require('./walletAgeService');
 
 /**
  * Notifies the withdrawer of a state change. Falls back to a direct SMS
@@ -82,6 +83,23 @@ async function releaseQueuedWithdrawal(withdrawal) {
   }
 
   const txBytes = MallcoinSale.decryptPendingTxBytes(sale);
+
+  // Wallet-age rule, checked before anything is cleared or written: a
+  // withdrawal for a wallet under the minimum simply stays queued, exactly as
+  // it was, and a later scan settles it once the wallet qualifies. Checking
+  // after `pendingTxBytes = null` would strand the held signature.
+  const ageCheck = await checkWalletWithdrawalAge(withdrawal.walletAddress);
+  if (!ageCheck.ok) {
+    logger.info('withdrawalLiquidityQueueService: held withdrawal skipped — wallet age not met', {
+      withdrawalId: withdrawal.withdrawalId,
+      walletAddress: withdrawal.walletAddress,
+      code: ageCheck.code,
+      ageDays: ageCheck.ageDays,
+      minimumDays: ageCheck.minimumDays,
+    });
+    return { ok: false, reason: ageCheck.code || 'wallet_age_not_met' };
+  }
+
   sale.pendingTxBytes = null;
   sale.pendingTxBytesSetAt = null;
 

@@ -63,6 +63,16 @@ const UserSchema = new Schema({
   walletAddress: { type: String },
   walletAddress_blind: { type: String },
 
+  // When `walletAddress` first became associated with this account, written by
+  // POST /api/auth/link-wallet (see authController.linkWallet). The server-side
+  // clock behind the wallet-age withdrawal rule in
+  // services/walletAgeService.js — deliberately not the client's
+  // `store.wallet.createdAt`, which any browser tab could move backwards.
+  // Re-stamped only when a *different* address is linked: re-confirming the
+  // same wallet after the cipher wall disconnects it must not restart a
+  // 29-day clock the person already served.
+  walletLinkedAt: { type: Date },
+
   // bcrypt(PIN) uploaded by the wallet connect / change-PIN flows (see
   // POST /api/wallet/pin/set-pin). The PIN itself never leaves the device —
   // only its hash, which mirrors the client-side st.wallet.pinHash so

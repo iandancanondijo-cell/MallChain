@@ -14,10 +14,16 @@ jest.mock('../models/kyc');
 jest.mock('../models/user');
 jest.mock('../models/AuditLog', () => ({ create: jest.fn().mockResolvedValue({}) }));
 jest.mock('../middleware/upload', () => ({ KYC_UPLOAD_DIR: '/fake/kyc/uploads' }));
+// Only services/amlProvider.js's real vendor clients call axios, and only when
+// AML_PROVIDER_* env vars point at one (see the "screening actually ran"
+// block below). Mocking it keeps those tests from reaching the network.
+jest.mock('axios', () => ({ post: jest.fn(), get: jest.fn() }));
 
 const KYC = require('../models/kyc');
 const User = require('../models/user');
 const AuditLog = require('../models/AuditLog');
+const axios = require('axios');
+const { resetAmlProvider } = require('../services/amlProvider');
 const kycCtrl = require('../controllers/kycController');
 
 // automock replaces KYC.decryptKycPii (a plain function property on the
@@ -78,6 +84,20 @@ describe('kycController', () => {
     // Same reset problem for decryptKycPii — see the module-scope comment
     // above; a passthrough is correct since fixtures here are plaintext.
     KYC.decryptKycPii.mockImplementation((k) => k);
+    // The AML provider is memoised per process and chosen from the
+    // environment, so every test here starts from the same place the repo
+    // runs from: no vendor configured, therefore nothing screened.
+    delete process.env.AML_PROVIDER_TYPE;
+    delete process.env.AML_PROVIDER_API_KEY;
+    delete process.env.AML_PROVIDER_URL;
+    resetAmlProvider();
+  });
+
+  afterEach(() => {
+    delete process.env.AML_PROVIDER_TYPE;
+    delete process.env.AML_PROVIDER_API_KEY;
+    delete process.env.AML_PROVIDER_URL;
+    resetAmlProvider();
   });
 
   describe('uploadDocument', () => {
@@ -215,12 +235,18 @@ describe('kycController', () => {
       const res = mockRes();
       await kycCtrl.submitKYC(req, res);
 
+      // riskLevel is 'high' here because no AML vendor is configured in this
+      // environment, so no list was consulted. That is deliberately not 'low':
+      // "nobody looked" must never be recorded as "nothing was found".
       expect(KYC.create).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: 'u1', status: 'pending', riskLevel: 'low' })
+        expect.objectContaining({ userId: 'u1', status: 'pending', riskLevel: 'high' })
       );
+      const created = KYC.create.mock.calls[0][0];
+      expect(created.amlChecks).toMatchObject({ screened: false, sanctions: false, pep: false, provider: 'none' });
+      expect(created.amlChecks.raw.declaredPoliticalExposure).toBe(false);
       expect(User.findByIdAndUpdate).toHaveBeenCalledWith('u1', { name: 'Jane Doe' });
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ success: true, kycId: 'kyc1', status: 'pending', riskLevel: 'low' })
+        expect.objectContaining({ success: true, kycId: 'kyc1', status: 'pending', riskLevel: 'high' })
       );
     });
 
@@ -236,7 +262,7 @@ describe('kycController', () => {
       expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
     });
 
-    test('flags medium risk when politicalExposure is true', async () => {
+    test('keeps an un-screened PEP declaration held for review instead of downgrading it', async () => {
       KYC.findOne.mockResolvedValue(null);
       KYC.create.mockResolvedValue({ _id: 'kyc3' });
       User.findById.mockReturnValue({ select: jest.fn().mockResolvedValue({ name: 'Has Name' }) });
@@ -245,8 +271,15 @@ describe('kycController', () => {
       const res = mockRes();
       await kycCtrl.submitKYC(req, res);
 
-      expect(KYC.create).toHaveBeenCalledWith(expect.objectContaining({ riskLevel: 'medium' }));
-      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ riskLevel: 'medium' }));
+      // A self-declared PEP would map to 'medium' once a list is actually
+      // checked (see the "screening actually ran" block). With nothing
+      // screened the submission still surfaces at the higher of the two, and
+      // the declaration is preserved as a declaration rather than promoted
+      // into amlChecks.pep, which means "a PEP list matched".
+      expect(KYC.create).toHaveBeenCalledWith(expect.objectContaining({ riskLevel: 'high' }));
+      expect(KYC.create.mock.calls[0][0].amlChecks).toMatchObject({ screened: false, pep: false });
+      expect(KYC.create.mock.calls[0][0].amlChecks.raw.declaredPoliticalExposure).toBe(true);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ riskLevel: 'high' }));
     });
 
     test('500s and does not leak internals when KYC.create throws', async () => {
@@ -271,7 +304,7 @@ describe('kycController', () => {
     });
 
     test('upserts the risk profile without altering KYC status', async () => {
-      KYC.findOneAndUpdate.mockResolvedValue({ _id: 'k1', riskLevel: 'low' });
+      KYC.findOneAndUpdate.mockResolvedValue({ _id: 'k1', riskLevel: 'high' });
       const req = {
         user: { id: 'u1' },
         body: { kycData: { politicalExposure: false }, walletAddress: 'mall1abc' },
@@ -281,14 +314,92 @@ describe('kycController', () => {
 
       expect(KYC.findOneAndUpdate).toHaveBeenCalledWith(
         { userId: 'u1' },
-        expect.objectContaining({ riskLevel: 'low' }),
+        expect.objectContaining({ riskLevel: 'high' }),
         { new: true, upsert: true, setDefaultsOnInsert: true }
       );
-      // A real admin decision — not this mocked signal — must be what moves
-      // status; asserting the update payload never carries a status field.
+      // Nothing was screened in this environment, and the profile says so
+      // rather than recording a clean look-through.
+      expect(KYC.findOneAndUpdate.mock.calls[0][1].amlChecks).toMatchObject({ screened: false, provider: 'none' });
+      // A real admin decision — not this informational signal — must be what
+      // moves status; asserting the update payload never carries a status field.
       const updatePayload = KYC.findOneAndUpdate.mock.calls[0][1];
       expect(updatePayload).not.toHaveProperty('status');
-      expect(res.json).toHaveBeenCalledWith({ success: true, checks: expect.any(Object), riskLevel: 'low' });
+      expect(res.json).toHaveBeenCalledWith({ success: true, checks: expect.any(Object), riskLevel: 'high' });
+    });
+  });
+
+  // The mapping from a screening result to a risk level only means something
+  // once a vendor was really consulted, so these drive the provider selection
+  // code through a configured vendor (AML_PROVIDER_*) with axios stubbed,
+  // instead of asserting the mapping against a provider that screens nobody.
+  describe('with a real AML vendor configured', () => {
+    function configuredVendor(reply) {
+      process.env.AML_PROVIDER_TYPE = 'chainalysis';
+      process.env.AML_PROVIDER_API_KEY = 'test-key';
+      resetAmlProvider();
+      if (reply instanceof Error) axios.post.mockRejectedValue(reply);
+      else axios.post.mockResolvedValue({ data: reply });
+    }
+
+    test('a vendor that reports no hits is what makes a submission low risk', async () => {
+      configuredVendor({});
+      KYC.findOne.mockResolvedValue(null);
+      KYC.create.mockResolvedValue({ _id: 'k1' });
+      User.findById.mockReturnValue({ select: jest.fn().mockResolvedValue({ name: 'Jane Doe' }) });
+
+      const res = mockRes();
+      await kycCtrl.submitKYC({ user: { id: 'u1' }, body: validKycBody() }, res);
+
+      expect(KYC.create.mock.calls[0][0]).toMatchObject({ riskLevel: 'low' });
+      expect(KYC.create.mock.calls[0][0].amlChecks).toMatchObject({ screened: true, provider: 'chainalysis' });
+    });
+
+    test('a PEP match is medium and a sanctions match is high', async () => {
+      configuredVendor({ pep: { hit: true } });
+      KYC.findOne.mockResolvedValue(null);
+      KYC.create.mockResolvedValue({ _id: 'k2' });
+      User.findById.mockReturnValue({ select: jest.fn().mockResolvedValue({ name: 'Jane Doe' }) });
+      await kycCtrl.submitKYC({ user: { id: 'u1' }, body: validKycBody() }, mockRes());
+      expect(KYC.create.mock.calls[0][0]).toMatchObject({ riskLevel: 'medium' });
+
+      configuredVendor({ sanctions: { hit: true } });
+      KYC.create.mockResolvedValue({ _id: 'k3' });
+      await kycCtrl.submitKYC({ user: { id: 'u1' }, body: validKycBody() }, mockRes());
+      expect(KYC.create.mock.calls[1][0]).toMatchObject({ riskLevel: 'high' });
+      expect(KYC.create.mock.calls[1][0].amlChecks.sanctions).toBe(true);
+    });
+
+    test('a vendor that is unreachable still submits, held at high risk', async () => {
+      configuredVendor(new Error('Cloudflare 530 from screening endpoint'));
+      KYC.findOne.mockResolvedValue(null);
+      KYC.create.mockResolvedValue({ _id: 'k4' });
+      User.findById.mockReturnValue({ select: jest.fn().mockResolvedValue({ name: 'Jane Doe' }) });
+
+      const res = mockRes();
+      await kycCtrl.submitKYC({ user: { id: 'u1' }, body: validKycBody() }, res);
+
+      const created = KYC.create.mock.calls[0][0];
+      expect(created).toMatchObject({ riskLevel: 'high', status: 'pending' });
+      expect(created.amlChecks).toMatchObject({ screened: false, provider: 'unavailable' });
+      // An outage is recorded as an outage — not as a screening that found
+      // nothing, and not as a hit either.
+      expect(created.amlChecks.sanctions).toBe(false);
+      expect(created.amlChecks.raw.warning).toMatch(/unreachable/);
+    });
+
+    test('a vendor response that is not a screening payload is not read as clean', async () => {
+      // e.g. an intercepting proxy or error page answering 200 with a string.
+      configuredVendor('<!doctype html><html>error</html>');
+      KYC.findOne.mockResolvedValue(null);
+      KYC.create.mockResolvedValue({ _id: 'k5' });
+      User.findById.mockReturnValue({ select: jest.fn().mockResolvedValue({ name: 'Jane Doe' }) });
+
+      await kycCtrl.submitKYC({ user: { id: 'u1' }, body: validKycBody() }, mockRes());
+
+      const created = KYC.create.mock.calls[0][0];
+      expect(created.riskLevel).toBe('high');
+      expect(created.amlChecks.screened).toBe(false);
+      expect(created.amlChecks.provider).toBe('unavailable');
     });
   });
 
@@ -306,7 +417,34 @@ describe('kycController', () => {
       const req = { user: { id: 'u1' } };
       const res = mockRes();
       await kycCtrl.getKYCStatus(req, res);
-      expect(res.json).toHaveBeenCalledWith({ status: 'not_submitted' });
+      expect(res.json).toHaveBeenCalledWith({ status: 'not_submitted', verdict: 'not_submitted' });
+    });
+
+    test('publishes the verdict a wallet gate would apply, not just the document status', async () => {
+      // The §6 complaint in one account: an admin can approve by setting
+      // kycLevel without a KYC document ever existing. `status` still describes
+      // the (absent) record, and `verdict` is the answer the rest of the product
+      // acts on — which is why the dashboard banner and the wallet door can no
+      // longer tell this person two different stories.
+      KYC.findOne.mockReturnValue({ sort: jest.fn().mockResolvedValue(null) });
+      const res = mockRes();
+      await kycCtrl.getKYCStatus({ user: { id: 'u1', kycLevel: 2 } }, res);
+      expect(res.json).toHaveBeenCalledWith({ status: 'not_submitted', verdict: 'verified' });
+    });
+
+    test.each([
+      ['draft', 'not_submitted'],
+      ['pending', 'pending'],
+      ['review', 'pending'],
+      ['approved', 'verified'],
+      ['rejected', 'rejected'],
+    ])('a %s document reports verdict:%s beside its own status', async (status, verdict) => {
+      KYC.findOne.mockReturnValue({
+        sort: jest.fn().mockResolvedValue({ _id: 'k1', status, notes: '', reviewedAt: null }),
+      });
+      const res = mockRes();
+      await kycCtrl.getKYCStatus({ user: { id: 'u1', kycLevel: 1 } }, res);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ status, verdict }));
     });
 
     test('returns the caller\'s own full submitted profile', async () => {

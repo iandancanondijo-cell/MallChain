@@ -7,6 +7,7 @@ const ApiKey = require('../models/devhubApiKey');
 const { DEVHUB_PERMISSION } = require('../middleware/devhubKey');
 const { createLimiter } = require('../middleware/rateLimiter');
 const devhubV1 = require('./devhubApi');
+const { respondFailure } = require('../utils/respondFailure');
 
 function ok(data) { return { ok: true, data }; }
 function fail(err) {
@@ -39,7 +40,7 @@ router.get('/keys', auth, async (req, res) => {
     const keys = await ApiKey.find({ userId: req.user._id, revoked: false }).sort({ created: -1 }).lean();
     res.json(ok(keys));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -65,7 +66,7 @@ router.post('/keys', auth, keyLimiter, async (req, res) => {
 
     res.json(ok(apiKey));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -82,7 +83,7 @@ router.delete('/keys/:id', auth, async (req, res) => {
     }
     res.json(ok({ revoked: true }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -107,7 +108,7 @@ router.post('/test', async (req, res) => {
 
     res.json(ok({ valid: true, keyName: apiKey.name, permissions: apiKey.permissions, used: apiKey.used }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -127,7 +128,7 @@ router.get('/usage', auth, async (req, res) => {
 
     res.json(ok(stats));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -175,7 +176,7 @@ router.get('/docs', async (_req, res) => {
     };
     res.json(ok(docs));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 
@@ -196,7 +197,7 @@ router.put('/keys/:id', auth, async (req, res) => {
 
     res.json(ok(apiKey));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 

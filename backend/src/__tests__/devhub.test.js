@@ -1,9 +1,13 @@
 const request = require('supertest');
 const express = require('express');
 
+// countDocuments is the per-user active-key cap check in routes/devhub.js
+// (MAX_KEYS_PER_USER). The factory mock has to carry every method the routes
+// actually call, or the missing one throws and the request 500s.
 jest.mock('../models/devhubApiKey', () => ({
   find: jest.fn(),
   create: jest.fn(),
+  countDocuments: jest.fn(),
   findOneAndUpdate: jest.fn(),
 }));
 jest.mock('../middleware/auth', () =>
@@ -42,6 +46,7 @@ describe('devhub routes', () => {
   });
 
   test('POST /keys persists a real key scoped to the caller', async () => {
+    ApiKey.countDocuments.mockResolvedValue(0);
     ApiKey.create.mockResolvedValue({ _id: 'k1', userId: 'user1', name: 'prod', key: 'mk_abc', permissions: ['read'] });
 
     const res = await request(app).post('/api/devhub/keys').send({ name: 'prod' });
@@ -49,6 +54,17 @@ describe('devhub routes', () => {
     expect(res.status).toBe(200);
     expect(ApiKey.create).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user1', name: 'prod' }));
     expect(res.body.data.key).toMatch(/^mk_/);
+  });
+
+  test('POST /keys refuses a 21st active key instead of letting keys pile up', async () => {
+    // routes/devhub.js caps a user at MAX_KEYS_PER_USER (20) unrevoked keys.
+    ApiKey.countDocuments.mockResolvedValue(20);
+
+    const res = await request(app).post('/api/devhub/keys').send({ name: 'one-too-many' });
+
+    expect(res.status).toBe(409);
+    expect(ApiKey.countDocuments).toHaveBeenCalledWith({ userId: 'user1', revoked: false });
+    expect(ApiKey.create).not.toHaveBeenCalled();
   });
 
   test('DELETE /keys/:id revokes only the caller\'s own key', async () => {

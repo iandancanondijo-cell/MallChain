@@ -57,7 +57,14 @@ describe('faucet routes', () => {
       const res = await request(app).get('/api/faucet/status');
 
       expect(res.status).toBe(500);
-      expect(res.body.error.message).toBe('redis unavailable');
+      // The raw message is masked on purpose: this is a plain Error with no
+      // HTTP status, i.e. an infrastructure failure whose text can echo
+      // connection strings. B11 in errorHandler.js replaces it with the
+      // generic copy (the full message still goes to the log). Only errors
+      // faucetService authors with an explicit status — cooldown, disabled,
+      // bad address — are forwarded, and those are covered below.
+      expect(res.body.error.message).toBe('Internal server error. Please try again later.');
+      expect(res.body.error.code).toBe('INTERNAL_ERROR');
     });
   });
 

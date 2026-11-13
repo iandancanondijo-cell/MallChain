@@ -31,7 +31,7 @@ jest.mock('../utils/logger', () => ({ info: jest.fn(), error: jest.fn(), warn: j
 
 const KYC = require('../models/kyc');
 const User = require('../models/user');
-const { requireVerifiedKyc } = require('../middleware/requireKyc');
+const { requireVerifiedKyc, verdictForAccount, verdictFromRecordStatus } = require('../middleware/requireKyc');
 
 const ADDRESS = 'mall1p9f39uylkjv956xeltkdtsel5y6xu36xh2m6qg';
 const OTHER = 'mall1sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx1';
@@ -63,7 +63,16 @@ describe('requireVerifiedKyc', () => {
     const res = await request(appWith({})).post('/guarded').send({ address: ADDRESS });
 
     expect(res.status).toBe(403);
-    expect(res.body).toMatchObject({ ok: false, error: 'kyc_verification_required', kycStatus: 'unverified', next: '/kyc' });
+    // `verdict` is the four-value field clients branch on (handoff §6); it is
+    // published here as well as on GET /api/kyc/status so a blocked wallet
+    // action and the dashboard banner cannot give one account two answers.
+    expect(res.body).toMatchObject({
+      ok: false,
+      error: 'kyc_verification_required',
+      kycStatus: 'unverified',
+      verdict: 'not_submitted',
+      next: '/kyc',
+    });
   });
 
   test('an approved KYC record is allowed through', async () => {
@@ -89,16 +98,33 @@ describe('requireVerifiedKyc', () => {
   });
 
   test.each([
-    ['pending', 'submitted, awaiting a reviewer'],
-    ['review', 'queued for review'],
-    ['rejected', 'a reviewer said no'],
-  ])('a %s verdict reports kycStatus:%s', async (status) => {
+    ['pending', 'submitted, awaiting a reviewer', 'pending'],
+    ['review', 'queued for review', 'pending'],
+    ['rejected', 'a reviewer said no', 'rejected'],
+  ])('a %s verdict reports kycStatus:%s and verdict:%s', async (status, _meaning, verdict) => {
     KYC.findOne.mockImplementation(() => kycRecord({ _id: 'k1', status }));
 
     const res = await request(appWith({})).post('/guarded').send({ address: ADDRESS });
 
     expect(res.status).toBe(403);
     expect(res.body.kycStatus).toBe(status === 'review' ? 'pending' : status);
+    // 'review' is a reviewer's queue state, not a different answer to the
+    // account: both words for "a person has to look" publish 'pending'.
+    expect(res.body.verdict).toBe(verdict);
+  });
+
+  test('kycLevel >= 2 publishes verified whatever the document says', async () => {
+    // The admin approve path can set kycLevel without touching the KYC row, so
+    // an account can be verified while its newest record still reads 'pending'.
+    // The gate and GET /api/kyc/status both answer from verdictForAccount,
+    // which is why the wallet door and the banner cannot disagree here.
+    const app = express();
+    app.use(express.json());
+    app.post('/guarded', (req, _res, next) => { req.user = { _id: 'user1', kycLevel: 2 }; next(); }, requireVerifiedKyc({}), (_req, res) => res.json({ reached: true }));
+
+    const res = await request(app).post('/guarded').send({ address: ADDRESS });
+
+    expect(res.status).toBe(200);
   });
 
   test('the link-wallet exception allows only the address this account already holds', async () => {
@@ -145,5 +171,51 @@ describe('requireVerifiedKyc', () => {
 
     expect(res.status).toBe(503);
     expect(res.body.error).toBe('kyc_check_unavailable');
+  });
+});
+
+/**
+ * The derivation itself, with no HTTP in the way: this one table is what
+ * GET /api/kyc/status (the dashboard banner), GET /api/auth/compliance-status
+ * and this middleware all publish, which is the point of handoff §6 — the
+ * client used to assemble the same answer from `status` + `kycLevel` +
+ * `reviewedAt` in three places and get three different sentences.
+ */
+describe('verdictForAccount', () => {
+  const rec = (status) => ({ status });
+
+  test.each([
+    ['approved', 'verified'],
+    ['rejected', 'rejected'],
+    ['pending', 'pending'],
+    ['review', 'pending'],
+    // Wizard progress is not a submission: nobody is looking at it yet.
+    ['draft', 'not_submitted'],
+    [undefined, 'not_submitted'],
+    [null, 'not_submitted'],
+  ])('a %s document with no account flag is %s', (status, verdict) => {
+    expect(verdictForAccount({ kycLevel: 1 }, status ? rec(status) : null)).toBe(verdict);
+  });
+
+  test('kycLevel >= 2 settles the answer before the document is read', () => {
+    // Including against a document that still says 'pending' — that is the
+    // state an account is in the moment an admin approves it.
+    expect(verdictForAccount({ kycLevel: 2 }, rec('pending'))).toBe('verified');
+    expect(verdictForAccount({ kycLevel: 2 }, null)).toBe('verified');
+    // ... and a missing/undefined flag is not a verification: kycLevel 1 is
+    // models/user.js's default, which every fresh account has.
+    expect(verdictForAccount({ kycLevel: 1 }, null)).toBe('not_submitted');
+    expect(verdictForAccount({}, null)).toBe('not_submitted');
+    expect(verdictForAccount(null, rec('pending'))).toBe('pending');
+  });
+
+  test('verdictFromRecordStatus is the document-only form of the same table', () => {
+    expect(verdictFromRecordStatus('approved')).toBe('verified');
+    expect(verdictFromRecordStatus('review')).toBe('pending');
+    expect(verdictFromRecordStatus('draft')).toBe('not_submitted');
+    expect(verdictFromRecordStatus(undefined)).toBe('not_submitted');
+    // An account-level flag cannot be folded in here, by definition: this form
+    // has no User row to ask.
+    expect(verdictFromRecordStatus('pending')).toBe('pending');
   });
 });

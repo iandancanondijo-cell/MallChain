@@ -196,6 +196,65 @@ async function getHealth(req, res) {
   }
 }
 
+/**
+ * Non-throwing chain snapshot for the aggregated public status feed.
+ *
+ * /health and /stats answer with a single response each, so a caller that
+ * wants both (the landing status table did) makes 3 requests per poll and has
+ * to interpret two different failure modes. This returns one object that
+ * records *per-field* availability instead: `reachable` is only true when the
+ * node actually answered, and every derived measurement (block time, indexed
+ * tx total) stays null with its own reason rather than being replaced by a
+ * plausible-looking default. Nothing here invents a number.
+ *
+ * @param {{probeExplorer?: boolean, explorerBlockLimit?: number}} opts
+ */
+async function chainStatusSnapshot(opts = {}) {
+  const snapshot = {
+    reachable: false,
+    chainId: null,
+    moniker: null,
+    nodeVersion: null,
+    height: null,
+    latestBlockTime: null,
+    averageBlockTime: null,
+    totalTxs: null,
+    error: null,
+  }
+
+  let nodeRes, blockRes
+  try {
+    [nodeRes, blockRes] = await Promise.all([
+      fetchChain('/cosmos/base/tendermint/v1beta1/node_info'),
+      fetchChain('/cosmos/base/tendermint/v1beta1/blocks/latest'),
+    ])
+  } catch (err) {
+    snapshot.error = err instanceof AppError ? err.code : 'RPC_ERROR'
+    return snapshot
+  }
+
+  snapshot.reachable = true
+  snapshot.chainId = nodeRes?.default_node_info?.network || null
+  snapshot.moniker = nodeRes?.default_node_info?.moniker || null
+  snapshot.nodeVersion = nodeRes?.default_node_info?.version || null
+
+  const latestHeight = parseInt(blockRes?.block?.header?.height || '0', 10)
+  snapshot.height = Number.isFinite(latestHeight) && latestHeight > 0 ? latestHeight : null
+  snapshot.latestBlockTime = blockRes?.block?.header?.time || null
+
+  // Both measurements fetch independently and both are allowed to be null:
+  // average block time needs a 20-block history, the tx total needs CometBFT
+  // tx indexing. A null here means "not measurable", never "0".
+  const [averageBlockTime, totalTxs] = await Promise.all([
+    snapshot.height ? fetchAverageBlockTime(snapshot.height, snapshot.latestBlockTime) : Promise.resolve(null),
+    fetchTotalIndexedTxs(),
+  ])
+  snapshot.averageBlockTime = averageBlockTime
+  snapshot.totalTxs = totalTxs
+
+  return snapshot
+}
+
 module.exports = {
   getEmissionState,
   getTransactions,
@@ -203,4 +262,5 @@ module.exports = {
   getMarketPrice,
   getStats,
   getHealth,
+  chainStatusSnapshot,
 }

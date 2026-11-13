@@ -193,4 +193,47 @@ describe('keyManager.getTreasuryMnemonic', () => {
       expect(axios.get).not.toHaveBeenCalled();
     });
   });
+
+  // A dev box that has VAULT_ADDR configured but no Vault running is the
+  // common local state (the binary is not installed here). Before _vaultMnemonic
+  // existed, the Vault error escaped before the TEST_MODE branch could run, so
+  // the env fallback backend/.env documents was unreachable and every treasury
+  // call died on "Failed to authenticate to Vault".
+  describe('TEST_MODE fallback when Vault is configured but unavailable', () => {
+    test('uses TREASURY_MNEMONIC when the configured Vault cannot be reached', async () => {
+      process.env.VAULT_ADDR = 'https://vault.internal';
+      process.env.VAULT_TOKEN = 'vault-token';
+      process.env.TEST_MODE = 'true';
+      process.env.TREASURY_MNEMONIC = 'local dev mnemonic';
+      axios.get.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:8200'));
+
+      await expect(getTreasuryMnemonic()).resolves.toBe('local dev mnemonic');
+    });
+
+    test('still fails closed with the same Vault error when TEST_MODE is off', async () => {
+      process.env.VAULT_ADDR = 'https://vault.internal';
+      process.env.VAULT_TOKEN = 'vault-token';
+      process.env.TREASURY_MNEMONIC = 'local dev mnemonic';
+      axios.get.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:8200'));
+
+      await expect(getTreasuryMnemonic()).rejects.toThrow('Failed to retrieve mnemonic from Vault');
+    });
+
+    test('the same downgrade lets ALLOW_OPERATOR_MNEMONIC cover a dead Vault in dev', async () => {
+      const { getOperatorMnemonic } = require('../utils/keyManager');
+      process.env.VAULT_ADDR = 'https://vault.internal';
+      process.env.VAULT_TOKEN = 'vault-token';
+      process.env.ALLOW_OPERATOR_MNEMONIC = 'true';
+      process.env.OPERATOR_MNEMONIC = 'operator dev mnemonic';
+      axios.get.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:8200'));
+
+      // TEST_MODE is off here, so the Vault error must still escape: the
+      // operator key is what stakes and delegates real funds, and a silently
+      // downgraded Vault would be indistinguishable from a working one.
+      // (TEST_MODE's own downgrade is the test above; production can never have
+      // it on — config/index.js refuses to boot, covered in
+      // secretsValidation.test.js.)
+      await expect(getOperatorMnemonic()).rejects.toThrow('Failed to retrieve mnemonic from Vault');
+    });
+  });
 });

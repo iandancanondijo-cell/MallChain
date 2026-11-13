@@ -1,5 +1,6 @@
 const request = require('supertest');
 const express = require('express');
+const { blindIndex } = require('../utils/fieldEncryption');
 
 jest.mock('../models/user', () => ({
   findOne: jest.fn(),
@@ -38,6 +39,14 @@ describe('POST /api/auth/register — user payload + referral attribution', () =
   beforeEach(() => {
     jest.clearAllMocks();
   });
+
+  // login() looks the account up as User.findOne({ email_blind }).select('+password')
+  // — password is a select:false path, so the query has to stay chainable in
+  // the mock. Register's duplicate check is a plain awaited findOne with no
+  // projection, which is why those tests can keep using mockResolvedValue.
+  function userQuery(doc) {
+    return { select: jest.fn().mockResolvedValue(doc) };
+  }
 
   function fakeCreatedUser(overrides = {}) {
     return {
@@ -111,10 +120,10 @@ describe('POST /api/auth/register — user payload + referral attribution', () =
   });
 
   test('login returns banned:true for a banned account', async () => {
-    User.findOne.mockResolvedValue({
+    User.findOne.mockReturnValue(userQuery({
       _id: 'u1', email: 'banned@x.com', password: 'hashed', banned: true, kycLevel: 1, role: 'user',
       save: jest.fn().mockResolvedValue(undefined),
-    });
+    }));
 
     const res = await request(app).post('/api/auth/login').send({ email: 'banned@x.com', password: 'pw123456' });
 
@@ -130,19 +139,22 @@ describe('POST /api/auth/register — user payload + referral attribution', () =
     const res = await request(app).post('/api/auth/register').send({ email: 'Foo@Example.com', password: 'pw123456' });
 
     expect(res.status).toBe(200);
-    expect(User.findOne).toHaveBeenCalledWith({ email: 'foo@example.com' });
+    // email is encrypted at rest, so the duplicate check can only be made
+    // against the deterministic blind index — but the value being indexed is
+    // the LOWERCASED address, which is the behaviour under test here.
+    expect(User.findOne).toHaveBeenCalledWith({ email_blind: blindIndex('foo@example.com') });
     expect(User.create).toHaveBeenCalledWith(expect.objectContaining({ email: 'foo@example.com' }));
   });
 
   test('login looks up a mixed-case email address in lowercase', async () => {
-    User.findOne.mockResolvedValue({
+    User.findOne.mockReturnValue(userQuery({
       _id: 'u2', email: 'foo@example.com', password: 'hashed', banned: false, kycLevel: 1, role: 'user',
       save: jest.fn().mockResolvedValue(undefined),
-    });
+    }));
 
     const res = await request(app).post('/api/auth/login').send({ email: 'FOO@EXAMPLE.COM', password: 'pw123456' });
 
     expect(res.status).toBe(200);
-    expect(User.findOne).toHaveBeenCalledWith({ email: 'foo@example.com' });
+    expect(User.findOne).toHaveBeenCalledWith({ email_blind: blindIndex('foo@example.com') });
   });
 });

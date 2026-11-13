@@ -65,4 +65,34 @@ describe('marketplace escrow relay routes', () => {
     expect(res.status).toBe(200);
     expect(res.body.escrows).toEqual([{ id: 'e1', buyer: 'mall1a' }]);
   });
+
+  // A marketplaced binary predating the query answers the gateway with HTTP
+  // 200 + a grpc status body. Passing that through as data reads to the buyer
+  // as "you have no escrows", which is a wrong answer, not an empty one.
+  test('GET /escrow reports 503 when the node answers with a status envelope', async () => {
+    axios.get.mockResolvedValue({ data: { code: 12, message: 'Not Implemented' } });
+
+    const res = await request(app).get('/api/marketplace/escrow');
+
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ success: false, error: 'Not Implemented' });
+  });
+
+  test('GET /escrow/:id reports 503 when the node answers with a status envelope', async () => {
+    axios.get.mockResolvedValue({ data: { code: 12, message: 'Not Implemented' } });
+
+    const res = await request(app).get('/api/marketplace/escrow/e1');
+
+    expect(res.status).toBe(503);
+    expect(res.body.success).toBe(false);
+  });
+
+  test('GET /escrow still returns an genuinely empty list as empty', async () => {
+    axios.get.mockResolvedValue({ data: { escrows: [] } });
+
+    const res = await request(app).get('/api/marketplace/escrow');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true, escrows: [] });
+  });
 });

@@ -6,6 +6,7 @@ const explorer = require('../services/explorerService');
 const mallcoinService = require('../services/mallcoinService');
 const stakingService = require('../services/stakingService');
 const User = require('../models/user');
+const { respondFailure } = require('../utils/respondFailure');
 
 /**
  * The developer API a DevHub `mk_…` key actually unlocks.
@@ -60,7 +61,7 @@ router.get('/whoami', async (req, res) => {
       rateLimitPerMinute: Number(res.getHeader('X-RateLimit-Limit')) || 120,
     }));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 

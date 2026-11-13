@@ -1,5 +1,12 @@
+// The service reads the withdrawal's phone through the model's static
+// decryptPhone() (models/WithdrawalRequest.js:83), which returns the document
+// as a plain object with `phone` run through decryptField(). The fixture
+// phones here are already plaintext, so the mock mirrors the shape without
+// touching crypto — but it has to exist, or the release path throws before it
+// can settle anything.
 jest.mock('../models/WithdrawalRequest', () => ({
   find: jest.fn(),
+  decryptPhone: jest.fn((request) => (request ? { ...request } : request)),
 }));
 jest.mock('../models/MallcoinSale', () => ({
   findOne: jest.fn(),
@@ -24,11 +31,29 @@ jest.mock('../services/liquidityActivityService', () => ({
 jest.mock('../services/notify', () => ({
   notifyUser: jest.fn().mockResolvedValue(undefined),
 }));
+// The wallet-age gate (services/walletAgeService.js) is consulted before a
+// held withdrawal is released. These tests are about queue behaviour — FIFO,
+// reserve pressure, stale signatures — so the gate is stubbed "old enough"
+// here and its own behaviour is covered by walletAgeService.test.js.
+jest.mock('../services/walletAgeService', () => ({
+  MIN_WALLET_AGE_DAYS: 29,
+  checkWalletWithdrawalAge: jest.fn().mockResolvedValue({
+    ok: true,
+    code: null,
+    minimumDays: 29,
+    ageDays: 40,
+    reference: 'walletLinkedAt',
+    referenceAt: '2026-10-01T00:00:00.000Z',
+    unlockAt: '2026-10-30T00:00:00.000Z',
+    walletLinked: true,
+  }),
+}));
 
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 const MallcoinSale = require('../models/MallcoinSale');
 const liquidityController = require('../controllers/liquidityController');
 const { executeSellSettlement } = require('../services/sellExecutionService');
+const { checkWalletWithdrawalAge } = require('../services/walletAgeService');
 const {
   holdForLiquidity,
   releaseQueuedWithdrawal,
@@ -97,6 +122,31 @@ describe('withdrawalLiquidityQueueService', () => {
       const result = await releaseQueuedWithdrawal(withdrawal);
       expect(result.ok).toBe(false);
       expect(result.resignRequired).toBe(true);
+    });
+
+    test('a wallet that has not met the cash-out age rule stays queued with its signature intact', async () => {
+      // The age gate is checked BEFORE pendingTxBytes is cleared: consuming
+      // the held signature and then refusing to pay would strand the
+      // withdrawal in a state nothing can release.
+      const withdrawal = makeWithdrawal();
+      const sale = { pendingTxBytes: 'ENCRYPTED', pendingTxBytesSetAt: new Date() };
+      MallcoinSale.findOne.mockResolvedValue(sale);
+      checkWalletWithdrawalAge.mockResolvedValueOnce({
+        ok: false, code: 'wallet_age_not_met', minimumDays: 29, ageDays: 12,
+        reference: 'walletLinkedAt', referenceAt: '2026-10-30T00:00:00.000Z',
+        unlockAt: '2026-11-28T00:00:00.000Z', walletLinked: true,
+      });
+
+      const result = await releaseQueuedWithdrawal(withdrawal);
+
+      expect(result).toMatchObject({ ok: false, reason: 'wallet_age_not_met' });
+      expect(sale.pendingTxBytes).toBe('ENCRYPTED');
+      expect(withdrawal.status).toBe('pending_review');
+      expect(executeSellSettlement).not.toHaveBeenCalled();
+      checkWalletWithdrawalAge.mockResolvedValue({
+        ok: true, code: null, minimumDays: 29, ageDays: 40, reference: 'walletLinkedAt',
+        referenceAt: '2026-10-01T00:00:00.000Z', unlockAt: '2026-10-30T00:00:00.000Z', walletLinked: true,
+      });
     });
 
     test('returns a plain failure when there is no held transaction to release', async () => {

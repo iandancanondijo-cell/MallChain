@@ -233,6 +233,71 @@ const config = {
     },
   },
 
+  // Per-channel provider settings, read by services/sendgridService.js,
+  // services/twilioService.js, services/africastalkingService.js and
+  // services/whatsappService.js via `config.notifications.<channel>`.
+  //
+  // This block came in with 91672507 (multi-channel notifications). The
+  // 2026-11-11 history merge kept the four provider services but resolved
+  // this file from the other side, so the section disappeared while every
+  // `config.notifications.*` read stayed — any call into those services
+  // threw "Cannot read properties of undefined (reading 'email')" instead of
+  // no-opping, which is exactly the failure the "best-effort, never throws"
+  // contract above promises. Restoring it is what makes those guards work
+  // again; the live notification path is still notificationDispatcher →
+  // brevoService, and nothing here changes that.
+  //
+  // Each provider stays independently optional: an absent key disables that
+  // channel only, never the API.
+  notifications: {
+    email: {
+      // 'sendgrid' | 'twilio' — Twilio's email path is SendGrid over SMTP.
+      provider: (process.env.EMAIL_PROVIDER || '').toLowerCase() || 'sendgrid',
+      sendgrid: {
+        apiKey: process.env.SENDGRID_API_KEY || '',
+        from: process.env.SENDGRID_FROM || 'noreply@mallchain.network',
+        replyTo: process.env.SENDGRID_REPLY_TO || '',
+      },
+      twilio: {
+        accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+        authToken: process.env.TWILIO_AUTH_TOKEN || '',
+        from: process.env.TWILIO_EMAIL_FROM || 'noreply@mallchain.network',
+      },
+    },
+    sms: {
+      // 'twilio' | 'africastalking'
+      provider: (process.env.SMS_PROVIDER || '').toLowerCase() || 'twilio',
+      twilio: {
+        accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+        authToken: process.env.TWILIO_AUTH_TOKEN || '',
+        from: process.env.TWILIO_PHONE_FROM || '',
+        apiBaseUrl: process.env.TWILIO_API_BASE_URL || 'https://api.twilio.com',
+      },
+      africastalking: {
+        apiKey: process.env.AFRICASTALKING_API_KEY || '',
+        username: process.env.AFRICASTALKING_USERNAME || '',
+        senderId: process.env.AFRICASTALKING_SENDER_ID || '',
+        apiBaseUrl: process.env.AFRICASTALKING_API_BASE_URL || 'https://api.africastalking.com',
+      },
+    },
+    whatsapp: {
+      // 'meta' — Meta WhatsApp Cloud API (Facebook for Developers).
+      provider: (process.env.WHATSAPP_PROVIDER || '').toLowerCase() || 'meta',
+      meta: {
+        accessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
+        phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+        businessAccountId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '',
+        apiVersion: process.env.WHATSAPP_API_VERSION || 'v21.0',
+        apiBaseUrl: process.env.WHATSAPP_API_BASE_URL || 'https://graph.facebook.com',
+        // Business-initiated messages must use a pre-approved template —
+        // Meta rejects free-form text outside the 24h service window
+        // (error 131047). Blank falls back to plain text (dev/session only).
+        templateName: process.env.WHATSAPP_TEMPLATE_NAME || '',
+        templateLanguage: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en',
+      },
+    },
+  },
+
   badge: {
     // How many consecutive active days (see utils/activityTracker.js) the
     // monthly snapshot (jobs/badgeSnapshot.js) requires to earn a badge.

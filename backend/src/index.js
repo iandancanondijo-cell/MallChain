@@ -17,7 +17,7 @@ const jwt = require('jsonwebtoken');
 const cookie = require('cookie');
 const User = require('./models/user');
 const Conversation = require('./models/Conversation');
-const { createLimiter, limiters } = require('./middleware/rateLimiter')
+const { createLimiter, createGlobalLimiters, limiters } = require('./middleware/rateLimiter')
 const { apiKeyAuth } = require('./middleware/apiKeyAuth')
 const { errorHandler } = require('./utils/errorHandler')
 const logger = require('./utils/logger')
@@ -44,6 +44,7 @@ const blockchainTxRoutes = require('./routes/blockchainTx');
 const walletsRoutes = require('./routes/wallets');
 const kycRoutes = require('./routes/kyc');
 const { startBlockchainListener } = require('./services/blockchainListener');
+const { startBlockBroadcaster, getBroadcastLatestBlock } = require('./services/blockBroadcaster');
 const walletConnectionRoutes = require('./routes/walletConnection');
 const walletCreationRoutes = require('./routes/walletCreation');
 const governanceRoutes = require('./routes/governance');
@@ -78,11 +79,12 @@ const net = require('net')
 const { Server } = require('socket.io')
 const { csrfProtection } = require('./middleware/csrf')
 
-// Real-time services
-const { priceEngine } = require('./services/priceEngine');
-const { marketFeed } = require('./services/marketActivityFeed');
-const { walletSyncService } = require('./services/walletSync');
-const { notificationManager } = require('./services/notificationManager');
+// Real-time services. These four names used to resolve to five-line stubs that
+// answered with invented numbers (price 0, empty activity feed, no wallet
+// cache) — see the header comment in each module for what it replaced.
+const { startPriceFeed, getLatestPriceSnapshot, getPriceFeedStatus, isSnapshotCurrent, buildSnapshot: buildPriceSnapshot } = require('./services/priceEngine');
+const { startMarketFeed, getRecentEvents } = require('./services/marketActivityFeed');
+const walletSyncService = require('./services/walletSync');
 const { initializeDefaultBurnPolicies, initializeDefaultDynamicThresholds } = require('./services/burnCalculator');
 
 const app = express();
@@ -250,19 +252,22 @@ const minesLimiter = createLimiter({
 });
 
 // [B9 remediation] Global baseline rate limiter — catches routes that don't
-// have an explicit per-route limiter (market, staking, governance, notifications,
-// etc.). Generous enough to not interfere with normal use, but caps burst abuse.
-// Applied to all /api/* before route mounting so every endpoint has a floor.
-const globalLimiter = createLimiter({
-  windowMs: 15 * 60 * 1000,
-  max: 300, // 300 requests per 15 min per IP ≈ 20/min
-  message: { error: 'rate_limit_exceeded', message: 'Too many requests. Please try again later.' },
-  keyGenerator: (req) => {
-    // Key by user id when authenticated (so a logged-in user hitting many
-    // routes still shares one budget), fall back to IP for anonymous traffic.
-    return req.user?.id || req.ip || req.headers['x-forwarded-for']?.split(',')[0];
-  },
-});
+// have an explicit per-route limiter (market, staking, governance,
+// notifications, etc.). Applied to all /api/* before route mounting so every
+// endpoint has a floor.
+//
+// Split into two buckets because the previous single IP-keyed limiter was
+// both too tight for a signed-in browser session and too blunt to be real
+// abuse protection: one open tab polls ~35 req/min across the dashboard,
+// price, notification and mines endpoints, so 300/15min per IP was routinely
+// exhausted by legitimate use — which surfaced to users as
+// "rate_limit_exceeded"/"unavailable" panels inside the admin windows and
+// 429s on /api/health. Anonymous traffic keeps the same 300/15min per-IP
+// floor; authenticated traffic is keyed by account (verified JWT, resolved at
+// the edge — `req.user` is not populated this early, so the old
+// `req.user?.id || req.ip` key was dead code) with a budget sized to normal
+// use. See middleware/rateLimiter.js's createGlobalLimiters().
+const globalLimiter = createGlobalLimiters();
 
 // Apply global limiter to all API routes
 app.use('/api', globalLimiter);
@@ -537,6 +542,10 @@ app.use('/api/send', maintenanceGuard('send'), sendRoutes);
 app.use('/api/receive', receiveRoutes);
 app.use('/api/blockchain', limiters.lenient, blockchainRoutes);
 app.use('/api/blockchain/tx', blockchainTxRoutes);
+// Chain identity for the UI's network label, read from the node rather than
+// from each surface's own build flag (backend-handoff-2026-11-09 §5).
+const networkIdentityRoutes = require('./routes/networkIdentity');
+app.use('/api/network', limiters.lenient, networkIdentityRoutes);
 app.use('/api/wallets', walletsRoutes);
 app.use('/api/kyc', kycRoutes);
 const walletPinRoutes = require('./routes/walletPin');
@@ -807,7 +816,7 @@ app.use('/downloads', downloadsRoutes);
 // Global error handling middleware
 app.use(errorHandler())
 
-function checkRedisAvailable(host, port, timeoutMs = 2000) {
+function probeRedisOnce(host, port, timeoutMs) {
   return new Promise(resolve => {
     const socket = new net.Socket()
     const onDone = available => {
@@ -824,6 +833,45 @@ function checkRedisAvailable(host, port, timeoutMs = 2000) {
   })
 }
 
+/**
+ * Redis reachability probe, retried.
+ *
+ * This used to be one 2s `net.connect` attempt, and on a cold start that is
+ * not a measurement of Redis — it is a measurement of how busy the machine
+ * is. Observed on 2026-11-12: redis-server was answering `PING` in under a
+ * millisecond the whole time, the backend's log simultaneously reported a
+ * 4.5s Mongo query, and this probe timed out, so `startBackgroundWorkers`
+ * logged "Redis is unavailable" and returned. Every queue worker, the
+ * liquidity-release scanner, the recurring-withdrawal runner and the reward
+ * sweeps then silently stayed off until someone restarted the process — the
+ * kind of "that part is not working" that reappears after each reboot rather
+ * than being fixed. Attempts get a longer budget (2s, 4s, 6s) with a short
+ * backoff, which costs nothing when Redis is healthy (the first probe
+ * returns immediately) and turns a startup race into a log line.
+ */
+async function checkRedisAvailable(host, port, timeoutMs = 2000, attempts = 3) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop -- sequential probe by design
+    const available = await probeRedisOnce(host, port, timeoutMs * attempt)
+    if (available) {
+      if (attempt > 1) {
+        logger.info(`Redis became reachable on probe attempt ${attempt}/${attempts}`, { host, port })
+      }
+      return true
+    }
+    logger.warn(`Redis probe attempt ${attempt}/${attempts} timed out or failed`, {
+      host,
+      port,
+      budgetMs: timeoutMs * attempt,
+    })
+    if (attempt < attempts) {
+      // eslint-disable-next-line no-await-in-loop -- backoff between probes
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
+    }
+  }
+  return false
+}
+
 async function startBackgroundWorkers() {
   try {
     const redisHost = config.redis.host
@@ -831,7 +879,7 @@ async function startBackgroundWorkers() {
     const redisReady = await checkRedisAvailable(redisHost, redisPort)
 
     if (!redisReady) {
-      logger.warn('Redis is unavailable; background workers will remain disabled')
+      logger.warn('Redis is unavailable after every probe; background workers will remain disabled — queues will build up and nothing scheduled will run until this process restarts with Redis reachable')
       return
     }
 
@@ -1017,18 +1065,31 @@ async function start() {
 // - Server broadcasts wallet:update only to subscribed clients
 // - Prevents unauthorized access to other wallets' data
 const server = http.createServer(app)
-const socketAllowedOrigins = [
-  process.env.FRONTEND_URL,
-  ...(process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean),
-].filter(Boolean)
-if (!config.isProduction) {
-  socketAllowedOrigins.push('http://localhost:5173', 'http://127.0.0.1:5173')
+// One CORS policy for the whole process. This used to build its own copy of the
+// FRONTEND_URL/CORS_ORIGINS list, which drifted from getAllowedOrigins(): REST
+// accepted any localhost port while the socket accepted only 5173, so a page
+// served from `vite preview` (:4173) or a second dev port loaded, made API
+// calls, and sat at "Disconnected" forever with nothing in the logs to explain
+// it. Handing Socket.IO the same delegate removes that class of failure.
+const configuredOrigins = [config.frontendUrl, ...(config.corsOrigins || [])].filter(Boolean);
+const onlyLoopbackOrigins = configuredOrigins.every(
+  (origin) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin)
+);
+if (config.isProduction && onlyLoopbackOrigins) {
+  // `frontendUrl` defaults to the vite dev port, so a production process can
+  // come up answering "allowed origins: localhost:5173" and refuse every real
+  // browser. That failure looks like a dead app, not a config problem, so say
+  // which it is at boot.
+  logger.warn(
+    `NODE_ENV=production but every configured origin is loopback (${configuredOrigins.join(', ')}): real users' origins will be refused by CORS. Set FRONTEND_URL / CORS_ORIGINS to the deployed app origin.`,
+    { context: 'cors' }
+  )
 }
 const io = new Server(server, {
   // CORS configuration for Socket.IO connections
   // Must match frontend origin to allow WebSocket handshake
   cors: {
-    origin: socketAllowedOrigins.length > 0 ? socketAllowedOrigins : ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: getAllowedOrigins(),
     methods: ['GET', 'POST'],
     credentials: true
   },
@@ -1166,11 +1227,19 @@ io.on('connection', socket => {
     logger.info('Socket subscribed to wallet', { socketId: socket.id, address })
 
     // Task 5.6: Send cached wallet data if available
-    // Prevents initial UI flicker by providing immediate data
-    // walletSyncService maintains cache of recent wallet states
+    // Prevents initial UI flicker by providing immediate data. The cache is
+    // real now (services/walletSync.js) and holds an entry only for as long as
+    // mallcoinService's own 30s chain cache can still be called current; no
+    // entry means the client fetches, which is the honest answer.
     const cached = walletSyncService.getCachedWallet(address)
     if (cached) {
       socket.emit('wallet:update', cached)
+    } else {
+      // Nothing current in the cache: read the balance once and let the
+      // service emit to the room this socket just joined. Deliberately not
+      // awaited — a slow chain read must not delay the subscription ack, and
+      // the client's own fetch covers the gap if this returns nothing.
+      walletSyncService.publish(address, io)
     }
   })
 
@@ -1197,24 +1266,53 @@ io.on('connection', socket => {
 
   // Task 5.5: Market feed subscription
   // All clients subscribe to single "market:feed" room for market-wide updates
-  socket.on('subscribe:market', () => {
+  socket.on('subscribe:market', async () => {
     if (!joinRoomWithCap(socket, 'market:feed')) return
-    // Send recent market events to new subscriber
-    socket.emit('market:feed', marketFeed.getRecentEvents(50))
+    // Backlog of real activity, read from the ledger and the catalog (see
+    // services/marketActivityFeed.js for what is deliberately not published
+    // here). Live rows arrive separately as `market:event`.
+    try {
+      socket.emit('market:feed', await getRecentEvents(50))
+    } catch (err) {
+      // A failed read must look like "no data yet", not like "nothing has
+      // happened": the client treats an empty array as a valid backlog, so
+      // surface the failure in the log and let the page fall back to REST.
+      logger.warn('Socket', 'Market backlog read failed', err, { socketId: socket.id })
+    }
   })
 
   // Task 5.5: Price updates subscription
   // All clients subscribe to "price:updates" room for price data
-  socket.on('subscribe:price', () => {
+  socket.on('subscribe:price', async () => {
     if (!joinRoomWithCap(socket, 'price:updates')) return
-    // Send current market prices to new subscriber
-    socket.emit('price:current', priceEngine.getMarketData())
+    // The feed's cached snapshot, so joining is instant — but only while it is
+    // still current. The feed stops talking to the chain when the room empties
+    // (priceEngine's shouldPoll), so `latest` on a room that has been empty for
+    // a while is exactly as old as that gap; observed live at 11 minutes.
+    // Stale beats a moment's delay nowhere, so past one poll interval the
+    // joiner reads a fresh snapshot — and the timer that restarts on this
+    // socket joining keeps it current from then on.
+    const snapshot = getLatestPriceSnapshot()
+    if (isSnapshotCurrent(snapshot, getPriceFeedStatus().pollMs)) {
+      socket.emit('price:current', snapshot)
+      return
+    }
+    try {
+      socket.emit('price:current', await buildPriceSnapshot())
+    } catch (err) {
+      logger.warn('Socket', 'Price snapshot failed', err, { socketId: socket.id })
+    }
   })
 
   // Task 5.5: Live blocks subscription
   // All clients subscribe to "blocks:live" room for new blockchain blocks
   socket.on('subscribe:blocks', () => {
     if (!joinRoomWithCap(socket, 'blocks:live')) return
+    // Mirror the market/price handlers and answer the subscription with
+    // something: a page that joins between two blocks would otherwise show no
+    // live data at all until the next height lands.
+    const latest = getBroadcastLatestBlock()
+    if (latest) socket.emit('block:new', latest)
     logger.info('Socket subscribed to block updates', { socketId: socket.id })
   })
 
@@ -1292,14 +1390,25 @@ io.on('connection', socket => {
     // Start background workers (non-blocking)
     startBackgroundWorkers().catch(err => logger.error('Background workers failed', { error: err }));
     
-    // Start blockchain event listener (pulls from RPC)
+    // Reconciles pending/failed transactions against the chain (pull-based;
+    // despite the name it emits no socket events).
     const stopBlockListener = startBlockchainListener();
 
-    // Daily volume reset
-    setInterval(() => {
-      priceEngine.resetDailyVolume()
-      logger.info('Daily volume reset')
-    }, 24 * 60 * 60 * 1000)
+    // Pushes every new block to the `blocks:live` room as `block:new`. Without
+    // this the clients that subscribe to blocks sat on a poll and nothing ever
+    // arrived — see services/blockBroadcaster.js.
+    const stopBlockBroadcast = startBlockBroadcaster(io);
+
+    // Pushes the on-chain market price, the Mallpoint peg and 24h traded volume
+    // to the `price:updates` room. This used to be a `setInterval` that called a
+    // no-op `priceEngine.resetDailyVolume()` and logged "Daily volume reset" —
+    // a job that described work nothing did. Volume is now measured from the
+    // ledger instead of being reset anywhere. See services/priceEngine.js.
+    const stopPriceFeed = startPriceFeed(io);
+
+    // Holds the io reference for the `market:feed` room so settled purchases
+    // and new listings can be published as they are recorded.
+    const stopMarketFeed = startMarketFeed(io);
 
     // Monthly badge snapshot (14th of each month, see jobs/badgeSnapshot.js).
     // Not Redis-gated like startBackgroundWorkers() above — it's a plain
@@ -1344,12 +1453,19 @@ io.on('connection', socket => {
     // an unchanged queue every hour. Skipped when DISABLE_CRON=1.
     require('./jobs/pendingTaskNotifier').start();
 
-    // Cleanup on shutdown
-    process.on('SIGINT', () => {
-      logger.info('Shutting down...')
+    // Cleanup on shutdown. SIGTERM is what `kill`, nodemon, systemd and PM2
+    // actually send — handling only SIGINT meant the ordinary restart path
+    // exited without stopping any of these loops.
+    const shutdown = (signal) => {
+      logger.info('Shutting down...', { signal })
       if (stopBlockListener) stopBlockListener()
+      if (stopBlockBroadcast) stopBlockBroadcast()
+      if (stopPriceFeed) stopPriceFeed()
+      if (stopMarketFeed) stopMarketFeed()
       process.exit(0)
-    })
+    }
+    process.on('SIGINT', () => shutdown('SIGINT'))
+    process.on('SIGTERM', () => shutdown('SIGTERM'))
   });
 }
 

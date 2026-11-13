@@ -91,7 +91,11 @@ async function burnCoinsOnChain({ mnemonic, burnAmount, memo = '' }) {
       gasWanted: txResult.gasWanted,
     };
   } catch (err) {
-    console.error('[BurnTx] Burn transaction failed:', txResult?.code != null ? `code ${txResult.code}` : 'unknown error');
+    // Log the caught error, not the tx result: `txResult` is block-scoped to
+    // the try above, so referring to it here raised a ReferenceError that
+    // replaced the real failure (e.g. "Burn failed: code 7 - unauthorized
+    // burn") with "txResult is not defined".
+    console.error('[BurnTx] Burn transaction failed:', err?.message || 'unknown error');
     throw err;
   }
 }

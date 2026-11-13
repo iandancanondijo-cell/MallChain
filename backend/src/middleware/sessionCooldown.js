@@ -151,7 +151,13 @@ async function handleExpiredToken(req, res, token) {
   if (!payload || !(payload.userId || payload.id)) return false;
   const userId = String(payload.userId || payload.id);
   const mins = await armCooldownForExpiredSession(userId, payload.exp);
-  res.status(401).json({ error: 'session_expired', cooldownMinutes: mins });
+  // `code` is the machine-readable half of this contract (the same field
+  // routes/walletPin.js answers 'invalid_secret' with): a client must not have
+  // to string-match `error` to tell "this session ended" from "this request
+  // was refused", and CipherChallenge counts a wrong cipher against the
+  // wallet's device-side strike budget only when the server says the secret was
+  // actually compared. `error` stays as-is for existing consumers and logs.
+  res.status(401).json({ error: 'session_expired', code: 'session_expired', cooldownMinutes: mins });
   return true;
 }
 

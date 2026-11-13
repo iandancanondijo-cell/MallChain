@@ -74,11 +74,29 @@ describe('KYC model — field-level PII encryption', () => {
     expect(raw.postalCode).not.toBe('00100');
     expect(raw.idNumber.startsWith('v1:')).toBe(true);
 
-    // Fields deliberately NOT in scope stay as plain, readable text — this
-    // documents the actual encrypted-field boundary rather than assuming it.
-    expect(raw.firstName).toBe('Jane');
+    // The encrypted set is ENCRYPTED_FIELDS in models/kyc.js, which 5fa735f6
+    // widened past the original idNumber/phoneNumber/address/city/postalCode
+    // to the name fields, date of birth, income and the document URLs. This
+    // test predated that widening and still asserted the narrower boundary,
+    // which is why it failed on a raw `v1:…` firstName.
+    expect(raw.firstName).not.toBe('Jane');
+    expect(raw.firstName.startsWith('v1:')).toBe(true);
+    expect(raw.lastName.startsWith('v1:')).toBe(true);
+    expect(raw.annualIncome.startsWith('v1:')).toBe(true);
+
+    // Fields genuinely outside the list stay plain, readable text.
     expect(raw.occupation).toBe('Engineer');
     expect(raw.country).toBe('KE');
+    expect(raw.nationality).toBe('KE');
+
+    // dateOfBirth is IN ENCRYPTED_FIELDS but its schema path is a Date, so the
+    // ciphertext the pre-save hook assigns is cast straight back out and the
+    // value lands in the collection as a plain BSON date. Pinned as-is so the
+    // gap is visible from the suite instead of silent: closing it means
+    // changing the path to String and backfilling existing records — a
+    // data-model decision, not a test change.
+    expect(raw.dateOfBirth).toBeInstanceOf(Date);
+    expect(String(raw.dateOfBirth)).toContain('1990');
   });
 
   test('decryptKycPii recovers the exact original plaintext', async () => {
@@ -91,6 +109,12 @@ describe('KYC model — field-level PII encryption', () => {
     expect(decrypted.address).toBe('123 Real Street');
     expect(decrypted.city).toBe('Nairobi');
     expect(decrypted.postalCode).toBe('00100');
+    // The widened fields have to round-trip too — GET /api/kyc/status reads
+    // them back through this helper, so a gap here shows up as the user
+    // seeing their own ciphertext.
+    expect(decrypted.firstName).toBe('Jane');
+    expect(decrypted.lastName).toBe('Doe');
+    expect(decrypted.annualIncome).toBe('50000');
   });
 
   test('decryptKycPii also works on a .lean() plain object (the admin list / GDPR export path)', async () => {

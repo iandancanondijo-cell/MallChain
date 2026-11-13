@@ -17,6 +17,7 @@ const TaskSubmission = require('../models/TaskSubmission');
 const LiquidityReconciliation = require('../models/LiquidityReconciliation');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 const { initiateB2CPayout } = require('../services/b2cPayoutService');
+const { checkWalletWithdrawalAge, describeWalletAgeBlock } = require('../services/walletAgeService');
 const { requireAdmin, requireSuperAdmin } = require('../middleware/adminAuth');
 const { requireCategory, requireAnyCategory } = require('../middleware/categoryAccess');
 const activityEvents = require('../services/activityEvents');
@@ -42,6 +43,7 @@ const { uploadProof, PROOFS_UPLOAD_DIR } = require('../middleware/upload');
 const { syncMallPointAccount, requireWalletAddress } = require('../services/mallpointsService');
 const fs = require('fs');
 const path = require('path');
+const { respondDriverError } = require('../utils/respondFailure');
 
 // A submission in one of these states has already been paid (or finally
 // refused) — no route may credit it again. Shared shape with
@@ -165,6 +167,7 @@ router.post('/bootstrap', limiters.strict, async (req, res) => {
     if (err && err.code === 11000) {
       return res.status(409).json({ ok: false, error: 'An account with this email already exists.' });
     }
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -233,6 +236,7 @@ router.get('/dashboard', requireSuperAdmin, async (req, res) => {
     await auditLog('dashboard_view', req.user, 'Admin viewed dashboard');
     return res.json({ ok: true, stats });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -278,6 +282,7 @@ router.get('/users', requireCategory('users'), async (req, res) => {
     await auditLog('users_search', req.user, { search: search || null, role: role || null, resultCount: users.length });
     return res.json({ ok: true, users, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -292,6 +297,7 @@ router.get('/users/:id', requireCategory('users'), async (req, res) => {
     await auditLog('user_view', req.user, { targetUserId: req.params.id, email: user.email });
     return res.json({ ok: true, user });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -323,6 +329,7 @@ router.put('/users/:id/role', requireSuperAdmin, limiters.strict, async (req, re
     notify(user._id, { kind: 'system', title: 'Account role updated', body: `Your account role is now ${role}` });
     return res.json({ ok: true, user });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -348,6 +355,7 @@ router.put('/users/:id/ban', requireCategory('users'), limiters.strict, async (r
     });
     return res.json({ ok: true, user });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -365,6 +373,7 @@ router.delete('/users/:id', requireSuperAdmin, limiters.strict, async (req, res)
     chainAudit(req, 'admin_user_delete', `user:${req.params.id}`, { email: decryptedEmail, role: user.role });
     return res.json({ ok: true, user });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -387,6 +396,7 @@ router.get('/validators/applications', requireCategory('validator'), async (req,
 
     return res.json({ ok: true, applications, total });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -417,6 +427,7 @@ router.post('/validators/applications/:id/review', requireCategory('validator'),
     chainAudit(req, 'admin_validator_review', `validatorApplication:${req.params.id}`, { action, applicantAddress: application.applicantAddress });
     return res.json({ ok: true, application });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -452,6 +463,7 @@ router.get('/kyc/pending', requireCategory('kyc'), async (req, res) => {
     await auditLog('kyc_pending_view', req.user, { resultCount: submissions.length });
     return res.json({ ok: true, submissions, total });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -483,6 +495,7 @@ router.get('/kyc/reviewed', requireCategory('kyc'), async (req, res) => {
     await auditLog('kyc_reviewed_view', req.user, { resultCount: submissions.length });
     return res.json({ ok: true, submissions, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -521,6 +534,7 @@ router.get('/kyc/user/:userId', requireCategory('kyc'), async (req, res) => {
       aml: { total: amlRecords.length, pending: amlRecords.filter((r) => r.status === 'pending').length },
     });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -591,6 +605,7 @@ router.post('/kyc/:id/review', requireCategory('kyc'), limiters.strict, async (r
     chainAudit(req, 'admin_kyc_review', `kyc:${req.params.id}`, { action, applicantId: String(kyc.userId), screenshotRef: safeName });
     return res.json({ ok: true, kyc });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -622,6 +637,7 @@ router.get('/aml-reviews/pending', requireCategory('kyc'), async (req, res) => {
     await auditLog('aml_pending_view', req.user, { resultCount: reviews.length });
     return res.json({ ok: true, reviews, total });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -652,6 +668,7 @@ router.get('/aml-reviews/reviewed', requireCategory('kyc'), async (req, res) => 
     await auditLog('aml_reviewed_view', req.user, { resultCount: reviews.length });
     return res.json({ ok: true, reviews, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -691,6 +708,7 @@ router.post('/aml-reviews/:id/review', requireCategory('kyc'), limiters.strict, 
     chainAudit(req, 'admin_aml_review', `amlReview:${req.params.id}`, { action, userId: String(review.userId) });
     return res.json({ ok: true, review: WithdrawalAmlReview.decryptAmlPii(review) });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -721,6 +739,7 @@ router.get('/structuring-flags', requireAnyCategory(['treasury', 'kyc']), async 
 
     return res.json({ ok: true, flags, total });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -743,6 +762,7 @@ router.post('/structuring-flags/:id/acknowledge', requireAnyCategory(['treasury'
     chainAudit(req, 'admin_structuring_flag_acknowledge', `structuringFlag:${req.params.id}`, { walletAddress: flag.walletAddress });
     return res.json({ ok: true, flag });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -879,6 +899,7 @@ router.get('/mining/campaigns', requireCategory('mining'), async (req, res) => {
 
     return res.json({ ok: true, campaigns, total });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -897,6 +918,7 @@ router.get('/mining/submissions/pending', requireCategory('mining'), async (req,
 
     return res.json({ ok: true, submissions, total });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -958,7 +980,22 @@ router.post('/mining/submissions/:id/approve', requireCategory('mining'), limite
       // only number ever paid — so a mistyped figure silently over/under-paid
       // against the published campaign. Default to the campaign rate and let
       // an explicit, valid amount override it.
-      if (!finalReward) finalReward = Number(campaign.rate_per_task) || 0;
+      if (!finalReward) {
+        // A campaign document with no usable rate is misconfigured, not free.
+        // `Number(undefined) || 0` used to turn that into a 0-MLPTS payout that
+        // still marked the submission approved and notified the miner "+0
+        // MLPTS". Refuse instead so the admin sets the rate (or sends an
+        // explicit rewardAmount) rather than discovering it after the fact.
+        // A rate that is genuinely 0 still passes: that is the published price.
+        const published = campaign.rate_per_task;
+        if (published === undefined || published === null || !Number.isFinite(Number(published))) {
+          return res.status(400).json({
+            ok: false,
+            error: `campaign "${campaign.title}" has no rate_per_task set — approving it would pay 0 MLPTS. Set the campaign rate, or send an explicit rewardAmount.`,
+          });
+        }
+        finalReward = Number(published);
+      }
     }
     if (finalReward < 0) finalReward = 0;
 
@@ -1055,6 +1092,7 @@ router.post('/mining/submissions/:id/approve', requireCategory('mining'), limite
     chainAudit(req, 'admin_mining_submission_approve', `submission:${req.params.id}`, { minerId: String(sub.miner_id), rewardAmount: finalReward, screenshotRef: safeName });
     return res.json({ ok: true, submission: updated });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1121,6 +1159,7 @@ router.post('/proof', requireAdmin, uploadProof.single('proof'), async (req, res
     chainAudit(req, 'admin_proof_upload', `proof:${req.file.filename}`, { size: req.file.size });
     return res.json({ ok: true, documentRef: req.file.filename });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1183,6 +1222,7 @@ router.get('/governance/stats', requireCategory('blockchain'), async (_req, res)
       return res.json({ ok: true, stats: { total: 0, voting: 0, passed: 0, rejected: 0 }, proposals: [], note: 'chain unavailable' });
     }
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1204,6 +1244,7 @@ router.get('/audit', requireSuperAdmin, async (req, res) => {
     ]);
     return res.json({ ok: true, logs, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1226,6 +1267,7 @@ router.post('/reconcile', requireCategory('treasury'), limiters.strict, async (r
     await auditLog('system_reconcile', req.user, 'Pool reconciliation triggered');
     return res.json({ ok: true, report });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1239,6 +1281,7 @@ router.post('/reconciliation/run', requireCategory('treasury'), limiters.strict,
     chainAudit(req, 'admin_reconciliation_run', 'reconciliation:job', { detected: result?.detected, resolved: result?.resolved });
     return res.json({ ok: true, result });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1259,6 +1302,7 @@ router.get('/reconciliation/items', requireCategory('treasury'), async (req, res
 
     return res.json({ ok: true, items, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1293,6 +1337,7 @@ router.post('/reconciliation/:id/resolve', requireCategory('treasury'), limiters
     chainAudit(req, 'admin_reconciliation_resolved', `reconciliation:${item._id}`, { note: item.resolutionNote });
     return res.json({ ok: true, item });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1316,6 +1361,7 @@ router.get('/withdrawals', requireCategory('treasury'), async (req, res) => {
 
     return res.json({ ok: true, withdrawals, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1341,6 +1387,21 @@ router.post('/withdrawals/:id/retry', requireCategory('treasury'), limiters.stri
     if (!withdrawal) return res.status(404).json({ ok: false, error: 'Withdrawal not found' });
     if (withdrawal.status !== 'failed') {
       return res.status(409).json({ ok: false, error: `Only a failed withdrawal can be retried (current status: ${withdrawal.status})` });
+    }
+
+    // Wallet-age withdrawal rule — a retry initiates the same real B2C payout
+    // as the original request, so it is bound by the same 29-day clock.
+    // Without this, "retry" would be a working route around the rule for a
+    // wallet that was old enough to file but not to be paid (or whose request
+    // predates the rule entirely).
+    const ageCheck = await checkWalletWithdrawalAge(withdrawal.walletAddress);
+    if (!ageCheck.ok) {
+      return res.status(403).json({
+        ok: false,
+        error: describeWalletAgeBlock(ageCheck),
+        code: ageCheck.code,
+        details: ageCheck,
+      });
     }
 
     const payoutResult = await initiateB2CPayout({
@@ -1387,6 +1448,7 @@ router.post('/withdrawals/:id/retry', requireCategory('treasury'), limiters.stri
     });
     return res.json({ ok: true, withdrawal });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1445,6 +1507,7 @@ router.post('/withdrawals/:id/resolve', requireCategory('treasury'), limiters.st
     }
     return res.json({ ok: true, withdrawal });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1467,6 +1530,7 @@ router.get('/badges/purchases', requireCategory('mining'), async (req, res) => {
 
     return res.json({ ok: true, purchases, total });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1488,6 +1552,7 @@ router.get('/badges/issuances', requireCategory('mining'), async (req, res) => {
 
     return res.json({ ok: true, issuances, total });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1538,6 +1603,7 @@ router.post('/badges/grant', requireSuperAdmin, limiters.strict, async (req, res
     chainAudit(req, 'admin_badge_grant', `wallet:${walletAddress}`, { txHash: result.txHash, badgeType: 'gold' });
     return res.json({ ok: true, txHash: result.txHash });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1563,6 +1629,7 @@ router.post('/badges/purchases/:quoteId/void', requireCategory('mining'), limite
     chainAudit(req, 'admin_badge_purchase_void', `badgePurchase:${req.params.quoteId}`, { reason: reason || null });
     return res.json({ ok: true, purchase: purchase.toObject() });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1640,6 +1707,7 @@ router.post('/badges/approve', requireCategory('mining'), limiters.strict, async
       throw issueErr;
     }
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1678,6 +1746,7 @@ router.post('/badges/reject', requireCategory('mining'), limiters.strict, async 
     chainAudit(req, 'admin_badge_reject', `badgePurchase:${quoteId}`, { reason: reason || null });
     return res.json({ ok: true, purchase: purchase.toObject() });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1704,6 +1773,7 @@ router.post('/badges/design', requireCategory('mining'), limiters.strict, upload
     chainAudit(req, 'admin_badge_design_upload', `badgeDesign:${design._id}`, { filename: req.file.filename });
     return res.json({ ok: true, design });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1715,6 +1785,7 @@ router.get('/badges/design', requireCategory('mining'), async (_req, res) => {
     const design = await BadgeDesign.findOne({ active: true }).sort({ createdAt: -1 }).lean();
     return res.json({ ok: true, design });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1728,6 +1799,7 @@ router.get('/badges/design/image', requireCategory('mining'), async (_req, res) 
     const filePath = path.join(__dirname, '..', '..', design.imageUrl.replace(/^\//, ''));
     return res.sendFile(filePath);
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1811,6 +1883,7 @@ router.get('/chain/blocks', requireCategory('blockchain'), async (req, res) => {
 
     return res.json({ ok: true, blocks });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1842,6 +1915,7 @@ router.get('/chain/validators', requireCategory('blockchain'), async (_req, res)
       bondedTokens: poolRes?.data?.pool?.bonded_tokens || '0',
     });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1919,6 +1993,7 @@ router.post('/notifications/broadcast', requireSuperAdmin, limiters.strict, asyn
       skippedCount: 0,
     });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1940,6 +2015,7 @@ router.get('/maintenance', requireSuperAdmin, async (_req, res) => {
       updatedAt: state?.updatedAt || null,
     });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -1988,6 +2064,7 @@ router.post('/maintenance', requireSuperAdmin, limiters.strict, async (req, res)
       updatedAt: state.updatedAt || null,
     });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2029,6 +2106,7 @@ router.get('/presence', async (_req, res) => {
       lastSeenEmail: decryptedEmail,
     });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2060,6 +2138,7 @@ router.post('/reports', limiters.strict, async (req, res) => {
 
     return res.json({ ok: true, report });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2092,6 +2171,7 @@ router.get('/reports', async (req, res) => {
     }));
     return res.json({ ok: true, reports });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2115,6 +2195,7 @@ router.patch('/reports/:id/read', requireSuperAdmin, async (req, res) => {
     }
     return res.json({ ok: true, report });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2142,6 +2223,7 @@ router.patch('/reports/:id/action', requireSuperAdmin, async (req, res) => {
     chainAudit(req, 'admin_report_actioned', `report:${report._id}`, { replied: Boolean(report.superadminReply) });
     return res.json({ ok: true, report });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2201,6 +2283,7 @@ router.post('/users', requireSuperAdmin, limiters.strict, async (req, res) => {
       },
     });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2237,6 +2320,7 @@ router.patch('/users/:id/category', requireSuperAdmin, limiters.strict, async (r
       },
     });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2266,6 +2350,7 @@ router.get('/audit-chain', requireSuperAdmin, async (req, res) => {
     ]);
     return res.json({ ok: true, entries, total, page: Number(page) || 0, limit: safeLimit });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2286,6 +2371,7 @@ router.get('/audit-chain/verify', requireSuperAdmin, async (req, res) => {
     });
     return res.json({ ok: true, ...result });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2338,6 +2424,7 @@ router.get('/integrity/status', requireSuperAdmin, async (req, res) => {
       hmacSecretConfigured: hmacSecretPresent,
     });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2358,6 +2445,7 @@ router.post('/integrity/verify', requireSuperAdmin, async (req, res) => {
       checkedAt: new Date().toISOString(),
     });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2378,6 +2466,7 @@ router.get('/pending-tasks/summary', requireAdmin, async (req, res) => {
     const total = Object.values(byCategory).reduce((sum, c) => sum + (c.total || 0), 0);
     return res.json({ ok: true, byCategory, total });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }
@@ -2395,6 +2484,7 @@ router.post('/pending-tasks/notify', requireSuperAdmin, limiters.strict, async (
     await auditLog('pending_tasks_notify_run', req.user, { force, sent: result.sent, skipped: result.skipped, failed: result.failed });
     return res.json({ ok: true, force, grandTotal: result.snapshot.grandTotal, sent: result.sent, skipped: result.skipped, failed: result.failed });
   } catch (err) {
+    if (respondDriverError(res, err)) return;
     logger.error('adminPanel', { route: req.originalUrl, error: err.message || String(err) });
     return res.status(500).json({ ok: false, error: 'internal error' });
   }

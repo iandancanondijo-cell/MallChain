@@ -10,7 +10,7 @@ const { creditMlcns } = require('../services/faucetService')
 const {
   getMlptsPerMlcnsScale,
 } = require('../services/mallcoinService')
-const { getMallpointPriceKes } = require('../services/economyConstants')
+const { getMallpointPriceKes, getMallpointPeg, DEFAULT_MALLPOINT_PRICE_KES } = require('../services/economyConstants')
 const { getDynamicConversionRate } = require('../services/conversionRateOracle')
 const { blindIndex } = require('../utils/fieldEncryption')
 const { recordLiquidityActivity } = require('../services/liquidityActivityService')
@@ -27,6 +27,69 @@ const CONVERT_SIGNATURE_MAX_AGE_MS = 10 * 60 * 1000
 const ADR036_CONSUMED_TTL_SECONDS = 60 * 60
 
 const pointPrice = () => getMallpointPriceKes()
+
+// GET /api/mallpoints/price — the Mallpoints rate on its own.
+//
+// Why this exists: until now the only public way to ask "what is a Mallpoint
+// worth" was `GET /api/economy/state`, which answers with the whole tokenomics
+// payload — emission schedule, phase table, wallet balances and the market
+// spread — for one number. The landing page, the purchase screen, the Mines
+// leaderboard and the dashboard all did exactly that, and because
+// `/api/economy/state` is one of the heaviest routes in the backend (two chain
+// queries plus the oracle) every one of them was spending the anonymous
+// per-IP request budget on the largest response we serve. This route answers
+// the same question from the same single source of truth, for a fraction of
+// the work: one environment read and one cached oracle value.
+//
+// The KES peg never depends on the chain, so it is always present. The
+// MLPTS->MLCNS ratio does (it is derived from the live MLCNS market price), so
+// `conversion` is null when the oracle cannot answer rather than carrying a
+// stale or invented figure -- see services/conversionRateOracle.js for what
+// the numbers mean, and note that `proposedRate` is the value that settles on
+// chain (clamped to the on-chain bounds), not a display approximation.
+//
+// Registered before `/:address` so a GET of this path is not read as a wallet
+// address.
+router.get('/price', async (req, res) => {
+  try {
+    const peg = getMallpointPeg()
+
+    let conversion = null
+    try {
+      const oracle = await getDynamicConversionRate()
+      conversion = {
+        // MLCNS minted per MLPTS, exactly as the convert flow computes it.
+        valueRatio: oracle.proposedRate / oracle.rateScale,
+        human: `1 MP ≈ ${(oracle.proposedRate / oracle.rateScale).toFixed(2)} MLCNS`,
+        proposedRate: oracle.proposedRate,
+        rateScale: oracle.rateScale,
+        minRate: oracle.minRate,
+        maxRate: oracle.maxRate,
+        clamped: oracle.clamped,
+        mlcnsMidPriceKes: oracle.mlcnsMidPriceKes,
+        mlptsPriceKes: oracle.mlptsPriceKes,
+        source: oracle.source,
+      }
+    } catch (e) {
+      logger.warn('mallpoints', 'conversion oracle unavailable; publishing the peg only', { error: e?.message })
+    }
+
+    return res.json({
+      success: true,
+      currency: 'KES',
+      // 1 MLPTS = `pointPriceKes` KES. `pegSource` says whether a deployment
+      // set that value or is running on the built-in default.
+      pointPriceKes: peg.kes,
+      pegSource: peg.source,
+      defaultPointPriceKes: DEFAULT_MALLPOINT_PRICE_KES,
+      conversion,
+      asOf: new Date().toISOString(),
+    })
+  } catch (e) {
+    logger.error('mallpoints', { route: req.originalUrl, error: e.message || String(e) });
+    return res.status(500).json({ success: false, error: 'internal error' })
+  }
+})
 
 // GET /api/mallpoints/:address — chain + database Mallpoints
 router.get('/:address', async (req, res) => {

@@ -15,6 +15,11 @@ jest.mock('../models/TaskSubmission', () => ({
 }));
 jest.mock('../models/user', () => ({
   findByIdAndUpdate: jest.fn(),
+  // settle() reads the miner and each rewarded reviewer by id
+  // (User.findById(...).session(session)) and resolves their wallet through
+  // the model's decryptUserPii() static before syncing MallPointAccounts.
+  findById: jest.fn(),
+  decryptUserPii: jest.fn((user) => user ?? {}),
 }));
 jest.mock('../models/WalletTransaction', () => ({
   create: jest.fn(),
@@ -26,6 +31,23 @@ jest.mock('../models/Campaign', () => ({
 jest.mock('../services/notify', () => ({
   notify: jest.fn(),
 }));
+// autoAssignReviewers() gates the pool on the admin-approved validator
+// allow-list (services/validatorEligibility.js). Left real, requiring it
+// pulls models/ValidatorApplication.js into the suite, which blows up at load
+// time against this file's deliberately thin mongoose mock (no Schema). Mock
+// the service directly: the eligibility rule itself is covered in
+// validatorEligibility.test.js.
+jest.mock('../services/validatorEligibility', () => ({
+  allowedAccountKeys: jest.fn(),
+  allowedValidatorMap: jest.fn(),
+  getValidatorEligibility: jest.fn(),
+}));
+// settle() moves MLPTS through mallpointsService; mocked so the suite never
+// loads that module's model graph either.
+jest.mock('../services/mallpointsService', () => ({
+  syncMallPointAccount: jest.fn(),
+  requireWalletAddress: jest.fn(),
+}));
 
 const mongoose = require('mongoose');
 const MinesReviewer = require('../models/MinesReviewer');
@@ -33,6 +55,8 @@ const TaskSubmission = require('../models/TaskSubmission');
 const User = require('../models/user');
 const WalletTransaction = require('../models/WalletTransaction');
 const Campaign = require('../models/Campaign');
+const validatorEligibility = require('../services/validatorEligibility');
+const { syncMallPointAccount } = require('../services/mallpointsService');
 const {
   computeWeight,
   autoAssignReviewers,
@@ -89,6 +113,17 @@ beforeEach(() => {
   MinesReviewer.findOneAndUpdate.mockImplementation(async (query) => ({ validator_id: query.validator_id }));
   MinesReviewer.findOne.mockReturnValue(chainable(null));
   MinesReviewer.updateMany.mockResolvedValue({});
+  // autoAssignReviewers() intersects the staked pool with the admin-approved
+  // validator allow-list. Default it to "everything in these fixtures is
+  // approved" so the pool-size assertions still describe the pre-approval
+  // behaviour; the test that wants nobody eligible overrides this.
+  validatorEligibility.allowedAccountKeys.mockResolvedValue(
+    new Set(Array.from({ length: 10 }, (_, i) => `r${i}`))
+  );
+  // settle() reads the miner (task.miner_id) and every rewarded reviewer by
+  // id, then resolves their wallet via User.decryptUserPii for the MallPoint
+  // account sync. One fake account covers all of them.
+  User.findById.mockReturnValue(chainable({ _id: 'submitter1', walletAddress: 'mall1submitter' }));
   // settle() claims the task with a conditional update before any money moves.
   // Default the claim to a winner (and echo its $set back) so the payout tests
   // exercise the paid path; the claim-loss test overrides it.
@@ -233,6 +268,14 @@ describe('checkAndResolve — reward/penalty payout', () => {
       expect.any(Object)
     );
     expect(User.findByIdAndUpdate).toHaveBeenCalledWith('submitter1', { $inc: { mlpts_balance: 5 } });
+    // GATE 61: the MLPTS credit is only real if the on-chain MallPointAccount
+    // was synced from the miner's linked wallet.
+    expect(syncMallPointAccount).toHaveBeenCalledWith(
+      'mall1submitter',
+      5,
+      expect.anything(),
+      expect.objectContaining({ userId: 'submitter1', flow: 'mines_reviewer_miner_reward' })
+    );
   });
 
   test('rewards majority-matching reviewers and credits their mlpts_balance', async () => {

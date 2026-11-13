@@ -38,6 +38,17 @@ const { sendEmail } = require('../services/brevoService');
 const { sendSMS } = require('../services/brevoService');
 const { notify, notifyUser } = require('../services/notify');
 
+// services/notificationPolicy.js reads the per-user switches as
+//   UserSettings.findOne({ userId }).select('notifications contactInfo').lean()
+// so the mock has to be chainable through select(). A bare { lean } looked
+// fine while the policy read settings directly, but with select() in the
+// chain it threw inside getUserSettings, which fail-opens to null — i.e.
+// every preference test below silently ran on defaults (email on, SMS off),
+// so the "explicitly disabled" cases could never fail for the right reason.
+function settingsQuery(doc) {
+  return { select: jest.fn().mockReturnThis(), lean: jest.fn().mockResolvedValue(doc) };
+}
+
 describe('notify()', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -89,7 +100,7 @@ describe('notifyUser()', () => {
   });
 
   test('always writes the in-app notification regardless of preferences', async () => {
-    UserSettings.findOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
+    UserSettings.findOne.mockReturnValue(settingsQuery(null));
 
     await notifyUser({ _id: 'user1', email: 'a@b.com' }, { title: 'Badge earned', body: 'nice' });
 
@@ -97,7 +108,7 @@ describe('notifyUser()', () => {
   });
 
   test('sends email when badgeAlerts is enabled (or unset, defaulting on) and the user has an email', async () => {
-    UserSettings.findOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
+    UserSettings.findOne.mockReturnValue(settingsQuery(null));
 
     await notifyUser({ _id: 'user1', email: 'a@b.com' }, { title: 'Badge earned', body: 'nice' });
 
@@ -109,9 +120,7 @@ describe('notifyUser()', () => {
   });
 
   test('does not send email when the user has explicitly disabled badgeAlerts for email', async () => {
-    UserSettings.findOne.mockReturnValue({
-      lean: jest.fn().mockResolvedValue({ notifications: { email: { badgeAlerts: false } } }),
-    });
+    UserSettings.findOne.mockReturnValue(settingsQuery({ notifications: { email: { badgeAlerts: false } } }));
 
     await notifyUser({ _id: 'user1', email: 'a@b.com' }, { title: 'Badge earned', body: 'nice' });
 
@@ -119,14 +128,12 @@ describe('notifyUser()', () => {
   });
 
   test('sends SMS only when explicitly enabled (defaults off, unlike email)', async () => {
-    UserSettings.findOne.mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
+    UserSettings.findOne.mockReturnValue(settingsQuery(null));
 
     await notifyUser({ _id: 'user1', phone: '254700000000' }, { title: 'Badge earned', body: 'nice' });
     expect(sendSMS).not.toHaveBeenCalled();
 
-    UserSettings.findOne.mockReturnValue({
-      lean: jest.fn().mockResolvedValue({ notifications: { sms: { badgeAlerts: true } } }),
-    });
+    UserSettings.findOne.mockReturnValue(settingsQuery({ notifications: { sms: { badgeAlerts: true } } }));
     await notifyUser({ _id: 'user1', phone: '254700000000' }, { title: 'Badge earned', body: 'nice' });
     expect(sendSMS).toHaveBeenCalledWith('254700000000', 'Mallchain: Badge earned — nice');
   });

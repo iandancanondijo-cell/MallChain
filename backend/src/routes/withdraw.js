@@ -13,6 +13,7 @@ const { validateRequest } = require('../utils/validationSchemas');
 const schemas = require('../utils/validationSchemas');
 const idempotency = require('../middleware/idempotency');
 const { config } = require('../config');
+const { checkWalletWithdrawalAge, describeWalletAgeBlock } = require('../services/walletAgeService');
 const { recordWithdrawLiquidityActivity } = require('../services/liquidityActivityService');
 const { emitWithdrawalRequested, userIdForAddress } = require('../services/activityEvents');
 const { requireAdmin } = require('../middleware/adminAuth');
@@ -106,6 +107,22 @@ router.post('/mpesa', requireAdmin, idempotency({ required: true }), validateReq
   try {
     const { walletAddress, phone, amountMlcns, amountKes, currency } = req.validatedBody;
     const withdrawalId = crypto.randomBytes(12).toString('hex');
+
+    // Wallet-age withdrawal rule, applied to the staff-filed path too. It is
+    // the same rule as POST /api/buy/sell and the settlement itself, so an
+    // admin cannot route around it by filing the request by hand; a payout
+    // for a wallet under the minimum simply isn't available through any
+    // caller. (A genuine exception is a human decision made outside this
+    // API, not a bug in it.)
+    const ageCheck = await checkWalletWithdrawalAge(walletAddress);
+    if (!ageCheck.ok) {
+      return res.status(403).json({
+        ok: false,
+        error: describeWalletAgeBlock(ageCheck),
+        code: ageCheck.code,
+        details: ageCheck,
+      });
+    }
 
     const withdrawal = await WithdrawalRequest.create({
       withdrawalId,

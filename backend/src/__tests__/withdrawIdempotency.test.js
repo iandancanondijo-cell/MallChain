@@ -18,6 +18,19 @@ jest.mock('../services/b2cPayoutService', () => ({
 jest.mock('../services/liquidityActivityService', () => ({
   recordWithdrawLiquidityActivity: jest.fn().mockResolvedValue(undefined),
 }));
+// POST /mpesa applies the 29-day wallet-age rule first, which reads the User
+// collection. This suite mounts no Mongo (see jest.config.js), so a real
+// model call would sit in mongoose's buffering queue for 10s and the test
+// would time out. The rule has its own suite (walletAgeService.test.js);
+// these tests are about Idempotency-Key, so the collaborator is stubbed.
+jest.mock('../services/walletAgeService', () => ({
+  MIN_WALLET_AGE_DAYS: 29,
+  checkWalletWithdrawalAge: jest.fn().mockResolvedValue({
+    ok: true, code: null, minimumDays: 29, ageDays: 40,
+    reference: 'walletLinkedAt', referenceAt: null, unlockAt: null, walletLinked: true,
+  }),
+  describeWalletAgeBlock: jest.fn(() => null),
+}));
 jest.mock('../models/IdempotencyKey', () => ({
   findOne: jest.fn(),
   create: jest.fn(),

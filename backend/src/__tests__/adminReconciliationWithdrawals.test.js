@@ -33,6 +33,18 @@ jest.mock('../services/badgeService', () => ({ getUserBadgeInfo: jest.fn() }));
 jest.mock('../services/badgeTxBuilder', () => ({ issueBadgeFromMnemonic: jest.fn() }));
 jest.mock('../services/notify', () => ({ notify: jest.fn(), notifyUser: jest.fn() }));
 jest.mock('../services/b2cPayoutService', () => ({ initiateB2CPayout: jest.fn() }));
+// POST /withdrawals/:id/retry applies the same 29-day wallet-age rule as the
+// original cash-out (it fires the same real B2C payout). The rule is covered
+// by walletAgeService.test.js; here it is stubbed as satisfied so these tests
+// keep asserting payout-state transitions rather than the age gate.
+jest.mock('../services/walletAgeService', () => ({
+  MIN_WALLET_AGE_DAYS: 29,
+  checkWalletWithdrawalAge: jest.fn().mockResolvedValue({
+    ok: true, code: null, minimumDays: 29, ageDays: 40,
+    reference: 'walletLinkedAt', referenceAt: null, unlockAt: null, walletLinked: true,
+  }),
+  describeWalletAgeBlock: jest.fn(() => null),
+}));
 // Withdrawal transition emits are fire-and-forget through activityEvents; the
 // test asserts the emits + template-required fields here instead of reaching
 // the real notification engine. userSafeReason is mirrored with a trivial
@@ -130,6 +142,27 @@ describe('POST /api/admin/withdrawals/:id/retry', () => {
     const res = await request(app).post('/api/admin/withdrawals/w1/retry');
     expect(res.status).toBe(409);
     expect(initiateB2CPayout).not.toHaveBeenCalled();
+  });
+
+  test('403s without paying out when the wallet has not met the cash-out age rule', async () => {
+    // A retry moves the same real money as the original request, so it is
+    // bound by the 29-day rule too. Without this check, "retry" would be a
+    // working route around the rule for a wallet that was never old enough.
+    const { checkWalletWithdrawalAge } = require('../services/walletAgeService');
+    checkWalletWithdrawalAge.mockResolvedValueOnce({
+      ok: false, code: 'wallet_age_not_met', minimumDays: 29, ageDays: 4,
+      reference: 'walletLinkedAt', referenceAt: '2026-11-07T00:00:00.000Z',
+      unlockAt: '2026-12-06T00:00:00.000Z', walletLinked: true,
+    });
+    const doc = fakeDoc({ _id: 'w1', status: 'failed', phone: '254712345678', amountMlcns: 100, withdrawalId: 'wd1', walletAddress: 'mall1holder' });
+    WithdrawalRequest.findById.mockResolvedValue(doc);
+
+    const res = await request(app).post('/api/admin/withdrawals/w1/retry');
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('wallet_age_not_met');
+    expect(initiateB2CPayout).not.toHaveBeenCalled();
+    expect(doc.save).not.toHaveBeenCalled();
   });
 
   test('re-initiates the payout and marks it initiated on success', async () => {

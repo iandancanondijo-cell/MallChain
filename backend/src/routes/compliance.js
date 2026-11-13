@@ -16,14 +16,35 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../utils/logger');
 const requireJWT = require('../middleware/auth');
+const { requireAdmin } = require('../middleware/adminAuth');
 const User = require('../models/user');
 const AMLReview = require('../models/amlReview');
 const KYCSubmission = require('../models/kycSubmission');
 const ComplianceLog = require('../models/complianceLog');
-const { amlProvider } = require('../services/amlProvider');
+// getAmlProvider, not an `amlProvider` export — there never was one, and the
+// destructured undefined made every POST /aml-screen throw on the first call.
+const { getAmlProvider } = require('../services/amlProvider');
 
 const RESTRICTED_COUNTRIES = process.env.RESTRICTED_COUNTRIES?.split(',') || [];
 const AGE_REQUIREMENT = Number(process.env.AGE_REQUIREMENT || 18);
+
+// AMLReview.riskLevel is a 1-5 score while providers report a label; an
+// unrecognised label scores 1 (lowest) but never overrides a hit, which the
+// caller already recorded in `status`/`reason`.
+const SCREENING_RISK_TO_SCORE = { low: 1, medium: 2, high: 4, critical: 5, unknown: 3 };
+
+/**
+ * Which account made this request.
+ *
+ * middleware/auth puts either a Mongoose document or its lean, Redis-cached
+ * form on req.user. Only the document has the `id` virtual, so reading
+ * `req.user.id` alone made every route in this file answer "User not found"
+ * whenever the session was served from the cache — the same request succeeded
+ * or failed depending on cache state.
+ */
+function actorId(req) {
+  return req.user._id || req.user.id || req.user.userId;
+}
 
 /**
  * GET /api/compliance/status
@@ -31,9 +52,12 @@ const AGE_REQUIREMENT = Number(process.env.AGE_REQUIREMENT || 18);
  */
 router.get('/status', requireJWT, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = actorId(req);
+    // ageVerifiedAt/tosAcceptedAt/privacyAcceptedAt have to be selected or
+    // they are undefined on the document no matter what the account holds —
+    // this endpoint used to report tosAccepted:false for every user.
     const user = await User.findById(userId).select(
-      'email kycLevel createdAt'
+      'email kycLevel createdAt ageVerifiedAt tosAcceptedAt privacyAcceptedAt'
     );
 
     if (!user) {
@@ -44,18 +68,18 @@ router.get('/status', requireJWT, async (req, res) => {
     const kycSubmission = await KYCSubmission.findOne({ userId }).sort('-createdAt');
     const kycStatus = kycSubmission?.status || 'pending';
 
-    // Get AML status
+    // Get AML status. No review means no screening has ever run, which is not
+    // the same fact as "screened and clear" (see /aml-check).
     const amlReview = await AMLReview.findOne({ userId }).sort('-createdAt');
-    const amlStatus = amlReview?.status || 'clear';
+    const amlStatus = amlReview?.status || 'not_screened';
 
     // Check geographic restrictions
     const clientCountry = req.headers['cf-ipcountry'] || 'UNKNOWN';
     const geographicRestriction = RESTRICTED_COUNTRIES.includes(clientCountry);
 
     return res.json({
-      ageVerified: user.createdAt
-        ? (Date.now() - user.createdAt.getTime()) / (1000 * 60 * 60 * 24) >= 365 // Assume age verified if account >365 days
-        : false,
+      ageVerified: !!user.ageVerifiedAt,
+      ageVerifiedAt: user.ageVerifiedAt || null,
       tosAccepted: !!user.tosAcceptedAt,
       privacyAccepted: !!user.privacyAcceptedAt,
       kycLevel: user.kycLevel || 0,
@@ -97,7 +121,7 @@ router.post('/age-verify', requireJWT, async (req, res) => {
 
     if (actualAge < AGE_REQUIREMENT) {
       logger.warn('compliance', 'Age verification failed - under age', {
-        userId: req.user.id,
+        userId: actorId(req),
         calculatedAge: actualAge,
         requirement: AGE_REQUIREMENT,
       });
@@ -109,13 +133,13 @@ router.post('/age-verify', requireJWT, async (req, res) => {
     }
 
     // Update user record
-    await User.findByIdAndUpdate(req.user.id, {
+    await User.findByIdAndUpdate(actorId(req), {
       ageVerifiedAt: new Date(),
     });
 
     // Log compliance event
     await ComplianceLog.create({
-      userId: req.user.id,
+      userId: actorId(req),
       eventType: 'age_verification',
       status: 'success',
       metadata: {
@@ -126,7 +150,7 @@ router.post('/age-verify', requireJWT, async (req, res) => {
     });
 
     logger.info('compliance', 'Age verification successful', {
-      userId: req.user.id,
+      userId: actorId(req),
       age: actualAge,
     });
 
@@ -147,7 +171,7 @@ router.post('/age-verify', requireJWT, async (req, res) => {
  */
 router.post('/kyc-initiate', requireJWT, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = actorId(req);
     const { documentType, documentUrl, selfieUrl } = req.body;
 
     if (!documentType || !documentUrl) {
@@ -219,7 +243,7 @@ router.post('/kyc-initiate', requireJWT, async (req, res) => {
  */
 router.get('/kyc-status', requireJWT, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = actorId(req);
     const kycSubmission = await KYCSubmission.findOne({ userId }).sort('-createdAt');
 
     if (!kycSubmission) {
@@ -248,26 +272,31 @@ router.get('/kyc-status', requireJWT, async (req, res) => {
  */
 router.get('/aml-check', requireJWT, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = actorId(req);
     const user = await User.findById(userId);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Get AML review
+    // Get AML review. Absence of a review is absence of screening, not a
+    // clean bill of health: reporting 'clear' here advertised a compliance
+    // result that was never obtained.
     const amlReview = await AMLReview.findOne({ userId }).sort('-createdAt');
 
     if (!amlReview) {
       return res.json({
-        status: 'clear',
-        message: 'No AML concerns',
+        status: 'not_screened',
+        screened: false,
+        message: 'No AML screening has been run for this account',
         reviewedAt: null,
       });
     }
 
     return res.json({
       status: amlReview.status,
+      screened: amlReview.screeningData?.screened !== false,
+      provider: amlReview.provider || null,
       reason: amlReview.status === 'flagged' ? amlReview.reason : null,
       reviewedAt: amlReview.reviewedAt,
       reviewedBy: amlReview.reviewedBy ? 'compliance_team' : null,
@@ -286,7 +315,7 @@ router.post('/terms-accept', requireJWT, async (req, res) => {
   try {
     const { tosVersion, privacyVersion } = req.body;
 
-    await User.findByIdAndUpdate(req.user.id, {
+    await User.findByIdAndUpdate(actorId(req), {
       tosAcceptedAt: tosVersion ? new Date() : undefined,
       privacyAcceptedAt: privacyVersion ? new Date() : undefined,
       tosVersion: tosVersion || undefined,
@@ -295,7 +324,7 @@ router.post('/terms-accept', requireJWT, async (req, res) => {
 
     // Log compliance event
     await ComplianceLog.create({
-      userId: req.user.id,
+      userId: actorId(req),
       eventType: 'terms_acceptance',
       status: 'accepted',
       metadata: {
@@ -307,7 +336,7 @@ router.post('/terms-accept', requireJWT, async (req, res) => {
     });
 
     logger.info('compliance', 'Terms accepted', {
-      userId: req.user.id,
+      userId: actorId(req),
       tosVersion,
       privacyVersion,
     });
@@ -354,57 +383,105 @@ router.get('/restrictions', async (req, res) => {
 /**
  * POST /api/compliance/aml-screen
  * Trigger AML screening for user (admin)
+ *
+ * Requires a configured vendor. Without one nothing is screened, so nothing is
+ * recorded: writing an AMLReview with status 'clear' would put a compliance
+ * finding in the audit trail that was never obtained. The response says which
+ * provider was missing instead (services/amlProvider.js).
  */
-router.post('/aml-screen', requireJWT, async (req, res) => {
+router.post('/aml-screen', requireJWT, requireAdmin, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = actorId(req);
+    // Only fields the User schema actually declares: naming a path that isn't
+    // there makes .select() throw, which would fail the request before it
+    // reached the provider. (A PEP declaration lives on the KYC record, not on
+    // the account.)
     const user = await User.findById(userId).select('name email');
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Screen with AML provider (email is encrypted at rest — decrypt it first,
-    // otherwise the provider screens against ciphertext and never matches).
-    const screeningResult = await amlProvider.screen({
+    // Screen with the configured AML provider (email is encrypted at rest —
+    // decrypt it first, otherwise the provider screens against ciphertext and
+    // never matches).
+    const screeningResult = await getAmlProvider().screen({
+      firstName: user.name ? String(user.name).split(' ')[0] : undefined,
+      lastName: user.name ? String(user.name).split(' ').slice(1).join(' ') : undefined,
       name: user.name,
       email: User.decryptUserPii(user).email,
     });
 
+    if (screeningResult.screened === false) {
+      logger.warn('compliance', 'AML screening requested but no vendor is configured', {
+        userId,
+        provider: screeningResult.provider,
+      });
+      return res.status(503).json({
+        screened: false,
+        provider: screeningResult.provider,
+        error: screeningResult.warning
+          || 'No AML screening vendor is configured — set AML_PROVIDER_TYPE and AML_PROVIDER_API_KEY',
+      });
+    }
+
+    const hits = ['sanctions', 'pep', 'adverseMedia', 'watchlist']
+      .filter((flag) => screeningResult[flag]);
+    const flagged = hits.length > 0;
+    const reason = flagged
+      ? `AML screening hit: ${hits.join(', ')} (${screeningResult.provider})`
+      : undefined;
+
     // Save result
     const amlReview = new AMLReview({
       userId,
-      status: screeningResult.flagged ? 'flagged' : 'clear',
-      reason: screeningResult.reason,
+      status: flagged ? 'flagged' : 'clear',
+      reason,
+      riskLevel: SCREENING_RISK_TO_SCORE[screeningResult.riskLevel] || 1,
       screeningData: screeningResult,
+      provider: screeningResult.provider,
+      screenedAt: new Date(),
       reviewedAt: new Date(),
     });
 
     await amlReview.save();
 
-    // Log compliance event
+    // Log compliance event. ComplianceLog.status has no 'clear' in its enum —
+    // passing one made this create throw a validation error that surfaced as
+    // "AML screening failed"; a no-hit screening is a success.
     await ComplianceLog.create({
       userId,
       eventType: 'aml_screening',
-      status: screeningResult.flagged ? 'flagged' : 'clear',
+      status: flagged ? 'flagged' : 'success',
       metadata: {
-        reason: screeningResult.reason,
+        reason,
+        provider: screeningResult.provider,
+        riskLevel: screeningResult.riskLevel,
       },
     });
 
     logger.info('compliance', 'AML screening completed', {
       userId,
-      status: screeningResult.flagged ? 'flagged' : 'clear',
+      status: flagged ? 'flagged' : 'clear',
+      provider: screeningResult.provider,
     });
 
     return res.json({
       success: true,
-      status: screeningResult.flagged ? 'flagged' : 'clear',
-      reason: screeningResult.reason,
+      screened: true,
+      provider: screeningResult.provider,
+      status: flagged ? 'flagged' : 'clear',
+      reason,
     });
   } catch (err) {
+    // Fail closed, and never as a clean result: an unreadable vendor response
+    // or an unreachable provider is recorded as needing manual review.
     logger.error('compliance', 'AML screening failed', err);
-    res.status(500).json({ error: 'AML screening failed' });
+    res.status(503).json({
+      screened: false,
+      provider: 'unavailable',
+      error: 'AML screening could not be completed — review the account manually',
+    });
   }
 });
 

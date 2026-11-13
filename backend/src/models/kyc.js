@@ -41,16 +41,27 @@ const KYCSchema = new Schema({
   annualIncome: { type: String, required: true },
   politicalExposure: { type: Boolean, default: false },
   
-  // AML Assessment
+  // AML Assessment — riskLevel is derived from what the screening actually
+  // returned (see controllers/kycController.js performAMLCheck). When no list
+  // was consulted at all, the record is 'high' and amlChecks.screened is false:
+  // "no hits" only means something if somebody looked.
   riskLevel: { type: String, enum: ['low', 'medium', 'high'], required: true },
   amlChecks: {
+    // Was a sanctions/PEP/adverse-media/watchlist list really consulted for
+    // this submission? false = the four flags below are "nothing was checked",
+    // not "nothing was found". Default false so a record that predates this
+    // field, or one written without provenance, can never read as clean.
+    screened: { type: Boolean, default: false },
     sanctions: { type: Boolean, default: false },
     pep: { type: Boolean, default: false },
     adverseMedia: { type: Boolean, default: false },
     watchlist: { type: Boolean, default: false },
-    // 'mock' until a real provider is configured (services/amlProvider.js) —
-    // provider/raw form the audit trail of which screening actually ran.
-    provider: { type: String, default: 'mock' },
+    // Which provider produced the result (services/amlProvider.js):
+    // 'none' (no vendor configured) | 'safeguard' (production, no vendor) |
+    // 'unavailable' (vendor reachable but the call failed) | 'chainalysis' |
+    // 'trm' | 'complyadvantage' | 'http' | '[erased]' after a GDPR erasure.
+    // provider/raw together are the audit trail of which screening ran.
+    provider: { type: String, default: 'none' },
     raw: { type: Schema.Types.Mixed, default: null }
   },
   

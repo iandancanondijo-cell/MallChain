@@ -26,6 +26,7 @@
 
 const Joi = require('joi');
 const sanitizeHtml = require('sanitize-html');
+const { normalizePhone } = require('../utils/phone');
 
 function emailOptions() {
   if (process.env.TEST_MODE === 'true') {
@@ -43,6 +44,24 @@ function emailOptions() {
 // sanitize-html needs no DOM, is pure-JS, and produces identical output to
 // the working jsdom+DOMPurify combination for every case tested.
 const SANITIZE_HTML_OPTS = { allowedTags: [], allowedAttributes: {} };
+
+// Optional phone, captured at signup when offered. This field existed on the
+// October snapshot side of the 2026-11-11 history merge and was dropped along
+// with it: with stripUnknown:true an undeclared `phone` is silently deleted,
+// so every registration lost the number and the SMS/WhatsApp channels had
+// nowhere to send (utils/phone.js itself survived with no non-test caller).
+const phoneField = Joi.string()
+  .trim()
+  .max(20)
+  .custom((value, helpers) => {
+    const normalized = normalizePhone(value);
+    if (!normalized) return helpers.error('phone.invalid');
+    return normalized;
+  })
+  .optional()
+  .messages({
+    'phone.invalid': 'Invalid phone number — use international format, e.g. +254712345678',
+  });
 
 /**
  * Task 8.6: Auth validation schemas
@@ -88,6 +107,7 @@ const authSchemas = {
     // signup). The controller's `if (referralCodeInput)` guard already treats
     // '' as "no referral", so an empty value is harmless downstream.
     referralCode: Joi.string().trim().allow('').max(64).optional(),
+    phone: phoneField,
   }),
   
   // Registration with username
@@ -114,6 +134,7 @@ const authSchemas = {
         'string.pattern.base': 'Password must contain uppercase, lowercase, and numbers',
       }),
     referralCode: Joi.string().trim().optional(),
+    phone: phoneField,
   }),
 
   // Login with email

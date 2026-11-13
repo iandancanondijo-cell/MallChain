@@ -1,7 +1,24 @@
 /**
  * Wallet secret (PIN / Cipher Wall sequence) verification endpoints
- * POST /api/wallet/verify-pin - Verify the secret with rate limiting & lockout
+ * POST /api/wallet/pin/verify-pin - Verify the secret with rate limiting & lockout
  * Enforces server-side rate limiting for brute-force protection
+ *
+ * `code` values this endpoint answers with, and only these — the client
+ * (components/CipherChallenge.tsx) branches on them instead of inferring from
+ * which fields happen to be present:
+ *
+ *   200  —                      the secret matched.
+ *   400  invalid_secret_format  nothing was compared (missing/malformed input).
+ *   400  no_pin_set             no server-side hash to compare against.
+ *   401  invalid_secret         the secret WAS compared and rejected — this is
+ *                               the only response that may cost a strike.
+ *   429  secret_locked          the lockout from a previous streak is still
+ *                               being served out — a wait, not a strike.
+ *   500  —                      comparison could not be performed.
+ *
+ * A 401 without one of these codes is not this endpoint: middleware/
+ * requireAuth.js answers an expired session with 401 `code: 'session_expired'`
+ * before the request ever reaches the comparison.
  */
 const express = require('express');
 const router = express.Router();
@@ -27,6 +44,7 @@ router.post('/verify-pin', requireAuth, async (req, res) => {
   if (!pin || typeof pin !== 'string') {
     return res.status(400).json({
       ok: false,
+      code: 'invalid_secret_format',
       error: 'PIN is required',
     });
   }
@@ -42,6 +60,7 @@ router.post('/verify-pin', requireAuth, async (req, res) => {
   if (pin.length < 4 || pin.length > 64 || /[\r\n]/.test(pin) || Buffer.byteLength(pin, 'utf8') > 64) {
     return res.status(400).json({
       ok: false,
+      code: 'invalid_secret_format',
       error: 'Invalid secret format (4-64 characters)',
     });
   }
@@ -62,6 +81,11 @@ router.post('/verify-pin', requireAuth, async (req, res) => {
       return res.status(429).json({
         ok: false,
         error: 'Too many failed attempts. Try again later.',
+        // Nothing was compared on this request — the streak from earlier
+        // failures is still being served out — which is why this is a
+        // distinct code from 'invalid_secret' and why the client shows a
+        // wait rather than spending a strike.
+        code: 'secret_locked',
         valid: false,
         locked: true,
         remainingTime: remainingSeconds,
@@ -123,6 +147,15 @@ router.post('/verify-pin', requireAuth, async (req, res) => {
     return res.status(401).json({
       ok: false,
       error: result.locked ? 'Too many failed attempts. Account locked for 5 minutes.' : 'Incorrect PIN',
+      // The contract the client is allowed to branch on (handoff §4): this 401
+      // means the secret WAS compared and rejected, which is the only thing
+      // that may cost the user a strike. middleware/requireAuth.js answers an
+      // expired session with code 'session_expired' instead, and a client that
+      // had to infer the difference from the presence of `valid` /
+      // `attemptsRemaining` used to blame the user's cipher for a session that
+      // simply ran out. `valid`/`locked`/`attemptsRemaining` stay for existing
+      // consumers.
+      code: 'invalid_secret',
       valid: false,
       locked: result.locked,
       remainingTime: result.remainingSeconds,

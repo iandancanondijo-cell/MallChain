@@ -10,6 +10,19 @@ const express = require('express');
 
 jest.mock('../models/user', () => ({
   findById: jest.fn(),
+  // requireAuth touches lastSeenAt for any superadmin on an authed request
+  // (that is what /api/admin/presence reads). The legacy-payload case below
+  // signs a superadmin token, so without this the middleware threw
+  // "findByIdAndUpdate is not a function" and the route 401'd for a reason
+  // that has nothing to do with what the test is about.
+  findByIdAndUpdate: jest.fn().mockResolvedValue(null),
+}));
+
+// The same branch mirrors lastSeenAt into the auth cache; left unmocked it
+// opens a real Redis client, which is both slow and keeps the process alive.
+jest.mock('../middleware/authCache', () => ({
+  getCachedUser: jest.fn().mockResolvedValue(null),
+  setCachedUser: jest.fn().mockResolvedValue(undefined),
 }));
 
 const User = require('../models/user');

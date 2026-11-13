@@ -40,8 +40,15 @@ const sendSchema = Joi.object({
   // Optional, and only used to prove the queued record describes the account
   // the signed bytes actually came from. Joi rejects unknown keys by default,
   // so they have to be declared for the check below to have anything to read.
+  //
+  // addressSchema carries .required() because every other consumer of it
+  // (from/to/buyerAddress) is mandatory. Reusing it here verbatim made
+  // signerAddress mandatory too, which rejected the documented client-signed
+  // happy path — a wallet that sends only signedTx — with
+  // "Address is required". .optional() returns a copy, so the shared schema
+  // keeps its requiredness everywhere else.
   signerPubKey: Joi.string().base64().max(128),
-  signerAddress: addressSchema,
+  signerAddress: addressSchema.optional(),
 })
 
 const OBJECT_ID_RE = /^[a-fA-F0-9]{24}$/
@@ -152,7 +159,16 @@ router.get('/:id',
       })
     }
 
-    res.json(tx)
+    // The record is returned flat (no `ok` envelope) because every other read
+    // on this router is, but `id` is added next to `_id` rather than being
+    // left for clients to rediscover: this is a Mongo document serialised
+    // straight out of Mongoose, so its identifier arrived as `_id` and any
+    // caller following the documented contract (`transaction.id`) got an empty
+    // string — frontend-v14-integration-handoff §9.1. `_id` stays for the
+    // callers that were already reading it; both are the same string, and a
+    // client should never have to try one then the other.
+    const json = typeof tx.toJSON === 'function' ? tx.toJSON({ virtuals: true, getters: true }) : tx
+    return res.json({ ...json, id: String(json.id || tx._id) })
   }))
 
 module.exports = router

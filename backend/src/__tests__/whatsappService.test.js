@@ -1,142 +1,151 @@
-const mockPost = jest.fn();
-jest.mock('axios', () => ({ post: (...args) => mockPost(...args) }));
+// Tests for services/whatsappService.js as it exists on this line.
+//
+// Which WhatsApp sender the product should use is an open owner decision
+// ("pending sender"), and the 2026-11-11 history merge is a live example of
+// why the tests follow the code rather than the other way round: this file's
+// predecessor arrived with the October snapshot and described a Meta Cloud API
+// implementation — axios against graph.facebook.com, pre-approved template
+// payloads, an isConfigured() export, config.notifications.whatsapp.meta, and
+// a boolean `false` when unconfigured. The service that the merge actually
+// kept is the product line's Twilio version (8ab83c87, 2026-10-10, one day
+// after the snapshot): global fetch against api.twilio.com, form-encoded
+// Messages.json, `whatsapp:<number>` addressing, and a
+// { success, messageId | error } result object with no isConfigured().
+//
+// Rewriting the service to match the old test would have silently switched
+// the digest job's outbound provider, so the test was rewritten instead. If
+// the owner decides on Meta, this file and the service change together —
+// and note that the Twilio path here performs no phone-number normalisation
+// (the caller's string is sent verbatim as `whatsapp:${to}`), unlike the Meta
+// version, which stripped `whatsapp:` and non-digits.
+
+function configureTwilio(env) {
+  env.TWILIO_ACCOUNT_SID = 'ACtest';
+  env.TWILIO_AUTH_TOKEN = 'authtoken';
+  env.TWILIO_WHATSAPP_NUMBER = '+14155238886';
+}
+
+function clearTwilio(env) {
+  delete env.TWILIO_ACCOUNT_SID;
+  delete env.TWILIO_AUTH_TOKEN;
+  delete env.TWILIO_WHATSAPP_NUMBER;
+}
 
 describe('whatsappService', () => {
+  let fetchMock;
+
   beforeEach(() => {
     jest.resetModules();
-    jest.clearAllMocks();
-    delete process.env.WHATSAPP_ACCESS_TOKEN;
-    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
-    delete process.env.WHATSAPP_TEMPLATE_NAME;
+    clearTwilio(process.env);
+    fetchMock = jest.fn();
+    jest.spyOn(global, 'fetch').mockImplementation(fetchMock);
   });
 
-  test('no-ops without throwing when WhatsApp (Meta Cloud API) is not configured', async () => {
-    const { sendWhatsApp, isConfigured } = require('../services/whatsappService');
-    expect(isConfigured()).toBe(false);
-    await expect(sendWhatsApp('254700000000', 'hi')).resolves.toBe(false);
-    expect(mockPost).not.toHaveBeenCalled();
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
-  test('sends free-form text when no template is configured', async () => {
-    process.env.WHATSAPP_ACCESS_TOKEN = 'token';
-    process.env.WHATSAPP_PHONE_NUMBER_ID = '123456';
-    mockPost.mockResolvedValue({ status: 200, data: { messages: [{ id: 'wamid.1' }] } });
-
+  test('no-ops without throwing when Twilio WhatsApp is not configured', async () => {
     const { sendWhatsApp } = require('../services/whatsappService');
-    const result = await sendWhatsApp('254700000000', 'hi');
-    expect(result).toBe(true);
-    expect(mockPost).toHaveBeenCalledWith(
-      expect.stringContaining('/v21.0/123456/messages'),
-      expect.objectContaining({
-        messaging_product: 'whatsapp',
-        to: '254700000000',
-        type: 'text',
-        text: { body: 'hi' },
-      }),
-      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer token' }) })
-    );
-  });
 
-  test('sends a template message when WHATSAPP_TEMPLATE_NAME is configured', async () => {
-    process.env.WHATSAPP_ACCESS_TOKEN = 'token';
-    process.env.WHATSAPP_PHONE_NUMBER_ID = '123456';
-    process.env.WHATSAPP_TEMPLATE_NAME = 'mallchain_alert';
-    mockPost.mockResolvedValue({ status: 200, data: { messages: [{ id: 'wamid.1' }] } });
-
-    const { sendWhatsApp } = require('../services/whatsappService');
-    const result = await sendWhatsApp('254700000000', 'Badge earned');
-    expect(result).toBe(true);
-    expect(mockPost).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({
-        type: 'template',
-        template: {
-          name: 'mallchain_alert',
-          language: { code: 'en' },
-          components: [
-            { type: 'body', parameters: [{ type: 'text', text: 'Badge earned' }] },
-          ],
-        },
-      }),
-      expect.any(Object)
-    );
-  });
-
-  test('forceText bypasses the configured template (session-window sends)', async () => {
-    process.env.WHATSAPP_ACCESS_TOKEN = 'token';
-    process.env.WHATSAPP_PHONE_NUMBER_ID = '123456';
-    process.env.WHATSAPP_TEMPLATE_NAME = 'mallchain_alert';
-    mockPost.mockResolvedValue({ status: 200, data: { messages: [{ id: 'wamid.1' }] } });
-
-    const { sendWhatsApp } = require('../services/whatsappService');
-    await sendWhatsApp('254700000000', 'hi', { forceText: true });
-    expect(mockPost).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ type: 'text' }),
-      expect.any(Object)
-    );
-  });
-
-  test('per-call template override wins over env config', async () => {
-    process.env.WHATSAPP_ACCESS_TOKEN = 'token';
-    process.env.WHATSAPP_PHONE_NUMBER_ID = '123456';
-    mockPost.mockResolvedValue({ status: 200, data: { messages: [{ id: 'wamid.1' }] } });
-
-    const { sendWhatsApp } = require('../services/whatsappService');
-    await sendWhatsApp('254700000000', 'ignored', {
-      template: { name: 'custom_tpl', language: 'sw', bodyParams: ['a', 'b'] },
+    await expect(sendWhatsApp('254700000000', 'hi')).resolves.toMatchObject({
+      success: false,
+      error: 'WhatsApp not configured',
     });
-    expect(mockPost).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({
-        type: 'template',
-        template: {
-          name: 'custom_tpl',
-          language: { code: 'sw' },
-          components: [
-            { type: 'body', parameters: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] },
-          ],
-        },
-      }),
-      expect.any(Object)
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('sends via the Twilio Messages API and returns the sid', async () => {
+    configureTwilio(process.env);
+    fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => ({ sid: 'SM123' }) });
+
+    const { sendWhatsApp } = require('../services/whatsappService');
+    const result = await sendWhatsApp('254700000000', 'Your badge is live');
+
+    expect(result).toEqual({ success: true, messageId: 'SM123' });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://api.twilio.com/2010-04-01/Accounts/ACtest/Messages.json');
+    expect(init.method).toBe('POST');
+    expect(init.headers.Authorization).toBe(
+      `Basic ${Buffer.from('ACtest:authtoken').toString('base64')}`,
     );
+    expect(init.headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+
+    const body = new URLSearchParams(init.body);
+    expect(body.get('From')).toBe('whatsapp:+14155238886');
+    expect(body.get('To')).toBe('whatsapp:254700000000');
+    expect(body.get('Body')).toBe('Your badge is live');
   });
 
-  test('strips whatsapp: prefix and non-digits from phone number', async () => {
-    process.env.WHATSAPP_ACCESS_TOKEN = 'token';
-    process.env.WHATSAPP_PHONE_NUMBER_ID = '123456';
-    mockPost.mockResolvedValue({ status: 200, data: { messages: [{ id: 'wamid.1' }] } });
+  test('returns the API error message when Twilio answers non-2xx', async () => {
+    configureTwilio(process.env);
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ message: 'The number is not a WhatsApp number' }),
+    });
 
     const { sendWhatsApp } = require('../services/whatsappService');
-    await sendWhatsApp('whatsapp:+254-700-000000', 'hi');
-    expect(mockPost).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ to: '254700000000' }),
-      expect.any(Object)
-    );
+    await expect(sendWhatsApp('254700000000', 'hi')).resolves.toMatchObject({
+      success: false,
+      error: 'WhatsApp error: The number is not a WhatsApp number',
+    });
   });
 
-  test('returns false when Meta returns non-200 status', async () => {
-    process.env.WHATSAPP_ACCESS_TOKEN = 'token';
-    process.env.WHATSAPP_PHONE_NUMBER_ID = '123456';
-    mockPost.mockResolvedValue({ status: 400 });
+  test('returns false-shaped error (does not throw) when the request itself fails', async () => {
+    configureTwilio(process.env);
+    fetchMock.mockRejectedValue(new Error('ECONNRESET'));
 
     const { sendWhatsApp } = require('../services/whatsappService');
-    await expect(sendWhatsApp('254700000000', 'hi')).resolves.toBe(false);
+    await expect(sendWhatsApp('254700000000', 'hi')).resolves.toEqual({
+      success: false,
+      error: 'ECONNRESET',
+    });
   });
 
-  test('returns false (does not throw) when the request itself fails', async () => {
-    process.env.WHATSAPP_ACCESS_TOKEN = 'token';
-    process.env.WHATSAPP_PHONE_NUMBER_ID = '123456';
-    mockPost.mockRejectedValue(new Error('network down'));
-
+  test('rejects a missing recipient or body before touching the network', async () => {
+    configureTwilio(process.env);
     const { sendWhatsApp } = require('../services/whatsappService');
-    await expect(sendWhatsApp('254700000000', 'hi')).resolves.toBe(false);
+
+    await expect(sendWhatsApp('', 'hi')).resolves.toMatchObject({
+      success: false,
+      error: 'Missing required fields: to, message',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  test('no-ops when phone or message is missing', async () => {
-    const { sendWhatsApp } = require('../services/whatsappService');
-    await expect(sendWhatsApp('', 'hi')).resolves.toBe(false);
-    await expect(sendWhatsApp('254700000000', '')).resolves.toBe(false);
+  describe('sendTemplate', () => {
+    test('no-ops without configuration', async () => {
+      const { sendTemplate } = require('../services/whatsappService');
+
+      await expect(sendTemplate('254700000000', 'order_shipped', { body: ['ORD-1'] }))
+        .resolves.toMatchObject({ success: false, error: 'WhatsApp not configured' });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    test('renders the template name and body parameters into the message', async () => {
+      configureTwilio(process.env);
+      fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => ({ sid: 'SM9' }) });
+
+      const { sendTemplate } = require('../services/whatsappService');
+      // Twilio-side templates are console-authored; this path flattens the
+      // parameters into the text body, which is what the service documents.
+      await expect(sendTemplate('254700000000', 'order_shipped', { body: ['ORD-1', 'KSh 500'] }))
+        .resolves.toEqual({ success: true, messageId: 'SM9' });
+
+      const body = new URLSearchParams(fetchMock.mock.calls[0][1].body);
+      expect(body.get('Body')).toBe('[order_shipped]\nORD-1\nKSh 500');
+    });
+
+    test('requires a template name', async () => {
+      configureTwilio(process.env);
+      const { sendTemplate } = require('../services/whatsappService');
+
+      await expect(sendTemplate('254700000000', '')).resolves.toMatchObject({
+        success: false,
+        error: 'Missing required fields: to, templateName',
+      });
+    });
   });
 });

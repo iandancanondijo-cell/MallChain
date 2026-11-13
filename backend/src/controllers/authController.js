@@ -9,6 +9,7 @@ const { revokeToken, revokeAllUserTokens, isRevoked } = require('../middleware/t
 const { stampCurrentSession, checkLoginCooldown, handleExpiredToken, cooldownMinutes } = require('../middleware/sessionCooldown');
 const getRedis = require('../mallwallet/queue/redis');
 const { blindIndex, decryptField } = require('../utils/fieldEncryption');
+const { normalizePhone } = require('../utils/phone');
 const activityEvents = require('../services/activityEvents');
 const logger = require('../utils/logger');
 const { effectiveSessionTtlMinutes } = require('../utils/sessionPolicy');
@@ -224,6 +225,11 @@ function toPublicUser(user) {
     username: user.username || null,
     phone,
     walletAddress,
+    // Server-side wallet-age clock (see services/walletAgeService.js). The
+    // wallet panel reads its "Wallet age" from this instead of from the
+    // local store's `wallet.createdAt`, which only ever existed for wallets
+    // created in this browser and reported "Unknown" for every linked one.
+    walletLinkedAt: user.walletLinkedAt || null,
     avatarUrl: user.avatarUrl || null,
     role: user.role || 'user',
     creator_level: String(user.creator_level ?? 0),
@@ -341,7 +347,14 @@ exports.register = async (req, res) => {
   if (existing) return res.status(400).json({ error: 'email exists' });
   const hash = await bcrypt.hash(password, 10);
 
-  const u = await User.create({ email, password: hash });
+  // Optional phone, normalized to E.164 by the register schema (re-normalize
+  // here because this handler reads req.body). Without storing it the
+  // SMS/WhatsApp channels in notificationDispatcher have no destination for
+  // any account, ever — the schema field and the value were both being
+  // dropped on this line.
+  const phone = normalizePhone(req.body.phone);
+
+  const u = await User.create({ email, password: hash, ...(phone ? { phone } : {}) });
   await recordReferralAttribution(u, referralCode);
 
   // Signing up is not signing in: the session row is recorded (so the Active
@@ -441,7 +454,8 @@ exports.registerUsername = async (req, res) => {
   if (existingEmail) return res.status(400).json({ error: 'username exists' });
 
   const hash = await bcrypt.hash(password, 10);
-  const u = await User.create({ username, email: syntheticEmail, password: hash });
+  const phone = normalizePhone(req.body?.phone);
+  const u = await User.create({ username, email: syntheticEmail, password: hash, ...(phone ? { phone } : {}) });
   await recordReferralAttribution(u, req.body?.referralCode);
 
   const { token, sessionTtlMin, expiresAt } = await signToken(u, req);
@@ -538,7 +552,7 @@ exports.me = async (req, res) => {
     // hydration, so an expired cookie must surface the policy, not a generic
     // 'invalid token'.
     if (e && e.name === 'TokenExpiredError' && await handleExpiredToken(req, res, token)) return;
-    return res.status(401).json({ error: 'invalid token' })
+    return res.status(401).json({ error: 'invalid token', code: 'invalid_token' })
   }
 };
 
@@ -621,7 +635,15 @@ exports.linkWallet = async (req, res) => {
   // it computes walletAddress_blind and encrypts the address at rest.
   const user = await User.findById(userId).select('-password');
   if (!user) return res.status(401).json({ error: 'user not found' });
+
+  // Wallet-age clock for the withdrawal rule (services/walletAgeService.js).
+  // Stamped only when this is a *different* address than the one on file:
+  // re-attaching the wallet the cipher wall disconnected must not restart a
+  // 29-day wait the person already served, while swapping to a new address
+  // genuinely is a new wallet and starts a fresh clock.
+  const previousAddress = user.walletAddress ? decryptField(user.walletAddress) : null;
   user.walletAddress = address;
+  if (previousAddress !== address) user.walletLinkedAt = new Date();
   // This is the moment the account becomes rewardable, so it is the moment it
   // earns a referral code (see activateReferralCode). Set before the save so
   // the address and the code go to disk in one write, and credit the referrer

@@ -111,6 +111,10 @@ describe('requireAuth — expired session → 401 session_expired + one-shot coo
 
     expect(res.status).toBe(401);
     expect(res.body.error).toBe('session_expired');
+    // The code is what the client branches on (handoff §4): CipherChallenge.tsx
+    // may only count a strike on 'invalid_secret', so an expired session has
+    // to be identifiable without string-matching a prose field.
+    expect(res.body.code).toBe('session_expired');
     expect(res.body.cooldownMinutes).toBe(15);
     expect(mockStore.has(COOLDOWN_KEY)).toBe(true);
   });
@@ -137,6 +141,7 @@ describe('requireAuth — expired session → 401 session_expired + one-shot coo
     const res2 = await request(app).get('/protected').set('Authorization', `Bearer ${expiredTokenWithExp(olderExp)}`);
     expect(res2.status).toBe(401);
     expect(res2.body.error).toBe('session_expired'); // same response shape…
+    expect(res2.body.code).toBe('session_expired');
     expect(mockStore.has(COOLDOWN_KEY)).toBe(false); // …but the lock was NOT re-armed
   });
 
@@ -149,6 +154,7 @@ describe('requireAuth — expired session → 401 session_expired + one-shot coo
     const res = await request(app).get('/protected').set('Authorization', `Bearer ${forged}`);
     expect(res.status).toBe(401);
     expect(res.body.error).toBe('invalid token');
+    expect(res.body.code).toBe('invalid_token');
     expect(mockStore.has(COOLDOWN_KEY)).toBe(false);
   });
 
@@ -158,6 +164,7 @@ describe('requireAuth — expired session → 401 session_expired + one-shot coo
     const res = await request(app).get('/protected').set('Authorization', `Bearer ${expiredTokenWithExp(exp)}`);
     expect(res.status).toBe(401);
     expect(res.body.error).toBe('session_expired');
+    expect(res.body.code).toBe('session_expired');
   });
 });
 

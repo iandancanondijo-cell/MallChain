@@ -51,7 +51,12 @@ describe('staking routes', () => {
       const res = await request(app).get('/api/staking/summary/mall1abc');
 
       expect(res.status).toBe(500);
-      expect(res.body.error.message).toBe('chain unreachable');
+      // B11 in errorHandler.js masks the message of any non-AppError so a raw
+      // RPC/driver failure text (which can echo endpoints or payloads) never
+      // reaches the client; the real message still goes to the log. The status
+      // is what this endpoint's caller branches on, so that stays asserted.
+      expect(res.body.error.message).toBe('Internal server error. Please try again later.');
+      expect(res.body.error.code).toBe('INTERNAL_ERROR');
     });
 
     test('passes a MongoDB-operator-shaped address straight through as a plain string', async () => {
@@ -116,7 +121,12 @@ describe('staking routes', () => {
         .send({ txBytes: 'deadbeef' });
 
       expect(res.status).toBe(500);
-      expect(res.body.error.message).toBe('network error');
+      // Same B11 masking as the summary route above: the transport error is a
+      // plain Error, so the client gets the generic copy while the log keeps
+      // 'network error'. Contrast with the non-zero chain code case, which the
+      // controller deliberately turns into a 400 carrying the chain's raw_log.
+      expect(res.body.error.message).toBe('Internal server error. Please try again later.');
+      expect(res.body.error.code).toBe('INTERNAL_ERROR');
     });
 
     test('rejects a payload over the size limit', async () => {

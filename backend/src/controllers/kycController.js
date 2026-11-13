@@ -13,6 +13,7 @@ const activityEvents = require('../services/activityEvents');
 // otherwise we'd resolve `path.join(KYC_UPLOAD_DIR, "v1:...:...")` and
 // sendFile() would 404.
 const { decryptField } = require('../utils/fieldEncryption');
+const { verdictForAccount } = require('../middleware/requireKyc');
 
 exports.uploadDocument = asyncHandler(async (req, res) => {
   if (!req.file) {
@@ -66,6 +67,7 @@ exports.getDocument = asyncHandler(async (req, res) => {
   // admins reviewing such a record most often want to start with the
   // front (photo + name + DOB) anyway.
   const sideParam = typeof req.query?.side === 'string' ? req.query.side.toLowerCase() : 'front';
+  const sideRequested = typeof req.query?.side === 'string' && req.query.side.length > 0;
   const fieldName = sideParam === 'back'
     ? 'idBackUrl'
     : sideParam === 'document' || sideParam === 'single'
@@ -78,7 +80,19 @@ exports.getDocument = asyncHandler(async (req, res) => {
   // path.basename() yields junk and sendFile() would 404. decryptField
   // is a no-op for already-plain values, so legacy records (pre-encryption
   // migration) keep working too.
-  const storedUrl = decryptField(kyc[fieldName]);
+  let storedUrl = decryptField(kyc[fieldName]);
+
+  // Records submitted before the dual-side change only have idDocumentUrl.
+  // With no explicit ?side the caller asked for "the document", not
+  // specifically the front, so fall back to the legacy field rather than
+  // 404-ing every pre-dual-side submission — which is what the comment above
+  // promises ("still here so old submissions remain viewable") but the
+  // default did not do. An explicit ?side=front|back|document is always
+  // honoured exactly, with no cross-field fallback.
+  if (!storedUrl && !sideRequested && kyc.idDocumentUrl) {
+    storedUrl = decryptField(kyc.idDocumentUrl);
+  }
+
   if (!storedUrl) {
     throw new AppError(ErrorCodes.NOT_FOUND, `No ${fieldName === 'idDocumentUrl' ? 'document' : sideParam + ' document'} on file`, 404);
   }
@@ -123,8 +137,10 @@ exports.getDocument = asyncHandler(async (req, res) => {
 });
 
 // Delegates to services/amlProvider.js — a real vendor (Chainalysis, TRM,
-// ComplyAdvantage, etc.) plugs in there once credentials exist; until then
-// this calls the mock provider, which returns the same shape as before.
+// ComplyAdvantage, etc.) plugs in there once credentials exist. Until then no
+// vendor is reachable, so nothing is screened, and this code treats "nothing
+// was screened" exactly like "the screening failed": the submission is held for
+// a human at high risk, and the record states which of the two happened.
 //
 // FAIL-CLOSED, NOT FAIL-500: a screening provider outage (e.g. Chainalysis
 // returning Cloudflare 530, confirmed live 2026-11-02 when a real user's
@@ -134,35 +150,64 @@ exports.getDocument = asyncHandler(async (req, res) => {
 // provider is unreachable we mark the checks as un-runnable, flag the
 // submission 'high' risk so it surfaces prominently in the manual review
 // queue, and let the record be created.
+//
+// The shape this returns is the compliance audit trail, so nothing here may
+// assert a finding it did not obtain: every un-screened path reports the four
+// list flags as false (no list was consulted) with `screened:false`, never as
+// a clean result and never as a hit. The applicant's politically-exposed
+// answer is kept as a declaration (`raw.declaredPoliticalExposure`, plus the
+// top-level `politicalExposure` field on the record) rather than promoted into
+// `pep`, which means "a PEP list matched".
+const unscreenedResult = (kycData, provider, warning) => ({
+  checks: {
+    screened: false,
+    sanctions: false,
+    pep: false,
+    adverseMedia: false,
+    watchlist: false,
+    provider,
+    raw: {
+      warning,
+      declaredPoliticalExposure: Boolean(kycData.politicalExposure),
+    },
+  },
+  riskLevel: 'high',
+});
+
 const performAMLCheck = async (kycData) => {
+  let checks;
   try {
-    const checks = await screenAml(kycData);
-
-    let riskLevel = 'low';
-    if (checks.sanctions || checks.adverseMedia || checks.watchlist) {
-      riskLevel = 'high';
-    } else if (checks.pep) {
-      riskLevel = 'medium';
-    }
-
-    return { checks, riskLevel };
+    checks = await screenAml(kycData);
   } catch (err) {
     logger.error('kycController', 'AML screening unavailable — holding submission for manual review', err);
-    return {
-      checks: {
-        sanctions: false,
-        pep: Boolean(kycData.politicalExposure),
-        adverseMedia: false,
-        watchlist: false,
-        provider: 'unavailable',
-        raw: {
-          warning: 'AML screening provider unreachable at submit time — manual review required',
-          error: err.message,
-        },
-      },
-      riskLevel: 'high',
-    };
+    return unscreenedResult(
+      kycData,
+      'unavailable',
+      `AML screening provider unreachable at submit time — manual review required (${err.message})`,
+    );
   }
+
+  // No vendor configured (dev/test) or production safeguard active: the flags
+  // are false because nobody looked, which is not evidence of innocence.
+  if (checks.screened === false) {
+    logger.warn('kycController', 'AML screening did not run — holding submission for manual review', {
+      provider: checks.provider,
+    });
+    return unscreenedResult(
+      kycData,
+      checks.provider || 'none',
+      checks.warning || 'AML screening did not run — manual review required',
+    );
+  }
+
+  let riskLevel = 'low';
+  if (checks.sanctions || checks.adverseMedia || checks.watchlist) {
+    riskLevel = 'high';
+  } else if (checks.pep) {
+    riskLevel = 'medium';
+  }
+
+  return { checks, riskLevel };
 };
 
 exports.submitKYC = asyncHandler(async (req, res) => {
@@ -206,10 +251,11 @@ exports.submitKYC = asyncHandler(async (req, res) => {
     throw new AppError(ErrorCodes.INVALID_REQUEST_FORMAT, 'KYC already in progress', 400);
   }
 
-  // The AML check below is a mocked signal (no real sanctions/watchlist
-  // provider is integrated) — it's informational input for an admin's
-  // review, not an approval trigger. Every submission requires a real
-  // human decision now; nothing here can auto-approve.
+  // The AML result below is informational input for an admin's review, not an
+  // approval trigger — and until a real vendor is configured it is not a
+  // screening result at all: `amlChecks.screened` says which of the two the
+  // record holds. Every submission requires a real human decision either way;
+  // nothing here can auto-approve.
   const { checks, riskLevel } = await performAMLCheck(kycData);
   const status = 'pending';
 
@@ -280,9 +326,11 @@ exports.runAMLCheck = asyncHandler(async (req, res) => {
     // Perform AML check
     ({ checks, riskLevel } = await performAMLCheck(kycData));
 
-    // Update existing KYC or create new one — this is a mocked signal, not
-    // an approval trigger (see submitKYC for the same reasoning); status is
-    // left untouched here so a real admin decision is what changes it.
+    // Update existing KYC or create new one — this is informational input for
+    // a reviewer, not an approval trigger, and with no vendor configured it
+    // records that screening did not run (see submitKYC for the same
+    // reasoning); status is left untouched here so a real admin decision is
+    // what changes it.
     await KYC.findOneAndUpdate(
       { userId },
       {
@@ -318,7 +366,20 @@ exports.getKYCStatus = asyncHandler(async (req, res) => {
   }
 
   if (!kyc) {
-    return res.json({ status: 'not_submitted' });
+    // `verdict` is the field a client should branch on (handoff §6): `status`
+    // here is this route's own record vocabulary, while a draft record, a
+    // missing record and an unreviewed one all used to be told apart by reading
+    // status + kycLevel + reviewedAt together and hoping they agreed. The
+    // derivation lives in middleware/requireKyc.js, which is also the function
+    // that decides whether a wallet may be linked — so the banner and the gate
+    // cannot disagree about the same account. They would otherwise disagree
+    // right here: an admin can approve an account by setting kycLevel without
+    // a KYC document ever existing, and this branch's `status` has no record to
+    // describe.
+    return res.json({
+      status: 'not_submitted',
+      verdict: verdictForAccount(req.user, null),
+    });
   }
 
   // decryptKycPii undoes the model's pre-save encryption of idNumber/
@@ -328,7 +389,11 @@ exports.getKYCStatus = asyncHandler(async (req, res) => {
   const decrypted = KYC.decryptKycPii(kyc);
   res.json({
     kycId: kyc._id,
+    id: String(kyc._id),
     status: kyc.status,
+    // 'draft' → not_submitted, 'review'/'pending' → pending, 'approved' →
+    // verified, 'rejected' → rejected; kycLevel >= 2 overrides the document.
+    verdict: verdictForAccount(req.user, kyc),
     riskLevel: kyc.riskLevel,
     amlChecks: kyc.amlChecks,
     submittedAt: kyc.submittedAt,
@@ -338,9 +403,15 @@ exports.getKYCStatus = asyncHandler(async (req, res) => {
     hasFrontDocument: !!kyc.idFrontUrl,
     hasBackDocument: !!kyc.idBackUrl,
     personal: {
-      firstName: kyc.firstName,
-      lastName: kyc.lastName,
-      dateOfBirth: kyc.dateOfBirth,
+      // firstName/lastName/dateOfBirth/annualIncome are in models/kyc.js
+      // ENCRYPTED_FIELDS, so on the hydrated document they are still
+      // `v1:…` ciphertext — reading them off `kyc` handed the user their own
+      // encrypted blob instead of their own name. Everything in that list
+      // must come from `decrypted`; the fields the model leaves in plain
+      // text (nationality, country, occupation, …) stay on `kyc`.
+      firstName: decrypted.firstName,
+      lastName: decrypted.lastName,
+      dateOfBirth: decrypted.dateOfBirth,
       nationality: kyc.nationality,
     },
     address: {
@@ -358,7 +429,7 @@ exports.getKYCStatus = asyncHandler(async (req, res) => {
     financial: {
       occupation: kyc.occupation,
       sourceOfFunds: kyc.sourceOfFunds,
-      annualIncome: kyc.annualIncome,
+      annualIncome: decrypted.annualIncome,
       politicalExposure: kyc.politicalExposure,
     },
   });

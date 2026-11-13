@@ -5,6 +5,10 @@ const jwt = require('jsonwebtoken');
 jest.mock('../models/user', () => ({
   findById: jest.fn(),
   find: jest.fn(),
+  // taskAssign routes name the audit actor as
+  // User.decryptUserPii(req.user).email — email is encrypted at rest, so the
+  // static has to exist even in a suite whose fixtures are plaintext.
+  decryptUserPii: jest.fn((user) => user ?? {}),
 }));
 
 jest.mock('../models/TaskSubmission', () => ({
@@ -20,6 +24,30 @@ jest.mock('../models/MinesReviewer', () => ({
 jest.mock('../models/ValidatorApplication', () => ({
   find: jest.fn(),
 }));
+
+// /my-assigned hydrates each task's campaign so a reviewer can see the link
+// and rate they are voting against. Unmocked, that read buffers against an
+// unconnected mongoose instance and the route only answers after its 10s
+// timeout — past Jest's 5s test limit.
+jest.mock('../models/Campaign', () => ({
+  find: jest.fn(),
+  findById: jest.fn(),
+}));
+
+// Mimics the Mongoose query chain these routes build:
+// ValidatorApplication.find().select().sort().lean() and
+// Campaign.find().select().lean().catch(). Awaitable at every step.
+function chainable(resolvedValue) {
+  const node = {
+    select: jest.fn(() => node),
+    sort: jest.fn(() => node),
+    limit: jest.fn(() => node),
+    lean: jest.fn().mockResolvedValue(resolvedValue),
+    then: (onFulfilled, onRejected) => Promise.resolve(resolvedValue).then(onFulfilled, onRejected),
+    catch: (onRejected) => Promise.resolve(resolvedValue).catch(onRejected),
+  };
+  return node;
+}
 
 jest.mock('../models/AuditLog', () => ({
   create: jest.fn(),
@@ -39,6 +67,7 @@ const User = require('../models/user');
 const TaskSubmission = require('../models/TaskSubmission');
 const MinesReviewer = require('../models/MinesReviewer');
 const ValidatorApplication = require('../models/ValidatorApplication');
+const Campaign = require('../models/Campaign');
 const taskAssignmentRouter = require('../routes/taskAssignment');
 
 function authHeader(userId = 'admin-1', role = 'admin') {
@@ -65,6 +94,7 @@ describe('Task Assignment Routes', () => {
     User.findById.mockReturnValue({
       select: jest.fn().mockResolvedValue({ _id: 'admin-1', email: 'admin@example.com', role: 'admin' }),
     });
+    Campaign.find.mockReturnValue(chainable([]));
   });
 
   describe('GET /tasks/pending-assignment', () => {
@@ -125,6 +155,16 @@ describe('Task Assignment Routes', () => {
       MinesReviewer.findOneAndUpdate.mockResolvedValue({});
 
       const validatorIds = ['v1', 'v2', 'v3', 'v4', 'v5', 'v6'];
+      // POST /tasks/:id/assign gates on both halves of the validator rule:
+      // an approved ValidatorApplication (services/validatorEligibility.js,
+      // keyed by userId) and an active MinesReviewer stake for the same id.
+      ValidatorApplication.find.mockReturnValue(chainable(
+        validatorIds.map((id) => ({ userId: id, validatorAddress: `mall1${id}` }))
+      ));
+      MinesReviewer.find.mockReturnValue(chainable(
+        validatorIds.map((id) => ({ validator_id: id, stakeStatus: 'active' }))
+      ));
+
       const res = await request(app)
         .post('/api/task-assignment/tasks/task-1/assign')
         .set(authHeader())
@@ -133,6 +173,28 @@ describe('Task Assignment Routes', () => {
       expect(res.status).toBe(200);
       expect(mockTask.assignment_status).toBe('assigned');
       expect(mockTask.assigned_validators).toEqual(validatorIds);
+    });
+
+    test('refuses to assign someone with no approved validator application', async () => {
+      const mockTask = { _id: 'task-1', assignment_status: 'none', save: jest.fn().mockResolvedValue(true) };
+      TaskSubmission.findById.mockResolvedValue(mockTask);
+      const validatorIds = ['v1', 'v2', 'v3', 'v4', 'v5', 'v6'];
+      // Only v1..v5 have approved applications; v6 is a plain account.
+      ValidatorApplication.find.mockReturnValue(chainable(
+        validatorIds.slice(0, 5).map((id) => ({ userId: id, validatorAddress: `mall1${id}` }))
+      ));
+      MinesReviewer.find.mockReturnValue(chainable(
+        validatorIds.map((id) => ({ validator_id: id, stakeStatus: 'active' }))
+      ));
+
+      const res = await request(app)
+        .post('/api/task-assignment/tasks/task-1/assign')
+        .set(authHeader())
+        .send({ validator_ids: validatorIds });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/no approved validator application: v6/);
+      expect(mockTask.save).not.toHaveBeenCalled();
     });
   });
 

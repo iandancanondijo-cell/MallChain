@@ -313,6 +313,93 @@ marketplacecli query mallpoints user-points marketplace1xyz...
 → TasksCompleted: 12
 ```
 
+## Backend REST: transaction history (`/api/tx`)
+
+The chain queries above are the node's own CLI. The dashboard reads history
+through the backend instead, because the SDK's transaction *list* endpoint
+rejects every event query on this node and the raw RPC returns undecoded proto
+bytes — `GET /api/tx/history` does the `tx_search` + decode + merge in one
+place.
+
+```
+GET /api/tx/history?address=mall1…&status=all|confirmed|pending|failed
+                    &type=all|<category>|send|receive
+                    &search=<substring of hash/from/to>
+                    &startDate=<ISO>&endDate=<ISO>&page=1&limit=20
+```
+
+Every row:
+
+| Field | Meaning |
+|-------|---------|
+| `hash`, `id` | The transaction hash — same string, `id` so a client can address it (GET /api/tx/:id) without picking between `hash`/`txhash`/`_id` |
+| `from`, `to` | Sender field of the first message, and its recipient where one exists |
+| `amount` | Raw integer string in MLCNS micro-units (÷ 1e6), as the chain stores it |
+| `type` | Direction **for the queried address**: `send` or `receive` |
+| `txType`, `txTypeLabel` | Category from the published taxonomy below, and the words for it |
+| `msgType` | The raw protobuf `@type` URL, always — an unclearable category still says what it was |
+| `status` | `confirmed` / `failed` from the execution code |
+| `error` | `codespace: raw_log`, only when `status` is `failed` |
+| `timestamp` | The chain's own RFC3339 string |
+| `timestampMs` | The same instant as epoch **milliseconds**; `0` when the node gave no readable time — never "now" |
+| `block` | Block height as a number |
+| `gasUsed` | Only when the node reports it |
+
+`GET /api/tx/types` publishes the category table (`value`, `label`,
+`description`, `msgTypes`) so a client renders filters and labels from the
+server's list instead of matching on `@type` fragments. A `type=` value of
+`send`/`receive` filters on direction; any other published `value` filters on
+`txType`; anything else is a 400 rather than an empty page.
+
+Categories: `send`, `receive`, `purchase`, `sale`, `mint`, `burn`, `stake`,
+`unstake`, `redelegate`, `reward`, `convert`, `swap`, `liquidity`, `escrow`,
+`refund`, `dispute`, `badge`, `vault`, `bridge`, `attestation`, `contract`,
+`governance`, `penalty`, `validator`, `authorization`, `params`, `other`.
+
+Bank-module messages are deliberately absent: the faucet tops each MLCNS
+credit up with a 100-`stake` gas grant, and this surface renders every amount
+as MLCNS, so a bank row would read as a phantom 100 MALL receive.
+
+```
+GET /api/tx/:id            # :id = 64-hex chain hash → decoded chain row
+                           # :id = Mongo ObjectId   → queued record
+```
+
+## Backend REST: Mallpoints rate (`/api/mallpoints/price`)
+
+Public — no session, no wallet signature. What one Mallpoint is worth, stated
+by the server, without the rest of the economy.
+
+```
+GET /api/mallpoints/price
+→ { success, currency: "KES", pointPriceKes: 2, pegSource: "environment",
+    defaultPointPriceKes: 2, asOf: "2026-11-12T…Z",
+    conversion: { valueRatio: 3.225806, human: "1 MP ≈ 3.23 MLCNS",
+                  proposedRate: 3225806, rateScale: 1000000,
+                  minRate: 1000, maxRate: 100000000, clamped: false,
+                  mlcnsMidPriceKes: 0.62, mlptsPriceKes: 2,
+                  source: "fiat-pegged-oracle" } }
+```
+
+| Field | Meaning |
+|-------|---------|
+| `pointPriceKes` | KES per MLPTS — the canonical peg, read from `services/economyConstants.js`, the one place `MALLPOINT_PRICE_KES` is interpreted |
+| `pegSource` | `environment` when the deployment set `MALLPOINT_PRICE_KES` to a usable value, `default` when it did not and this is `defaultPointPriceKes`. KSh 2 by choice and KSh 2 by omission are different facts |
+| `defaultPointPriceKes` | The built-in default, always, so a reader can see how far the deployment moved from it |
+| `conversion` | The MLPTS→MLCNS ratio **as it would settle** (`proposedRate` is the on-chain-clamped value the convert flow mints with, not a display rounding). `null` when the oracle could not reach the chain |
+| `asOf` | When the answer was composed |
+
+The peg never depends on the chain, so an unreachable node costs the caller
+`conversion` and nothing else — there is no fabricated 1:1 here. `GET
+/api/economy/state` still carries both numbers for surfaces that want the
+market spread in the same request; this endpoint exists so a page that needs
+only the rate does not pay for the emission schedule, the treasury balances
+and two chain queries to read one integer.
+
+Client side: `services/mallpointsApi.getPrice()` and the shared, once-a-minute
+`hooks/useMallpointsPrice.ts` (the purchase page and the Mines leaderboard).
+`/api/mallpoints/:address` continues to return `pointPrice` for a balance read.
+
 ## Error Codes & Messages
 
 | Error | Cause | Solution |
@@ -326,5 +413,5 @@ marketplacecli query mallpoints user-points marketplace1xyz...
 
 ---
 
-**Last Updated**: May 10, 2026
+**Last Updated**: November 12, 2026 (`/api/tx` history contract and the published transaction categories added)
 **API Version**: Mallchain v1.0

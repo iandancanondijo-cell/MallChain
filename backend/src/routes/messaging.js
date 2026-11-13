@@ -10,6 +10,7 @@ const User = require('../models/user');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const { blindIndex, decryptField } = require('../utils/fieldEncryption');
+const { respondDriverError } = require('../utils/respondFailure');
 
 async function requireParticipant(req, res, next) {
   try {
@@ -21,6 +22,7 @@ async function requireParticipant(req, res, next) {
     req.conversation = conversation;
     next();
   } catch (error) {
+    if (respondDriverError(res, error)) return;
     res.status(500).json({ error: 'Failed to load conversation' });
   }
 }
@@ -61,6 +63,7 @@ router.get('/conversations', auth, async (req, res) => {
 
     res.json(result);
   } catch (error) {
+    if (respondDriverError(res, error)) return;
     logger.error('messaging', 'error fetching conversations', error);
     res.status(500).json({ error: 'Failed to fetch conversations' });
   }
@@ -86,6 +89,7 @@ router.get('/conversations/:id', auth, requireParticipant, async (req, res) => {
       })),
     });
   } catch (error) {
+    if (respondDriverError(res, error)) return;
     logger.error('messaging', 'error fetching conversation', error);
     res.status(500).json({ error: 'Failed to fetch conversation' });
   }
@@ -121,6 +125,7 @@ router.post('/conversations/:id/messages', auth, requireParticipant, async (req,
 
     res.json({ success: true, message: { id: message._id, from: 'me', text: message.text, ts: message.createdAt } });
   } catch (error) {
+    if (respondDriverError(res, error)) return;
     logger.error('messaging', 'error sending message', error);
     res.status(500).json({ error: 'Failed to send message' });
   }
@@ -156,6 +161,7 @@ router.post('/conversations', auth, async (req, res) => {
     const decryptedEmail = recipient.email ? decryptField(recipient.email) : recipient.email;
     res.json({ success: true, conversation: { id: conversation._id, name: recipient.username || decryptedEmail, unread: 0 } });
   } catch (error) {
+    if (respondDriverError(res, error)) return;
     logger.error('messaging', 'error creating conversation', error);
     res.status(500).json({ error: 'Failed to create conversation' });
   }
@@ -172,6 +178,7 @@ router.put('/conversations/:id/read', auth, requireParticipant, async (req, res)
     );
     res.json({ success: true, message: 'Marked as read' });
   } catch (error) {
+    if (respondDriverError(res, error)) return;
     logger.error('messaging', 'error marking as read', error);
     res.status(500).json({ error: 'Failed to mark as read' });
   }

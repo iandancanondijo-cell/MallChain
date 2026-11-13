@@ -9,11 +9,20 @@ jest.mock('../models/user', () => ({
   find: jest.fn(),
   findById: jest.fn(),
   findOneAndUpdate: jest.fn(),
+  // routes/mines.js resolves the wallet to sync through the model's
+  // decryptUserPii() static (GATE 61 on campaign funding and on the
+  // submission reward). Identity here is faithful: the fixtures carry plain
+  // walletAddress values, which is exactly what the real static yields.
+  decryptUserPii: jest.fn((user) => user ?? {}),
 }));
 jest.mock('../models/TaskSubmission', () => ({
   find: jest.fn(),
   findById: jest.fn(),
   create: jest.fn(),
+  // The rolling-24h platform cap in checkCampaignAbuseLimits() is computed by
+  // aggregation, so the abuse check needs this to exist even when a test does
+  // not care about the cap.
+  aggregate: jest.fn(),
 }));
 jest.mock('../models/Campaign', () => ({
   find: jest.fn(),
@@ -23,6 +32,13 @@ jest.mock('../models/Campaign', () => ({
 }));
 jest.mock('../models/WalletTransaction', () => ({ find: jest.fn(), create: jest.fn() }));
 jest.mock('../services/minesReviewService', () => ({ autoAssignReviewers: jest.fn() }));
+// Both flows debit/credit Mallpoints and then sync the on-chain
+// MallPointAccount. Left real, that service reaches for the chain and the
+// wallet models; its own behavior is covered by mallpointsService tests.
+jest.mock('../services/mallpointsService', () => ({
+  syncMallPointAccount: jest.fn().mockResolvedValue(undefined),
+  requireWalletAddress: jest.fn(),
+}));
 
 jest.mock('../middleware/authCache', () => ({
   getCachedUser: jest.fn().mockResolvedValue(null),
@@ -115,7 +131,7 @@ describe('POST /api/mines/campaigns/create', () => {
   });
 
   test('computes rate_per_task as Base x clamped Multiplier and escrows the budget', async () => {
-    User.findOneAndUpdate.mockResolvedValue({ _id: 'user-1', mlpts_balance: 90 });
+    User.findOneAndUpdate.mockResolvedValue({ _id: 'user-1', mlpts_balance: 90, walletAddress: 'mall1creator' });
     Campaign.create.mockResolvedValue([{ _id: 'camp-1', rate_per_task: 15, budget_remaining: 100 }]);
 
     const res = await request(app)
@@ -169,15 +185,25 @@ describe('POST /api/mines/submissions — campaign anti-abuse limits', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    User.findById.mockReturnValue({
-      select: jest.fn().mockResolvedValue({ _id: 'user-1', email: 'test@example.com', role: 'user' }),
-    });
+    // User.findById serves two call sites on this route: minesAuth's
+    // `.select('-password')` (awaitable) and the creator-eligibility gate's
+    // `.select('banned creator_level role').lean()`. chainable() is both
+    // awaitable and .lean()-able, and the projection decides which account
+    // comes back — 'creator-1' is the campaign's owner from the fixtures.
+    User.findById.mockImplementation((id) => ({
+      select: jest.fn(() => chainable(String(id) === 'creator-1'
+        ? { _id: 'creator-1', role: 'creator', creator_level: 1, banned: false }
+        : { _id: 'user-1', email: 'test@example.com', role: 'user' })),
+    }));
+    // Default the rolling-24h platform-cap aggregate to "nothing earned yet"
+    // so each test below is only exercising the limit named in its title.
+    TaskSubmission.aggregate.mockReturnValue(chainable([]));
   });
 
   test('rejects once the user hits max_completions_per_user for the campaign', async () => {
     Campaign.findById.mockReturnValue(chainable({
-      _id: 'camp-1', status: 'active', budget_remaining: 50, max_completions_per_user: 1,
-      cooldown_seconds: 3600, rate_per_task: 5, platform: 'instagram',
+      _id: 'camp-1', creator_id: 'creator-1', status: 'active', budget_remaining: 50,
+      max_completions_per_user: 1, cooldown_seconds: 3600, rate_per_task: 5, platform: 'instagram',
     }));
     TaskSubmission.find.mockReturnValue(chainable([{ _id: 'sub-1', created_at: new Date(), status: 'approved' }]));
 
@@ -193,8 +219,8 @@ describe('POST /api/mines/submissions — campaign anti-abuse limits', () => {
 
   test('rejects a resubmission before the cooldown elapses', async () => {
     Campaign.findById.mockReturnValue(chainable({
-      _id: 'camp-1', status: 'active', budget_remaining: 50, max_completions_per_user: 5,
-      cooldown_seconds: 3600, rate_per_task: 5, platform: 'instagram',
+      _id: 'camp-1', creator_id: 'creator-1', status: 'active', budget_remaining: 50,
+      max_completions_per_user: 5, cooldown_seconds: 3600, rate_per_task: 5, platform: 'instagram',
     }));
     TaskSubmission.find.mockReturnValue(chainable([{ _id: 'sub-1', created_at: new Date(), status: 'approved' }]));
 
@@ -209,11 +235,10 @@ describe('POST /api/mines/submissions — campaign anti-abuse limits', () => {
 
   test('allows a fresh submission to a campaign the user has never submitted to', async () => {
     Campaign.findById.mockReturnValue(chainable({
-      _id: 'camp-1', status: 'active', budget_remaining: 50, max_completions_per_user: 1,
-      cooldown_seconds: 3600, rate_per_task: 5, platform: 'instagram',
+      _id: 'camp-1', creator_id: 'creator-1', status: 'active', budget_remaining: 50,
+      max_completions_per_user: 1, cooldown_seconds: 3600, rate_per_task: 5, platform: 'instagram',
     }));
     TaskSubmission.find.mockReturnValue(chainable([]));
-    TaskSubmission.aggregate = jest.fn().mockReturnValue(chainable([]));
     TaskSubmission.create.mockResolvedValue([{ _id: 'new-sub', campaign_id: 'camp-1' }]);
 
     const res = await request(app)
@@ -228,7 +253,11 @@ describe('POST /api/mines/submissions — campaign anti-abuse limits', () => {
     );
   });
 
-  test('non-campaign submissions skip abuse checks entirely', async () => {
+  test('a submission with no campaign_id is rejected — Mines is campaign-bound', async () => {
+    // This used to assert that "non-campaign submissions skip abuse checks
+    // entirely". POST /submissions now requires campaign_id up front (and
+    // validates the campaign, its creator and the task-link open before the
+    // abuse check runs), so a campaign-less body never reaches create.
     TaskSubmission.create.mockResolvedValue([{ _id: 'new-sub' }]);
 
     const res = await request(app)
@@ -236,8 +265,9 @@ describe('POST /api/mines/submissions — campaign anti-abuse limits', () => {
       .set(authHeader())
       .send({ title: 'general mines task', proof_url: 'https://proof' });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/campaign_id is required/);
     expect(Campaign.findById).not.toHaveBeenCalled();
-    expect(TaskSubmission.create).toHaveBeenCalled();
+    expect(TaskSubmission.create).not.toHaveBeenCalled();
   });
 });

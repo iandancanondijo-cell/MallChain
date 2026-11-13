@@ -49,6 +49,7 @@ const ApiKey = require('../models/devhubApiKey');
 const Contract = require('../models/Contract');
 const AuditLog = require('../models/AuditLog');
 
+const { blindIndex } = require('../utils/fieldEncryption');
 const { exportUserData, eraseUserData } = require('../services/gdprService');
 
 function buildUser(overrides = {}) {
@@ -125,7 +126,15 @@ describe('gdprService.eraseUserData', () => {
     const user = buildUser();
     await eraseUserData(user);
 
-    const expectedFilter = { $or: [{ walletAddress: 'mall1realaddress' }, { phone: '+254700000000' }] };
+    // BadgePurchase / MallcoinPurchase / WithdrawalRequest / LiquidityPoolActivity /
+    // MallcoinSale all encrypt `phone` at rest and carry a phone_blind column,
+    // so the erasure can only find a user's rows through the blind index —
+    // matching the plaintext column would erase nothing. B2CPayout is the
+    // exception (sellerPhone is stored in plain text, no blind index), which is
+    // why its filter below still carries the decrypted number.
+    const expectedFilter = {
+      $or: [{ walletAddress: 'mall1realaddress' }, { phone_blind: blindIndex('+254700000000') }],
+    };
     expect(BadgePurchase.updateMany).toHaveBeenCalledWith(expectedFilter, { $set: { phone: '[erased]' } });
     expect(MallcoinPurchase.updateMany).toHaveBeenCalledWith(expectedFilter, { $set: { phone: '[erased]' } });
     expect(WithdrawalRequest.updateMany).toHaveBeenCalledWith(expectedFilter, { $set: { phone: '[erased]' } });

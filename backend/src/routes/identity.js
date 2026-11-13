@@ -6,6 +6,7 @@ const { createLimiter } = require('../middleware/rateLimiter');
 const User = require('../models/user');
 const UserSettings = require('../models/UserSettings');
 const { blindIndex } = require('../utils/fieldEncryption');
+const { respondFailure } = require('../utils/respondFailure');
 
 function ok(data) { return { ok: true, data }; }
 function fail(err) {
@@ -114,7 +115,7 @@ router.post('/resolve', auth, resolveLimiter, async (req, res) => {
 
     res.json(ok(data));
   } catch (e) {
-    res.status(500).json(fail(e));
+    respondFailure(res, e, fail);
   }
 });
 

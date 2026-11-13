@@ -45,7 +45,7 @@ function checkCsrf(req, res) {
 
 function requireAuth(role) {
   return async function authMiddleware(req, res, next) {
-    if (!JWT_SECRET) return res.status(500).json({ error: 'server configuration error' });
+    if (!JWT_SECRET) return res.status(500).json({ error: 'server configuration error', code: 'server_misconfigured' });
 
     const auth = req.headers.authorization;
     let token = null;
@@ -53,7 +53,7 @@ function requireAuth(role) {
 
     if (auth) {
       const parts = auth.split(' ');
-      if (parts.length !== 2) return res.status(401).json({ error: 'bad auth header' });
+      if (parts.length !== 2) return res.status(401).json({ error: 'bad auth header', code: 'malformed_auth_header' });
       token = parts[1];
       authMethod = 'bearer';
     } else if (req.cookies && req.cookies[AUTH_COOKIE_NAME]) {
@@ -61,7 +61,7 @@ function requireAuth(role) {
       authMethod = 'cookie';
     }
 
-    if (!token) return res.status(401).json({ error: 'missing auth token' });
+    if (!token) return res.status(401).json({ error: 'missing auth token', code: 'missing_token' });
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
@@ -72,13 +72,13 @@ function requireAuth(role) {
       // "log out" only ever cleared the token client-side; the JWT itself
       // stayed usable server-side until it naturally expired.
       if (await isRevoked(decoded)) {
-        return res.status(401).json({ error: 'invalid token' });
+        return res.status(401).json({ error: 'invalid token', code: 'token_revoked' });
       }
 
       let user = await getCachedUser(userId);
       if (!user) {
         user = await User.findById(userId).select('-password');
-        if (!user) return res.status(401).json({ error: 'invalid token' });
+        if (!user) return res.status(401).json({ error: 'invalid token', code: 'unknown_user' });
         await setCachedUser(userId, user);
       }
 
@@ -168,9 +168,27 @@ function requireAuth(role) {
       // tell the client exactly that. handleExpiredToken re-verifies the
       // signature itself, so forged 'expired' tokens fall through to the
       // generic 401 below like any other invalid token.
-      if (err && err.name === 'TokenExpiredError' && await handleExpiredToken(req, res, token)) return;
+      if (err && err.name === 'TokenExpiredError') {
+        // The cooldown arm-and-respond path owns this request when it takes
+        // the response; when it declines (a forged/undecodable payload, or
+        // no JWT_SECRET) this is still exactly what it looks like: a session
+        // that ran out. Answering it as a generic 'invalid token' is what
+        // made a lock-screen unlock count as a wrong cipher — see
+        // CipherChallenge.tsx, which strikes only on code 'invalid_secret'.
+        if (await handleExpiredToken(req, res, token)) return;
+        // In practice unreachable from this middleware: handleExpiredToken only
+        // declines when JWT_SECRET is unset or the token fails verification
+        // even with ignoreExpiration, and both are impossible here (the 500
+        // guard above already required the secret, and TokenExpiredError means
+        // the signature checked out). Kept as a defensive answer rather than a
+        // generic 'invalid token', because that is the response the client is
+        // not allowed to mistake for a rejected cipher. No cooldownMinutes:
+        // nothing was armed, and the client must not mirror a countdown the
+        // server never started.
+        return res.status(401).json({ error: 'session_expired', code: 'session_expired' });
+      }
       console.error(err);
-      return res.status(401).json({ error: 'invalid token' });
+      return res.status(401).json({ error: 'invalid token', code: 'invalid_token' });
     }
   };
 }
